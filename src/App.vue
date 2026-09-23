@@ -16,6 +16,8 @@ const tab = ref('dashboard')
 const enterPayload = ref<string[] | null>(null)
 /** 概览页触发「新建项目」:切到项目页并自动打开新建弹窗 */
 const pendingCreate = ref(false)
+/** 项目页触发「管理插件」:切到已安装页并定位到该项目 */
+const pendingAddonProject = ref<string | null>(null)
 
 // ---------- 全局下载任务(常驻订阅,切页不断线) ----------
 
@@ -84,6 +86,11 @@ function gotoCreate() {
   pendingCreate.value = true
   tab.value = 'projects'
 }
+
+function gotoAddons(id: string) {
+  pendingAddonProject.value = id
+  tab.value = 'addons'
+}
 </script>
 
 <template>
@@ -97,10 +104,16 @@ function gotoCreate() {
         :auto-create="pendingCreate"
         @consumed="enterPayload = null"
         @create-done="pendingCreate = false"
+        @manage-addons="gotoAddons"
       />
       <VersionsView v-else-if="tab === 'versions'" />
       <MarketplaceView v-else-if="tab === 'marketplace'" @navigate="tab = $event" />
-      <AddonsView v-else-if="tab === 'addons'" @navigate="tab = $event" />
+      <AddonsView
+        v-else-if="tab === 'addons'"
+        :enter-project-id="pendingAddonProject"
+        @navigate="tab = $event"
+        @consumed="pendingAddonProject = null"
+      />
       <SettingsView v-else />
     </main>
 

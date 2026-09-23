@@ -203,6 +203,8 @@ button {
 
 .btn.primary:hover:not(:disabled) {
   filter: brightness(1.07);
+  /* 覆盖 .btn:hover 的浅灰背景,避免"浅底白字"看不见文字 */
+  background: var(--brand-grad);
   color: #fff;
   border-color: transparent;
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { getSettings, notify, pickDirectory, putDoc } from '../services/bridge'
+import { getSettings, isWindows, notify, pickDirectory, putDoc } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import { openProjectAction } from '../composables/useProjectActions'
@@ -9,14 +9,18 @@ import type { GodotProject, GodotVersion, OpenAction } from '../types/godot'
 type Row = GodotProject & { _id: string }
 
 const props = defineProps<{ enterPayload?: string[] | null, autoCreate?: boolean }>()
-const emit = defineEmits<{ (e: 'consumed'): void, (e: 'create-done'): void }>()
+const emit = defineEmits<{
+  (e: 'consumed'): void
+  (e: 'create-done'): void
+  (e: 'manage-addons', id: string): void
+}>()
 
 const settings = getSettings()
 const projects = ref<Row[]>([])
 const versions = ref<(GodotVersion & { _id: string })[]>([])
 const filter = ref('')
-const confirmingId = ref<string | null>(null)
 const selected = ref(-1)
+const isWin = isWindows()
 
 const ACTION_LABEL: Record<OpenAction, string> = { editor: '打开', run: '运行', folder: '目录' }
 const ACTION_ICON: Record<OpenAction, string> = { editor: 'pencil', run: 'play', folder: 'folder' }
@@ -172,17 +176,34 @@ function submitCreate() {
 
 // ---------- 项目操作 ----------
 
+// ---------- 删除项目(模态确认,可选同时删除文件) ----------
+
+const showDelete = ref(false)
+const deleteTarget = ref<Row | null>(null)
+const delFiles = ref(false)
+const deleting = ref(false)
+
 function removeProject(p: Row) {
-  if (confirmingId.value === p._id) {
-    confirmingId.value = null
-    window.services.removeProject(p._id)
-    projects.value = projects.value.filter((x) => x._id !== p._id)
-  } else {
-    confirmingId.value = p._id
-    setTimeout(() => {
-      if (confirmingId.value === p._id) confirmingId.value = null
-    }, 2500)
+  deleteTarget.value = p
+  // 全局设置为「总是删除」时默认勾选
+  delFiles.value = settings.deleteProjectFiles === 'always'
+  showDelete.value = true
+}
+
+function confirmDelete() {
+  const p = deleteTarget.value
+  if (!p || deleting.value) return
+  deleting.value = true
+  const deleteFiles = settings.deleteProjectFiles !== 'never' && delFiles.value
+  const r = window.services.removeProject(p._id, deleteFiles)
+  deleting.value = false
+  if (!r.ok) {
+    notify(r.error || '删除失败')
+    return
   }
+  showDelete.value = false
+  projects.value = projects.value.filter((x) => x._id !== p._id)
+  notify(deleteFiles ? `已删除项目及文件(回收站):${p.name}` : `已移除项目记录:${p.name}`)
 }
 
 function toggleFavorite(p: Row) {
@@ -236,10 +257,14 @@ function onKeyDown(e: KeyboardEvent) {
       showCreate.value = false
       return
     }
+    if (showDelete.value) {
+      showDelete.value = false
+      return
+    }
     selected.value = -1
     return
   }
-  if (showCreate.value) return
+  if (showCreate.value || showDelete.value) return
   if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(e.key)) return
   const tag = (e.target as HTMLElement)?.tagName
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
@@ -330,12 +355,17 @@ function onKeyDown(e: KeyboardEvent) {
               <Icon :name="ACTION_ICON[act]" :size="13" />
             </button>
             <span class="act-sep"></span>
+            <button
+              class="btn small ghost icon-act"
+              title="管理该项目的插件"
+              @click="emit('manage-addons', p._id)"
+            >
+              <Icon name="puzzle" :size="13" />
+            </button>
             <button class="btn small ghost star" :class="{ on: p.favorite }" title="收藏" @click="toggleFavorite(p)">
               <Icon name="star" :size="13" :stroke-width="p.favorite ? 2.4 : 1.7" />
             </button>
-            <button class="btn small danger-text" @click="removeProject(p)">
-              {{ confirmingId === p._id ? '确认?' : '删除' }}
-            </button>
+            <button class="btn small danger-text" @click="removeProject(p)">删除</button>
           </div>
         </div>
       </div>
@@ -425,6 +455,43 @@ function onKeyDown(e: KeyboardEvent) {
             </button>
           </div>
         </form>
+      </div>
+    </Teleport>
+
+    <!-- 删除项目确认模态框 -->
+    <Teleport to="body">
+      <div v-if="showDelete" class="modal-mask" @click.self="showDelete = false">
+        <div class="card modal">
+          <div class="modal-head">
+            <div class="modal-title"><Icon name="trash" :size="15" /> 删除项目</div>
+            <span class="grow"></span>
+            <button type="button" class="btn small ghost icon-x" title="关闭" @click="showDelete = false">
+              <Icon name="x" :size="14" />
+            </button>
+          </div>
+
+          <p class="del-text">确定要从列表中移除「{{ deleteTarget?.name }}」吗?</p>
+          <div class="del-path mono" :title="deleteTarget?.path">{{ deleteTarget?.path }}</div>
+
+          <label v-if="settings.deleteProjectFiles !== 'never'" class="open-row del-check">
+            <input v-model="delFiles" type="checkbox" class="chk" />
+            <span>同时删除项目文件夹{{ isWin ? '(移入回收站,可恢复)' : '(将永久删除,不可恢复)' }}</span>
+          </label>
+          <div class="del-hint">
+            {{ settings.deleteProjectFiles === 'never'
+              ? '已按全局设置仅移除记录,项目文件不受影响。'
+              : '不勾选则仅移除列表记录,项目文件不受影响;删除行为可在「设置」中全局配置。' }}
+          </div>
+
+          <div class="modal-foot">
+            <span class="grow"></span>
+            <button type="button" class="btn ghost" @click="showDelete = false">取消</button>
+            <button type="button" class="btn del-confirm" :disabled="deleting" @click="confirmDelete">
+              <span v-if="deleting" class="spin"></span>
+              {{ deleting ? '删除中…' : '删除' }}
+            </button>
+          </div>
+        </div>
       </div>
     </Teleport>
   </div>
@@ -687,5 +754,59 @@ function onKeyDown(e: KeyboardEvent) {
   gap: 8px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
+}
+
+/* ---------- 删除项目模态框 ---------- */
+
+.del-text {
+  margin: 2px 0 6px;
+  font-size: 13.5px;
+  color: var(--text);
+}
+
+.del-path {
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.del-check {
+  margin-top: 12px;
+}
+
+.chk {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--brand);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.del-hint {
+  margin-top: 6px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+/* 红色确认按钮(hover 保持红底白字) */
+.btn.del-confirm {
+  background: var(--danger);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15), var(--shadow-sm);
+}
+
+.btn.del-confirm:hover:not(:disabled) {
+  filter: brightness(1.07);
+  background: var(--danger);
+  border-color: transparent;
+  color: #fff;
 }
 </style>

@@ -38,6 +38,7 @@ const ICONS: Record<string, string> = {
   zap: 'M13 2.5L5 13.5h5l-1 8 8-11h-5z',
   box: 'M4.5 7.5l7.5-4 7.5 4v9l-7.5 4-7.5-4zM4.5 7.5l7.5 4 7.5-4M12 11.5v9',
   link: 'M10 14a4.5 4.5 0 0 0 6.4.4l2.8-2.8a4.5 4.5 0 0 0-6.4-6.4l-1.6 1.6M14 10a4.5 4.5 0 0 0-6.4-.4l-2.8 2.8a4.5 4.5 0 0 0 6.4 6.4l1.6-1.6',
+  copy: 'M9 9h11v11H9zM4.5 15V3.5h11.5',
 }
 
 const props = defineProps<{ name: string; size?: number; strokeWidth?: number }>()

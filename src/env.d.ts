@@ -54,8 +54,14 @@ interface Services {
     error?: string
     project?: import('./types/godot').GodotProject
   }
-  /** 删除项目记录 */
-  removeProject(id: string): { ok: boolean }
+  /** 删除项目记录(deleteFiles=true 同时删除项目文件夹,Windows 移入回收站) */
+  removeProject(id: string, deleteFiles?: boolean): { ok: boolean, error?: string, filesDeleted?: boolean }
+  /** 复制插件目录到另一个项目(不自动启用) */
+  copyAddonsToProject(opts: {
+    sourceProjectId: string
+    dirNames: string[]
+    targetProjectId: string
+  }): { ok: boolean, error?: string, copied?: number, skipped?: string[], targetName?: string }
   /** 启动项目(editor=编辑器,run=运行) */
   launchProject(opts: { projectId: string, action: 'editor' | 'run' }): {
     ok: boolean

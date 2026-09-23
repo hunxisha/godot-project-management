@@ -29,8 +29,10 @@ window.services = {
   createProject: (opts) => projects.createProject(opts),
   /** 递归扫描目录下的所有项目 */
   scanProjects: (rootDir) => projects.scanProjects(rootDir),
-  /** 删除项目记录 */
-  removeProject: (id) => projects.removeProject(id),
+  /** 删除项目记录(deleteFiles=true 同时删除项目文件夹,Windows 移入回收站) */
+  removeProject: (id, deleteFiles) => projects.removeProject(id, deleteFiles),
+  /** 复制插件目录到另一个项目 */
+  copyAddonsToProject: (opts) => projects.copyAddonsToProject(opts),
   /** 启动项目(editor=打开编辑器带 -e,run=直接运行) */
   launchProject: (opts) => launchProject(opts),
   /** 搜索 Asset Store */

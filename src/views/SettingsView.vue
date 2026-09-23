@@ -26,6 +26,12 @@ const openActions: { value: OpenAction, label: string, icon: string }[] = [
   { value: 'folder', label: '打开项目目录', icon: 'folder' }
 ]
 
+const deleteModes: { value: 'ask' | 'always' | 'never', label: string }[] = [
+  { value: 'ask', label: '每次询问' },
+  { value: 'always', label: '默认同时删除' },
+  { value: 'never', label: '仅移除记录' }
+]
+
 /** 验证并保存 Asset Store API Key */
 async function saveApiKey() {
   const key = apiKeyInput.value.trim()
@@ -155,6 +161,28 @@ function openStoreSite() {
             <Icon :name="a.icon" :size="12" /> {{ a.label }}
           </button>
         </div>
+      </div>
+    </div>
+
+    <div class="card section">
+      <div class="sec-head">
+        <span class="sec-ico"><Icon name="trash" :size="15" /></span>
+        <span class="sec-title">删除项目时</span>
+      </div>
+      <div class="sec-body">
+        <div class="seg">
+          <button
+            v-for="m in deleteModes"
+            :key="m.value"
+            :class="{ on: state.deleteProjectFiles === m.value }"
+            @click="state.deleteProjectFiles = m.value; patchNow()"
+          >
+            {{ m.label }}
+          </button>
+        </div>
+      </div>
+      <div class="hint">
+        「每次询问」在删除弹窗中自由勾选;「默认同时删除」弹窗默认勾上删除文件;「仅移除记录」不再提供删除文件选项。Windows 下删除的项目文件夹会移入回收站,可恢复。
       </div>
     </div>
 

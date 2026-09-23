@@ -63,11 +63,14 @@ export interface GodotSettings {
   defaultOpenAction: OpenAction
   /** 安装插件后自动在 project.godot 中启用 */
   autoEnablePlugin: boolean
+  /** 删除项目时如何处理项目文件:ask=弹窗询问,always=总是同时删除,never=仅移除记录 */
+  deleteProjectFiles: 'ask' | 'always' | 'never'
 }
 
 export const DEFAULT_SETTINGS: GodotSettings = {
   defaultOpenAction: 'editor',
-  autoEnablePlugin: true
+  autoEnablePlugin: true,
+  deleteProjectFiles: 'ask'
 }
 
 /** 引擎下载资产(官方 CDN 直链) */

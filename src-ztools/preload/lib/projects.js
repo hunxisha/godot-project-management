@@ -230,10 +230,81 @@ function scanProjects(rootDir) {
   return found
 }
 
-/** 删除项目记录 */
-function removeProject(id) {
-  removeDoc(id)
-  return { ok: true }
+/**
+ * 删除项目记录;deleteFiles=true 时同时删除项目文件夹。
+ * Windows 下移入回收站(可恢复),其他平台永久删除。
+ */
+function removeProject(id, deleteFiles) {
+  try {
+    const project = getDoc(id)
+    if (deleteFiles && project && project.path) {
+      // 安全校验:目录内必须存在 project.godot 才执行删除,防止误删任意路径
+      if (!fs.existsSync(path.join(project.path, 'project.godot'))) {
+        return { ok: false, error: '目录校验失败(未找到 project.godot),已取消删除文件,仅移除记录请重试' }
+      }
+      if (process.platform === 'win32') {
+        // PowerShell 调用 VB FileSystem 将目录移入回收站
+        const ps =
+          "Add-Type -AssemblyName Microsoft.VisualBasic; " +
+          `[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory(${JSON.stringify(project.path)}, 'OnlyErrorDialogs', 'SendToRecycleBin')`
+        require('node:child_process').execSync(
+          `powershell.exe -NoProfile -Command ${JSON.stringify(ps)}`,
+          { stdio: 'ignore' }
+        )
+      } else {
+        fs.rmSync(project.path, { recursive: true, force: true })
+      }
+    }
+    removeDoc(id)
+    return { ok: true, filesDeleted: !!deleteFiles }
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || '删除失败' }
+  }
 }
 
-module.exports = { parseProjectGodot, addProject, scanProjects, removeProject, projectDocId, matchVersion, createProject }
+/** 复制插件目录到另一个项目(不自动启用) */
+function copyAddonsToProject({ sourceProjectId, dirNames, targetProjectId }) {
+  try {
+    const src = getDoc(sourceProjectId)
+    const dst = getDoc(targetProjectId)
+    if (!src || !dst) return { ok: false, error: '项目不存在' }
+    if (path.resolve(src.path) === path.resolve(dst.path)) {
+      return { ok: false, error: '不能复制到同一项目' }
+    }
+    const srcAddons = path.join(src.path, 'addons')
+    if (!fs.existsSync(srcAddons)) return { ok: false, error: '源项目没有 addons 目录' }
+    const dstAddons = path.join(dst.path, 'addons')
+    fs.mkdirSync(dstAddons, { recursive: true })
+
+    const copied = []
+    const skipped = []
+    for (const d of dirNames || []) {
+      const s = path.join(srcAddons, d)
+      const t = path.join(dstAddons, d)
+      if (!fs.existsSync(s)) {
+        skipped.push(`${d}(不存在)`)
+        continue
+      }
+      if (fs.existsSync(t)) {
+        skipped.push(`${d}(目标已存在)`)
+        continue
+      }
+      fs.cpSync(s, t, { recursive: true })
+      copied.push(d)
+    }
+    return { ok: true, copied: copied.length, skipped, targetName: dst.name }
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || '复制失败' }
+  }
+}
+
+module.exports = {
+  parseProjectGodot,
+  addProject,
+  scanProjects,
+  removeProject,
+  copyAddonsToProject,
+  projectDocId,
+  matchVersion,
+  createProject
+}
