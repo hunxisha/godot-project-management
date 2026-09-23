@@ -55,6 +55,10 @@ export interface GodotSettings {
   versionsRoot?: string
   /** HTTP 代理地址,如 http://127.0.0.1:7890;留空直连 */
   proxy?: string
+  /** Asset Store API Key(在 store.godotengine.org 登录后生成) */
+  apiKey?: string
+  /** API Key 验证通过的用户名(本地缓存显示用) */
+  storeAccount?: string
   defaultVersionId?: string
   defaultOpenAction: OpenAction
   /** 安装插件后自动在 project.godot 中启用 */
@@ -122,6 +126,11 @@ export interface MarketAsset {
   description?: string
   /** 商店页面链接 */
   storeUrl?: string
+}
+
+/** 本地收藏的市场资产(官方 API 暂未开放收藏,存于本地) */
+export interface FavoriteAsset extends MarketAsset {
+  addedAt: number
 }
 
 /** 项目已安装的插件(Addon) */

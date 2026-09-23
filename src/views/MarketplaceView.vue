@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { notify } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
-import type { AddonInfo, GodotProject, MarketAsset } from '../types/godot'
+import type { AddonInfo, FavoriteAsset, GodotProject, MarketAsset } from '../types/godot'
 
 const emit = defineEmits<{ (e: 'navigate', tab: string): void }>()
 
@@ -18,6 +18,78 @@ const addons = ref<AddonInfo[]>([])
 const installing = ref<{ assetId: string, percent: number, stage: string } | null>(null)
 const confirmingDir = ref<string | null>(null)
 const updateInfo = ref<Record<string, { hasUpdate: boolean, latest?: string }>>({})
+
+// ---------- 浏览模式:推荐 / 最近更新 / 搜索 / 收藏 ----------
+
+type BrowseMode = 'featured' | 'recent' | 'search' | 'favorites'
+const mode = ref<BrowseMode>('featured')
+const featured = ref<MarketAsset[]>([])
+const recent = ref<MarketAsset[]>([])
+const recentPage = ref(1)
+const recentPages = ref(1)
+const favorites = ref<FavoriteAsset[]>([])
+const browsing = ref(false)
+const browseError = ref('')
+
+/** 当前模式展示的资产列表 */
+const displayAssets = computed<MarketAsset[]>(() => {
+  if (mode.value === 'featured') return featured.value
+  if (mode.value === 'recent') return recent.value
+  if (mode.value === 'favorites') return favorites.value
+  return results.value
+})
+
+/** 目标项目已安装的市场资产 ID */
+const installedIds = computed(
+  () => new Set(addons.value.filter((a) => a.fromMarket && a.assetId).map((a) => a.assetId!))
+)
+
+/** 加载当前模式的数据(推荐只拉一次;最近更新按页;收藏读本地) */
+async function loadBrowse() {
+  if (mode.value === 'favorites') {
+    favorites.value = window.services.listFavorites()
+    return
+  }
+  if (mode.value === 'featured' && featured.value.length) return
+  browsing.value = true
+  browseError.value = ''
+  try {
+    if (mode.value === 'featured') {
+      featured.value = await window.services.listFeatured()
+    } else if (mode.value === 'recent') {
+      const r = await window.services.listRecentlyUpdated(recentPage.value)
+      recent.value = r.result
+      recentPages.value = r.pages
+    }
+  } catch (e: any) {
+    browseError.value = e?.message || String(e)
+  } finally {
+    browsing.value = false
+  }
+}
+
+function switchMode(m: BrowseMode) {
+  if (mode.value === m) return
+  mode.value = m
+  loadBrowse()
+}
+
+function changeRecentPage(delta: number) {
+  const next = recentPage.value + delta
+  if (next < 1 || next > recentPages.value) return
+  recentPage.value = next
+  loadBrowse()
+}
+
+function isFav(id: string): boolean {
+  return window.services.isFavorite(id)
+}
+
+function toggleFav(a: MarketAsset) {
+  window.services.toggleFavorite(a)
+  favorites.value = window.services.listFavorites()
+  notify(isFav(a.assetId) ? '已收藏 ' + a.title : '已取消收藏')
+}
 
 const target = computed(() => projects.value.find((p) => p._id === targetId.value))
 
@@ -40,6 +112,7 @@ onMounted(() => {
     }
     reloadAddons()
   }
+  loadBrowse()
 })
 
 function onTargetChange() {
@@ -196,8 +269,18 @@ function uninstall(a: AddonInfo) {
         <span v-if="target" class="tb-path mono" :title="target.path">{{ target.path }}</span>
       </div>
 
-      <!-- 搜索 -->
-      <div class="search-row">
+      <!-- 浏览模式切换 -->
+      <div class="seg mode-tabs">
+        <button :class="{ on: mode === 'featured' }" @click="switchMode('featured')">推荐</button>
+        <button :class="{ on: mode === 'recent' }" @click="switchMode('recent')">最近更新</button>
+        <button :class="{ on: mode === 'search' }" @click="switchMode('search')">搜索</button>
+        <button :class="{ on: mode === 'favorites' }" @click="switchMode('favorites')">
+          收藏<span v-if="favorites.length" class="fav-count">{{ favorites.length }}</span>
+        </button>
+      </div>
+
+      <!-- 搜索(仅搜索模式) -->
+      <div v-if="mode === 'search'" class="search-row">
         <input
           v-model="query"
           class="input"
@@ -214,15 +297,21 @@ function uninstall(a: AddonInfo) {
         </button>
       </div>
 
-      <!-- 搜索结果 -->
-      <div v-if="searchError" class="card error-box">
-        <span>搜索失败:{{ searchError }}</span>
+      <!-- 结果区(推荐/最近更新/搜索/收藏共用) -->
+      <div v-if="browseError || searchError" class="card error-box">
+        <span>加载失败:{{ browseError || searchError }}</span>
       </div>
-      <div v-else-if="!results.length && !searching" class="hint-line">
+      <div v-else-if="browsing" class="hint-line">加载中…</div>
+      <div v-else-if="mode === 'search' && !results.length && !searching" class="hint-line">
         输入关键词搜索 Godot 官方资产商店(Asset Store),可按引擎版本过滤,点击名称可在浏览器中打开详情。
       </div>
-      <div v-if="results.length" class="asset-list">
-        <div v-for="a in results" :key="a.assetId" class="card asset">
+      <EmptyState
+        v-else-if="mode === 'favorites' && !favorites.length"
+        title="还没有收藏"
+        desc="在推荐、最近更新或搜索结果中点击 ★ 收藏插件,方便下次快速安装。"
+      />
+      <div v-if="displayAssets.length" class="asset-list">
+        <div v-for="a in displayAssets" :key="a.assetId" class="card asset">
           <img v-if="a.iconUrl" :src="a.iconUrl" class="asset-icon" alt="" @error="($event.target as HTMLImageElement).style.display = 'none'" />
           <div v-else class="asset-icon placeholder"></div>
           <div class="asset-main">
@@ -230,11 +319,18 @@ function uninstall(a: AddonInfo) {
               <span class="name link" title="在商店中查看" @click="openStore(a)">{{ a.title }}</span>
               <span class="tag">{{ a.category }}</span>
               <span v-if="a.rating" class="tag brand" title="商店评分">★ {{ (a.rating / 10).toFixed(1) }}</span>
+              <span v-if="installedIds.has(a.assetId)" class="tag ok">已安装</span>
             </div>
             <div class="asset-meta" :title="a.description">
               {{ a.author }}{{ a.description ? ' · ' + a.description : '' }}
             </div>
           </div>
+          <button
+            class="btn small fav-btn"
+            :class="{ active: isFav(a.assetId) }"
+            :title="isFav(a.assetId) ? '取消收藏' : '收藏'"
+            @click="toggleFav(a)"
+          >★</button>
           <button
             v-if="installing && installing.assetId === a.assetId"
             class="btn small"
@@ -247,6 +343,13 @@ function uninstall(a: AddonInfo) {
             @click="install(a)"
           >安装</button>
         </div>
+      </div>
+
+      <!-- 最近更新分页 -->
+      <div v-if="mode === 'recent' && recent.length && !browsing" class="page-row">
+        <button class="btn small" :disabled="recentPage <= 1" @click="changeRecentPage(-1)">上一页</button>
+        <span class="page-info">{{ recentPage }} / {{ recentPages }}</span>
+        <button class="btn small" :disabled="recentPage >= recentPages" @click="changeRecentPage(1)">下一页</button>
       </div>
 
       <!-- 已安装 -->
@@ -323,6 +426,37 @@ function uninstall(a: AddonInfo) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.mode-tabs {
+  align-self: flex-start;
+}
+
+.fav-count {
+  margin-left: 4px;
+  font-size: 11px;
+  color: var(--brand);
+}
+
+.fav-btn {
+  color: var(--text-3);
+  padding: 4px 8px;
+}
+
+.fav-btn.active {
+  color: #f5a623;
+}
+
+.page-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.page-info {
+  font-size: 12px;
+  color: var(--text-3);
 }
 
 .search-row {

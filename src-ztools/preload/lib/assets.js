@@ -24,6 +24,47 @@ function latestRelease(list) {
   return sorted[0]
 }
 
+/** 商店资产对象 → MarketAsset 统一映射 */
+function mapAsset(a) {
+  return {
+    assetId: `${a.publisher.slug}/${a.slug}`,
+    title: a.name,
+    author: a.publisher.name,
+    category: (a.tags && a.tags[0] && a.tags[0].display_name) || '',
+    versionString: '',
+    godotVersion: '',
+    rating: a.reviews_score,
+    iconUrl: a.thumbnail || undefined,
+    description: a.description,
+    storeUrl: a.store_url
+  }
+}
+
+/** 官方精选(推荐)Addon */
+async function listFeatured() {
+  const list = await getJson(`${API_BASE}/assets/?type=0&featured_only=true&require_release=true&page_size=20`)
+  return (Array.isArray(list) ? list : []).map(mapAsset)
+}
+
+/** 最近更新的 Addon(全库按更新时间倒序) */
+async function listRecentlyUpdated(page = 1) {
+  const params = new URLSearchParams({
+    query: '',
+    type: '0',
+    require_release: 'true',
+    sort: 'updated_desc',
+    page: String(page),
+    batch_size: '20'
+  })
+  const data = await getJson(`${API_BASE}/search/query/?${params}`)
+  const count = Number(data.count) || 0
+  return {
+    result: (data.hits || []).map((h) => mapAsset(h.asset || {})),
+    page,
+    pages: Math.max(1, Math.ceil(count / 20))
+  }
+}
+
 /** 搜索市场资产(Addon) */
 async function searchAssets(filter, godotVersion, page = 1) {
   const params = new URLSearchParams({
@@ -38,21 +79,7 @@ async function searchAssets(filter, godotVersion, page = 1) {
   const data = await getJson(`${API_BASE}/search/query/?${params}`)
   const count = Number(data.count) || 0
   return {
-    result: (data.hits || []).map((h) => {
-      const a = h.asset || {}
-      return {
-        assetId: `${a.publisher.slug}/${a.slug}`,
-        title: a.name,
-        author: a.publisher.name,
-        category: (a.tags && a.tags[0] && a.tags[0].display_name) || '',
-        versionString: '',
-        godotVersion: '',
-        rating: a.reviews_score,
-        iconUrl: a.thumbnail || undefined,
-        description: a.description,
-        storeUrl: a.store_url
-      }
-    }),
+    result: (data.hits || []).map((h) => mapAsset(h.asset || {})),
     page,
     pages: Math.max(1, Math.ceil(count / 20))
   }
@@ -296,8 +323,62 @@ function setAddonEnabled({ projectId, dirName, enabled }) {
   }
 }
 
+// ---------- 本地收藏(官方 API 暂未开放收藏,收藏数据存于本地插件数据库) ----------
+
+const FAVORITES_ID = 'godot/market/favorites'
+
+function readFavorites() {
+  return getDoc(FAVORITES_ID)?.items || []
+}
+
+/** 收藏列表(按收藏时间倒序) */
+function listFavorites() {
+  return [...readFavorites()].sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0))
+}
+
+/** 收藏/取消收藏,返回收藏状态 */
+function toggleFavorite(asset) {
+  const list = readFavorites()
+  const idx = list.findIndex((x) => x.assetId === asset.assetId)
+  if (idx >= 0) {
+    list.splice(idx, 1)
+    putDoc(FAVORITES_ID, { items: list })
+    return false
+  }
+  delete asset.addedAt
+  list.push({ ...asset, addedAt: Date.now() })
+  putDoc(FAVORITES_ID, { items: list })
+  return true
+}
+
+function isFavorite(assetId) {
+  return readFavorites().some((x) => x.assetId === assetId)
+}
+
+// ---------- 账号(API Key) ----------
+
+/**
+ * 验证 Asset Store API Key。
+ * @returns {{ authenticated: boolean, name?: string }}
+ */
+async function verifyApiKey(key) {
+  const info = await getJson(`${API_BASE}/auth/introspection`, {
+    Authorization: `Bearer ${key}`
+  })
+  if (!info || String(info.authenticated).toLowerCase() !== 'true') {
+    throw new Error('API Key 无效或已过期')
+  }
+  return { authenticated: true, name: info.name || info.id || '已认证用户' }
+}
+
 module.exports = {
   searchAssets,
+  listFeatured,
+  listRecentlyUpdated,
+  listFavorites,
+  toggleFavorite,
+  isFavorite,
+  verifyApiKey,
   getAssetDetail,
   listAddons,
   installAsset,

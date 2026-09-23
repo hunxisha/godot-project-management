@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { reactive } from 'vue'
-import { getSettings, openPath, pickDirectory, saveSettings } from '../services/bridge'
+import { reactive, ref } from 'vue'
+import { getSettings, notify, openPath, pickDirectory, saveSettings } from '../services/bridge'
 import type { OpenAction } from '../types/godot'
 
 const state = reactive({ ...getSettings() })
+const apiKeyInput = ref('')
+const verifying = ref(false)
 
 function patchNow() {
   saveSettings({ ...state })
@@ -22,6 +24,38 @@ const openActions: { value: OpenAction, label: string }[] = [
   { value: 'run', label: '运行项目' },
   { value: 'folder', label: '打开项目目录' }
 ]
+
+/** 验证并保存 Asset Store API Key */
+async function saveApiKey() {
+  const key = apiKeyInput.value.trim()
+  if (!key || verifying.value) return
+  verifying.value = true
+  try {
+    const r = await window.services.verifyApiKey(key)
+    if (r.authenticated) {
+      state.apiKey = key
+      state.storeAccount = r.name || '已认证用户'
+      patchNow()
+      apiKeyInput.value = ''
+      notify(`已连接 Asset Store:${r.name || '已认证用户'}`)
+    }
+  } catch (e: any) {
+    notify(e?.message || '验证失败,请检查 API Key')
+  } finally {
+    verifying.value = false
+  }
+}
+
+/** 退出登录(仅清除本地记录,不撤销网站上的 Key) */
+function logoutStore() {
+  delete state.apiKey
+  delete state.storeAccount
+  patchNow()
+}
+
+function openStoreSite() {
+  window.ztools.shellOpenExternal('https://store.godotengine.org/settings/api-keys/')
+}
 </script>
 
 <template>
@@ -51,6 +85,35 @@ const openActions: { value: OpenAction, label: string }[] = [
         />
       </div>
       <div class="hint">所有网络请求(版本列表、引擎下载、插件市场)将经由该 HTTP 代理发送,保存后立即生效;仅支持 HTTP 代理。</div>
+    </div>
+
+    <div class="card section">
+      <div class="section-title">Asset Store 账号</div>
+      <template v-if="state.storeAccount">
+        <div class="row">
+          <span class="value">已连接:{{ state.storeAccount }}</span>
+          <div class="gap"></div>
+          <button class="btn small danger-text" @click="logoutStore">退出登录</button>
+        </div>
+      </template>
+      <template v-else>
+        <div class="row">
+          <input
+            v-model="apiKeyInput"
+            class="input value"
+            type="password"
+            placeholder="粘贴 Asset Store API Key"
+            spellcheck="false"
+            @keyup.enter="saveApiKey"
+          />
+          <button class="btn small primary" :disabled="verifying || !apiKeyInput.trim()" @click="saveApiKey">
+            {{ verifying ? '验证中…' : '连接' }}
+          </button>
+        </div>
+      </template>
+      <div class="hint">
+        在 <span class="link" @click="openStoreSite">store.godotengine.org 的 API 密钥页面</span> 登录并生成 Key 后粘贴到此处;退出登录不会撤销网站上的 Key。
+      </div>
     </div>
 
     <div class="card section">
@@ -127,6 +190,11 @@ const openActions: { value: OpenAction, label: string }[] = [
   gap: 8px;
   font-size: 13px;
   color: var(--text-2);
+  cursor: pointer;
+}
+
+.link {
+  color: var(--brand);
   cursor: pointer;
 }
 </style>

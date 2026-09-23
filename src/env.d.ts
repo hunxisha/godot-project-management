@@ -54,6 +54,18 @@ interface Services {
     godotVersion?: string,
     page?: number
   ): Promise<{ result: import('./types/godot').MarketAsset[], page: number, pages: number }>
+  /** 官方精选(推荐)Addon */
+  listFeatured(): Promise<import('./types/godot').MarketAsset[]>
+  /** 最近更新的 Addon */
+  listRecentlyUpdated(page?: number): Promise<{ result: import('./types/godot').MarketAsset[], page: number, pages: number }>
+  /** 本地收藏列表 */
+  listFavorites(): import('./types/godot').FavoriteAsset[]
+  /** 收藏/取消收藏 */
+  toggleFavorite(asset: import('./types/godot').MarketAsset): boolean
+  /** 是否已收藏 */
+  isFavorite(assetId: string): boolean
+  /** 验证 Asset Store API Key */
+  verifyApiKey(key: string): Promise<{ authenticated: boolean, name?: string }>
   /** 列出项目已安装插件 */
   listAddons(projectId: string): import('./types/godot').AddonInfo[]
   /** 安装市场插件 */

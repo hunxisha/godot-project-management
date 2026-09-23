@@ -31,8 +31,20 @@ window.services = {
   removeProject: (id) => projects.removeProject(id),
   /** 启动项目(editor=打开编辑器带 -e,run=直接运行) */
   launchProject: (opts) => launchProject(opts),
-  /** 搜索 Asset Library */
+  /** 搜索 Asset Store */
   searchAssets: (filter, godotVersion, page) => assets.searchAssets(filter, godotVersion, page),
+  /** 官方精选(推荐)Addon */
+  listFeatured: () => assets.listFeatured(),
+  /** 最近更新的 Addon */
+  listRecentlyUpdated: (page) => assets.listRecentlyUpdated(page),
+  /** 本地收藏列表 */
+  listFavorites: () => assets.listFavorites(),
+  /** 收藏/取消收藏 */
+  toggleFavorite: (asset) => assets.toggleFavorite(asset),
+  /** 是否已收藏 */
+  isFavorite: (assetId) => assets.isFavorite(assetId),
+  /** 验证 Asset Store API Key */
+  verifyApiKey: (key) => assets.verifyApiKey(key),
   /** 列出项目已安装插件 */
   listAddons: (projectId) => assets.listAddons(projectId),
   /** 安装市场插件 */
