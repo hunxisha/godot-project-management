@@ -2,3 +2,4 @@ node_modules/
 src-ztools/dist/
 *.local
 .DS_Store
+graphify-out/
