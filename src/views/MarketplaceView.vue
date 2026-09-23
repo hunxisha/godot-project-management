@@ -82,28 +82,25 @@ function godotRange(a: MarketAsset): string {
   return ''
 }
 
-/** 最新 release 30 天内发布视为新品 */
-function isNew(a: MarketAsset): boolean {
-  if (!a.releaseCreated) return false
-  const t = Date.parse(a.releaseCreated)
-  if (Number.isNaN(t)) return false
-  return Date.now() - t < 30 * 24 * 3600 * 1000
-}
+// ---------- 浏览模式:全部 / 推荐 / 新品 / 最近更新 / 收藏,搜索常驻工具栏 ----------
 
-// ---------- 浏览模式:推荐 / 最近更新 / 收藏,搜索常驻工具栏 ----------
-
-type BrowseMode = 'featured' | 'recent' | 'favorites'
+type BrowseMode = 'all' | 'featured' | 'new' | 'recent' | 'favorites'
 const mode = ref<BrowseMode>('featured')
+const all = ref<MarketAsset[]>([])
 const featured = ref<MarketAsset[]>([])
+const fresh = ref<MarketAsset[]>([])
 const recent = ref<MarketAsset[]>([])
-const recentPage = ref(1)
-const recentPages = ref(1)
+/** 分页模式(全部/新品/最近更新)共用页码 */
+const pageNum = ref(1)
+const pageTotal = ref(1)
 const favorites = ref<FavoriteAsset[]>([])
 const browsing = ref(false)
 const browseError = ref('')
 
 const MODE_META: Record<BrowseMode, { label: string, icon: string }> = {
+  all: { label: '全部', icon: 'grid' },
   featured: { label: '推荐', icon: 'sparkle' },
+  new: { label: '新品', icon: 'zap' },
   recent: { label: '最近更新', icon: 'clock' },
   favorites: { label: '收藏', icon: 'star' }
 }
@@ -112,6 +109,8 @@ const MODE_META: Record<BrowseMode, { label: string, icon: string }> = {
 const displayAssets = computed<MarketAsset[]>(() => {
   let list: MarketAsset[]
   if (query.value.trim()) list = results.value
+  else if (mode.value === 'all') list = all.value
+  else if (mode.value === 'new') list = fresh.value
   else if (mode.value === 'recent') list = recent.value
   else if (mode.value === 'favorites') list = favorites.value
   else list = featured.value
@@ -126,7 +125,7 @@ const installedIds = computed(
   () => new Set(addons.value.filter((a) => a.fromMarket && a.assetId).map((a) => a.assetId!))
 )
 
-/** 加载当前模式的数据(推荐只拉一次;最近更新按页;收藏读本地) */
+/** 加载当前模式的数据(推荐只拉一次;全部/新品/最近更新按页;收藏读本地) */
 async function loadBrowse() {
   if (mode.value === 'favorites') {
     favorites.value = window.services.listFavorites()
@@ -140,10 +139,20 @@ async function loadBrowse() {
     if (mode.value === 'featured') {
       featured.value = await window.services.listFeatured()
       hydrateVersions(featured.value)
+    } else if (mode.value === 'all') {
+      const r = await window.services.listAllAssets(pageNum.value)
+      all.value = r.result
+      pageTotal.value = r.pages
+      hydrateVersions(all.value)
+    } else if (mode.value === 'new') {
+      const r = await window.services.listNewAssets(pageNum.value)
+      fresh.value = r.result
+      pageTotal.value = r.pages
+      hydrateVersions(fresh.value)
     } else if (mode.value === 'recent') {
-      const r = await window.services.listRecentlyUpdated(recentPage.value)
+      const r = await window.services.listRecentlyUpdated(pageNum.value)
       recent.value = r.result
-      recentPages.value = r.pages
+      pageTotal.value = r.pages
       hydrateVersions(recent.value)
     }
   } catch (e: any) {
@@ -176,6 +185,7 @@ function switchMode(m: BrowseMode) {
   query.value = ''
   if (mode.value === m) return
   mode.value = m
+  pageNum.value = 1
   loadBrowse()
 }
 
@@ -201,10 +211,10 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
 })
 
-function changeRecentPage(delta: number) {
-  const next = recentPage.value + delta
-  if (next < 1 || next > recentPages.value) return
-  recentPage.value = next
+function changePage(delta: number) {
+  const next = pageNum.value + delta
+  if (next < 1 || next > pageTotal.value) return
+  pageNum.value = next
   loadBrowse()
 }
 
@@ -504,7 +514,6 @@ function installFromPicker(r: ReleaseRow) {
                 {{ a.title }}
                 <Icon name="external" :size="10" />
               </span>
-              <span v-if="isNew(a)" class="badge-new" title="最新发布 30 天内">新品</span>
               <span v-if="a.versionString" class="asset-ver" :title="a.versionString">v{{ fmtVer(a.versionString) }}</span>
             </div>
           </div>
@@ -554,11 +563,14 @@ function installFromPicker(r: ReleaseRow) {
         </div>
       </div>
 
-      <!-- 最近更新分页 -->
-      <div v-if="mode === 'recent' && recent.length && !browsing" class="page-row">
-        <button class="btn small" :disabled="recentPage <= 1" @click="changeRecentPage(-1)"><Icon name="chevron-left" :size="12" /> 上一页</button>
-        <span class="page-info">{{ recentPage }} / {{ recentPages }}</span>
-        <button class="btn small" :disabled="recentPage >= recentPages" @click="changeRecentPage(1)">下一页 <Icon name="chevron-right" :size="12" /></button>
+      <!-- 分页(全部/新品/最近更新) -->
+      <div
+        v-if="(mode === 'all' || mode === 'new' || mode === 'recent') && displayAssets.length && !browsing"
+        class="page-row"
+      >
+        <button class="btn small" :disabled="pageNum <= 1" @click="changePage(-1)"><Icon name="chevron-left" :size="12" /> 上一页</button>
+        <span class="page-info">{{ pageNum }} / {{ pageTotal }}</span>
+        <button class="btn small" :disabled="pageNum >= pageTotal" @click="changePage(1)">下一页 <Icon name="chevron-right" :size="12" /></button>
       </div>
 
       <!-- 版本选择器模态框 -->
@@ -970,22 +982,6 @@ function installFromPicker(r: ReleaseRow) {
 
 .pick-ver {
   flex-shrink: 0;
-}
-
-/* 新品徽标 */
-.badge-new {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 6px;
-  border-radius: 999px;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  color: var(--brand);
-  background: var(--brand-weak);
-  border: 1px solid var(--brand);
-  width: fit-content;
-  margin-top: 3px;
 }
 
 /* Godot 兼容版本范围 */

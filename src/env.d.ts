@@ -76,6 +76,10 @@ interface Services {
   ): Promise<{ result: import('./types/godot').MarketAsset[], page: number, pages: number }>
   /** 官方精选(推荐)Addon */
   listFeatured(): Promise<import('./types/godot').MarketAsset[]>
+  /** 全部资产(默认热度排序,分页) */
+  listAllAssets(page?: number): Promise<{ result: import('./types/godot').MarketAsset[], page: number, pages: number }>
+  /** 最新上架的资产(按发布时间倒序,分页) */
+  listNewAssets(page?: number): Promise<{ result: import('./types/godot').MarketAsset[], page: number, pages: number }>
   /** 最近更新的 Addon */
   listRecentlyUpdated(page?: number): Promise<{ result: import('./types/godot').MarketAsset[], page: number, pages: number }>
   /** 本地收藏列表 */

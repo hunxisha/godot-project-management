@@ -39,6 +39,10 @@ window.services = {
   searchAssets: (filter, godotVersion, page) => assets.searchAssets(filter, godotVersion, page),
   /** 官方精选(推荐)Addon */
   listFeatured: () => assets.listFeatured(),
+  /** 全部资产(默认热度排序,分页) */
+  listAllAssets: (page) => assets.listAllAssets(page),
+  /** 最新上架的资产(按发布时间倒序,分页) */
+  listNewAssets: (page) => assets.listNewAssets(page),
   /** 最近更新的 Addon */
   listRecentlyUpdated: (page) => assets.listRecentlyUpdated(page),
   /** 本地收藏列表 */

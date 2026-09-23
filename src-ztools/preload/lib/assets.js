@@ -47,6 +47,46 @@ async function listFeatured() {
   return (Array.isArray(list) ? list : []).map(mapAsset)
 }
 
+/** 全部资产总数缓存(assets 列表接口不返回 count,用搜索接口补一次) */
+let allAssetCount = 0
+
+/** 全部资产(默认热度排序,分页) */
+async function listAllAssets(page = 1) {
+  const list = await getJson(
+    `${API_BASE}/assets/?type=0&require_release=true&page_size=20&page=${page}`
+  )
+  if (!allAssetCount) {
+    const head = await getJson(
+      `${API_BASE}/search/query/?query=&type=0&require_release=true&page=1&batch_size=1`
+    ).catch(() => null)
+    allAssetCount = Number(head && head.count) || (Array.isArray(list) ? list.length : 0)
+  }
+  return {
+    result: (Array.isArray(list) ? list : []).map(mapAsset),
+    page,
+    pages: Math.max(1, Math.ceil(allAssetCount / 20))
+  }
+}
+
+/** 最新上架的资产(按发布时间倒序,分页) */
+async function listNewAssets(page = 1) {
+  const params = new URLSearchParams({
+    query: '',
+    type: '0',
+    require_release: 'true',
+    sort: 'created_desc',
+    page: String(page),
+    batch_size: '20'
+  })
+  const data = await getJson(`${API_BASE}/search/query/?${params}`)
+  const count = Number(data.count) || 0
+  return {
+    result: (data.hits || []).map((h) => mapAsset(h.asset || {})),
+    page,
+    pages: Math.max(1, Math.ceil(count / 20))
+  }
+}
+
 /** 最近更新的 Addon(全库按更新时间倒序) */
 async function listRecentlyUpdated(page = 1) {
   const params = new URLSearchParams({
@@ -490,6 +530,8 @@ async function listAssetReleases(assetId) {
 module.exports = {
   searchAssets,
   listFeatured,
+  listAllAssets,
+  listNewAssets,
   listRecentlyUpdated,
   listFavorites,
   toggleFavorite,
