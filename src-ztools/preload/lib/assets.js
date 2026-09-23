@@ -113,6 +113,36 @@ function moveSync(src, dest) {
   }
 }
 
+/** 递归收集 plugin.cfg 路径(限深 5,跳过隐藏目录) */
+function findPluginCfgs(dir, depth = 0, out = []) {
+  if (depth > 5) return out
+  let entries
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch (e) {
+    return out
+  }
+  for (const ent of entries) {
+    if (ent.name.startsWith('.')) continue
+    const p = path.join(dir, ent.name)
+    if (ent.isDirectory()) findPluginCfgs(p, depth + 1, out)
+    else if (ent.name === 'plugin.cfg') out.push(p)
+  }
+  return out
+}
+
+/**
+ * 确定安装源目录列表(其直接子项即插件目录)。
+ * 兼容多种打包结构:根/addons/x、根/x/addons/x、wrapper/x 等——
+ * 统一取 plugin.cfg 所在目录的父目录;无 plugin.cfg 时回退旧逻辑。
+ */
+function locateSources(extractDir) {
+  const cfgs = findPluginCfgs(extractDir)
+  const sources = [...new Set(cfgs.map((c) => path.dirname(path.dirname(c))))]
+  if (sources.length) return sources
+  return [fs.existsSync(path.join(extractDir, 'addons')) ? path.join(extractDir, 'addons') : extractDir]
+}
+
 /** 解析 plugin.cfg(取 name/version/author) */
 function parsePluginCfg(cfgPath) {
   try {
@@ -232,23 +262,25 @@ async function installAsset({ projectId, assetId, assetMeta }, onProgress) {
     const extractDir = path.join(tmpDir, 'x')
     await extractZip(zipPath, extractDir)
 
-    // zip 根目录若含 addons/,则取其内部;否则取根目录
-    let srcDir = extractDir
-    if (fs.existsSync(path.join(extractDir, 'addons'))) srcDir = path.join(extractDir, 'addons')
+    // 定位插件源目录:zip 打包结构多样(addons/x、x/addons/x、wrapper/x 等),
+    // 以 plugin.cfg 所在目录的父目录为准,无 plugin.cfg 时回退旧逻辑
+    const sources = locateSources(extractDir)
 
     const dirNames = []
-    for (const ent of fs.readdirSync(srcDir, { withFileTypes: true })) {
-      const dest = path.join(addonsDir, ent.name)
-      const src = path.join(srcDir, ent.name)
-      if (ent.isDirectory()) {
-        fs.rmSync(dest, { recursive: true, force: true })
-        moveSync(src, dest)
-        dirNames.push(ent.name)
-      } else if (ent.name === '.import' || ent.name.endsWith('.gdignore')) {
-        // 单文件资产不移动
-      } else {
-        fs.rmSync(dest, { force: true })
-        moveSync(src, dest)
+    for (const srcDir of sources) {
+      for (const ent of fs.readdirSync(srcDir, { withFileTypes: true })) {
+        const dest = path.join(addonsDir, ent.name)
+        const src = path.join(srcDir, ent.name)
+        if (ent.isDirectory()) {
+          fs.rmSync(dest, { recursive: true, force: true })
+          moveSync(src, dest)
+          dirNames.push(ent.name)
+        } else if (ent.name === '.import' || ent.name.endsWith('.gdignore')) {
+          // 单文件资产不移动
+        } else {
+          fs.rmSync(dest, { force: true })
+          moveSync(src, dest)
+        }
       }
     }
     if (!dirNames.length) return { ok: false, error: '压缩包中未找到插件目录' }
