@@ -8,8 +8,8 @@ import type { GodotProject, GodotVersion, OpenAction } from '../types/godot'
 
 type Row = GodotProject & { _id: string }
 
-const props = defineProps<{ enterPayload?: string[] | null }>()
-const emit = defineEmits<{ (e: 'consumed'): void }>()
+const props = defineProps<{ enterPayload?: string[] | null, autoCreate?: boolean }>()
+const emit = defineEmits<{ (e: 'consumed'): void, (e: 'create-done'): void }>()
 
 const settings = getSettings()
 const projects = ref<Row[]>([])
@@ -43,6 +43,11 @@ onMounted(() => {
     selected.value = -1
   }, '过滤项目')
   window.addEventListener('keydown', onKeyDown)
+  // 概览页「新建项目」联动:进入本页时自动打开新建弹窗
+  if (props.autoCreate) {
+    openCreate()
+    emit('create-done')
+  }
 })
 
 onBeforeUnmount(() => {

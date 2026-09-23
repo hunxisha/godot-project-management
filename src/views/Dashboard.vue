@@ -5,7 +5,7 @@ import { openProjectAction } from '../composables/useProjectActions'
 import Icon from '../components/Icon.vue'
 import type { GodotProject, GodotVersion } from '../types/godot'
 
-const emit = defineEmits<{ (e: 'navigate', tab: string): void }>()
+const emit = defineEmits<{ (e: 'navigate', tab: string): void, (e: 'create'): void }>()
 
 const projects = ref<(GodotProject & { _id: string })[]>([])
 const versions = ref<(GodotVersion & { _id: string })[]>([])
@@ -124,21 +124,28 @@ function gradOf(name: string): string {
         <span class="qi-icon qi-a"><Icon name="download" :size="18" /></span>
         <span class="qi-text">
           <span class="qi-name">下载引擎</span>
-          <span class="qi-desc">获取 Godot 官方版本</span>
+          <span class="qi-desc">获取官方版本</span>
+        </span>
+      </button>
+      <button class="quick-item card" @click="emit('create')">
+        <span class="qi-icon qi-b"><Icon name="plus" :size="18" /></span>
+        <span class="qi-text">
+          <span class="qi-name">新建项目</span>
+          <span class="qi-desc">从零创建</span>
         </span>
       </button>
       <button class="quick-item card" @click="emit('navigate', 'projects')">
-        <span class="qi-icon qi-b"><Icon name="folder-plus" :size="18" /></span>
+        <span class="qi-icon qi-c"><Icon name="folder-plus" :size="18" /></span>
         <span class="qi-text">
           <span class="qi-name">添加项目</span>
-          <span class="qi-desc">拖入项目文件夹即可</span>
+          <span class="qi-desc">导入已有目录</span>
         </span>
       </button>
       <button class="quick-item card" @click="emit('navigate', 'marketplace')">
-        <span class="qi-icon qi-c"><Icon name="puzzle" :size="18" /></span>
+        <span class="qi-icon qi-d"><Icon name="puzzle" :size="18" /></span>
         <span class="qi-text">
           <span class="qi-name">插件市场</span>
-          <span class="qi-desc">浏览官方资产商店</span>
+          <span class="qi-desc">官方资产商店</span>
         </span>
       </button>
     </section>
@@ -454,7 +461,7 @@ function gradOf(name: string): string {
 /* ---- 快捷操作 ---- */
 .quick {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 10px;
 }
 
@@ -487,6 +494,7 @@ function gradOf(name: string): string {
 .qi-a { background: var(--brand-weak); color: var(--brand); }
 .qi-b { background: var(--grad-b); color: #fff; }
 .qi-c { background: var(--grad-c); color: #fff; }
+.qi-d { background: var(--grad-d); color: #fff; }
 
 .qi-text {
   display: flex;

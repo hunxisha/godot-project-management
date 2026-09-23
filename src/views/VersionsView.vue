@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getSettings, notify, pickDirectory, pickFile, isWindows, saveSettings, showInFolder } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
@@ -27,6 +27,7 @@ installed.value = window.ztools.db.allDocs('godot/version/') as any[]
 onMounted(() => {
   unwatchTasks = window.services.watchTasks((snap) => {
     tasks.value = snap
+    // 完成通知与任务清理由 App.vue 全局订阅负责,这里只负责展示与本地列表合并
     for (const t of snap) {
       if (t.status === 'done' && t.version && !installed.value.some((v) => v._id === t.version!.id)) {
         installed.value.unshift({ ...t.version, _id: t.version.id })
@@ -37,21 +38,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => unwatchTasks && unwatchTasks())
-
-watch(
-  tasks,
-  (list) => {
-    for (const t of list) {
-      if (t.status === 'done') {
-        notify(`${t.version?.name ?? t.tag} 安装完成`)
-        window.services.dismissTask(t.id)
-      } else if (t.status === 'canceled') {
-        window.services.dismissTask(t.id)
-      }
-    }
-  },
-  { deep: false }
-)
 
 // ---------- 版本列表 ----------
 

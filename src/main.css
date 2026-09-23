@@ -32,6 +32,7 @@
   --warn: #dfa32b;
   --warn-weak: rgba(223, 163, 43, 0.14);
   --gold: #e8a94a;
+  --gold-weak: rgba(232, 169, 74, 0.16);
 
   /* 字母头像渐变组 */
   --grad-a: linear-gradient(135deg, #57a1d4, #35719f);
@@ -73,6 +74,7 @@
   --warn: #e3b341;
   --warn-weak: rgba(227, 179, 65, 0.13);
   --gold: #eebd62;
+  --gold-weak: rgba(238, 189, 98, 0.15);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.25);
