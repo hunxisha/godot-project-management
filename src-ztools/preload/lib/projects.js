@@ -345,14 +345,15 @@ async function copyTree(src, dest, includeCache, onProgress) {
     }
   }
   walk(src, '')
-  await fs.promises.mkdir(dest, { recursive: true })
+  // 注意:preload 环境的 fs.promises 不完整(无 write),统一用同步 API 保持可靠
+  fs.mkdirSync(dest, { recursive: true })
   let bytes = 0
   for (let i = 0; i < files.length; i++) {
     const f = files[i]
     const target = path.join(dest, ...f.rel.split('/'))
-    await fs.promises.mkdir(path.dirname(target), { recursive: true })
-    await fs.promises.copyFile(f.abs, target)
-    bytes += (await fs.promises.stat(f.abs)).size
+    fs.mkdirSync(path.dirname(target), { recursive: true })
+    fs.copyFileSync(f.abs, target)
+    bytes += fs.statSync(f.abs).size
     if (onProgress) onProgress({ done: i + 1, total: files.length, current: f.rel, bytes })
   }
   return { fileCount: files.length, bytes }

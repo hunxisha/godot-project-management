@@ -170,7 +170,7 @@ async function createZip(srcDir, zipPath, onProgress, exclude) {
   try {
     for (let i = 0; i < files.length; i++) {
       const f = files[i]
-      const data = await fs.promises.readFile(f.abs)
+      const data = fs.readFileSync(f.abs)
       const deflated = zlib.deflateRawSync(data, { level: 6 })
       const useDeflate = deflated.length < data.length
       const payload = useDeflate ? deflated : data
@@ -190,17 +190,19 @@ async function createZip(srcDir, zipPath, onProgress, exclude) {
       lfh.writeUInt32LE(payload.length, 18)
       lfh.writeUInt32LE(data.length, 22)
       lfh.writeUInt16LE(nameBuf.length, 26)
-      await fs.promises.write(fd, lfh)
-      await fs.promises.write(fd, nameBuf)
-      await fs.promises.write(fd, payload)
+      // 注意:preload 环境无 fs.promises.write,统一用同步写(与解压侧同步 API 一致)
+      fs.writeSync(fd, lfh)
+      fs.writeSync(fd, nameBuf)
+      fs.writeSync(fd, payload)
 
       central.push({ nameBuf, crc, method, time, date, compSize: payload.length, rawSize: data.length, offset })
       offset += 30 + nameBuf.length + payload.length
       if (onProgress) onProgress({ done: i + 1, total, current: f.rel, bytes: offset })
     }
 
-    // central directory
+    // central directory(cdSize 必须按实际写入字节累加,标准解压工具按该长度读取)
     const cdStart = offset
+    let cdSize = 0
     for (const c of central) {
       const cd = Buffer.alloc(46)
       cd.writeUInt32LE(0x02014b50, 0)
@@ -215,10 +217,10 @@ async function createZip(srcDir, zipPath, onProgress, exclude) {
       cd.writeUInt32LE(c.rawSize, 24)
       cd.writeUInt16LE(c.nameBuf.length, 28)
       cd.writeUInt32LE(c.offset, 42)
-      await fs.promises.write(fd, cd)
-      await fs.promises.write(fd, c.nameBuf)
+      fs.writeSync(fd, cd)
+      fs.writeSync(fd, c.nameBuf)
+      cdSize += 46 + c.nameBuf.length
     }
-    const cdSize = offset - cdStart
 
     // EOCD
     const eocd = Buffer.alloc(22)
@@ -227,11 +229,12 @@ async function createZip(srcDir, zipPath, onProgress, exclude) {
     eocd.writeUInt16LE(central.length, 10)
     eocd.writeUInt32LE(cdSize, 12)
     eocd.writeUInt32LE(cdStart, 16)
-    await fs.promises.write(fd, eocd)
+    fs.writeSync(fd, eocd)
+    // 返回总字节数(本地数据 + central directory + EOCD),供备份记录显示
+    return { fileCount: total, bytes: cdStart + cdSize + 22 }
   } finally {
     fs.closeSync(fd)
   }
-  return { fileCount: total, bytes: offset }
 }
 
 module.exports = { extractZip, ensureDir, dirSize, createZip }
