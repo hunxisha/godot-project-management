@@ -97,6 +97,29 @@ const favorites = ref<FavoriteAsset[]>([])
 const browsing = ref(false)
 const browseError = ref('')
 
+// ---------- 标签聚合分页 ----------
+// 商店 API 不支持服务端标签过滤,分页模式下每页仅少量匹配项会"看着不满一页"。
+// 标签筛选 + 分页模式(全部/新品/最近更新)时改用聚合池:批量并发拉服务端多页,
+// 把匹配项汇入本地池,每屏固定展示 20 个匹配项;翻页按需继续聚合,直到拉完全库。
+
+const POOL_PAGE = 20
+/** 聚合池:按当前(模式+标签)收集的匹配资产 */
+const matchPool = ref<MarketAsset[]>([])
+/** 已拉取的服务端页数 */
+const poolFetched = ref(0)
+/** 服务端是否已拉完(无更多页) */
+const poolDone = ref(false)
+/** 服务端总页数(首批返回前未知) */
+const poolTotalPages = ref(Infinity)
+const poolLoading = ref(false)
+
+/** 聚合模式:分页模式 + 已选标签 */
+const aggregating = computed(
+  () => !!tagFilter.value && (mode.value === 'all' || mode.value === 'new' || mode.value === 'recent')
+)
+/** 聚合池的客户端页数(未拉完时持续增长,展示时加 + 号) */
+const poolPages = computed(() => Math.max(1, Math.ceil(matchPool.value.length / POOL_PAGE)))
+
 const MODE_META: Record<BrowseMode, { label: string, icon: string }> = {
   all: { label: '全部', icon: 'grid' },
   featured: { label: '推荐', icon: 'sparkle' },
@@ -107,6 +130,13 @@ const MODE_META: Record<BrowseMode, { label: string, icon: string }> = {
 
 /** 当前展示的资产列表:搜索词非空时优先显示搜索结果;标签/兼容筛选在客户端应用 */
 const displayAssets = computed<MarketAsset[]>(() => {
+  // 聚合模式:池内已按标签过滤,直接按客户端页码切片(每屏凑满匹配项)
+  if (aggregating.value && !query.value.trim()) {
+    const start = (pageNum.value - 1) * POOL_PAGE
+    let list = matchPool.value.slice(start, start + POOL_PAGE)
+    if (compatOnly.value) list = list.filter((a) => compatOf(a) !== false)
+    return list
+  }
   let list: MarketAsset[]
   if (query.value.trim()) list = results.value
   else if (mode.value === 'all') list = all.value
@@ -125,11 +155,77 @@ const installedIds = computed(
   () => new Set(addons.value.filter((a) => a.fromMarket && a.assetId).map((a) => a.assetId!))
 )
 
+/** 按当前模式拉取服务端指定页(全部/新品/最近更新共用) */
+function fetchPage(page: number) {
+  if (mode.value === 'all') return window.services.listAllAssets(page)
+  if (mode.value === 'new') return window.services.listNewAssets(page)
+  return window.services.listRecentlyUpdated(page)
+}
+
+/** 重置聚合池 */
+function resetPool() {
+  matchPool.value = []
+  poolFetched.value = 0
+  poolDone.value = false
+  poolTotalPages.value = Infinity
+  pageNum.value = 1
+}
+
+/**
+ * 聚合服务端多页数据(每批 4 页并发,按页序追加保持排序):
+ * 把匹配当前标签的资产汇入池,直到凑满 targetCount 个或拉完全库。
+ */
+async function fillPool(targetCount: number) {
+  if (poolDone.value || poolLoading.value) return
+  poolLoading.value = true
+  browsing.value = true
+  browseError.value = ''
+  const g = TAG_GROUPS.find((x) => x.label === tagFilter.value)
+  try {
+    while (!poolDone.value && matchPool.value.length < targetCount) {
+      const batch: number[] = []
+      while (batch.length < 4 && poolFetched.value + batch.length + 1 <= poolTotalPages.value) {
+        batch.push(poolFetched.value + batch.length + 1)
+      }
+      if (!batch.length) {
+        poolDone.value = true
+        break
+      }
+      const rs = await Promise.all(batch.map((p) => fetchPage(p)))
+      for (const r of rs) {
+        poolFetched.value += 1
+        if (r.pages) poolTotalPages.value = r.pages
+        const matched = g ? r.result.filter((a) => inGroup(a, g.slugs)) : r.result
+        matchPool.value.push(...matched)
+        if (!r.result.length || poolFetched.value >= poolTotalPages.value) poolDone.value = true
+      }
+    }
+  } catch (e: any) {
+    browseError.value = e?.message || String(e)
+  } finally {
+    poolLoading.value = false
+    browsing.value = false
+  }
+}
+
+/** 给聚合模式下当前屏可见资产补齐 release 信息 */
+function hydrateScreen() {
+  const start = (pageNum.value - 1) * POOL_PAGE
+  hydrateVersions(matchPool.value.slice(start, start + POOL_PAGE))
+}
+
 /** 加载当前模式的数据(推荐只拉一次;全部/新品/最近更新按页;收藏读本地) */
 async function loadBrowse() {
   if (mode.value === 'favorites') {
     favorites.value = window.services.listFavorites()
     hydrateVersions(favorites.value)
+    return
+  }
+  // 聚合模式:重置池并填充第一屏
+  if (aggregating.value) {
+    resetPool()
+    await fillPool(POOL_PAGE)
+    hydrateScreen()
     return
   }
   if (mode.value === 'featured' && featured.value.length) return
@@ -164,11 +260,14 @@ async function loadBrowse() {
 
 /** 异步拉取列表资产的最新 release 信息并填充(版本/兼容范围/发布日期;失败不影响列表展示) */
 async function hydrateVersions(list: MarketAsset[]) {
-  const ids = list.map((a) => a.assetId).filter((id) => typeof id === 'string' && id.includes('/'))
-  if (!ids.length) return
+  // 只拉取尚未填充过的资产(聚合模式翻屏时避免重复请求)
+  const need = list.filter(
+    (a) => a.assetId && a.assetId.includes('/') && !a.versionString && !a.minGodot && !a.maxGodot && !a.releaseCreated
+  )
+  if (!need.length) return
   try {
-    const map = await window.services.getReleaseInfos(ids)
-    for (const a of list) {
+    const map = await window.services.getReleaseInfos(need.map((a) => a.assetId))
+    for (const a of need) {
       const info = map[a.assetId]
       if (!info) continue
       if (info.version) a.versionString = info.version
@@ -211,12 +310,38 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
 })
 
-function changePage(delta: number) {
+async function changePage(delta: number) {
   const next = pageNum.value + delta
-  if (next < 1 || next > pageTotal.value) return
+  if (next < 1) return
+  if (aggregating.value) {
+    // 聚合模式:池数据不够覆盖下一屏时继续向后聚合
+    const need = next * POOL_PAGE
+    if (matchPool.value.length < need && !poolDone.value) {
+      await fillPool(need)
+      if (browseError.value) return
+    }
+    if ((next - 1) * POOL_PAGE < matchPool.value.length) {
+      pageNum.value = next
+      hydrateScreen()
+    }
+    return
+  }
+  if (next > pageTotal.value) return
   pageNum.value = next
   loadBrowse()
 }
+
+// 标签筛选变化:聚合模式下重建匹配池;离开聚合模式时页码是池页码,需回到服务端第 1 页
+watch(tagFilter, (_nv, ov) => {
+  const wasAgg = !!ov && (mode.value === 'all' || mode.value === 'new' || mode.value === 'recent')
+  if (aggregating.value) {
+    resetPool()
+    fillPool(POOL_PAGE).then(hydrateScreen)
+  } else if (wasAgg) {
+    pageNum.value = 1
+    loadBrowse()
+  }
+})
 
 function isFav(id: string): boolean {
   return window.services.isFavorite(id)
@@ -472,7 +597,8 @@ function installFromPicker(r: ReleaseRow) {
         <span>加载失败:{{ browseError || searchError }}</span>
       </div>
       <div v-else-if="browsing || searching || (query.trim() && !hasSearched)" class="hint-line">
-        <span class="spin"></span> {{ searching || query.trim() ? '搜索中…' : '加载中…' }}
+        <span class="spin"></span>
+        {{ searching || query.trim() ? '搜索中…' : poolLoading ? `正在从商店聚合「${tagFilter}」标签的插件…` : '加载中…' }}
       </div>
       <EmptyState
         v-else-if="query.trim() && !results.length"
@@ -490,7 +616,7 @@ function installFromPicker(r: ReleaseRow) {
         v-else-if="tagFilter && !displayAssets.length"
         icon="puzzle"
         title="该标签下暂无插件"
-        :desc="`当前列表中没有「${tagFilter}」标签的插件,可切换其他标签或浏览模式。`"
+        :desc="aggregating ? `已扫描商店全部页面,没有找到「${tagFilter}」标签的插件,可切换其他标签。` : `当前列表中没有「${tagFilter}」标签的插件,可切换其他标签或浏览模式。`"
       />
       <div v-if="displayAssets.length" class="asset-grid">
         <div v-for="a in displayAssets" :key="a.assetId" class="card asset">
@@ -563,14 +689,21 @@ function installFromPicker(r: ReleaseRow) {
         </div>
       </div>
 
-      <!-- 分页(全部/新品/最近更新) -->
+      <!-- 分页(全部/新品/最近更新;标签筛选时为聚合分页,页码为匹配项页数,+ 表示还有更多) -->
       <div
         v-if="(mode === 'all' || mode === 'new' || mode === 'recent') && displayAssets.length && !browsing"
         class="page-row"
       >
         <button class="btn small" :disabled="pageNum <= 1" @click="changePage(-1)"><Icon name="chevron-left" :size="12" /> 上一页</button>
-        <span class="page-info">{{ pageNum }} / {{ pageTotal }}</span>
-        <button class="btn small" :disabled="pageNum >= pageTotal" @click="changePage(1)">下一页 <Icon name="chevron-right" :size="12" /></button>
+        <span
+          class="page-info"
+          :title="aggregating ? `已聚合 ${matchPool.length} 个「${tagFilter}」插件(共扫描 ${poolFetched} 页)` : ''"
+        >{{ pageNum }} / {{ aggregating ? poolPages + (poolDone ? '' : '+') : pageTotal }}</span>
+        <button
+          class="btn small"
+          :disabled="aggregating ? poolDone && pageNum >= poolPages : pageNum >= pageTotal"
+          @click="changePage(1)"
+        >下一页 <Icon name="chevron-right" :size="12" /></button>
       </div>
 
       <!-- 版本选择器模态框 -->
