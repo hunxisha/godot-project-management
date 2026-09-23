@@ -10,13 +10,34 @@ const emit = defineEmits<{ (e: 'navigate', tab: string): void }>()
 const projects = ref<(GodotProject & { _id: string })[]>([])
 const targetId = ref('')
 const query = ref('')
-const verFilter = ref('')
+const tagFilter = ref('')
 const searching = ref(false)
 const searchError = ref('')
 const results = ref<MarketAsset[]>([])
 const addons = ref<AddonInfo[]>([])
 const installing = ref<{ assetId: string, percent: number, stage: string } | null>(null)
 const brokenIcons = ref(new Set<string>())
+
+// ---------- 标签筛选(商店 API 不支持服务端过滤,客户端按标签 slug 筛) ----------
+
+/** 商店标签为自由标签,按 slug 聚合为常用分类 */
+const TAG_GROUPS: { label: string, slugs: string[] }[] = [
+  { label: '2D', slugs: ['2d'] },
+  { label: '3D', slugs: ['3d'] },
+  { label: 'UI', slugs: ['ui', 'gui', 'userinterface'] },
+  { label: 'AI', slugs: ['ai'] },
+  { label: '工具', slugs: ['tool', 'tools', 'editortool', 'tooling'] },
+  { label: '模板', slugs: ['template', 'templates'] },
+  { label: '材质', slugs: ['material', 'materials'] },
+  { label: '着色器', slugs: ['shader', 'shaders'] },
+  { label: '编辑器', slugs: ['editor', 'editors'] }
+]
+
+/** 资产是否属于标签组(旧收藏无标签列表时按分类名兜底) */
+function inGroup(a: MarketAsset, slugs: string[]): boolean {
+  if (a.tagSlugs?.length) return a.tagSlugs.some((s) => slugs.includes(s))
+  return slugs.includes((a.category || '').toLowerCase())
+}
 
 // ---------- 浏览模式:推荐 / 最近更新 / 收藏,搜索常驻工具栏 ----------
 
@@ -36,12 +57,15 @@ const MODE_META: Record<BrowseMode, { label: string, icon: string }> = {
   favorites: { label: '收藏', icon: 'star' }
 }
 
-/** 当前展示的资产列表:搜索词非空时优先显示搜索结果 */
+/** 当前展示的资产列表:搜索词非空时优先显示搜索结果;标签筛选在客户端应用 */
 const displayAssets = computed<MarketAsset[]>(() => {
-  if (query.value.trim()) return results.value
-  if (mode.value === 'recent') return recent.value
-  if (mode.value === 'favorites') return favorites.value
-  return featured.value
+  let list: MarketAsset[]
+  if (query.value.trim()) list = results.value
+  else if (mode.value === 'recent') list = recent.value
+  else if (mode.value === 'favorites') list = favorites.value
+  else list = featured.value
+  const g = TAG_GROUPS.find((x) => x.label === tagFilter.value)
+  return g ? list.filter((a) => inGroup(a, g.slugs)) : list
 })
 
 /** 目标项目已安装的市场资产 ID */
@@ -115,13 +139,6 @@ watch(query, () => {
   searchTimer = setTimeout(search, 400)
 })
 
-// 版本筛选变化时,若正在搜索则立即重新搜索
-watch(verFilter, () => {
-  if (!query.value.trim()) return
-  if (searchTimer) clearTimeout(searchTimer)
-  search()
-})
-
 onBeforeUnmount(() => {
   if (searchTimer) clearTimeout(searchTimer)
 })
@@ -145,23 +162,11 @@ function toggleFav(a: MarketAsset) {
 
 const target = computed(() => projects.value.find((p) => p._id === targetId.value))
 
-/** 引擎版本筛选选项:已装引擎的 major.minor */
-const versionOptions = computed(() => {
-  const set = new Set<string>()
-  for (const p of projects.value) {
-    if (p.engineVersion) set.add(p.engineVersion.split('.').slice(0, 2).join('.'))
-  }
-  return [...set]
-})
-
 onMounted(() => {
   projects.value = window.ztools.db.allDocs('godot/project/') as any[]
   projects.value.sort((a, b) => (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0))
   if (projects.value.length) {
     targetId.value = projects.value[0]._id
-    if (projects.value[0].engineVersion) {
-      verFilter.value = projects.value[0].engineVersion.split('.').slice(0, 2).join('.')
-    }
     reloadAddons()
   }
   loadBrowse()
@@ -169,9 +174,6 @@ onMounted(() => {
 
 function onTargetChange() {
   reloadAddons()
-  // 搜索的引擎版本筛选跟随目标项目,保证搜索结果与安装目标一致
-  const p = projects.value.find((x) => x._id === targetId.value)
-  verFilter.value = p?.engineVersion ? p.engineVersion.split('.').slice(0, 2).join('.') : ''
 }
 
 function reloadAddons() {
@@ -204,7 +206,7 @@ async function search() {
   searching.value = true
   searchError.value = ''
   try {
-    const r = await window.services.searchAssets(query.value.trim(), verFilter.value || undefined)
+    const r = await window.services.searchAssets(query.value.trim())
     results.value = r.result
     hydrateVersions(results.value)
   } catch (e: any) {
@@ -317,9 +319,9 @@ async function install(asset: MarketAsset) {
               @keyup.enter="onSearchEnter"
             />
           </div>
-          <select v-model="verFilter" class="sb-ver" title="按引擎版本过滤搜索结果">
-            <option value="">全部版本</option>
-            <option v-for="v in versionOptions" :key="v" :value="v">Godot {{ v }}</option>
+          <select v-model="tagFilter" class="sb-ver" title="按标签筛选当前列表">
+            <option value="">全部标签</option>
+            <option v-for="g in TAG_GROUPS" :key="g.label" :value="g.label">{{ g.label }}</option>
           </select>
         </div>
         <div class="tb-row">
@@ -343,7 +345,7 @@ async function install(asset: MarketAsset) {
       <!-- 搜索结果概要 -->
       <div v-if="query.trim() && hasSearched && !searchError && !browsing" class="result-line">
         <span class="rl-text">
-          “{{ query.trim() }}” 的搜索结果 · {{ results.length }} 项
+          “{{ query.trim() }}” 的搜索结果 · {{ displayAssets.length }} 项<template v-if="tagFilter">({{ tagFilter }})</template>
         </span>
         <span class="grow"></span>
         <button class="btn small ghost" @click="query = ''"><Icon name="x" :size="11" /> 清除搜索</button>
@@ -361,13 +363,19 @@ async function install(asset: MarketAsset) {
         v-else-if="query.trim() && !results.length"
         icon="search"
         title="没有找到相关插件"
-        :desc="`没有与「${query.trim()}」匹配的插件,试试其他关键词,或调整搜索框旁的引擎版本筛选。`"
+        :desc="`没有与「${query.trim()}」匹配的插件,试试其他关键词。`"
       />
       <EmptyState
         v-else-if="mode === 'favorites' && !favorites.length"
         icon="star"
         title="还没有收藏"
         desc="在推荐、最近更新或搜索结果中点击 ★ 收藏插件,方便下次快速安装。"
+      />
+      <EmptyState
+        v-else-if="tagFilter && !displayAssets.length"
+        icon="puzzle"
+        title="该标签下暂无插件"
+        :desc="`当前列表中没有「${tagFilter}」标签的插件,可切换其他标签或浏览模式。`"
       />
       <div v-if="displayAssets.length" class="asset-grid">
         <div v-for="a in displayAssets" :key="a.assetId" class="card asset">

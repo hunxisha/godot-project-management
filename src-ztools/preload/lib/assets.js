@@ -31,6 +31,7 @@ function mapAsset(a) {
     title: a.name,
     author: a.publisher.name,
     category: (a.tags && a.tags[0] && a.tags[0].display_name) || '',
+    tagSlugs: (a.tags || []).map((t) => t.slug),
     versionString: '',
     godotVersion: '',
     rating: a.reviews_score,

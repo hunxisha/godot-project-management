@@ -120,6 +120,8 @@ export interface MarketAsset {
   title: string
   author: string
   category: string
+  /** 全部标签 slug(用于客户端标签筛选;旧收藏等历史数据可能缺失) */
+  tagSlugs?: string[]
   /** 商店搜索结果不逐资产提供版本,安装时从 releases 端点实时获取 */
   versionString: string
   godotVersion: string
