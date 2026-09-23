@@ -16,6 +16,8 @@ export interface GodotVersion {
   variant: Variant
   platform: Platform
   exePath: string
+  /** 插件创建的安装目录(managed 时用于删除) */
+  installDir?: string
   /** true=由插件下载并管理,false=用户本地导入 */
   managed: boolean
   /** 安装包来源(下载 URL 或 'local') */
@@ -23,6 +25,8 @@ export interface GodotVersion {
   installedAt: number
   /** 字节 */
   size?: number
+  /** --version 校验是否通过 */
+  verified?: boolean
 }
 
 /** 管理的 Godot 项目 */
@@ -97,6 +101,8 @@ export interface DownloadTask {
   error?: string
   /** 完成后对应的版本 id */
   versionId?: string
+  /** 完成后对应的版本文档 */
+  version?: GodotVersion
 }
 
 /** Asset Library 市场资产 */
