@@ -54,7 +54,7 @@ function logoutStore() {
 }
 
 function openStoreSite() {
-  window.ztools.shellOpenExternal('https://store.godotengine.org/settings/api-keys/')
+  window.ztools.shellOpenExternal('https://store.godotengine.org/settings/#tab-api')
 }
 </script>
 
