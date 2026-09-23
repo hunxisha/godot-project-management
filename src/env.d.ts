@@ -48,6 +48,34 @@ interface Services {
     error?: string
     project?: import('./types/godot').GodotProject & { _id: string }
   }
+  /** 搜索 Asset Library */
+  searchAssets(
+    filter: string,
+    godotVersion?: string,
+    page?: number
+  ): Promise<{ result: import('./types/godot').MarketAsset[], page: number, pages: number }>
+  /** 列出项目已安装插件 */
+  listAddons(projectId: string): import('./types/godot').AddonInfo[]
+  /** 安装市场插件 */
+  installAsset(
+    opts: { projectId: string, assetId: number },
+    onProgress?: (p: { stage: 'downloading' | 'extracting', received?: number, total?: number }) => void
+  ): Promise<{
+    ok: boolean
+    error?: string
+    addon?: { title: string, versionString: string, dirNames: string[], enabled: boolean }
+  }>
+  /** 更新插件(覆盖安装) */
+  updateAsset(
+    opts: { projectId: string, assetId: number },
+    onProgress?: (p: { stage: 'downloading' | 'extracting', received?: number, total?: number }) => void
+  ): Promise<{ ok: boolean, error?: string, addon?: { title: string, versionString: string, dirNames: string[], enabled: boolean } }>
+  /** 检查插件更新 */
+  checkAddonUpdate(opts: { projectId: string, assetId: number }): Promise<{ hasUpdate: boolean, latest?: string, error?: string }>
+  /** 卸载插件 */
+  uninstallAddon(opts: { projectId: string, dirName: string }): { ok: boolean, error?: string }
+  /** 启用/禁用插件 */
+  setAddonEnabled(opts: { projectId: string, dirName: string, enabled: boolean }): { ok: boolean, error?: string }
 }
 
 declare global {

@@ -4,6 +4,7 @@ const { currentPlatform, fetchReleases } = require('./lib/releases')
 const install = require('./lib/install')
 const projects = require('./lib/projects')
 const { launchProject } = require('./lib/launcher')
+const assets = require('./lib/assets')
 
 window.services = {
   /** 当前平台标识 */
@@ -29,5 +30,19 @@ window.services = {
   /** 删除项目记录 */
   removeProject: (id) => projects.removeProject(id),
   /** 启动项目(editor=打开编辑器带 -e,run=直接运行) */
-  launchProject: (opts) => launchProject(opts)
+  launchProject: (opts) => launchProject(opts),
+  /** 搜索 Asset Library */
+  searchAssets: (filter, godotVersion, page) => assets.searchAssets(filter, godotVersion, page),
+  /** 列出项目已安装插件 */
+  listAddons: (projectId) => assets.listAddons(projectId),
+  /** 安装市场插件 */
+  installAsset: (opts, onProgress) => assets.installAsset(opts, onProgress),
+  /** 更新插件 */
+  updateAsset: (opts, onProgress) => assets.updateAsset(opts, onProgress),
+  /** 检查插件更新 */
+  checkAddonUpdate: (opts) => assets.checkAddonUpdate(opts),
+  /** 卸载插件 */
+  uninstallAddon: (opts) => assets.uninstallAddon(opts),
+  /** 启用/禁用插件 */
+  setAddonEnabled: (opts) => assets.setAddonEnabled(opts)
 }

@@ -129,8 +129,22 @@ export interface InstalledAddon {
   title: string
   versionString: string
   /** addons/ 下的目录名 */
-  dirName: string
+  dirNames: string[]
   installedAt: number
+}
+
+/** 扫描项目 addons/ 得到的插件信息 */
+export interface AddonInfo {
+  dirName: string
+  name: string
+  version?: string
+  author?: string
+  hasCfg: boolean
+  enabled: boolean
+  fromMarket: boolean
+  assetId?: number
+  versionString?: string
+  installedAt?: number
 }
 
 /** project.godot 解析结果 */
