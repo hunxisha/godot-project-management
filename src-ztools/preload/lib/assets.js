@@ -102,6 +102,17 @@ async function getAssetDetail(assetId) {
   }
 }
 
+/** 同盘直接 rename,跨盘(EXDEV/EPERM)回退为复制后删除 */
+function moveSync(src, dest) {
+  try {
+    fs.renameSync(src, dest)
+  } catch (e) {
+    if (e.code !== 'EXDEV' && e.code !== 'EPERM') throw e
+    fs.cpSync(src, dest, { recursive: true })
+    fs.rmSync(src, { recursive: true, force: true })
+  }
+}
+
 /** 解析 plugin.cfg(取 name/version/author) */
 function parsePluginCfg(cfgPath) {
   try {
@@ -231,13 +242,13 @@ async function installAsset({ projectId, assetId, assetMeta }, onProgress) {
       const src = path.join(srcDir, ent.name)
       if (ent.isDirectory()) {
         fs.rmSync(dest, { recursive: true, force: true })
-        fs.renameSync(src, dest)
+        moveSync(src, dest)
         dirNames.push(ent.name)
       } else if (ent.name === '.import' || ent.name.endsWith('.gdignore')) {
         // 单文件资产不移动
       } else {
         fs.rmSync(dest, { force: true })
-        fs.renameSync(src, dest)
+        moveSync(src, dest)
       }
     }
     if (!dirNames.length) return { ok: false, error: '压缩包中未找到插件目录' }
