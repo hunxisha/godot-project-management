@@ -31,7 +31,7 @@ onMounted(() => {
     <TabBar v-model="tab" />
     <main class="content">
       <Dashboard v-if="tab === 'dashboard'" @navigate="tab = $event" />
-      <ProjectsView v-else-if="tab === 'projects'" :enter-payload="enterPayload" />
+      <ProjectsView v-else-if="tab === 'projects'" :enter-payload="enterPayload" @consumed="enterPayload = null" />
       <VersionsView v-else-if="tab === 'versions'" />
       <MarketplaceView v-else-if="tab === 'marketplace'" />
       <SettingsView v-else />

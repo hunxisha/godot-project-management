@@ -31,6 +31,23 @@ interface Services {
   watchTasks(fn: (tasks: import('./types/godot').DownloadTask[]) => void): () => void
   importLocalExe(exePath: string): Promise<{ ok: boolean, error?: string, version?: import('./types/godot').GodotVersion }>
   deleteVersion(v: { id: string, installDir?: string, managed: boolean }): { ok: boolean, error?: string }
+  /** 添加项目(目录或 project.godot 文件路径) */
+  addProject(inputPath: string): {
+    ok: boolean
+    error?: string
+    project?: import('./types/godot').GodotProject
+    exists?: boolean
+  }
+  /** 递归扫描目录,返回所有含 project.godot 的目录 */
+  scanProjects(rootDir: string): string[]
+  /** 删除项目记录 */
+  removeProject(id: string): { ok: boolean }
+  /** 启动项目(editor=编辑器,run=运行) */
+  launchProject(opts: { projectId: string, action: 'editor' | 'run' }): {
+    ok: boolean
+    error?: string
+    project?: import('./types/godot').GodotProject & { _id: string }
+  }
 }
 
 declare global {

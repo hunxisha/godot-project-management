@@ -2,6 +2,8 @@
 // 能力模块位于 lib/ 下,按功能领域拆分
 const { currentPlatform, fetchReleases } = require('./lib/releases')
 const install = require('./lib/install')
+const projects = require('./lib/projects')
+const { launchProject } = require('./lib/launcher')
 
 window.services = {
   /** 当前平台标识 */
@@ -19,5 +21,13 @@ window.services = {
   /** 导入本地引擎可执行文件 */
   importLocalExe: (exePath) => install.importLocalExe(exePath),
   /** 删除已装版本 */
-  deleteVersion: (v) => install.deleteVersion(v)
+  deleteVersion: (v) => install.deleteVersion(v),
+  /** 添加项目(目录或 project.godot 文件) */
+  addProject: (inputPath) => projects.addProject(inputPath),
+  /** 递归扫描目录下的所有项目 */
+  scanProjects: (rootDir) => projects.scanProjects(rootDir),
+  /** 删除项目记录 */
+  removeProject: (id) => projects.removeProject(id),
+  /** 启动项目(editor=打开编辑器带 -e,run=直接运行) */
+  launchProject: (opts) => launchProject(opts)
 }
