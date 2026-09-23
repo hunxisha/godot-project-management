@@ -5,7 +5,8 @@ const tabs = [
   { key: 'dashboard', label: '概览', icon: 'grid' },
   { key: 'projects', label: '项目', icon: 'folder' },
   { key: 'versions', label: '版本', icon: 'package' },
-  { key: 'marketplace', label: '插件', icon: 'puzzle' },
+  { key: 'marketplace', label: '市场', icon: 'puzzle' },
+  { key: 'addons', label: '已安装', icon: 'check' },
   { key: 'settings', label: '设置', icon: 'gear' }
 ]
 

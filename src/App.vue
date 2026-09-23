@@ -6,6 +6,7 @@ import Dashboard from './views/Dashboard.vue'
 import ProjectsView from './views/ProjectsView.vue'
 import VersionsView from './views/VersionsView.vue'
 import MarketplaceView from './views/MarketplaceView.vue'
+import AddonsView from './views/AddonsView.vue'
 import SettingsView from './views/SettingsView.vue'
 import { notify } from './services/bridge'
 import type { DownloadTask } from './types/godot'
@@ -99,6 +100,7 @@ function gotoCreate() {
       />
       <VersionsView v-else-if="tab === 'versions'" />
       <MarketplaceView v-else-if="tab === 'marketplace'" @navigate="tab = $event" />
+      <AddonsView v-else-if="tab === 'addons'" @navigate="tab = $event" />
       <SettingsView v-else />
     </main>
 

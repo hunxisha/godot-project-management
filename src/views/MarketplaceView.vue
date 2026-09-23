@@ -14,11 +14,8 @@ const verFilter = ref('')
 const searching = ref(false)
 const searchError = ref('')
 const results = ref<MarketAsset[]>([])
-const checking = ref(false)
 const addons = ref<AddonInfo[]>([])
 const installing = ref<{ assetId: string, percent: number, stage: string } | null>(null)
-const confirmingDir = ref<string | null>(null)
-const updateInfo = ref<Record<string, { hasUpdate: boolean, latest?: string }>>({})
 const brokenIcons = ref(new Set<string>())
 
 // ---------- 浏览模式:推荐 / 最近更新 / 收藏 / 我的库,搜索常驻工具栏 ----------
@@ -178,7 +175,6 @@ onMounted(() => {
 })
 
 function onTargetChange() {
-  updateInfo.value = {}
   reloadAddons()
   // 搜索的引擎版本筛选跟随目标项目,保证搜索结果与安装目标一致
   const p = projects.value.find((x) => x._id === targetId.value)
@@ -244,7 +240,7 @@ function onIconError(id: string) {
   brokenIcons.value = new Set(brokenIcons.value).add(id)
 }
 
-// ---------- 安装 / 更新 ----------
+// ---------- 安装 ----------
 
 function fmtSize(n?: number): string {
   if (!n) return ''
@@ -293,68 +289,6 @@ async function install(asset: MarketAsset) {
     notify(r.error || '安装失败')
   }
 }
-
-async function checkUpdates() {
-  if (!targetId.value) return
-  checking.value = true
-  const jobs = addons.value.filter((a) => a.fromMarket && a.assetId)
-  const next: Record<string, { hasUpdate: boolean, latest?: string }> = {}
-  await Promise.all(
-    jobs.map(async (a) => {
-      const r = await window.services.checkAddonUpdate({ projectId: targetId.value, assetId: a.assetId! })
-      if (r.hasUpdate) next[a.dirName] = { hasUpdate: true, latest: r.latest }
-    })
-  )
-  updateInfo.value = next
-  checking.value = false
-  const count = Object.keys(next).length
-  notify(count ? `${count} 个插件有新版本` : '所有插件均为最新版本')
-}
-
-async function update(a: AddonInfo) {
-  if (!targetId.value || !a.assetId || installing.value) return
-  installing.value = { assetId: a.assetId, percent: 0, stage: '下载中' }
-  const r = await window.services.updateAsset(
-    { projectId: targetId.value, assetId: a.assetId },
-    (p) => {
-      if (p.stage === 'downloading') {
-        installing.value = { assetId: a.assetId!, percent: percent(p), stage: `下载中 ${fmtSize(p.received)}` }
-      } else {
-        installing.value = { assetId: a.assetId!, percent: 100, stage: '解压中' }
-      }
-    }
-  )
-  installing.value = null
-  if (r.ok) {
-    notify(`${a.name} 已更新到 ${r.addon?.versionString}`)
-    reloadAddons()
-    checkUpdates()
-  } else {
-    notify(r.error || '更新失败')
-  }
-}
-
-// ---------- 启用 / 卸载 ----------
-
-function toggleEnabled(a: AddonInfo) {
-  const r = window.services.setAddonEnabled({ projectId: targetId.value, dirName: a.dirName, enabled: !a.enabled })
-  if (r.ok) reloadAddons()
-  else notify(r.error || '操作失败')
-}
-
-function uninstall(a: AddonInfo) {
-  if (confirmingDir.value === a.dirName) {
-    confirmingDir.value = null
-    const r = window.services.uninstallAddon({ projectId: targetId.value, dirName: a.dirName })
-    if (r.ok) reloadAddons()
-    else notify(r.error || '卸载失败')
-  } else {
-    confirmingDir.value = a.dirName
-    setTimeout(() => {
-      if (confirmingDir.value === a.dirName) confirmingDir.value = null
-    }, 2500)
-  }
-}
 </script>
 
 <template>
@@ -369,45 +303,55 @@ function uninstall(a: AddonInfo) {
     </EmptyState>
 
     <template v-else>
-      <!-- 工具栏:安装目标 + 浏览模式 + 常驻搜索(滚动时吸顶) -->
-      <div class="toolbar">
-        <label class="tb-target" :title="target?.path ? `安装到 ${target.path}` : '选择要安装插件的项目'">
-          <Icon name="folder" :size="13" />
-          <span class="tb-caption">安装到</span>
-          <select v-model="targetId" class="tb-select" @change="onTargetChange">
-            <option v-for="p in projects" :key="p._id" :value="p._id">{{ p.name }}</option>
-          </select>
-        </label>
-        <span class="tb-divider"></span>
-        <div class="mode-tabs">
-          <button
-            v-for="(m, key) in MODE_META"
-            :key="key"
-            class="chip"
-            :class="{ on: mode === key }"
-            @click="switchMode(key as BrowseMode)"
-          >
-            <Icon :name="m.icon" :size="12" />
-            {{ m.label }}
-            <span v-if="key === 'favorites' && favorites.length" class="chip-count">{{ favorites.length }}</span>
-            <span v-if="key === 'library' && library.length" class="chip-count">{{ library.length }}</span>
-          </button>
-        </div>
+      <!-- 页面标题 -->
+      <div class="view-head">
+        <h2><Icon name="puzzle" :size="16" /> 插件市场</h2>
+        <span class="head-sub">官方 Asset Store</span>
         <span class="grow"></span>
-        <div class="search-box">
-          <Icon name="search" :size="13" class="sb-icon" />
-          <input
-            v-model="query"
-            class="sb-input"
-            placeholder="搜索插件…"
-            spellcheck="false"
-            @keyup.enter="onSearchEnter"
-          />
+      </div>
+
+      <!-- 工具栏(滚动时吸顶):第一行 安装目标 + 搜索,第二行 浏览模式 -->
+      <div class="toolbar">
+        <div class="tb-row">
+          <label class="tb-target" :title="target?.path ? `安装到 ${target.path}` : '选择要安装插件的项目'">
+            <Icon name="folder" :size="13" />
+            <span class="tb-caption">安装到</span>
+            <select v-model="targetId" class="tb-select" @change="onTargetChange">
+              <option v-for="p in projects" :key="p._id" :value="p._id">{{ p.name }}</option>
+            </select>
+          </label>
+          <div class="search-box">
+            <Icon name="search" :size="13" class="sb-icon" />
+            <input
+              v-model="query"
+              class="sb-input"
+              placeholder="搜索插件,回车立即搜索…"
+              spellcheck="false"
+              @keyup.enter="onSearchEnter"
+            />
+          </div>
+          <select v-model="verFilter" class="sb-ver" title="按引擎版本过滤搜索结果">
+            <option value="">全部版本</option>
+            <option v-for="v in versionOptions" :key="v" :value="v">Godot {{ v }}</option>
+          </select>
         </div>
-        <select v-model="verFilter" class="sb-ver" title="按引擎版本过滤搜索结果">
-          <option value="">全部版本</option>
-          <option v-for="v in versionOptions" :key="v" :value="v">Godot {{ v }}</option>
-        </select>
+        <div class="tb-row">
+          <div class="mode-tabs">
+            <button
+              v-for="(m, key) in MODE_META"
+              :key="key"
+              class="chip"
+              :class="{ on: mode === key }"
+              @click="switchMode(key as BrowseMode)"
+            >
+              <Icon :name="m.icon" :size="12" />
+              {{ m.label }}
+              <span v-if="key === 'favorites' && favorites.length" class="chip-count">{{ favorites.length }}</span>
+              <span v-if="key === 'library' && library.length" class="chip-count">{{ library.length }}</span>
+            </button>
+          </div>
+          <span class="grow"></span>
+        </div>
       </div>
 
       <!-- 搜索结果概要 -->
@@ -463,30 +407,32 @@ function uninstall(a: AddonInfo) {
             />
             <div v-else class="asset-icon ph"><Icon name="puzzle" :size="22" /></div>
             <div class="asset-title-box">
-              <span class="asset-title link" title="在商店中查看" @click="openStore(a)">
+              <span class="asset-title link" :title="`${a.title} · 在商店中查看`" @click="openStore(a)">
                 {{ a.title }}
                 <Icon name="external" :size="10" />
               </span>
-              <span v-if="a.versionString" class="asset-ver">v{{ fmtVer(a.versionString) }}</span>
+              <span v-if="a.versionString" class="asset-ver" :title="a.versionString">v{{ fmtVer(a.versionString) }}</span>
             </div>
           </div>
           <div class="asset-tags">
             <span class="tag">{{ a.category }}</span>
-            <span v-if="a.rating" class="rating" :title="`商店评分 ${starsOf(a.rating)} / 5`">
+            <span v-if="a.rating && a.rating >= 20" class="rating" :title="`商店评分 ${starsOf(a.rating)} / 5`">
               <Icon name="star" :size="10" :stroke-width="2.2" /> {{ starsOf(a.rating) }}
             </span>
             <span v-if="installedIds.has(a.assetId)" class="tag ok">已安装</span>
           </div>
+          <!-- 我的库模式显示安装记录,其余显示作者 + 简介 -->
           <div
             v-if="mode === 'library' && (a as LibraryAsset).projectCount"
-            class="asset-meta lib"
+            class="asset-lib"
             :title="(a as LibraryAsset).projectNames.join('\n')"
           >
             已装于 {{ (a as LibraryAsset).projectCount }} 个项目 · {{ formatDate((a as LibraryAsset).installedAt) }}
           </div>
-          <div v-else class="asset-meta" :title="a.description">
-            {{ a.author }}{{ a.description ? ' · ' + a.description : '' }}
-          </div>
+          <template v-else>
+            <div class="asset-author">{{ a.author }}</div>
+            <div class="asset-desc" :title="a.description">{{ a.description }}</div>
+          </template>
           <button
             v-if="installing && installing.assetId === a.assetId"
             class="btn small asset-install busy"
@@ -511,52 +457,6 @@ function uninstall(a: AddonInfo) {
         <span class="page-info">{{ recentPage }} / {{ recentPages }}</span>
         <button class="btn small" :disabled="recentPage >= recentPages" @click="changeRecentPage(1)">下一页 <Icon name="chevron-right" :size="12" /></button>
       </div>
-
-      <!-- 已安装(与市场浏览区明确分隔) -->
-      <div class="installed-zone">
-        <div class="view-head installed-head">
-          <h2><Icon name="puzzle" :size="16" /> 已安装插件 <span class="count-pill">{{ addons.length }}</span></h2>
-          <span v-if="target" class="tag brand" :title="target.path">当前项目:{{ target.name }}</span>
-          <span class="grow"></span>
-          <button v-if="addons.some((a) => a.fromMarket)" class="btn small" :disabled="checking" @click="checkUpdates">
-            <span v-if="checking" class="spin"></span>
-            <Icon v-else name="refresh" :size="12" />
-            {{ checking ? '检查中…' : '检查更新' }}
-          </button>
-        </div>
-
-        <EmptyState v-if="!addons.length" icon="puzzle" title="该项目还没有插件" desc="在上方搜索并安装,安装后自动写入 addons/ 目录。" />
-        <div v-else class="addon-list">
-          <div v-for="a in addons" :key="a.dirName" class="card addon">
-          <div class="ad-ico" :class="{ off: !a.enabled }"><Icon name="puzzle" :size="17" /></div>
-          <div class="addon-main">
-            <div class="addon-name">
-              <span class="name">{{ a.name }}</span>
-              <span v-if="a.version" class="tag">v{{ a.version }}</span>
-              <span class="tag" :class="a.enabled ? 'ok' : 'warn'">{{ a.enabled ? '已启用' : '未启用' }}</span>
-              <span v-if="a.fromMarket" class="tag brand">市场</span>
-              <span v-else class="tag" title="手动放置或未通过市场安装">未知来源</span>
-              <span v-if="updateInfo[a.dirName]" class="tag warn">可更新到 v{{ updateInfo[a.dirName].latest }}</span>
-            </div>
-            <div class="addon-meta mono" :title="`addons/${a.dirName}`">addons/{{ a.dirName }}</div>
-          </div>
-          <div class="addon-actions">
-            <button
-              v-if="a.fromMarket && updateInfo[a.dirName]"
-              class="btn small primary"
-              :disabled="!!installing"
-              @click="update(a)"
-            ><Icon name="download" :size="12" /> 更新</button>
-            <button v-if="a.hasCfg" class="btn small ghost" @click="toggleEnabled(a)">
-              {{ a.enabled ? '禁用' : '启用' }}
-            </button>
-            <button class="btn small danger-text" @click="uninstall(a)">
-              {{ confirmingDir === a.dirName ? '确认卸载?' : '卸载' }}
-            </button>
-          </div>
-          </div>
-        </div>
-      </div>
     </template>
   </div>
 </template>
@@ -566,19 +466,32 @@ function uninstall(a: AddonInfo) {
   flex: 1;
 }
 
-/* ---------- 工具栏(吸顶) ---------- */
+/* ---------- 页面标题 ---------- */
+.head-sub {
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* ---------- 工具栏(吸顶,两行布局) ---------- */
 .toolbar {
   position: sticky;
   top: -16px;
   z-index: 20;
   display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 9px;
   margin: 0 -18px;
   padding: 10px 18px;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
+}
+
+.tb-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .tb-target {
@@ -606,13 +519,6 @@ function uninstall(a: AddonInfo) {
   box-shadow: none;
 }
 
-.tb-divider {
-  width: 1px;
-  height: 18px;
-  background: var(--border);
-  flex-shrink: 0;
-}
-
 /* ---------- 模式标签 ---------- */
 .mode-tabs {
   display: flex;
@@ -625,8 +531,8 @@ function uninstall(a: AddonInfo) {
 .search-box {
   position: relative;
   flex: 1;
-  min-width: 150px;
-  max-width: 300px;
+  min-width: 180px;
+  max-width: 460px;
 }
 
 .sb-icon {
@@ -640,7 +546,7 @@ function uninstall(a: AddonInfo) {
 
 .sb-input {
   width: 100%;
-  padding: 4px 10px 4px 28px;
+  padding: 5px 10px 5px 28px;
   border: 1px solid var(--border-strong);
   border-radius: 8px;
   background: var(--surface);
@@ -661,7 +567,7 @@ function uninstall(a: AddonInfo) {
 }
 
 .sb-ver {
-  padding: 4px 6px;
+  padding: 5px 6px;
   border: 1px solid var(--border-strong);
   border-radius: 8px;
   background: var(--surface);
@@ -826,6 +732,10 @@ function uninstall(a: AddonInfo) {
   font-size: 11px;
   color: var(--text-3);
   font-family: var(--mono);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .asset-tags {
@@ -835,21 +745,31 @@ function uninstall(a: AddonInfo) {
   flex-wrap: wrap;
 }
 
-.asset-meta {
+/* 作者与简介分行,层次更清晰 */
+.asset-author {
   font-size: 12px;
-  line-height: 1.5;
   color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-desc {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-2);
   overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  min-height: 36px;
+  min-height: 37px;
 }
 
-.asset-meta.lib {
+/* 我的库模式的安装记录行 */
+.asset-lib {
+  font-size: 12px;
   color: var(--brand);
-  display: block;
-  min-height: 0;
+  min-height: 37px;
 }
 
 .asset-install {
@@ -873,80 +793,5 @@ function uninstall(a: AddonInfo) {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--text-3);
-}
-
-/* ---------- 已安装插件(独立分区) ---------- */
-.installed-zone {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 6px;
-  padding-top: 14px;
-  border-top: 1px dashed var(--border-strong);
-}
-
-.addon-list {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-
-.addon {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 9px 14px;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.addon:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-sm);
-}
-
-.ad-ico {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-sm);
-  background: var(--brand-weak);
-  color: var(--brand);
-  flex-shrink: 0;
-}
-
-.ad-ico.off {
-  background: var(--surface-3);
-  color: var(--text-3);
-}
-
-.addon-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.addon-name {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.name {
-  font-weight: 600;
-  font-size: 13.5px;
-}
-
-.addon-meta {
-  font-size: 11.5px;
-  color: var(--text-3);
-}
-
-.addon-actions {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex-shrink: 0;
 }
 </style>
