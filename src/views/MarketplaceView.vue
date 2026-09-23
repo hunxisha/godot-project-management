@@ -1,9 +1,12 @@
 ﻿<script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { notify } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import type { AddonInfo, FavoriteAsset, GodotProject, GodotVersion, MarketAsset } from '../types/godot'
+
+// 被 App 的 KeepAlive 缓存:切走再切回不重新加载浏览数据(直到插件重启)
+defineOptions({ name: 'MarketplaceView' })
 
 const emit = defineEmits<{ (e: 'navigate', tab: string): void }>()
 
@@ -365,6 +368,18 @@ onMounted(() => {
   }
   loadBrowse()
   window.addEventListener('keydown', onKeydown)
+})
+
+// 切回本页(KeepAlive 缓存实例被重新激活):轻量同步本地数据,浏览状态全部保留
+onActivated(() => {
+  projects.value = window.ztools.db.allDocs('godot/project/') as any[]
+  projects.value.sort((a, b) => (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0))
+  versions.value = window.ztools.db.allDocs('godot/version/') as any[]
+  // 上次选中的项目已被删除时回退到最近项目
+  if (projects.value.length && !projects.value.some((p) => p._id === targetId.value)) {
+    targetId.value = projects.value[0]._id
+  }
+  reloadAddons()
 })
 
 function onKeydown(e: KeyboardEvent) {

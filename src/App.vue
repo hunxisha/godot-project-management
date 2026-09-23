@@ -97,24 +97,27 @@ function gotoAddons(id: string) {
   <div class="app">
     <TabBar v-model="tab" />
     <main class="content">
-      <Dashboard v-if="tab === 'dashboard'" @navigate="tab = $event" @create="gotoCreate" />
-      <ProjectsView
-        v-else-if="tab === 'projects'"
-        :enter-payload="enterPayload"
-        :auto-create="pendingCreate"
-        @consumed="enterPayload = null"
-        @create-done="pendingCreate = false"
-        @manage-addons="gotoAddons"
-      />
-      <VersionsView v-else-if="tab === 'versions'" />
-      <MarketplaceView v-else-if="tab === 'marketplace'" @navigate="tab = $event" />
-      <AddonsView
-        v-else-if="tab === 'addons'"
-        :enter-project-id="pendingAddonProject"
-        @navigate="tab = $event"
-        @consumed="pendingAddonProject = null"
-      />
-      <SettingsView v-else />
+      <!-- 仅缓存市场页:切走再切回保留浏览状态(模式/标签/页码/数据),直到插件重启 -->
+      <KeepAlive include="MarketplaceView">
+        <Dashboard v-if="tab === 'dashboard'" @navigate="tab = $event" @create="gotoCreate" />
+        <ProjectsView
+          v-else-if="tab === 'projects'"
+          :enter-payload="enterPayload"
+          :auto-create="pendingCreate"
+          @consumed="enterPayload = null"
+          @create-done="pendingCreate = false"
+          @manage-addons="gotoAddons"
+        />
+        <VersionsView v-else-if="tab === 'versions'" />
+        <MarketplaceView v-else-if="tab === 'marketplace'" @navigate="tab = $event" />
+        <AddonsView
+          v-else-if="tab === 'addons'"
+          :enter-project-id="pendingAddonProject"
+          @navigate="tab = $event"
+          @consumed="pendingAddonProject = null"
+        />
+        <SettingsView v-else />
+      </KeepAlive>
     </main>
 
     <!-- 全局任务栏:版本页有详细任务卡,其余页面显示紧凑进度条 -->
