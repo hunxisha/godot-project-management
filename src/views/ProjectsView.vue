@@ -4,7 +4,7 @@ import { getSettings, isWindows, notify, pickDirectory, putDoc } from '../servic
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import { openProjectAction } from '../composables/useProjectActions'
-import type { GodotProject, GodotVersion, OpenAction } from '../types/godot'
+import type { BackupRecord, GodotProject, GodotVersion, OpenAction } from '../types/godot'
 
 type Row = GodotProject & { _id: string }
 
@@ -27,13 +27,21 @@ const ACTION_ICON: Record<OpenAction, string> = { editor: 'pencil', run: 'play',
 
 const visible = computed<Row[]>(() => {
   const kw = filter.value.trim().toLowerCase()
-  const list = projects.value.filter((p) => !kw || p.name.toLowerCase().includes(kw) || p.path.toLowerCase().includes(kw))
+  const list = projects.value.filter((p) => {
+    if (favOnly.value && !p.favorite) return false
+    return !kw || p.name.toLowerCase().includes(kw) || p.path.toLowerCase().includes(kw)
+  })
   return [...list].sort((a, b) => {
     if (!!a.favorite !== !!b.favorite) return a.favorite ? -1 : 1
     if ((b.lastOpenedAt || 0) !== (a.lastOpenedAt || 0)) return (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0)
     return a.name.localeCompare(b.name)
   })
 })
+
+// ---------- 收藏筛选 ----------
+
+const favOnly = ref(false)
+const favCount = computed(() => projects.value.filter((p) => p.favorite).length)
 
 function reload() {
   projects.value = window.ztools.db.allDocs('godot/project/') as any[]
@@ -42,6 +50,7 @@ function reload() {
 
 onMounted(() => {
   reload()
+  refreshLastBackups()
   window.ztools.setSubInput(({ text }) => {
     filter.value = text
     selected.value = -1
@@ -218,6 +227,141 @@ function bindVersion(p: Row, versionId: string) {
   putDoc(_id, data)
 }
 
+// ---------- 项目备份(打包 zip / 完整快照 / 历史恢复) ----------
+
+const showBackup = ref(false)
+const backupTarget = ref<Row | null>(null)
+const bMode = ref<'zip' | 'copy'>('zip')
+const bDir = ref('')
+const bIncludeCache = ref(false)
+const backing = ref(false)
+const bProg = ref<{ done: number, total: number, current: string } | null>(null)
+/** 各项目最近一次备份记录(projectId → record) */
+const lastBackups = ref<Record<string, BackupRecord>>({})
+/** 本次会话记住的备份目录(优先于全局设置) */
+let sessionBackupDir = ''
+const historyList = ref<BackupRecord[]>([])
+const restoreMode = ref<'overwrite' | 'new'>('new')
+const restoring = ref('')
+/** 两击确认:恢复覆盖 / 删除备份 */
+const pendingRestore = ref('')
+const pendingDel = ref('')
+
+function refreshLastBackups() {
+  const map: Record<string, BackupRecord> = {}
+  for (const b of window.services.listBackups()) {
+    const cur = map[b.projectId]
+    if (!cur || b.createdAt > cur.createdAt) map[b.projectId] = b
+  }
+  lastBackups.value = map
+}
+
+function openBackup(p: Row) {
+  backupTarget.value = p
+  bMode.value = 'zip'
+  bIncludeCache.value = false
+  bDir.value = sessionBackupDir || settings.backupRoot || ''
+  pendingRestore.value = ''
+  pendingDel.value = ''
+  restoring.value = ''
+  historyList.value = window.services.listBackups(p._id)
+  showBackup.value = true
+}
+
+function chooseBackupDir() {
+  const d = pickDirectory('选择备份保存位置')
+  if (d) bDir.value = d
+}
+
+async function confirmBackup() {
+  const p = backupTarget.value
+  if (!p || backing.value) return
+  if (!bDir.value.trim()) {
+    notify('请选择备份保存位置')
+    return
+  }
+  backing.value = true
+  bProg.value = null
+  try {
+    const rec = await window.services.backupProject(
+      p._id,
+      { mode: bMode.value, destDir: bDir.value.trim(), includeCache: bIncludeCache.value },
+      (prog) => { bProg.value = prog }
+    )
+    sessionBackupDir = bDir.value.trim()
+    notify(`备份完成:${rec.projectName} · ${fmtSize(rec.size)} / ${rec.fileCount} 个文件`)
+    refreshLastBackups()
+    historyList.value = window.services.listBackups(p._id)
+  } catch (e: any) {
+    notify(e?.message || '备份失败')
+  } finally {
+    backing.value = false
+    bProg.value = null
+  }
+}
+
+async function doRestore(b: BackupRecord) {
+  if (restoring.value) return
+  // 覆盖原项目是破坏性操作,两击确认
+  if (restoreMode.value === 'overwrite' && pendingRestore.value !== b._id) {
+    pendingRestore.value = b._id
+    return
+  }
+  restoring.value = b._id
+  try {
+    const r = await window.services.restoreBackup(b._id, { mode: restoreMode.value })
+    if (!r.ok) {
+      notify(r.error || '恢复失败')
+      return
+    }
+    notify(
+      restoreMode.value === 'new'
+        ? `已恢复为新项目:${r.newProjectName}`
+        : `已恢复「${b.projectName}」,原目录已移入回收站`
+    )
+    reload()
+    refreshLastBackups()
+    historyList.value = window.services.listBackups(b.projectId)
+    pendingRestore.value = ''
+  } finally {
+    restoring.value = ''
+  }
+}
+
+function doDeleteBackup(b: BackupRecord) {
+  if (pendingDel.value !== b._id) {
+    pendingDel.value = b._id
+    return
+  }
+  const r = window.services.deleteBackup(b._id)
+  if (!r.ok) {
+    notify(r.error || '删除失败')
+    return
+  }
+  pendingDel.value = ''
+  historyList.value = historyList.value.filter((x) => x._id !== b._id)
+  refreshLastBackups()
+  notify('已删除备份(移入回收站)')
+}
+
+function fmtSize(n?: number): string {
+  if (!n) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let v = n
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${units[i]}`
+}
+
+function formatTime(ts: number): string {
+  const d = new Date(ts)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
 function openProject(p: Row, action?: OpenAction) {
   openProjectAction(p, action)
 }
@@ -261,10 +405,14 @@ function onKeyDown(e: KeyboardEvent) {
       showDelete.value = false
       return
     }
+    if (showBackup.value) {
+      if (!backing.value) showBackup.value = false
+      return
+    }
     selected.value = -1
     return
   }
-  if (showCreate.value || showDelete.value) return
+  if (showCreate.value || showDelete.value || showBackup.value) return
   if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(e.key)) return
   const tag = (e.target as HTMLElement)?.tagName
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
@@ -285,6 +433,12 @@ function onKeyDown(e: KeyboardEvent) {
   <div class="projects view">
     <div class="view-head">
       <h2><Icon name="folder" :size="16" /> 项目 <span class="count-pill">{{ projects.length }}</span></h2>
+      <div class="seg head-seg">
+        <button :class="{ on: !favOnly }" @click="favOnly = false">全部</button>
+        <button :class="{ on: favOnly }" :disabled="!favCount" title="只看收藏的项目" @click="favOnly = true">
+          <Icon name="star" :size="11" :stroke-width="favOnly ? 2.4 : 1.7" /> 收藏 {{ favCount }}
+        </button>
+      </div>
       <span class="grow"></span>
       <button class="btn small ghost" @click="openCreate"><Icon name="plus" :size="13" /> 新建项目</button>
       <button class="btn small primary" @click="addManually"><Icon name="folder-plus" :size="13" /> 添加项目</button>
@@ -338,6 +492,11 @@ function onKeyDown(e: KeyboardEvent) {
                 </option>
               </select>
               <span class="opened"><Icon name="clock" :size="11" /> {{ formatLastOpened(p.lastOpenedAt) }}</span>
+              <span
+                v-if="lastBackups[p._id]"
+                class="opened"
+                :title="`最近备份:${lastBackups[p._id].destPath}(${lastBackups[p._id].mode === 'zip' ? 'zip 打包' : '完整快照'})`"
+              ><Icon name="box" :size="11" /> 备份于 {{ formatLastOpened(lastBackups[p._id].createdAt) }}</span>
             </div>
           </div>
           <div class="row-actions">
@@ -361,6 +520,13 @@ function onKeyDown(e: KeyboardEvent) {
               @click="emit('manage-addons', p._id)"
             >
               <Icon name="puzzle" :size="13" />
+            </button>
+            <button
+              class="btn small ghost icon-act"
+              title="备份该项目(打包 / 快照 / 恢复)"
+              @click="openBackup(p)"
+            >
+              <Icon name="box" :size="13" />
             </button>
             <button class="btn small ghost star" :class="{ on: p.favorite }" title="收藏" @click="toggleFavorite(p)">
               <Icon name="star" :size="13" :stroke-width="p.favorite ? 2.4 : 1.7" />
@@ -494,12 +660,236 @@ function onKeyDown(e: KeyboardEvent) {
         </div>
       </div>
     </Teleport>
+
+    <!-- 项目备份模态框(备份设置 + 历史/恢复) -->
+    <Teleport to="body">
+      <div v-if="showBackup" class="modal-mask" @click.self="!backing && !restoring && (showBackup = false)">
+        <div class="card modal">
+          <div class="modal-head">
+            <div class="modal-title"><Icon name="box" :size="15" /> 备份 · {{ backupTarget?.name }}</div>
+            <span class="grow"></span>
+            <button
+              type="button"
+              class="btn small ghost icon-x"
+              title="关闭"
+              :disabled="backing || !!restoring"
+              @click="showBackup = false"
+            >
+              <Icon name="x" :size="14" />
+            </button>
+          </div>
+
+          <div class="field">
+            <span class="f-label">备份方式</span>
+            <div class="seg">
+              <button :class="{ on: bMode === 'zip' }" :disabled="backing" @click="bMode = 'zip'">zip 打包</button>
+              <button :class="{ on: bMode === 'copy' }" :disabled="backing" @click="bMode = 'copy'">完整快照</button>
+            </div>
+            <div class="f-hint">
+              {{ bMode === 'zip' ? '压缩为单个 zip 文件,体积小、便于归档与传输。' : '复制为完整目录快照,不解压即可用 Godot 直接打开。' }}
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="f-label" for="bk-dir">保存位置</label>
+            <div class="dir-row">
+              <input
+                id="bk-dir"
+                v-model="bDir"
+                class="input mono"
+                placeholder="选择备份保存位置(默认目录可在设置中配置)"
+                autocomplete="off"
+                spellcheck="false"
+                :disabled="backing"
+              />
+              <button type="button" class="btn ghost" :disabled="backing" @click="chooseBackupDir">
+                <Icon name="folder" :size="14" /> 浏览
+              </button>
+            </div>
+          </div>
+
+          <label class="open-row">
+            <input v-model="bIncludeCache" class="switch" type="checkbox" :disabled="backing" />
+            <span>包含 .godot 编辑器缓存(默认排除,备份更快更小)</span>
+          </label>
+
+          <div v-if="backing && bProg" class="bk-progress">
+            <span class="spin"></span>
+            <span>正在备份 {{ bProg.done }} / {{ bProg.total }} 个文件</span>
+            <span class="mono bk-cur" :title="bProg.current">{{ bProg.current }}</span>
+          </div>
+
+          <div class="modal-foot">
+            <span class="f-hint">恢复为新项目不影响当前项目</span>
+            <span class="grow"></span>
+            <button type="button" class="btn ghost" :disabled="backing || !!restoring" @click="showBackup = false">关闭</button>
+            <button type="button" class="btn primary" :disabled="backing || !bDir.trim()" @click="confirmBackup">
+              <span v-if="backing" class="spin"></span>
+              {{ backing ? '备份中…' : '开始备份' }}
+            </button>
+          </div>
+
+          <!-- 备份历史与恢复 -->
+          <div class="bk-history">
+            <div class="bk-hist-head">
+              <span class="f-label">备份历史({{ historyList.length }})</span>
+              <div class="seg">
+                <button
+                  :class="{ on: restoreMode === 'new' }"
+                  :disabled="!historyList.length"
+                  @click="restoreMode = 'new'; pendingRestore = ''"
+                >恢复为新项目</button>
+                <button
+                  :class="{ on: restoreMode === 'overwrite' }"
+                  :disabled="!historyList.length"
+                  @click="restoreMode = 'overwrite'; pendingRestore = ''"
+                >覆盖原项目</button>
+              </div>
+            </div>
+            <div v-if="restoreMode === 'overwrite' && historyList.some((b) => !b.missing)" class="bk-warn">
+              <Icon name="alert" :size="11" /> 覆盖恢复将替换当前项目目录,原目录会先移入回收站,请确认。
+            </div>
+            <div v-if="!historyList.length" class="bk-empty">暂无备份记录,完成第一次备份后可在这里恢复。</div>
+            <div v-else class="bk-list">
+              <div v-for="b in historyList" :key="b._id" class="bk-item" :class="{ missing: b.missing }">
+                <div class="bk-item-main">
+                  <span class="bk-time mono">{{ formatTime(b.createdAt) }}</span>
+                  <span class="tag">{{ b.mode === 'zip' ? 'zip' : '快照' }}</span>
+                  <span class="bk-size">{{ fmtSize(b.size) }} · {{ b.fileCount }} 文件</span>
+                  <span v-if="b.missing" class="tag warn"><Icon name="alert" :size="10" /> 备份文件缺失</span>
+                </div>
+                <div class="bk-path mono" :title="b.destPath">{{ b.destPath }}</div>
+                <div class="bk-item-acts">
+                  <button
+                    class="btn small ghost"
+                    :disabled="!!restoring || b.missing"
+                    :class="{ warn: restoreMode === 'overwrite' && pendingRestore === b._id }"
+                    @click="doRestore(b)"
+                  >
+                    <span v-if="restoring === b._id" class="spin"></span>
+                    {{ restoring === b._id ? '恢复中…' : restoreMode === 'overwrite' && pendingRestore === b._id ? '确认覆盖?' : '恢复' }}
+                  </button>
+                  <button class="btn small danger-text" :disabled="!!restoring" @click="doDeleteBackup(b)">
+                    {{ pendingDel === b._id ? '确认删除?' : '删除' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <style scoped>
 .grow {
   flex: 1;
+}
+
+.head-seg {
+  margin-left: 10px;
+}
+
+/* ---------- 备份模态框 ---------- */
+.bk-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brand);
+  min-width: 0;
+}
+
+.bk-cur {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+}
+
+.bk-history {
+  border-top: 1px solid var(--border);
+  margin-top: 14px;
+  padding-top: 12px;
+}
+
+.bk-hist-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.bk-warn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--danger);
+  margin-bottom: 8px;
+}
+
+.bk-empty {
+  font-size: 12px;
+  color: var(--text-3);
+  padding: 6px 0;
+}
+
+.bk-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 210px;
+  overflow-y: auto;
+}
+
+.bk-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+}
+
+.bk-item.missing {
+  opacity: 0.6;
+}
+
+.bk-item-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bk-time {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.bk-size {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.bk-path {
+  font-size: 10.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin: 3px 0 5px;
+}
+
+.bk-item-acts {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
 }
 
 .list {

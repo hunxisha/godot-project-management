@@ -65,6 +65,25 @@ export interface GodotSettings {
   autoEnablePlugin: boolean
   /** 删除项目时如何处理项目文件:ask=弹窗询问,always=总是同时删除,never=仅移除记录 */
   deleteProjectFiles: 'ask' | 'always' | 'never'
+  /** 项目备份默认目录 */
+  backupRoot?: string
+}
+
+/** 项目备份记录 */
+export interface BackupRecord {
+  _id: string
+  projectId: string
+  projectName: string
+  /** zip=打包备份,copy=完整快照目录 */
+  mode: 'zip' | 'copy'
+  /** 备份文件(zip)或目录(快照)的绝对路径 */
+  destPath: string
+  /** 字节(zip 为压缩后估算) */
+  size: number
+  fileCount: number
+  createdAt: number
+  /** 备份文件已被外部删除 */
+  missing?: boolean
 }
 
 export const DEFAULT_SETTINGS: GodotSettings = {

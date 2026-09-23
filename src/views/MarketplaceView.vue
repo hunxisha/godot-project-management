@@ -358,12 +358,19 @@ function toggleFav(a: MarketAsset) {
 
 const target = computed(() => projects.value.find((p) => p._id === targetId.value))
 
+/** 安装目标:收藏项目排前(其余按最近打开) */
+const sortedProjects = computed(() =>
+  [...projects.value].sort((a, b) => {
+    if (!!a.favorite !== !!b.favorite) return a.favorite ? -1 : 1
+    return (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0)
+  })
+)
+
 onMounted(() => {
   projects.value = window.ztools.db.allDocs('godot/project/') as any[]
-  projects.value.sort((a, b) => (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0))
   versions.value = window.ztools.db.allDocs('godot/version/') as any[]
   if (projects.value.length) {
-    targetId.value = projects.value[0]._id
+    targetId.value = sortedProjects.value[0]._id
     reloadAddons()
   }
   loadBrowse()
@@ -373,11 +380,10 @@ onMounted(() => {
 // 切回本页(KeepAlive 缓存实例被重新激活):轻量同步本地数据,浏览状态全部保留
 onActivated(() => {
   projects.value = window.ztools.db.allDocs('godot/project/') as any[]
-  projects.value.sort((a, b) => (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0))
   versions.value = window.ztools.db.allDocs('godot/version/') as any[]
-  // 上次选中的项目已被删除时回退到最近项目
+  // 上次选中的项目已被删除时回退到收藏/最近项目
   if (projects.value.length && !projects.value.some((p) => p._id === targetId.value)) {
-    targetId.value = projects.value[0]._id
+    targetId.value = sortedProjects.value[0]._id
   }
   reloadAddons()
 })
@@ -551,7 +557,7 @@ function installFromPicker(r: ReleaseRow) {
             <Icon name="folder" :size="13" />
             <span class="tb-caption">安装到</span>
             <select v-model="targetId" class="tb-select" @change="onTargetChange">
-              <option v-for="p in projects" :key="p._id" :value="p._id">{{ p.name }}</option>
+              <option v-for="p in sortedProjects" :key="p._id" :value="p._id">{{ p.favorite ? '★ ' : '' }}{{ p.name }}</option>
             </select>
             <span v-if="targetGodot" class="tb-gver" title="该项目绑定的 Godot 版本">Godot {{ targetGodot }}</span>
           </label>

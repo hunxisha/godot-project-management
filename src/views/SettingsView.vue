@@ -20,6 +20,14 @@ function chooseRoot() {
   }
 }
 
+function chooseBackupRoot() {
+  const dir = pickDirectory('选择项目备份目录', state.backupRoot)
+  if (dir) {
+    state.backupRoot = dir
+    patchNow()
+  }
+}
+
 const openActions: { value: OpenAction, label: string, icon: string }[] = [
   { value: 'editor', label: '在编辑器中打开', icon: 'pencil' },
   { value: 'run', label: '运行项目', icon: 'play' },
@@ -162,6 +170,29 @@ function openStoreSite() {
           </button>
         </div>
       </div>
+    </div>
+
+    <div class="card section">
+      <div class="sec-head">
+        <span class="sec-ico"><Icon name="box" :size="15" /></span>
+        <span class="sec-title">项目备份目录</span>
+      </div>
+      <div class="sec-body">
+        <div class="root-row">
+          <span class="mono root-value" :class="{ unset: !state.backupRoot }">
+            {{ state.backupRoot ?? '未设置(每次备份时选择)' }}
+          </span>
+          <div class="grow"></div>
+          <button class="btn small" @click="chooseBackupRoot">选择目录</button>
+          <button
+            v-if="state.backupRoot"
+            class="btn small ghost"
+            title="打开目录"
+            @click="openPath(state.backupRoot!)"
+          ><Icon name="external" :size="12" /></button>
+        </div>
+      </div>
+      <div class="hint">备份项目时默认保存到该目录;备份弹窗中可临时改选其他位置。</div>
     </div>
 
     <div class="card section">

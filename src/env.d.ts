@@ -62,6 +62,21 @@ interface Services {
     dirNames: string[]
     targetProjectId: string
   }): { ok: boolean, error?: string, copied?: number, skipped?: string[], targetName?: string }
+  /** 备份项目(mode: 'zip' 打包 | 'copy' 快照复制;includeCache 包含 .godot 缓存;onProgress 每文件回调) */
+  backupProject(
+    projectId: string,
+    opts: { mode: 'zip' | 'copy', destDir: string, includeCache?: boolean },
+    onProgress?: (p: { done: number, total: number, current: string, bytes: number }) => void
+  ): Promise<import('./types/godot').BackupRecord>
+  /** 备份记录列表(按时间倒序,projectId 为空返回全部) */
+  listBackups(projectId?: string): import('./types/godot').BackupRecord[]
+  /** 从备份恢复(mode: 'overwrite' 覆盖原项目 | 'new' 恢复为新项目) */
+  restoreBackup(
+    backupId: string,
+    opts: { mode: 'overwrite' | 'new', destDir?: string }
+  ): Promise<{ ok: boolean, error?: string, newProjectName?: string }>
+  /** 删除备份(记录 + 文件移入回收站) */
+  deleteBackup(backupId: string): { ok: boolean, error?: string }
   /** 启动项目(editor=编辑器,run=运行) */
   launchProject(opts: { projectId: string, action: 'editor' | 'run' }): {
     ok: boolean

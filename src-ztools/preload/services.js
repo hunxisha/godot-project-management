@@ -33,6 +33,14 @@ window.services = {
   removeProject: (id, deleteFiles) => projects.removeProject(id, deleteFiles),
   /** 复制插件目录到另一个项目 */
   copyAddonsToProject: (opts) => projects.copyAddonsToProject(opts),
+  /** 备份项目(mode: 'zip' 打包 | 'copy' 快照复制;onProgress 每文件回调) */
+  backupProject: (projectId, opts, onProgress) => projects.backupProject(projectId, opts, onProgress),
+  /** 备份记录列表(按时间倒序,projectId 为空返回全部) */
+  listBackups: (projectId) => projects.listBackups(projectId),
+  /** 从备份恢复(mode: 'overwrite' 覆盖原项目 | 'new' 恢复为新项目) */
+  restoreBackup: (backupId, opts) => projects.restoreBackup(backupId, opts),
+  /** 删除备份(记录 + 文件移入回收站) */
+  deleteBackup: (backupId) => projects.deleteBackup(backupId),
   /** 启动项目(editor=打开编辑器带 -e,run=直接运行) */
   launchProject: (opts) => launchProject(opts),
   /** 搜索 Asset Store */

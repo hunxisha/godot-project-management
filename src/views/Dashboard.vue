@@ -19,6 +19,14 @@ const recentProjects = computed(() =>
     .slice(0, 5)
 )
 
+/** 收藏项目(最多展示 8 个,按最近打开排序) */
+const favProjects = computed(() =>
+  projects.value
+    .filter((p) => p.favorite)
+    .sort((a, b) => (b.lastOpenedAt || b.addedAt) - (a.lastOpenedAt || a.addedAt))
+    .slice(0, 8)
+)
+
 /** 按时段问候 */
 const hour = new Date().getHours()
 const greeting =
@@ -92,6 +100,43 @@ function gradOf(name: string): string {
         </span>
         <Icon name="chevron-right" :size="14" class="s-arrow" />
       </button>
+    </section>
+
+    <!-- 收藏项目 -->
+    <section class="card block">
+      <div class="block-head">
+        <h3><Icon name="star" :size="14" class="fav-star" /> 收藏项目</h3>
+        <button class="more" @click="emit('navigate', 'projects')">管理收藏 <Icon name="chevron-right" :size="12" /></button>
+      </div>
+      <template v-if="favProjects.length">
+        <div
+          v-for="p in favProjects"
+          :key="p._id"
+          class="recent-row"
+          @click="openProjectAction(p)"
+        >
+          <div class="avatar" :class="`g-${gradOf(p.name)}`">{{ p.name.charAt(0).toUpperCase() }}</div>
+          <div class="rr-main">
+            <div class="rr-name">
+              <span>{{ p.name }}</span>
+              <span v-if="p.engineVersion" class="tag">{{ p.engineVersion }}</span>
+            </div>
+            <div class="rr-path mono" :title="p.path">{{ p.path }}</div>
+          </div>
+          <div class="fav-acts">
+            <button class="fav-btn" title="在编辑器中打开" @click.stop="openProjectAction(p, 'editor')">
+              <Icon name="pencil" :size="12" />
+            </button>
+            <button class="fav-btn" title="运行项目" @click.stop="openProjectAction(p, 'run')">
+              <Icon name="play" :size="12" />
+            </button>
+          </div>
+        </div>
+      </template>
+      <div v-else class="fav-empty">
+        <Icon name="star" :size="14" />
+        在「项目」页点亮星标,常用项目会固定在这里,一键打开编辑器或运行
+      </div>
     </section>
 
     <!-- 最近项目 -->
@@ -456,6 +501,56 @@ function gradOf(name: string): string {
 
 .recent-row:hover .rr-open {
   opacity: 1;
+}
+
+/* ---- 收藏项目区 ---- */
+.fav-star {
+  color: var(--warn, #e8a33d);
+}
+
+.fav-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.fav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+
+.fav-btn:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+  background: var(--brand-weak);
+}
+
+.fav-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 12px 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+.fav-empty .icon {
+  color: var(--warn, #e8a33d);
+  flex-shrink: 0;
 }
 
 /* ---- 快捷操作 ---- */
