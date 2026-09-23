@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getSettings, notify, pickDirectory, putDoc } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
+import Icon from '../components/Icon.vue'
 import { openProjectAction } from '../composables/useProjectActions'
 import type { GodotProject, GodotVersion, OpenAction } from '../types/godot'
 
@@ -18,6 +19,7 @@ const confirmingId = ref<string | null>(null)
 const selected = ref(-1)
 
 const ACTION_LABEL: Record<OpenAction, string> = { editor: '打开', run: '运行', folder: '目录' }
+const ACTION_ICON: Record<OpenAction, string> = { editor: 'pencil', run: 'play', folder: 'folder' }
 
 const visible = computed<Row[]>(() => {
   const kw = filter.value.trim().toLowerCase()
@@ -152,6 +154,13 @@ function formatLastOpened(ts?: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+/** 项目名 → 头像渐变组 */
+function gradOf(name: string): string {
+  let h = 0
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0
+  return ['a', 'b', 'c', 'd'][h % 4]
+}
+
 // ---------- 键盘导航(插件页获得焦点时生效) ----------
 
 function onKeyDown(e: KeyboardEvent) {
@@ -176,24 +185,26 @@ function onKeyDown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="projects">
-    <div class="section-head">
-      <h2>项目 <span class="count">{{ projects.length }}</span></h2>
+  <div class="projects view">
+    <div class="view-head">
+      <h2><Icon name="folder" :size="16" /> 项目 <span class="count-pill">{{ projects.length }}</span></h2>
       <span class="grow"></span>
-      <button class="btn small primary" @click="addManually">添加项目</button>
+      <button class="btn small primary" @click="addManually"><Icon name="folder-plus" :size="13" /> 添加项目</button>
     </div>
 
     <EmptyState
       v-if="!projects.length"
+      icon="folder"
       title="还没有 Godot 项目"
       desc="将项目文件夹拖入 ZTools 主输入框选择「添加Godot项目」,或点击「添加项目」选择目录(支持子目录扫描)。"
     >
-      <button class="btn primary" @click="addManually">添加项目</button>
+      <button class="btn primary" @click="addManually"><Icon name="folder-plus" :size="14" /> 添加项目</button>
     </EmptyState>
 
     <template v-else>
       <EmptyState
         v-if="!visible.length"
+        icon="search"
         title="没有匹配的项目"
         :desc="`没有名称或路径包含「${filter}」的项目`"
       />
@@ -204,12 +215,15 @@ function onKeyDown(e: KeyboardEvent) {
           class="card row-item"
           :class="{ selected: i === selected }"
         >
-          <div class="avatar" :class="{ fav: p.favorite }">{{ p.name.charAt(0).toUpperCase() }}</div>
+          <div class="avatar" :class="`g-${gradOf(p.name)}`">
+            {{ p.name.charAt(0).toUpperCase() }}
+            <span v-if="p.favorite" class="pin"><Icon name="star" :size="9" :stroke-width="2.4" /></span>
+          </div>
           <div class="row-main">
             <div class="row-name">
               <span class="name">{{ p.name }}</span>
               <span v-if="p.engineVersion" class="tag" :title="`项目要求引擎 ${p.engineVersion}`">{{ p.engineVersion }}</span>
-              <span v-if="mismatch(p)" class="tag warn" title="绑定版本与项目引擎要求不一致">版本不匹配</span>
+              <span v-if="mismatch(p)" class="tag warn" title="绑定版本与项目引擎要求不一致"><Icon name="alert" :size="10" /> 版本不匹配</span>
             </div>
             <div class="row-path mono" :title="p.path">{{ p.path }}</div>
             <div class="row-meta">
@@ -224,32 +238,27 @@ function onKeyDown(e: KeyboardEvent) {
                   {{ v.variant === 'mono' ? `${v.name} (C#)` : v.name }}
                 </option>
               </select>
-              <span class="opened">{{ formatLastOpened(p.lastOpenedAt) }}</span>
+              <span class="opened"><Icon name="clock" :size="11" /> {{ formatLastOpened(p.lastOpenedAt) }}</span>
             </div>
           </div>
           <div class="row-actions">
             <button class="btn small primary" @click="openProject(p)">
+              <Icon :name="ACTION_ICON[settings.defaultOpenAction]" :size="13" />
               {{ ACTION_LABEL[settings.defaultOpenAction] }}
             </button>
             <button
-              v-if="settings.defaultOpenAction !== 'editor'"
-              class="btn small"
-              title="在编辑器中打开"
-              @click="openProject(p, 'editor')"
-            >编辑</button>
-            <button
-              v-if="settings.defaultOpenAction !== 'run'"
-              class="btn small"
-              title="直接运行项目"
-              @click="openProject(p, 'run')"
-            >运行</button>
-            <button
-              v-if="settings.defaultOpenAction !== 'folder'"
-              class="btn small"
-              title="打开项目目录"
-              @click="openProject(p, 'folder')"
-            >目录</button>
-            <button class="btn small star" :class="{ on: p.favorite }" title="收藏" @click="toggleFavorite(p)">★</button>
+              v-for="act in (['editor', 'run', 'folder'] as OpenAction[]).filter((a) => a !== settings.defaultOpenAction)"
+              :key="act"
+              class="btn small ghost icon-act"
+              :title="act === 'editor' ? '在编辑器中打开' : act === 'run' ? '直接运行项目' : '打开项目目录'"
+              @click="openProject(p, act)"
+            >
+              <Icon :name="ACTION_ICON[act]" :size="13" />
+            </button>
+            <span class="act-sep"></span>
+            <button class="btn small ghost star" :class="{ on: p.favorite }" title="收藏" @click="toggleFavorite(p)">
+              <Icon name="star" :size="13" :stroke-width="p.favorite ? 2.4 : 1.7" />
+            </button>
             <button class="btn small danger-text" @click="removeProject(p)">
               {{ confirmingId === p._id ? '确认?' : '删除' }}
             </button>
@@ -261,33 +270,8 @@ function onKeyDown(e: KeyboardEvent) {
 </template>
 
 <style scoped>
-.projects {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 16px;
-}
-
 .grow {
   flex: 1;
-}
-
-.section-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.section-head h2 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.count {
-  color: var(--text-3);
-  font-weight: 400;
-  font-size: 13px;
 }
 
 .list {
@@ -299,20 +283,27 @@ function onKeyDown(e: KeyboardEvent) {
 .row-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
+  gap: 13px;
+  padding: 11px 14px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.row-item:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow);
 }
 
 .row-item.selected {
   border-color: var(--brand);
+  background: var(--brand-weak);
 }
 
 .avatar {
-  width: 34px;
-  height: 34px;
+  position: relative;
+  width: 36px;
+  height: 36px;
   border-radius: var(--radius-sm);
-  background: var(--brand-weak);
-  color: var(--brand);
+  color: #fff;
   font-weight: 700;
   font-size: 16px;
   display: flex;
@@ -321,9 +312,25 @@ function onKeyDown(e: KeyboardEvent) {
   flex-shrink: 0;
 }
 
-.avatar.fav {
-  background: var(--warn-weak);
-  color: var(--warn);
+.avatar.g-a { background: var(--grad-a); }
+.avatar.g-b { background: var(--grad-b); }
+.avatar.g-c { background: var(--grad-c); }
+.avatar.g-d { background: var(--grad-d); }
+
+/* 收藏角标 */
+.pin {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--gold);
+  color: #fff;
+  border: 1.5px solid var(--surface);
 }
 
 .row-main {
@@ -339,10 +346,11 @@ function onKeyDown(e: KeyboardEvent) {
 
 .name {
   font-weight: 600;
+  font-size: 13.5px;
 }
 
 .row-path {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -352,17 +360,22 @@ function onKeyDown(e: KeyboardEvent) {
 .row-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-top: 2px;
+  gap: 10px;
+  margin-top: 3px;
 }
 
 .ver-select {
   max-width: 220px;
   padding: 1px 6px;
   font-size: 12px;
+  border-radius: 6px;
+  box-shadow: none;
 }
 
 .opened {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 12px;
   color: var(--text-3);
 }
@@ -370,15 +383,34 @@ function onKeyDown(e: KeyboardEvent) {
 .row-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   flex-shrink: 0;
 }
 
+.icon-act {
+  width: 28px;
+  padding: 3px 0;
+  color: var(--text-2);
+}
+
+.icon-act:hover {
+  color: var(--brand);
+}
+
+.act-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 3px;
+}
+
 .star {
+  width: 28px;
+  padding: 3px 0;
   color: var(--text-3);
 }
 
 .star.on {
-  color: var(--warn);
+  color: var(--gold);
 }
 </style>

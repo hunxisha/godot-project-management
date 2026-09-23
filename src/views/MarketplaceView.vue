@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { notify } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
+import Icon from '../components/Icon.vue'
 import type { AddonInfo, FavoriteAsset, GodotProject, LibraryAsset, MarketAsset } from '../types/godot'
 
 const emit = defineEmits<{ (e: 'navigate', tab: string): void }>()
@@ -18,6 +19,7 @@ const addons = ref<AddonInfo[]>([])
 const installing = ref<{ assetId: string, percent: number, stage: string } | null>(null)
 const confirmingDir = ref<string | null>(null)
 const updateInfo = ref<Record<string, { hasUpdate: boolean, latest?: string }>>({})
+const brokenIcons = ref(new Set<string>())
 
 // ---------- 浏览模式:推荐 / 最近更新 / 搜索 / 收藏 ----------
 
@@ -31,6 +33,14 @@ const favorites = ref<FavoriteAsset[]>([])
 const library = ref<LibraryAsset[]>([])
 const browsing = ref(false)
 const browseError = ref('')
+
+const MODE_META: Record<BrowseMode, { label: string, icon: string }> = {
+  featured: { label: '推荐', icon: 'sparkle' },
+  recent: { label: '最近更新', icon: 'clock' },
+  search: { label: '搜索', icon: 'search' },
+  favorites: { label: '收藏', icon: 'star' },
+  library: { label: '我的库', icon: 'bookmark' }
+}
 
 /** 当前模式展示的资产列表 */
 const displayAssets = computed<MarketAsset[]>(() => {
@@ -179,6 +189,11 @@ async function search() {
   }
 }
 
+/** 图标加载失败时回退到占位块 */
+function onIconError(id: string) {
+  brokenIcons.value = new Set(brokenIcons.value).add(id)
+}
+
 // ---------- 安装 / 更新 ----------
 
 function fmtSize(n?: number): string {
@@ -293,19 +308,20 @@ function uninstall(a: AddonInfo) {
 </script>
 
 <template>
-  <div class="marketplace">
+  <div class="marketplace view">
     <EmptyState
       v-if="!projects.length"
+      icon="folder-plus"
       title="先添加一个 Godot 项目"
       desc="插件(Addon)安装在具体项目中,请先在「项目」页添加项目。"
     >
-      <button class="btn primary" @click="emit('navigate', 'projects')">去添加项目</button>
+      <button class="btn primary" @click="emit('navigate', 'projects')"><Icon name="folder-plus" :size="14" /> 去添加项目</button>
     </EmptyState>
 
     <template v-else>
       <!-- 目标项目 -->
       <div class="card target-bar">
-        <span class="tb-label">安装到</span>
+        <span class="tb-label"><Icon name="folder" :size="13" /> 安装到</span>
         <select v-model="targetId" class="select" @change="onTargetChange">
           <option v-for="p in projects" :key="p._id" :value="p._id">{{ p.name }}</option>
         </select>
@@ -313,118 +329,143 @@ function uninstall(a: AddonInfo) {
       </div>
 
       <!-- 浏览模式切换 -->
-      <div class="seg mode-tabs">
-        <button :class="{ on: mode === 'featured' }" @click="switchMode('featured')">推荐</button>
-        <button :class="{ on: mode === 'recent' }" @click="switchMode('recent')">最近更新</button>
-        <button :class="{ on: mode === 'search' }" @click="switchMode('search')">搜索</button>
-        <button :class="{ on: mode === 'favorites' }" @click="switchMode('favorites')">
-          收藏<span v-if="favorites.length" class="fav-count">{{ favorites.length }}</span>
-        </button>
-        <button :class="{ on: mode === 'library' }" @click="switchMode('library')">
-          我的库<span v-if="library.length" class="fav-count">{{ library.length }}</span>
+      <div class="mode-tabs">
+        <button
+          v-for="(m, key) in MODE_META"
+          :key="key"
+          class="chip"
+          :class="{ on: mode === key }"
+          @click="switchMode(key as BrowseMode)"
+        >
+          <Icon :name="m.icon" :size="12" />
+          {{ m.label }}
+          <span v-if="key === 'favorites' && favorites.length" class="chip-count">{{ favorites.length }}</span>
+          <span v-if="key === 'library' && library.length" class="chip-count">{{ library.length }}</span>
         </button>
       </div>
 
       <!-- 搜索(仅搜索模式) -->
       <div v-if="mode === 'search'" class="search-row">
-        <input
-          v-model="query"
-          class="input"
-          placeholder="搜索插件,如 dialogic、tiled importer…"
-          spellcheck="false"
-          @keyup.enter="search"
-        />
+        <div class="search-box">
+          <Icon name="search" :size="14" class="sb-icon" />
+          <input
+            v-model="query"
+            class="input"
+            placeholder="搜索插件,如 dialogic、tiled importer…"
+            spellcheck="false"
+            @keyup.enter="search"
+          />
+        </div>
         <select v-model="verFilter" class="select" title="按引擎版本过滤">
           <option value="">全部版本</option>
           <option v-for="v in versionOptions" :key="v" :value="v">Godot {{ v }}</option>
         </select>
         <button class="btn primary" :disabled="searching" @click="search">
+          <span v-if="searching" class="spin"></span>
           {{ searching ? '搜索中…' : '搜索' }}
         </button>
       </div>
 
       <!-- 结果区(推荐/最近更新/搜索/收藏共用) -->
       <div v-if="browseError || searchError" class="card error-box">
+        <Icon name="alert" :size="14" />
         <span>加载失败:{{ browseError || searchError }}</span>
       </div>
-      <div v-else-if="browsing" class="hint-line">加载中…</div>
+      <div v-else-if="browsing" class="hint-line"><span class="spin"></span> 加载中…</div>
       <div v-else-if="mode === 'search' && !results.length && !searching" class="hint-line">
         输入关键词搜索 Godot 官方资产商店(Asset Store),可按引擎版本过滤,点击名称可在浏览器中打开详情。
       </div>
       <EmptyState
         v-else-if="mode === 'favorites' && !favorites.length"
+        icon="star"
         title="还没有收藏"
         desc="在推荐、最近更新或搜索结果中点击 ★ 收藏插件,方便下次快速安装。"
       />
       <EmptyState
         v-else-if="mode === 'library' && !library.length"
+        icon="bookmark"
         title="我的库还是空的"
         desc="通过市场安装过的插件会自动记录到这里,可在不同项目间快速重装。"
       />
-      <div v-if="displayAssets.length" class="asset-list">
+      <div v-if="displayAssets.length" class="asset-grid">
         <div v-for="a in displayAssets" :key="a.assetId" class="card asset">
-          <img v-if="a.iconUrl" :src="a.iconUrl" class="asset-icon" alt="" @error="($event.target as HTMLImageElement).style.display = 'none'" />
-          <div v-else class="asset-icon placeholder"></div>
-          <div class="asset-main">
-            <div class="asset-name">
-              <span class="name link" title="在商店中查看" @click="openStore(a)">{{ a.title }}</span>
-              <span v-if="a.versionString" class="tag" title="最新版本">v{{ a.versionString }}</span>
-              <span class="tag">{{ a.category }}</span>
-              <span v-if="a.rating" class="tag brand" title="商店评分">★ {{ (a.rating / 10).toFixed(1) }}</span>
-              <span v-if="installedIds.has(a.assetId)" class="tag ok">已安装</span>
-            </div>
-            <div
-              v-if="mode === 'library' && (a as LibraryAsset).projectCount"
-              class="asset-meta"
-              :title="(a as LibraryAsset).projectNames.join('\n')"
-            >
-              已装于 {{ (a as LibraryAsset).projectCount }} 个项目 · {{ formatDate((a as LibraryAsset).installedAt) }} · v{{
-                a.versionString || '?'
-              }}
-            </div>
-            <div v-else class="asset-meta" :title="a.description">
-              {{ a.author }}{{ a.description ? ' · ' + a.description : '' }}
-            </div>
-          </div>
           <button
-            class="btn small fav-btn"
+            class="fav-btn"
             :class="{ active: isFav(a.assetId) }"
             :title="isFav(a.assetId) ? '取消收藏' : '收藏'"
             @click="toggleFav(a)"
-          >★</button>
+          ><Icon name="star" :size="14" :stroke-width="isFav(a.assetId) ? 2.4 : 1.7" /></button>
+          <div class="asset-head">
+            <img
+              v-if="a.iconUrl && !brokenIcons.has(a.assetId)"
+              :src="a.iconUrl"
+              class="asset-icon"
+              alt=""
+              @error="onIconError(a.assetId)"
+            />
+            <div v-else class="asset-icon ph"><Icon name="puzzle" :size="22" /></div>
+            <div class="asset-title-box">
+              <span class="asset-title link" title="在商店中查看" @click="openStore(a)">
+                {{ a.title }}
+                <Icon name="external" :size="10" />
+              </span>
+              <span v-if="a.versionString" class="asset-ver">v{{ a.versionString }}</span>
+            </div>
+          </div>
+          <div class="asset-tags">
+            <span class="tag">{{ a.category }}</span>
+            <span v-if="a.rating" class="tag brand"><Icon name="star" :size="10" :stroke-width="2.2" /> {{ (a.rating / 10).toFixed(1) }}</span>
+            <span v-if="installedIds.has(a.assetId)" class="tag ok">已安装</span>
+          </div>
+          <div
+            v-if="mode === 'library' && (a as LibraryAsset).projectCount"
+            class="asset-meta lib"
+            :title="(a as LibraryAsset).projectNames.join('\n')"
+          >
+            已装于 {{ (a as LibraryAsset).projectCount }} 个项目 · {{ formatDate((a as LibraryAsset).installedAt) }}
+          </div>
+          <div v-else class="asset-meta" :title="a.description">
+            {{ a.author }}{{ a.description ? ' · ' + a.description : '' }}
+          </div>
           <button
             v-if="installing && installing.assetId === a.assetId"
-            class="btn small"
+            class="btn small asset-install busy"
             disabled
-          >{{ installing.stage }} {{ installing.percent.toFixed(0) }}%</button>
+          >
+            <span class="spin"></span>
+            {{ installing.stage }} {{ installing.percent.toFixed(0) }}%
+          </button>
           <button
             v-else
-            class="btn small primary"
+            class="btn small primary asset-install"
             :disabled="!!installing"
             @click="install(a)"
-          >安装</button>
+          ><Icon name="download" :size="12" /> 安装</button>
         </div>
       </div>
 
       <!-- 最近更新分页 -->
       <div v-if="mode === 'recent' && recent.length && !browsing" class="page-row">
-        <button class="btn small" :disabled="recentPage <= 1" @click="changeRecentPage(-1)">上一页</button>
+        <button class="btn small" :disabled="recentPage <= 1" @click="changeRecentPage(-1)"><Icon name="chevron-left" :size="12" /> 上一页</button>
         <span class="page-info">{{ recentPage }} / {{ recentPages }}</span>
-        <button class="btn small" :disabled="recentPage >= recentPages" @click="changeRecentPage(1)">下一页</button>
+        <button class="btn small" :disabled="recentPage >= recentPages" @click="changeRecentPage(1)">下一页 <Icon name="chevron-right" :size="12" /></button>
       </div>
 
       <!-- 已安装 -->
-      <div class="section-head">
-        <h2>已安装插件 <span class="count">{{ addons.length }}</span></h2>
+      <div class="view-head installed-head">
+        <h2><Icon name="puzzle" :size="16" /> 已安装插件 <span class="count-pill">{{ addons.length }}</span></h2>
         <span class="grow"></span>
         <button v-if="addons.some((a) => a.fromMarket)" class="btn small" :disabled="checking" @click="checkUpdates">
+          <span v-if="checking" class="spin"></span>
+          <Icon v-else name="refresh" :size="12" />
           {{ checking ? '检查中…' : '检查更新' }}
         </button>
       </div>
 
-      <EmptyState v-if="!addons.length" title="该项目还没有插件" desc="在上方搜索并安装,安装后自动写入 addons/ 目录。" />
+      <EmptyState v-if="!addons.length" icon="puzzle" title="该项目还没有插件" desc="在上方搜索并安装,安装后自动写入 addons/ 目录。" />
       <div v-else class="addon-list">
         <div v-for="a in addons" :key="a.dirName" class="card addon">
+          <div class="ad-ico" :class="{ off: !a.enabled }"><Icon name="puzzle" :size="17" /></div>
           <div class="addon-main">
             <div class="addon-name">
               <span class="name">{{ a.name }}</span>
@@ -442,8 +483,8 @@ function uninstall(a: AddonInfo) {
               class="btn small primary"
               :disabled="!!installing"
               @click="update(a)"
-            >更新</button>
-            <button v-if="a.hasCfg" class="btn small" @click="toggleEnabled(a)">
+            ><Icon name="download" :size="12" /> 更新</button>
+            <button v-if="a.hasCfg" class="btn small ghost" @click="toggleEnabled(a)">
               {{ a.enabled ? '禁用' : '启用' }}
             </button>
             <button class="btn small danger-text" @click="uninstall(a)">
@@ -457,17 +498,11 @@ function uninstall(a: AddonInfo) {
 </template>
 
 <style scoped>
-.marketplace {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 16px;
-}
-
 .grow {
   flex: 1;
 }
 
+/* ---------- 目标项目 ---------- */
 .target-bar {
   display: flex;
   align-items: center;
@@ -476,38 +511,236 @@ function uninstall(a: AddonInfo) {
 }
 
 .tb-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 13px;
+  font-weight: 600;
   color: var(--text-2);
+  flex-shrink: 0;
+}
+
+.tb-label .icon {
+  color: var(--brand);
+}
+
+.target-bar .select {
+  padding: 3px 10px;
+  font-size: 13px;
+  box-shadow: none;
 }
 
 .tb-path {
   flex: 1;
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* ---------- 模式标签 ---------- */
 .mode-tabs {
-  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
 }
 
-.fav-count {
-  margin-left: 4px;
-  font-size: 11px;
-  color: var(--brand);
+/* ---------- 搜索 ---------- */
+.search-row {
+  display: flex;
+  gap: 8px;
+}
+
+.search-box {
+  position: relative;
+  flex: 1;
+}
+
+.sb-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-3);
+  pointer-events: none;
+}
+
+.search-box .input {
+  width: 100%;
+  padding-left: 32px;
+}
+
+.search-row .select {
+  box-shadow: none;
+}
+
+.error-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.hint-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 26px 0;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+/* ---------- 资产网格 ---------- */
+.asset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 10px;
+}
+
+.asset {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+
+.asset:hover {
+  border-color: var(--brand);
+  box-shadow: var(--shadow-lift);
+  transform: translateY(-1px);
 }
 
 .fav-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
   color: var(--text-3);
-  padding: 4px 8px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.fav-btn:hover {
+  background: var(--surface-2);
+  color: var(--gold);
 }
 
 .fav-btn.active {
-  color: #f5a623;
+  color: var(--gold);
 }
 
+.asset-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding-right: 24px;
+}
+
+.asset-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  object-fit: contain;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.asset-icon.ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--brand-weak);
+  border-color: transparent;
+  color: var(--brand);
+}
+
+.asset-title-box {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.asset-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.asset-title .icon {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.asset-title:hover,
+.asset-title:hover .icon {
+  color: var(--brand);
+}
+
+.asset-ver {
+  font-size: 11px;
+  color: var(--text-3);
+  font-family: var(--mono);
+}
+
+.asset-tags {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.asset-meta {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-3);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  min-height: 36px;
+}
+
+.asset-meta.lib {
+  color: var(--brand);
+  display: block;
+  min-height: 0;
+}
+
+.asset-install {
+  margin-top: auto;
+  width: 100%;
+}
+
+.asset-install.busy {
+  color: var(--brand);
+}
+
+/* ---------- 分页 ---------- */
 .page-row {
   display: flex;
   align-items: center;
@@ -517,111 +750,49 @@ function uninstall(a: AddonInfo) {
 
 .page-info {
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
   color: var(--text-3);
 }
 
-.search-row {
-  display: flex;
-  gap: 8px;
+/* ---------- 已安装插件 ---------- */
+.installed-head {
+  margin-top: 4px;
 }
 
-.search-row .input {
-  flex: 1;
-}
-
-.error-box {
-  display: flex;
-  padding: 10px 14px;
-  color: var(--danger);
-  font-size: 13px;
-}
-
-.hint-line {
-  padding: 16px 0;
-  text-align: center;
-  font-size: 12px;
-  color: var(--text-3);
-}
-
-.asset-list,
 .addon-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-
-.asset {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 14px;
-}
-
-.asset-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-sm);
-  object-fit: contain;
-  background: var(--surface-2);
-  flex-shrink: 0;
-}
-
-.asset-icon.placeholder {
-  background: var(--brand-weak);
-}
-
-.asset-main {
-  flex: 1;
-  min-width: 0;
-}
-
-.asset-name {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.name {
-  font-weight: 600;
-}
-
-.name.link {
-  cursor: pointer;
-}
-
-.name.link:hover {
-  color: var(--brand);
-}
-
-.asset-meta {
-  font-size: 12px;
-  color: var(--text-3);
-}
-
-.section-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 6px;
-}
-
-.section-head h2 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.count {
-  color: var(--text-3);
-  font-weight: 400;
-  font-size: 13px;
+  gap: 7px;
 }
 
 .addon {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 8px 14px;
+  padding: 9px 14px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.addon:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.ad-ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: var(--brand-weak);
+  color: var(--brand);
+  flex-shrink: 0;
+}
+
+.ad-ico.off {
+  background: var(--surface-3);
+  color: var(--text-3);
 }
 
 .addon-main {
@@ -636,14 +807,20 @@ function uninstall(a: AddonInfo) {
   flex-wrap: wrap;
 }
 
+.name {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
 .addon-meta {
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--text-3);
 }
 
 .addon-actions {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 5px;
   flex-shrink: 0;
 }
 </style>

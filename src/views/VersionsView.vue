@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { getSettings, notify, pickDirectory, pickFile, isWindows, saveSettings, showInFolder } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
+import Icon from '../components/Icon.vue'
 import type { DownloadTask, GodotRelease, GodotVersion, ReleaseAsset, Variant } from '../types/godot'
 
 const settings = reactive(getSettings())
@@ -241,14 +242,18 @@ function progressOf(t: DownloadTask): number {
 </script>
 
 <template>
-  <div class="versions">
+  <div class="versions view">
     <!-- 下载任务 -->
     <div v-for="t in tasks" :key="t.id" class="card task">
       <div class="task-head">
+        <span class="task-ico"><Icon name="package" :size="15" /></span>
         <span class="task-name">{{ t.tag }}</span>
         <span class="tag">{{ t.variant === 'mono' ? 'C#' : '标准' }}</span>
         <span class="grow"></span>
-        <span class="task-status" :class="t.status">{{ statusText[t.status] }}</span>
+        <span class="task-status" :class="t.status">
+          <span v-if="['queued', 'downloading', 'extracting', 'verifying'].includes(t.status)" class="spin"></span>
+          {{ statusText[t.status] }}
+        </span>
         <button
           v-if="t.status !== 'error' && t.status !== 'canceled' && t.status !== 'done'"
           class="btn small danger-text"
@@ -256,26 +261,32 @@ function progressOf(t: DownloadTask): number {
         >取消</button>
       </div>
       <div v-if="t.status === 'downloading'" class="task-bar">
-        <div class="bar" :class="{ indet: !t.totalSize }"><div class="fill" :style="{ width: progressOf(t) + '%' }"></div></div>
+        <div class="bar" :class="{ indet: !t.totalSize }"><div class="fill active" :style="{ width: progressOf(t) + '%' }"></div></div>
         <span class="task-meta">{{ progressText(t) }} · {{ formatSize(t.received) }}{{ t.totalSize ? '/' + formatSize(t.totalSize) : '' }} · {{ formatSpeed(t.speed) }}</span>
       </div>
       <div v-else-if="t.status === 'error'" class="task-error">
-        {{ t.error }}
+        <Icon name="alert" :size="13" />
+        <span class="grow">{{ t.error }}</span>
         <button class="btn small" @click="retryTask(t)">重试</button>
-        <button class="btn small" @click="dismissTask(t)">关闭</button>
+        <button class="btn small ghost" @click="dismissTask(t)">关闭</button>
       </div>
-      <div v-else-if="t.status !== 'done'" class="task-meta">{{ statusText[t.status] }}…</div>
+      <div v-else-if="t.status !== 'done'" class="task-meta plain">{{ statusText[t.status] }}…</div>
     </div>
 
     <!-- 已安装 -->
-    <div class="section-head">
-      <h2>已安装 <span class="count">{{ installed.length }}</span></h2>
+    <div class="view-head">
+      <h2><Icon name="package" :size="16" /> 已安装 <span class="count-pill">{{ installed.length }}</span></h2>
       <span class="grow"></span>
-      <button class="btn small" :disabled="importing" @click="importLocal">{{ importing ? '导入中…' : '导入本地引擎' }}</button>
+      <button class="btn small" :disabled="importing" @click="importLocal">
+        <Icon name="upload" :size="13" /> {{ importing ? '导入中…' : '导入本地引擎' }}
+      </button>
     </div>
 
     <div v-if="installed.length" class="installed">
       <div v-for="v in installed" :key="v._id" class="card ver">
+        <div class="v-ico" :class="{ default: settings.defaultVersionId === v._id }">
+          <Icon name="gear" :size="18" />
+        </div>
         <div class="ver-main">
           <div class="ver-name-row">
             <span class="ver-name">{{ v.name }}</span>
@@ -287,12 +298,14 @@ function progressOf(t: DownloadTask): number {
           <div class="ver-path mono" :title="v.exePath">{{ v.exePath }}</div>
           <div class="ver-meta">
             <span v-if="v.size">{{ formatSize(v.size) }} · </span>
-            <span>{{ formatDate(v.installedAt) }}</span>
+            <span>安装于 {{ formatDate(v.installedAt) }}</span>
           </div>
         </div>
         <div class="ver-actions">
-          <button v-if="settings.defaultVersionId !== v._id" class="btn small" @click="setDefault(v)">设为默认</button>
-          <button class="btn small" @click="showInFolder(v.exePath)">所在目录</button>
+          <button v-if="settings.defaultVersionId !== v._id" class="btn small ghost" @click="setDefault(v)">设为默认</button>
+          <button class="btn small ghost" title="打开所在目录" @click="showInFolder(v.exePath)">
+            <Icon name="folder" :size="13" /> 目录
+          </button>
           <button class="btn small danger-text" @click="askDelete(v)">
             {{ confirmingId === v._id ? '确认删除?' : '删除' }}
           </button>
@@ -301,13 +314,14 @@ function progressOf(t: DownloadTask): number {
     </div>
     <EmptyState
       v-else
+      icon="package"
       title="尚未安装 Godot 引擎"
       desc="从下方「可用版本」下载官方引擎,或点击「导入本地引擎」使用已有的 Godot 可执行文件。"
     />
 
     <!-- 可用版本 -->
-    <div class="section-head">
-      <h2>可用版本</h2>
+    <div class="view-head filter-head">
+      <h2><Icon name="download" :size="16" /> 可用版本</h2>
       <span class="grow"></span>
       <select v-model="majorFilter" class="select" title="按大版本筛选">
         <option value="all">全部大版本</option>
@@ -322,17 +336,22 @@ function progressOf(t: DownloadTask): number {
         <button :class="{ on: variant === 'mono' }" @click="variant = 'mono'">C#</button>
       </div>
       <button class="btn small" :disabled="releasesLoading" @click="loadReleases(true)">
-        {{ releasesLoading ? '加载中…' : '刷新' }}
+        <span v-if="releasesLoading" class="spin"></span>
+        <Icon v-else name="refresh" :size="13" /> 刷新
       </button>
     </div>
 
     <div v-if="releasesError" class="card error-box">
-      <span>获取版本列表失败:{{ releasesError }}</span>
+      <Icon name="alert" :size="14" />
+      <span class="grow">获取版本列表失败:{{ releasesError }}</span>
       <button class="btn small" @click="loadReleases(true)">重试</button>
     </div>
-    <div v-else-if="releasesLoading" class="loading">正在获取版本列表…</div>
+    <div v-else-if="releasesLoading" class="loading">
+      <span class="spin"></span> 正在获取版本列表…
+    </div>
     <div v-else class="rel-list">
       <div v-for="r in visibleReleases" :key="r.tag" class="card rel">
+        <span class="rel-dot" :class="{ pre: r.prerelease }" :title="r.prerelease ? '预发布' : '稳定版'"></span>
         <div class="rel-main">
           <span class="rel-name">{{ r.name }}</span>
           <span v-if="r.prerelease" class="tag warn">预发布</span>
@@ -341,91 +360,45 @@ function progressOf(t: DownloadTask): number {
         <span v-if="assetFor(r) && assetFor(r)!.size" class="rel-size mono">{{ formatSize(assetFor(r)!.size) }}</span>
         <button
           v-if="isInstalled(r)"
-          class="btn small"
+          class="btn small ghost installed-btn"
           disabled
-        >已安装</button>
+        ><Icon name="check" :size="12" /> 已安装</button>
         <div v-else-if="isDownloading(r)" class="rel-progress" :title="statusText[taskFor(r)!.status]">
-          <div class="bar" :class="{ indet: !taskFor(r)!.totalSize }">
-            <div class="fill" :style="{ width: progressOf(taskFor(r)!) + '%' }"></div>
-          </div>
+          <div class="bar" :class="{ indet: !taskFor(r)!.totalSize }"><div class="fill active" :style="{ width: progressOf(taskFor(r)!) + '%' }"></div></div>
           <span class="rel-pct">{{ progressText(taskFor(r)!) }}</span>
         </div>
         <button v-else-if="!assetFor(r)" class="btn small" disabled title="该版本无此变体">无此变体</button>
-        <button v-else class="btn small primary" @click="download(r)">下载</button>
+        <button v-else class="btn small primary" @click="download(r)"><Icon name="download" :size="12" /> 下载</button>
       </div>
-      <div v-if="!visibleReleases.length" class="loading">没有匹配的版本</div>
+      <div v-if="!visibleReleases.length" class="loading plain">没有匹配的版本</div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.versions {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 16px;
-}
-
 .grow {
   flex: 1;
 }
 
-.section-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 6px;
+.filter-head {
+  margin-top: 4px;
+  flex-wrap: wrap;
 }
 
-.section-head h2 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.count {
-  color: var(--text-3);
-  font-weight: 400;
-  font-size: 13px;
-}
-
-.check {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--text-2);
-  cursor: pointer;
-}
-
-.seg {
-  display: flex;
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-}
-
-.seg button {
-  padding: 3px 10px;
-  border: none;
-  background: var(--surface);
-  color: var(--text-2);
+.filter-head .select {
+  padding: 3px 8px;
   font-size: 12px;
-  cursor: pointer;
+  box-shadow: none;
 }
 
-.seg button.on {
-  background: var(--brand-weak);
-  color: var(--brand);
-  font-weight: 600;
-}
-
-/* 任务 */
+/* ---------- 任务卡 ---------- */
 .task {
-  padding: 10px 14px;
+  padding: 11px 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 9px;
+  border-color: var(--brand);
+  box-shadow: var(--shadow);
 }
 
 .task-head {
@@ -434,12 +407,30 @@ function progressOf(t: DownloadTask): number {
   gap: 8px;
 }
 
+.task-ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  background: var(--brand-weak);
+  color: var(--brand);
+  flex-shrink: 0;
+}
+
 .task-name {
   font-weight: 600;
+  font-family: var(--mono);
+  font-size: 13px;
 }
 
 .task-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
+  font-weight: 600;
   color: var(--text-3);
 }
 
@@ -464,60 +455,18 @@ function progressOf(t: DownloadTask): number {
   gap: 10px;
 }
 
-.bar {
+.task-bar .bar {
   flex: 1;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--surface-2);
-  overflow: hidden;
-}
-
-.fill {
-  height: 100%;
-  border-radius: 3px;
-  background: var(--brand);
-  transition: width 0.15s linear;
-}
-
-/* 总大小未知时的不确定进度动画 */
-.bar.indet .fill {
-  width: 30% !important;
-  animation: indet-slide 1.2s ease-in-out infinite alternate;
-}
-
-@keyframes indet-slide {
-  from {
-    margin-left: 0;
-  }
-  to {
-    margin-left: 70%;
-  }
-}
-
-/* 版本行内进度条 */
-.rel-progress {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.rel-progress .bar {
-  flex: none;
-  width: 96px;
-  height: 6px;
-}
-
-.rel-pct {
-  font-size: 12px;
-  color: var(--brand);
-  white-space: nowrap;
 }
 
 .task-meta {
   font-size: 12px;
   color: var(--text-3);
   white-space: nowrap;
+}
+
+.task-meta.plain {
+  color: var(--brand);
 }
 
 .task-error {
@@ -528,7 +477,7 @@ function progressOf(t: DownloadTask): number {
   color: var(--danger);
 }
 
-/* 已安装卡片 */
+/* ---------- 已安装 ---------- */
 .installed {
   display: flex;
   flex-direction: column;
@@ -538,8 +487,31 @@ function progressOf(t: DownloadTask): number {
 .ver {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 10px 14px;
+  gap: 13px;
+  padding: 11px 14px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.ver:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow);
+}
+
+.v-ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.v-ico.default {
+  background: var(--brand-weak);
+  color: var(--brand);
 }
 
 .ver-main {
@@ -554,12 +526,13 @@ function progressOf(t: DownloadTask): number {
 }
 
 .ver-name {
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 13.5px;
 }
 
 .ver-path {
   margin-top: 2px;
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -573,11 +546,12 @@ function progressOf(t: DownloadTask): number {
 
 .ver-actions {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 5px;
   flex-shrink: 0;
 }
 
-/* 可用版本列表 */
+/* ---------- 可用版本 ---------- */
 .error-box {
   display: flex;
   align-items: center;
@@ -588,10 +562,17 @@ function progressOf(t: DownloadTask): number {
 }
 
 .loading {
-  padding: 20px 0;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 26px 0;
   color: var(--text-3);
   font-size: 13px;
+}
+
+.loading.plain {
+  padding: 18px 0;
 }
 
 .rel-list {
@@ -603,8 +584,27 @@ function progressOf(t: DownloadTask): number {
 .rel {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
   padding: 8px 14px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.rel:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.rel-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--brand);
+  flex-shrink: 0;
+}
+
+.rel-dot.pre {
+  background: transparent;
+  border: 1.5px solid var(--warn);
 }
 
 .rel-main {
@@ -616,7 +616,8 @@ function progressOf(t: DownloadTask): number {
 }
 
 .rel-name {
-  font-weight: 500;
+  font-weight: 600;
+  font-size: 13px;
 }
 
 .rel-date,
@@ -624,5 +625,32 @@ function progressOf(t: DownloadTask): number {
   font-size: 12px;
   color: var(--text-3);
   white-space: nowrap;
+}
+
+.rel-size {
+  min-width: 52px;
+  text-align: right;
+}
+
+.rel-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.rel-progress .bar {
+  width: 96px;
+}
+
+.rel-pct {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brand);
+  white-space: nowrap;
+}
+
+.installed-btn {
+  color: var(--ok);
 }
 </style>
