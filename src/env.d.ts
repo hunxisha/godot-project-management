@@ -48,7 +48,7 @@ interface Services {
     error?: string
     project?: import('./types/godot').GodotProject & { _id: string }
   }
-  /** 搜索 Asset Library */
+  /** 搜索 Asset Store */
   searchAssets(
     filter: string,
     godotVersion?: string,
@@ -58,7 +58,7 @@ interface Services {
   listAddons(projectId: string): import('./types/godot').AddonInfo[]
   /** 安装市场插件 */
   installAsset(
-    opts: { projectId: string, assetId: number },
+    opts: { projectId: string, assetId: string },
     onProgress?: (p: { stage: 'downloading' | 'extracting', received?: number, total?: number }) => void
   ): Promise<{
     ok: boolean
@@ -67,11 +67,11 @@ interface Services {
   }>
   /** 更新插件(覆盖安装) */
   updateAsset(
-    opts: { projectId: string, assetId: number },
+    opts: { projectId: string, assetId: string },
     onProgress?: (p: { stage: 'downloading' | 'extracting', received?: number, total?: number }) => void
   ): Promise<{ ok: boolean, error?: string, addon?: { title: string, versionString: string, dirNames: string[], enabled: boolean } }>
   /** 检查插件更新 */
-  checkAddonUpdate(opts: { projectId: string, assetId: number }): Promise<{ hasUpdate: boolean, latest?: string, error?: string }>
+  checkAddonUpdate(opts: { projectId: string, assetId: string }): Promise<{ hasUpdate: boolean, latest?: string, error?: string }>
   /** 卸载插件 */
   uninstallAddon(opts: { projectId: string, dirName: string }): { ok: boolean, error?: string }
   /** 启用/禁用插件 */

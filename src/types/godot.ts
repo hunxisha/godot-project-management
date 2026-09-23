@@ -108,18 +108,20 @@ export interface DownloadTask {
 
 /** Asset Library 市场资产 */
 export interface MarketAsset {
-  assetId: number
+  /** Asset Store 标识:"{publisherSlug}/{assetSlug}" */
+  assetId: string
   title: string
   author: string
   category: string
+  /** 商店搜索结果不逐资产提供版本,安装时从 releases 端点实时获取 */
   versionString: string
-  /** 适配的引擎版本,如 "4.3" 或 "any" */
   godotVersion: string
-  downloadUrl: string
-  downloadCount: number
+  /** 商店评分(0-50,除以 10 得星级) */
+  rating: number
   iconUrl?: string
-  modifyDate?: string
   description?: string
+  /** 商店页面链接 */
+  storeUrl?: string
 }
 
 /** 项目已安装的插件(Addon) */
@@ -143,7 +145,7 @@ export interface AddonInfo {
   hasCfg: boolean
   enabled: boolean
   fromMarket: boolean
-  assetId?: number
+  assetId?: string
   versionString?: string
   installedAt?: number
 }

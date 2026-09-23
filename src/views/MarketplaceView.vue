@@ -15,7 +15,7 @@ const searchError = ref('')
 const results = ref<MarketAsset[]>([])
 const checking = ref(false)
 const addons = ref<AddonInfo[]>([])
-const installing = ref<{ assetId: number, percent: number, stage: string } | null>(null)
+const installing = ref<{ assetId: string, percent: number, stage: string } | null>(null)
 const confirmingDir = ref<string | null>(null)
 const updateInfo = ref<Record<string, { hasUpdate: boolean, latest?: string }>>({})
 
@@ -56,6 +56,11 @@ function reloadAddons() {
 }
 
 // ---------- 搜索 ----------
+
+/** 打开商店页面 */
+function openStore(a: MarketAsset) {
+  if (a.storeUrl) window.ztools.shellOpenExternal(a.storeUrl)
+}
 
 async function search() {
   searching.value = true
@@ -214,7 +219,7 @@ function uninstall(a: AddonInfo) {
         <span>搜索失败:{{ searchError }}</span>
       </div>
       <div v-else-if="!results.length && !searching" class="hint-line">
-        输入关键词搜索 Godot 官方资产库(Asset Library),可按引擎版本过滤。
+        输入关键词搜索 Godot 官方资产商店(Asset Store),可按引擎版本过滤,点击名称可在浏览器中打开详情。
       </div>
       <div v-if="results.length" class="asset-list">
         <div v-for="a in results" :key="a.assetId" class="card asset">
@@ -222,12 +227,12 @@ function uninstall(a: AddonInfo) {
           <div v-else class="asset-icon placeholder"></div>
           <div class="asset-main">
             <div class="asset-name">
-              <span class="name">{{ a.title }}</span>
+              <span class="name link" title="在商店中查看" @click="openStore(a)">{{ a.title }}</span>
               <span class="tag">{{ a.category }}</span>
-              <span class="tag brand">Godot {{ a.godotVersion }}</span>
+              <span v-if="a.rating" class="tag brand" title="商店评分">★ {{ (a.rating / 10).toFixed(1) }}</span>
             </div>
-            <div class="asset-meta">
-              {{ a.author }} · v{{ a.versionString }} · 下载 {{ a.downloadCount }} 次
+            <div class="asset-meta" :title="a.description">
+              {{ a.author }}{{ a.description ? ' · ' + a.description : '' }}
             </div>
           </div>
           <button
@@ -383,6 +388,14 @@ function uninstall(a: AddonInfo) {
 
 .name {
   font-weight: 600;
+}
+
+.name.link {
+  cursor: pointer;
+}
+
+.name.link:hover {
+  color: var(--brand);
 }
 
 .asset-meta {

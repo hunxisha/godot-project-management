@@ -1,4 +1,6 @@
-// Godot Asset Library:搜索、安装、启用、更新、卸载插件(Addon)
+// Godot Asset Store(store.godotengine.org/api/v1,2026 起官方编辑器使用的新 API):
+// 搜索、安装、启用、更新、卸载插件(Addon)
+// assetId 格式为 "{publisherSlug}/{assetSlug}",如 "maran23/script-ide"
 const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
@@ -6,47 +8,69 @@ const { getJson, downloadFile } = require('./http')
 const { extractZip, ensureDir } = require('./extract')
 const { getDoc, putDoc, removeDoc, listDocs } = require('./store')
 
-const API_BASE = 'https://godotengine.org/asset-library/api'
+const API_BASE = 'https://store.godotengine.org/api/v1'
 
-/** 搜索市场资产 */
+/** 拆 assetId 为 [publisherSlug, assetSlug] */
+function splitAssetId(assetId) {
+  const [pub, slug] = String(assetId).split('/')
+  if (!pub || !slug) throw new Error('资产 ID 无效: ' + assetId)
+  return [pub, slug]
+}
+
+/** 取 releases 数组中最新的一个(按 created 日期排序) */
+function latestRelease(list) {
+  if (!Array.isArray(list) || !list.length) return undefined
+  const sorted = [...list].sort((a, b) => String(b.created).localeCompare(String(a.created)))
+  return sorted[0]
+}
+
+/** 搜索市场资产(Addon) */
 async function searchAssets(filter, godotVersion, page = 1) {
   const params = new URLSearchParams({
-    filter: filter || '',
-    sort: 'updated',
-    status: 'approved',
+    query: filter || '',
+    type: '0', // 0 = Addon(工具/脚本),1 = 完整项目
+    require_release: 'true',
+    sort: 'updated_desc',
     page: String(page),
-    amount: '20'
+    batch_size: '20'
   })
-  if (godotVersion) params.set('godot_version', godotVersion)
-  const data = await getJson(`${API_BASE}/assets?${params}`)
+  if (godotVersion) params.set('compatibility', godotVersion)
+  const data = await getJson(`${API_BASE}/search/query/?${params}`)
+  const count = Number(data.count) || 0
   return {
-    result: (data.result || []).map((a) => ({
-      assetId: a.asset_id,
-      title: a.title,
-      author: a.author,
-      category: a.category,
-      versionString: a.version_string,
-      godotVersion: a.godot_version,
-      downloadUrl: a.download_url,
-      downloadCount: a.download_count,
-      iconUrl: a.icon_url || undefined,
-      modifyDate: a.modify_date,
-      supportLevel: a.support_level
-    })),
-    page: data.page || 1,
-    pages: data.pages || 1
+    result: (data.hits || []).map((h) => {
+      const a = h.asset || {}
+      return {
+        assetId: `${a.publisher.slug}/${a.slug}`,
+        title: a.name,
+        author: a.publisher.name,
+        category: (a.tags && a.tags[0] && a.tags[0].display_name) || '',
+        versionString: '',
+        godotVersion: '',
+        rating: a.reviews_score,
+        iconUrl: a.thumbnail || undefined,
+        description: a.description,
+        storeUrl: a.store_url
+      }
+    }),
+    page,
+    pages: Math.max(1, Math.ceil(count / 20))
   }
 }
 
-/** 获取资产详情 */
+/** 获取资产详情:含最新 release 的版本与下载直链(下载链接为带签名的临时直链,安装时实时获取) */
 async function getAssetDetail(assetId) {
-  const a = await getJson(`${API_BASE}/assets/${assetId}`)
+  const [pub, slug] = splitAssetId(assetId)
+  const detail = await getJson(`${API_BASE}/assets/${pub}/${slug}/`)
+  const releases = await getJson(`${API_BASE}/releases/${pub}/${slug}/`).catch(() => [])
+  const latest = latestRelease(releases) || {}
   return {
-    assetId: a.asset_id,
-    title: a.title,
-    versionString: a.version_string,
-    downloadUrl: a.download_url,
-    godotVersion: a.godot_version
+    assetId,
+    title: detail.name,
+    versionString: latest.version || '',
+    downloadUrl: latest.download_url || '',
+    description: detail.description,
+    tags: (detail.tags || []).map((t) => t.display_name)
   }
 }
 
@@ -230,11 +254,14 @@ async function checkAddonUpdate({ projectId, assetId }) {
   try {
     const doc = getDoc(`godot/asset/${projectId}/${assetId}`)
     if (!doc) return { hasUpdate: false }
-    const detail = await getAssetDetail(assetId)
-    if (detail.versionString && detail.versionString !== doc.versionString) {
-      return { hasUpdate: true, latest: detail.versionString }
+    const [pub, slug] = splitAssetId(assetId)
+    const releases = await getJson(`${API_BASE}/releases/${pub}/${slug}/`)
+    const latest = latestRelease(releases)
+    const latestVersion = (latest && latest.version) || ''
+    if (latestVersion && latestVersion !== doc.versionString) {
+      return { hasUpdate: true, latest: latestVersion }
     }
-    return { hasUpdate: false, latest: detail.versionString }
+    return { hasUpdate: false, latest: latestVersion }
   } catch (e) {
     return { hasUpdate: false, error: (e && e.message) || '检查更新失败' }
   }
