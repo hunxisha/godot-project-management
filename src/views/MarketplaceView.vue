@@ -50,6 +50,7 @@ const installedIds = computed(
 async function loadBrowse() {
   if (mode.value === 'favorites') {
     favorites.value = window.services.listFavorites()
+    hydrateVersions(favorites.value)
     return
   }
   if (mode.value === 'library') {
@@ -62,15 +63,32 @@ async function loadBrowse() {
   try {
     if (mode.value === 'featured') {
       featured.value = await window.services.listFeatured()
+      hydrateVersions(featured.value)
     } else if (mode.value === 'recent') {
       const r = await window.services.listRecentlyUpdated(recentPage.value)
       recent.value = r.result
       recentPages.value = r.pages
+      hydrateVersions(recent.value)
     }
   } catch (e: any) {
     browseError.value = e?.message || String(e)
   } finally {
     browsing.value = false
+  }
+}
+
+/** 异步拉取列表资产的最新版本号并填充(失败不影响列表展示) */
+async function hydrateVersions(list: MarketAsset[]) {
+  const ids = list.map((a) => a.assetId).filter((id) => typeof id === 'string' && id.includes('/'))
+  if (!ids.length) return
+  try {
+    const map = await window.services.getLatestVersions(ids)
+    for (const a of list) {
+      const v = map[a.assetId]
+      if (v) a.versionString = v
+    }
+  } catch {
+    // 版本号拉取失败时静默跳过
   }
 }
 
@@ -153,6 +171,7 @@ async function search() {
   try {
     const r = await window.services.searchAssets(query.value.trim(), verFilter.value || undefined)
     results.value = r.result
+    hydrateVersions(results.value)
   } catch (e: any) {
     searchError.value = e?.message || String(e)
   } finally {
@@ -349,6 +368,7 @@ function uninstall(a: AddonInfo) {
           <div class="asset-main">
             <div class="asset-name">
               <span class="name link" title="在商店中查看" @click="openStore(a)">{{ a.title }}</span>
+              <span v-if="a.versionString" class="tag" title="最新版本">v{{ a.versionString }}</span>
               <span class="tag">{{ a.category }}</span>
               <span v-if="a.rating" class="tag brand" title="商店评分">★ {{ (a.rating / 10).toFixed(1) }}</span>
               <span v-if="installedIds.has(a.assetId)" class="tag ok">已安装</span>

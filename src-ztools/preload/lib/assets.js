@@ -431,6 +431,42 @@ async function verifyApiKey(key) {
   return { authenticated: true, name: info.name || info.id || '已认证用户' }
 }
 
+// ---------- 批量版本号(列表展示用) ----------
+
+const versionCache = new Map()
+
+/**
+ * 批量获取资产最新版本号(并发受限、带内存缓存,失败静默跳过)。
+ * @param {string[]} assetIds
+ * @returns {Promise<Record<string, string>>} { [assetId]: version }
+ */
+async function getLatestVersions(assetIds) {
+  const ids = [...new Set(assetIds)].filter(
+    (id) => typeof id === 'string' && id.includes('/') && !versionCache.has(id)
+  )
+  const CONCURRENCY = 6
+  let idx = 0
+  async function worker() {
+    while (idx < ids.length) {
+      const id = ids[idx++]
+      try {
+        const [pub, slug] = splitAssetId(id)
+        const releases = await getJson(`${API_BASE}/releases/${pub}/${slug}/`)
+        const latest = latestRelease(releases)
+        versionCache.set(id, latest ? String(latest.version || '') : '')
+      } catch (e) {
+        versionCache.set(id, '')
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, ids.length) }, worker))
+  const out = {}
+  for (const id of new Set(assetIds)) {
+    if (versionCache.has(id)) out[id] = versionCache.get(id)
+  }
+  return out
+}
+
 module.exports = {
   searchAssets,
   listFeatured,
@@ -439,6 +475,7 @@ module.exports = {
   toggleFavorite,
   isFavorite,
   listLibrary,
+  getLatestVersions,
   verifyApiKey,
   getAssetDetail,
   listAddons,

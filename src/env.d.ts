@@ -66,6 +66,8 @@ interface Services {
   isFavorite(assetId: string): boolean
   /** 我的库:全部项目的市场插件安装记录聚合 */
   listLibrary(): import('./types/godot').LibraryAsset[]
+  /** 批量获取资产最新版本号(列表展示用) */
+  getLatestVersions(assetIds: string[]): Promise<Record<string, string>>
   /** 验证 Asset Store API Key */
   verifyApiKey(key: string): Promise<{ authenticated: boolean, name?: string }>
   /** 列出项目已安装插件 */
