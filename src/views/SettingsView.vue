@@ -40,6 +40,20 @@ const openActions: { value: OpenAction, label: string }[] = [
     </div>
 
     <div class="card section">
+      <div class="section-title">网络代理</div>
+      <div class="row">
+        <input
+          v-model.trim="state.proxy"
+          class="input value"
+          placeholder="如 http://127.0.0.1:7890,留空直连"
+          spellcheck="false"
+          @change="patchNow"
+        />
+      </div>
+      <div class="hint">所有网络请求(版本列表、引擎下载、插件市场)将经由该 HTTP 代理发送,保存后立即生效;仅支持 HTTP 代理。</div>
+    </div>
+
+    <div class="card section">
       <div class="section-title">打开项目的默认动作</div>
       <div class="row">
         <select v-model="state.defaultOpenAction" class="select" @change="patchNow">

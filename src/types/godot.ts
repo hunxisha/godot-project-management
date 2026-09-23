@@ -53,6 +53,8 @@ export interface GodotProject {
 export interface GodotSettings {
   /** 引擎安装根目录(首次下载时选择并保存) */
   versionsRoot?: string
+  /** HTTP 代理地址,如 http://127.0.0.1:7890;留空直连 */
+  proxy?: string
   defaultVersionId?: string
   defaultOpenAction: OpenAction
   /** 安装插件后自动在 project.godot 中启用 */
