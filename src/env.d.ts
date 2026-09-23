@@ -7,12 +7,9 @@ declare module '*.vue' {
   export default component
 }
 
-// Preload services 类型声明（对应 src-ztools/preload/services.js）
-interface Services {
-  readFile: (file: string) => string
-  writeTextFile: (text: string) => string
-  writeImageFile: (base64Url: string) => string | undefined
-}
+// Preload services 类型声明(对应 src-ztools/preload/services.js)
+// Node 能力(fs/网络/进程)按里程碑在此扩展
+interface Services {}
 
 declare global {
   interface Window {

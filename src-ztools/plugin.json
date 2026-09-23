@@ -13,41 +13,58 @@
   },
   "features": [
     {
-      "code": "hello",
-      "explain": "这是插件应用的第一个功能",
+      "code": "godot",
+      "explain": "Godot 项目管理概览",
       "icon": "logo.png",
       "cmds": [
-        "你好",
-        "hello"
+        "godot",
+        "Godot管理"
       ]
     },
     {
-      "code": "read",
-      "explain": "功能指令+匹配指令示例，使用 node.js 能力读文件",
+      "code": "projects",
+      "explain": "管理 Godot 项目,绑定引擎版本,快捷打开",
       "icon": "logo.png",
       "cmds": [
-        "读文件",
+        "gp",
+        "godot项目",
+        "打开godot项目"
+      ]
+    },
+    {
+      "code": "versions",
+      "explain": "下载并管理 Godot 引擎版本",
+      "icon": "logo.png",
+      "cmds": [
+        "gv",
+        "godot版本",
+        "下载godot"
+      ]
+    },
+    {
+      "code": "plugins",
+      "explain": "浏览并安装 Godot 插件(Addon)",
+      "icon": "logo.png",
+      "cmds": [
+        "godot插件",
+        "godot插件市场"
+      ]
+    },
+    {
+      "code": "addProject",
+      "explain": "拖入项目文件夹或 project.godot 文件快速添加项目",
+      "icon": "logo.png",
+      "cmds": [
+        {
+          "type": "files",
+          "fileType": "directory",
+          "label": "添加Godot项目"
+        },
         {
           "type": "files",
           "fileType": "file",
-          "maxLength": 1,
-          "label": "读文件"
-        }
-      ]
-    },
-    {
-      "code": "write",
-      "explain": "匹配指令示例，使用 node.js 能力写文件",
-      "icon": "logo.png",
-      "mainHide": true,
-      "cmds": [
-        {
-          "type": "over",
-          "label": "保存为文件"
-        },
-        {
-          "type": "img",
-          "label": "保存为文件"
+          "extensions": ["godot"],
+          "label": "添加Godot项目"
         }
       ]
     }
