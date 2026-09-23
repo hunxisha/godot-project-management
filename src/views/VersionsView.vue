@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { getSettings, notify, pickDirectory, pickFile, isWindows, saveSettings, showInFolder } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
-import type { DownloadTask, GodotRelease, GodotVersion, Variant } from '../types/godot'
+import type { DownloadTask, GodotRelease, GodotVersion, ReleaseAsset, Variant } from '../types/godot'
 
 const settings = reactive(getSettings())
 const platform = window.services.currentPlatform()
@@ -92,7 +92,7 @@ const visibleReleases = computed(() =>
   })
 )
 
-function assetFor(release: GodotRelease): { name: string, url: string, size: number } | undefined {
+function assetFor(release: GodotRelease): ReleaseAsset | undefined {
   return release.assets.find((a) => (variant.value === 'mono') === a.name.toLowerCase().includes('mono'))
 }
 
@@ -122,7 +122,7 @@ async function download(release: GodotRelease) {
   if (!root) return
   window.services.downloadAndInstall(
     { tag: release.tag, variant: variant.value, platform, url: asset.url, fileName: asset.name, totalSize: asset.size },
-    { mirror: settings.mirror || undefined, versionsRoot: root }
+    { versionsRoot: root }
   )
 }
 
@@ -138,7 +138,7 @@ function retryTask(t: DownloadTask) {
   window.services.dismissTask(t.id)
   window.services.downloadAndInstall(
     { tag: t.tag, variant: t.variant, platform: t.platform, url: t.url, fileName: t.fileName, totalSize: t.totalSize },
-    { mirror: undefined, versionsRoot: settings.versionsRoot! }
+    { versionsRoot: settings.versionsRoot! }
   )
 }
 
@@ -317,7 +317,7 @@ function progressOf(t: DownloadTask): number {
           <span v-if="r.prerelease" class="tag warn">预发布</span>
         </div>
         <span class="rel-date">{{ formatDate(r.publishedAt) }}</span>
-        <span v-if="assetFor(r)" class="rel-size mono">{{ formatSize(assetFor(r)!.size) }}</span>
+        <span v-if="assetFor(r) && assetFor(r)!.size" class="rel-size mono">{{ formatSize(assetFor(r)!.size) }}</span>
         <button
           v-if="isInstalled(r)"
           class="btn small"

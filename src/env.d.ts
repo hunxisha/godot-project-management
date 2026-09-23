@@ -23,7 +23,7 @@ interface Services {
   /** 下载并安装版本(入队),返回任务 id */
   downloadAndInstall(
     params: DownloadParams,
-    opts: { mirror?: string, versionsRoot: string }
+    opts: { versionsRoot: string }
   ): string
   cancelTask(id: string): void
   dismissTask(id: string): void

@@ -4,14 +4,14 @@ const fs = require('node:fs')
 
 const UA = { 'User-Agent': 'ztools-godot-plugin' }
 
-/** GET JSON,自动跟随重定向 */
-function getJson(url, headers) {
+/** GET 文本(HTML 等),自动跟随重定向 */
+function getText(url, headers) {
   return new Promise((resolve, reject) => {
     https
       .get(url, { headers: { ...UA, ...headers } }, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           res.resume()
-          return resolve(getJson(res.headers.location, headers))
+          return resolve(getText(res.headers.location, headers))
         }
         if (res.statusCode !== 200) {
           res.resume()
@@ -19,15 +19,20 @@ function getJson(url, headers) {
         }
         const chunks = []
         res.on('data', (c) => chunks.push(c))
-        res.on('end', () => {
-          try {
-            resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')))
-          } catch (e) {
-            reject(new Error('响应解析失败: ' + e.message))
-          }
-        })
+        res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
       })
       .on('error', reject)
+  })
+}
+
+/** GET JSON,自动跟随重定向 */
+function getJson(url, headers) {
+  return getText(url, headers).then((text) => {
+    try {
+      return JSON.parse(text)
+    } catch (e) {
+      throw new Error('响应解析失败: ' + e.message)
+    }
   })
 }
 

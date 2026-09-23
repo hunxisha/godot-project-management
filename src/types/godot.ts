@@ -53,8 +53,6 @@ export interface GodotProject {
 export interface GodotSettings {
   /** 引擎安装根目录(首次下载时选择并保存) */
   versionsRoot?: string
-  /** 下载镜像前缀,拼接在 GitHub 下载链接前;留空直连 */
-  mirror?: string
   defaultVersionId?: string
   defaultOpenAction: OpenAction
   /** 安装插件后自动在 project.godot 中启用 */
@@ -66,14 +64,15 @@ export const DEFAULT_SETTINGS: GodotSettings = {
   autoEnablePlugin: true
 }
 
-/** GitHub Release 资产 */
+/** 引擎下载资产(官方 CDN 直链) */
 export interface ReleaseAsset {
   name: string
   url: string
-  size: number
+  /** 归档页不提供大小;0 表示未知,下载开始后从响应 Content-Length 获取 */
+  size?: number
 }
 
-/** GitHub Release */
+/** 官方归档中的引擎版本(含稳定版与 dev/beta/rc 预发布版) */
 export interface GodotRelease {
   tag: string
   name: string

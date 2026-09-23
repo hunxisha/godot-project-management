@@ -40,12 +40,6 @@ async function pump() {
   }
 }
 
-/** 应用镜像前缀 */
-function withMirror(url, mirror) {
-  if (!mirror) return url
-  return mirror.replace(/\/+$/, '') + '/' + url
-}
-
 function displayName(tag) {
   const idx = tag.indexOf('-')
   if (idx < 0) return tag
@@ -59,11 +53,11 @@ const platformOfProcess = () => (process.platform === 'win32' ? 'win64' : proces
 /**
  * 下载并安装一个版本(入队,立即返回任务 id)。
  * @param {{ tag, variant, platform, url, fileName, totalSize }} params
- * @param {{ mirror?: string, versionsRoot: string }} opts
+ * @param {{ versionsRoot: string }} opts
  */
 function downloadAndInstall(params, opts) {
   const id = `dl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-  const finalUrl = withMirror(params.url, opts.mirror)
+  const finalUrl = params.url
   registry.set(id, {
     pub: {
       id,

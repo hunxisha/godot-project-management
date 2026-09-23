@@ -40,20 +40,6 @@ const openActions: { value: OpenAction, label: string }[] = [
     </div>
 
     <div class="card section">
-      <div class="section-title">下载镜像</div>
-      <div class="row">
-        <input
-          v-model.trim="state.mirror"
-          class="input value"
-          placeholder="留空直连 GitHub,如 https://ghproxy.net/"
-          spellcheck="false"
-          @change="patchNow"
-        />
-      </div>
-      <div class="hint">下载引擎时镜像前缀会拼接在 GitHub 下载链接之前,仅影响下载,不影响版本列表。</div>
-    </div>
-
-    <div class="card section">
       <div class="section-title">打开项目的默认动作</div>
       <div class="row">
         <select v-model="state.defaultOpenAction" class="select" @change="patchNow">
