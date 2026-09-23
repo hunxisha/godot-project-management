@@ -43,6 +43,8 @@ window.services = {
   toggleFavorite: (asset) => assets.toggleFavorite(asset),
   /** 是否已收藏 */
   isFavorite: (assetId) => assets.isFavorite(assetId),
+  /** 我的库:全部项目的市场插件安装记录聚合 */
+  listLibrary: () => assets.listLibrary(),
   /** 验证 Asset Store API Key */
   verifyApiKey: (key) => assets.verifyApiKey(key),
   /** 列出项目已安装插件 */

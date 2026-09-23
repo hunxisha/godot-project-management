@@ -64,19 +64,29 @@ interface Services {
   toggleFavorite(asset: import('./types/godot').MarketAsset): boolean
   /** 是否已收藏 */
   isFavorite(assetId: string): boolean
+  /** 我的库:全部项目的市场插件安装记录聚合 */
+  listLibrary(): import('./types/godot').LibraryAsset[]
   /** 验证 Asset Store API Key */
   verifyApiKey(key: string): Promise<{ authenticated: boolean, name?: string }>
   /** 列出项目已安装插件 */
   listAddons(projectId: string): import('./types/godot').AddonInfo[]
   /** 安装市场插件 */
   installAsset(
-    opts: { projectId: string, assetId: string },
+    opts: {
+      projectId: string,
+      assetId: string,
+      assetMeta?: {
+        title?: string,
+        author?: string,
+        category?: string,
+        rating?: number,
+        iconUrl?: string,
+        description?: string,
+        storeUrl?: string
+      }
+    },
     onProgress?: (p: { stage: 'downloading' | 'extracting', received?: number, total?: number }) => void
-  ): Promise<{
-    ok: boolean
-    error?: string
-    addon?: { title: string, versionString: string, dirNames: string[], enabled: boolean }
-  }>
+  ): Promise<{ ok: boolean, error?: string, addon?: { title: string, versionString: string, dirNames: string[], enabled: boolean } }>
   /** 更新插件(覆盖安装) */
   updateAsset(
     opts: { projectId: string, assetId: string },

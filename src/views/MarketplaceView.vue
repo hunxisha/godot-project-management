@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { notify } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
-import type { AddonInfo, FavoriteAsset, GodotProject, MarketAsset } from '../types/godot'
+import type { AddonInfo, FavoriteAsset, GodotProject, LibraryAsset, MarketAsset } from '../types/godot'
 
 const emit = defineEmits<{ (e: 'navigate', tab: string): void }>()
 
@@ -21,13 +21,14 @@ const updateInfo = ref<Record<string, { hasUpdate: boolean, latest?: string }>>(
 
 // ---------- 浏览模式:推荐 / 最近更新 / 搜索 / 收藏 ----------
 
-type BrowseMode = 'featured' | 'recent' | 'search' | 'favorites'
+type BrowseMode = 'featured' | 'recent' | 'search' | 'favorites' | 'library'
 const mode = ref<BrowseMode>('featured')
 const featured = ref<MarketAsset[]>([])
 const recent = ref<MarketAsset[]>([])
 const recentPage = ref(1)
 const recentPages = ref(1)
 const favorites = ref<FavoriteAsset[]>([])
+const library = ref<LibraryAsset[]>([])
 const browsing = ref(false)
 const browseError = ref('')
 
@@ -36,6 +37,7 @@ const displayAssets = computed<MarketAsset[]>(() => {
   if (mode.value === 'featured') return featured.value
   if (mode.value === 'recent') return recent.value
   if (mode.value === 'favorites') return favorites.value
+  if (mode.value === 'library') return library.value
   return results.value
 })
 
@@ -44,10 +46,14 @@ const installedIds = computed(
   () => new Set(addons.value.filter((a) => a.fromMarket && a.assetId).map((a) => a.assetId!))
 )
 
-/** 加载当前模式的数据(推荐只拉一次;最近更新按页;收藏读本地) */
+/** 加载当前模式的数据(推荐只拉一次;最近更新按页;收藏/我的库读本地) */
 async function loadBrowse() {
   if (mode.value === 'favorites') {
     favorites.value = window.services.listFavorites()
+    return
+  }
+  if (mode.value === 'library') {
+    library.value = window.services.listLibrary()
     return
   }
   if (mode.value === 'featured' && featured.value.length) return
@@ -135,6 +141,12 @@ function openStore(a: MarketAsset) {
   if (a.storeUrl) window.ztools.shellOpenExternal(a.storeUrl)
 }
 
+function formatDate(ts: number): string {
+  if (!ts) return ''
+  const d = new Date(ts)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 async function search() {
   searching.value = true
   searchError.value = ''
@@ -165,7 +177,19 @@ async function install(asset: MarketAsset) {
   if (!targetId.value || installing.value) return
   installing.value = { assetId: asset.assetId, percent: 0, stage: '下载中' }
   const r = await window.services.installAsset(
-    { projectId: targetId.value, assetId: asset.assetId },
+    {
+      projectId: targetId.value,
+      assetId: asset.assetId,
+      assetMeta: {
+        title: asset.title,
+        author: asset.author,
+        category: asset.category,
+        rating: asset.rating,
+        iconUrl: asset.iconUrl,
+        description: asset.description,
+        storeUrl: asset.storeUrl
+      }
+    },
     (p) => {
       if (!installing.value || installing.value.assetId !== asset.assetId) return
       if (p.stage === 'downloading') {
@@ -277,6 +301,9 @@ function uninstall(a: AddonInfo) {
         <button :class="{ on: mode === 'favorites' }" @click="switchMode('favorites')">
           收藏<span v-if="favorites.length" class="fav-count">{{ favorites.length }}</span>
         </button>
+        <button :class="{ on: mode === 'library' }" @click="switchMode('library')">
+          我的库<span v-if="library.length" class="fav-count">{{ library.length }}</span>
+        </button>
       </div>
 
       <!-- 搜索(仅搜索模式) -->
@@ -310,6 +337,11 @@ function uninstall(a: AddonInfo) {
         title="还没有收藏"
         desc="在推荐、最近更新或搜索结果中点击 ★ 收藏插件,方便下次快速安装。"
       />
+      <EmptyState
+        v-else-if="mode === 'library' && !library.length"
+        title="我的库还是空的"
+        desc="通过市场安装过的插件会自动记录到这里,可在不同项目间快速重装。"
+      />
       <div v-if="displayAssets.length" class="asset-list">
         <div v-for="a in displayAssets" :key="a.assetId" class="card asset">
           <img v-if="a.iconUrl" :src="a.iconUrl" class="asset-icon" alt="" @error="($event.target as HTMLImageElement).style.display = 'none'" />
@@ -321,7 +353,16 @@ function uninstall(a: AddonInfo) {
               <span v-if="a.rating" class="tag brand" title="商店评分">★ {{ (a.rating / 10).toFixed(1) }}</span>
               <span v-if="installedIds.has(a.assetId)" class="tag ok">已安装</span>
             </div>
-            <div class="asset-meta" :title="a.description">
+            <div
+              v-if="mode === 'library' && (a as LibraryAsset).projectCount"
+              class="asset-meta"
+              :title="(a as LibraryAsset).projectNames.join('\n')"
+            >
+              已装于 {{ (a as LibraryAsset).projectCount }} 个项目 · {{ formatDate((a as LibraryAsset).installedAt) }} · v{{
+                a.versionString || '?'
+              }}
+            </div>
+            <div v-else class="asset-meta" :title="a.description">
               {{ a.author }}{{ a.description ? ' · ' + a.description : '' }}
             </div>
           </div>
