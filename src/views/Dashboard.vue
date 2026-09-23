@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { getSettings, listDocs, pickDirectory, saveSettings, showInFolder } from '../services/bridge'
+import { openProjectAction } from '../composables/useProjectActions'
 import type { GodotProject, GodotVersion } from '../types/godot'
 
 const emit = defineEmits<{ (e: 'navigate', tab: string): void }>()
@@ -10,6 +11,12 @@ const versions = ref<(GodotVersion & { _id: string })[]>([])
 const settings = getSettings()
 
 const defaultVersion = computed(() => versions.value.find((v) => v._id === settings.defaultVersionId))
+
+const recentProjects = computed(() =>
+  [...projects.value]
+    .sort((a, b) => (b.lastOpenedAt || b.addedAt) - (a.lastOpenedAt || a.addedAt))
+    .slice(0, 5)
+)
 
 onMounted(() => {
   projects.value = listDocs<GodotProject>('godot/project/')
@@ -40,6 +47,27 @@ function chooseRoot() {
         <div class="num small">{{ defaultVersion?.name ?? '未设置' }}</div>
         <div class="label">默认引擎</div>
       </div>
+    </div>
+
+    <div v-if="recentProjects.length" class="card recent">
+      <div class="section-title">最近项目</div>
+      <div
+        v-for="p in recentProjects"
+        :key="p._id"
+        class="recent-row"
+        @click="openProjectAction(p)"
+      >
+        <div class="avatar" :class="{ fav: p.favorite }">{{ p.name.charAt(0).toUpperCase() }}</div>
+        <div class="rr-main">
+          <div class="rr-name">
+            <span>{{ p.name }}</span>
+            <span v-if="p.engineVersion" class="tag">{{ p.engineVersion }}</span>
+          </div>
+          <div class="rr-path mono" :title="p.path">{{ p.path }}</div>
+        </div>
+        <span class="rr-open">打开</span>
+      </div>
+      <button class="btn small more" @click="emit('navigate', 'projects')">查看全部项目</button>
     </div>
 
     <div class="quick card">
@@ -119,6 +147,80 @@ function chooseRoot() {
   margin-top: 2px;
   font-size: 12px;
   color: var(--text-3);
+}
+
+.recent {
+  padding: 12px 16px;
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 8px;
+}
+
+.recent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.recent-row:hover {
+  background: var(--surface-2);
+}
+
+.avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: var(--brand-weak);
+  color: var(--brand);
+  font-weight: 700;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.avatar.fav {
+  background: var(--warn-weak);
+  color: var(--warn);
+}
+
+.rr-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.rr-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.rr-path {
+  font-size: 12px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rr-open {
+  font-size: 12px;
+  color: var(--brand);
+  flex-shrink: 0;
+}
+
+.more {
+  margin-top: 6px;
 }
 
 .quick {

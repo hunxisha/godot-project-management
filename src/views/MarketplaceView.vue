@@ -213,6 +213,9 @@ function uninstall(a: AddonInfo) {
       <div v-if="searchError" class="card error-box">
         <span>搜索失败:{{ searchError }}</span>
       </div>
+      <div v-else-if="!results.length && !searching" class="hint-line">
+        输入关键词搜索 Godot 官方资产库(Asset Library),可按引擎版本过滤。
+      </div>
       <div v-if="results.length" class="asset-list">
         <div v-for="a in results" :key="a.assetId" class="card asset">
           <img v-if="a.iconUrl" :src="a.iconUrl" class="asset-icon" alt="" @error="($event.target as HTMLImageElement).style.display = 'none'" />
@@ -331,6 +334,13 @@ function uninstall(a: AddonInfo) {
   padding: 10px 14px;
   color: var(--danger);
   font-size: 13px;
+}
+
+.hint-line {
+  padding: 16px 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
 }
 
 .asset-list,

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { getSettings, hideMainWindow, notify, openPath, pickDirectory, putDoc } from '../services/bridge'
+import { getSettings, notify, pickDirectory, putDoc } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
+import { openProjectAction } from '../composables/useProjectActions'
 import type { GodotProject, GodotVersion, OpenAction } from '../types/godot'
 
 type Row = GodotProject & { _id: string }
@@ -128,20 +129,7 @@ function bindVersion(p: Row, versionId: string) {
 }
 
 function openProject(p: Row, action?: OpenAction) {
-  const act = action || settings.defaultOpenAction
-  if (act === 'folder') {
-    openPath(p.path)
-    p.lastOpenedAt = Date.now()
-    p.openCount = (p.openCount || 0) + 1
-    return
-  }
-  const r = window.services.launchProject({ projectId: p._id, action: act })
-  if (r.ok && r.project) {
-    Object.assign(p, r.project)
-    hideMainWindow()
-  } else {
-    notify(r.error || '启动失败')
-  }
+  openProjectAction(p, action)
 }
 
 // ---------- 展示辅助 ----------
