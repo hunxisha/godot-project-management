@@ -14,6 +14,7 @@ const releasesLoading = ref(false)
 const releasesError = ref('')
 const stableOnly = ref(true)
 const variant = ref<Variant>('standard')
+const majorFilter = ref('all')
 const importing = ref(false)
 const confirmingId = ref<string | null>(null)
 let unwatchTasks: (() => void) | null = null
@@ -65,7 +66,31 @@ async function loadReleases(force: boolean) {
   }
 }
 
-const visibleReleases = computed(() => releases.value.filter((r) => !stableOnly.value || !r.prerelease))
+/** 从 tag 提取大版本(major.minor),如 4.7.1-stable / 4.8-beta1 → 4.7 / 4.8 */
+function majorOf(tag: string): string {
+  const m = tag.match(/^v?(\d+\.\d+)/)
+  return m ? m[1] : ''
+}
+
+/** 列表中出现的所有大版本,按新到旧排序 */
+const majorOptions = computed(() => {
+  const set = new Map<string, number>()
+  for (const r of releases.value) {
+    const m = majorOf(r.tag)
+    if (!m) continue
+    const [a, b] = m.split('.').map(Number)
+    set.set(m, a * 1000 + b)
+  }
+  return [...set.entries()].sort((x, y) => y[1] - x[1]).map(([k]) => k)
+})
+
+const visibleReleases = computed(() =>
+  releases.value.filter((r) => {
+    if (stableOnly.value && r.prerelease) return false
+    if (majorFilter.value !== 'all' && majorOf(r.tag) !== majorFilter.value) return false
+    return true
+  })
+)
 
 function assetFor(release: GodotRelease): { name: string, url: string, size: number } | undefined {
   return release.assets.find((a) => (variant.value === 'mono') === a.name.toLowerCase().includes('mono'))
@@ -263,6 +288,10 @@ function progressOf(t: DownloadTask): number {
     <div class="section-head">
       <h2>可用版本</h2>
       <span class="grow"></span>
+      <select v-model="majorFilter" class="select" title="按大版本筛选">
+        <option value="all">全部大版本</option>
+        <option v-for="m in majorOptions" :key="m" :value="m">{{ m }}.x</option>
+      </select>
       <label class="check">
         <input v-model="stableOnly" type="checkbox" />
         <span>仅稳定版</span>
