@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { notify } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
-import type { AddonInfo, FavoriteAsset, GodotProject, LibraryAsset, MarketAsset } from '../types/godot'
+import type { AddonInfo, FavoriteAsset, GodotProject, MarketAsset } from '../types/godot'
 
 const emit = defineEmits<{ (e: 'navigate', tab: string): void }>()
 
@@ -18,24 +18,22 @@ const addons = ref<AddonInfo[]>([])
 const installing = ref<{ assetId: string, percent: number, stage: string } | null>(null)
 const brokenIcons = ref(new Set<string>())
 
-// ---------- 浏览模式:推荐 / 最近更新 / 收藏 / 我的库,搜索常驻工具栏 ----------
+// ---------- 浏览模式:推荐 / 最近更新 / 收藏,搜索常驻工具栏 ----------
 
-type BrowseMode = 'featured' | 'recent' | 'favorites' | 'library'
+type BrowseMode = 'featured' | 'recent' | 'favorites'
 const mode = ref<BrowseMode>('featured')
 const featured = ref<MarketAsset[]>([])
 const recent = ref<MarketAsset[]>([])
 const recentPage = ref(1)
 const recentPages = ref(1)
 const favorites = ref<FavoriteAsset[]>([])
-const library = ref<LibraryAsset[]>([])
 const browsing = ref(false)
 const browseError = ref('')
 
 const MODE_META: Record<BrowseMode, { label: string, icon: string }> = {
   featured: { label: '推荐', icon: 'sparkle' },
   recent: { label: '最近更新', icon: 'clock' },
-  favorites: { label: '收藏', icon: 'star' },
-  library: { label: '我的库', icon: 'bookmark' }
+  favorites: { label: '收藏', icon: 'star' }
 }
 
 /** 当前展示的资产列表:搜索词非空时优先显示搜索结果 */
@@ -43,7 +41,6 @@ const displayAssets = computed<MarketAsset[]>(() => {
   if (query.value.trim()) return results.value
   if (mode.value === 'recent') return recent.value
   if (mode.value === 'favorites') return favorites.value
-  if (mode.value === 'library') return library.value
   return featured.value
 })
 
@@ -52,15 +49,11 @@ const installedIds = computed(
   () => new Set(addons.value.filter((a) => a.fromMarket && a.assetId).map((a) => a.assetId!))
 )
 
-/** 加载当前模式的数据(推荐只拉一次;最近更新按页;收藏/我的库读本地) */
+/** 加载当前模式的数据(推荐只拉一次;最近更新按页;收藏读本地) */
 async function loadBrowse() {
   if (mode.value === 'favorites') {
     favorites.value = window.services.listFavorites()
     hydrateVersions(favorites.value)
-    return
-  }
-  if (mode.value === 'library') {
-    library.value = window.services.listLibrary()
     return
   }
   if (mode.value === 'featured' && featured.value.length) return
@@ -194,12 +187,6 @@ function reloadAddons() {
 /** 打开商店页面 */
 function openStore(a: MarketAsset) {
   if (a.storeUrl) window.ztools.shellOpenExternal(a.storeUrl)
-}
-
-function formatDate(ts: number): string {
-  if (!ts) return ''
-  const d = new Date(ts)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 /** 去掉版本串的前导 v(展示时统一补 v 前缀) */
@@ -347,7 +334,6 @@ async function install(asset: MarketAsset) {
               <Icon :name="m.icon" :size="12" />
               {{ m.label }}
               <span v-if="key === 'favorites' && favorites.length" class="chip-count">{{ favorites.length }}</span>
-              <span v-if="key === 'library' && library.length" class="chip-count">{{ library.length }}</span>
             </button>
           </div>
           <span class="grow"></span>
@@ -383,12 +369,6 @@ async function install(asset: MarketAsset) {
         title="还没有收藏"
         desc="在推荐、最近更新或搜索结果中点击 ★ 收藏插件,方便下次快速安装。"
       />
-      <EmptyState
-        v-else-if="mode === 'library' && !library.length"
-        icon="bookmark"
-        title="我的库还是空的"
-        desc="通过市场安装过的插件会自动记录到这里,可在不同项目间快速重装。"
-      />
       <div v-if="displayAssets.length" class="asset-grid">
         <div v-for="a in displayAssets" :key="a.assetId" class="card asset">
           <button
@@ -421,18 +401,8 @@ async function install(asset: MarketAsset) {
             </span>
             <span v-if="installedIds.has(a.assetId)" class="tag ok">已安装</span>
           </div>
-          <!-- 我的库模式显示安装记录,其余显示作者 + 简介 -->
-          <div
-            v-if="mode === 'library' && (a as LibraryAsset).projectCount"
-            class="asset-lib"
-            :title="(a as LibraryAsset).projectNames.join('\n')"
-          >
-            已装于 {{ (a as LibraryAsset).projectCount }} 个项目 · {{ formatDate((a as LibraryAsset).installedAt) }}
-          </div>
-          <template v-else>
-            <div class="asset-author">{{ a.author }}</div>
-            <div class="asset-desc" :title="a.description">{{ a.description }}</div>
-          </template>
+          <div class="asset-author">{{ a.author }}</div>
+          <div class="asset-desc" :title="a.description">{{ a.description }}</div>
           <button
             v-if="installing && installing.assetId === a.assetId"
             class="btn small asset-install busy"
@@ -762,13 +732,6 @@ async function install(asset: MarketAsset) {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  min-height: 37px;
-}
-
-/* 我的库模式的安装记录行 */
-.asset-lib {
-  font-size: 12px;
-  color: var(--brand);
   min-height: 37px;
 }
 

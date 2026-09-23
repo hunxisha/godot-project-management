@@ -136,14 +136,6 @@ export interface FavoriteAsset extends MarketAsset {
   addedAt: number
 }
 
-/** 我的库:全部项目安装过的市场资产(按资产去重聚合) */
-export interface LibraryAsset extends MarketAsset {
-  versionString: string
-  installedAt: number
-  projectCount: number
-  projectNames: string[]
-}
-
 /** 项目已安装的插件(Addon) */
 export interface InstalledAddon {
   id: string

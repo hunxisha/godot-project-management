@@ -400,53 +400,6 @@ function isFavorite(assetId) {
   return readFavorites().some((x) => x.assetId === assetId)
 }
 
-// ---------- 我的库(全部项目的市场插件安装记录聚合) ----------
-
-/**
- * 汇总所有项目安装过的市场资产(同一资产多项目去重合并)。
- * @returns {Array<{
- *   assetId: string, title: string, author: string, category: string, rating: number,
- *   iconUrl?: string, description?: string, storeUrl?: string,
- *   versionString: string, installedAt: number,
- *   projectCount: number, projectNames: string[]
- * }>}
- */
-function listLibrary() {
-  const nameById = new Map()
-  for (const p of listDocs('godot/project/')) nameById.set(p._id, p.name)
-
-  const merged = new Map()
-  for (const doc of listDocs('godot/asset/')) {
-    if (!doc.assetId) continue
-    let item = merged.get(doc.assetId)
-    if (!item) {
-      item = {
-        assetId: doc.assetId,
-        title: doc.title || doc.assetId,
-        author: (doc.meta && doc.meta.author) || '',
-        category: (doc.meta && doc.meta.category) || '',
-        rating: (doc.meta && doc.meta.rating) || 0,
-        iconUrl: doc.meta && doc.meta.iconUrl,
-        description: doc.meta && doc.meta.description,
-        storeUrl: doc.meta && doc.meta.storeUrl,
-        versionString: doc.versionString || '',
-        installedAt: doc.installedAt || 0,
-        projectCount: 0,
-        projectNames: []
-      }
-      merged.set(doc.assetId, item)
-    }
-    item.projectCount += 1
-    const name = nameById.get(doc.projectId) || doc.projectId
-    if (!item.projectNames.includes(name)) item.projectNames.push(name)
-    if ((doc.installedAt || 0) > item.installedAt) {
-      item.installedAt = doc.installedAt
-      if (doc.versionString) item.versionString = doc.versionString
-    }
-  }
-  return [...merged.values()].sort((a, b) => b.installedAt - a.installedAt)
-}
-
 // ---------- 账号(API Key) ----------
 
 /**
@@ -506,7 +459,6 @@ module.exports = {
   listFavorites,
   toggleFavorite,
   isFavorite,
-  listLibrary,
   getLatestVersions,
   verifyApiKey,
   getAssetDetail,
