@@ -249,6 +249,11 @@ function progressOf(t: DownloadTask): number {
         <span class="tag">{{ t.variant === 'mono' ? 'C#' : '标准' }}</span>
         <span class="grow"></span>
         <span class="task-status" :class="t.status">{{ statusText[t.status] }}</span>
+        <button
+          v-if="t.status !== 'error' && t.status !== 'canceled' && t.status !== 'done'"
+          class="btn small danger-text"
+          @click="cancelTask(t)"
+        >取消</button>
       </div>
       <div v-if="t.status === 'downloading'" class="task-bar">
         <div class="bar" :class="{ indet: !t.totalSize }"><div class="fill" :style="{ width: progressOf(t) + '%' }"></div></div>
@@ -260,7 +265,6 @@ function progressOf(t: DownloadTask): number {
         <button class="btn small" @click="dismissTask(t)">关闭</button>
       </div>
       <div v-else-if="t.status !== 'done'" class="task-meta">{{ statusText[t.status] }}…</div>
-      <button v-if="t.status !== 'error' && t.status !== 'canceled'" class="btn small danger-text" @click="cancelTask(t)">取消</button>
     </div>
 
     <!-- 已安装 -->
@@ -422,7 +426,6 @@ function progressOf(t: DownloadTask): number {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  position: relative;
 }
 
 .task-head {
@@ -523,12 +526,6 @@ function progressOf(t: DownloadTask): number {
   gap: 8px;
   font-size: 12px;
   color: var(--danger);
-}
-
-.task > .danger-text {
-  position: absolute;
-  right: 10px;
-  top: 8px;
 }
 
 /* 已安装卡片 */
