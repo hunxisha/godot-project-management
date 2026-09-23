@@ -101,7 +101,24 @@ function isInstalled(release: GodotRelease): boolean {
 }
 
 function isDownloading(release: GodotRelease): boolean {
-  return tasks.value.some((t) => t.tag === release.tag && t.variant === variant.value && t.status !== 'error' && t.status !== 'canceled')
+  return !!taskFor(release)
+}
+
+/** 该版本对应的活动下载任务(含排队/下载/解压/校验) */
+function taskFor(release: GodotRelease): DownloadTask | undefined {
+  return tasks.value.find(
+    (t) =>
+      t.tag === release.tag &&
+      t.variant === variant.value &&
+      t.status !== 'error' &&
+      t.status !== 'canceled' &&
+      t.status !== 'done'
+  )
+}
+
+/** 进度文案:totalSize 已知显示百分比,未知显示"下载中" */
+function progressText(t: DownloadTask): string {
+  return t.totalSize ? `${progressOf(t).toFixed(0)}%` : '下载中'
 }
 
 // ---------- 下载 ----------
@@ -234,8 +251,8 @@ function progressOf(t: DownloadTask): number {
         <span class="task-status" :class="t.status">{{ statusText[t.status] }}</span>
       </div>
       <div v-if="t.status === 'downloading'" class="task-bar">
-        <div class="bar"><div class="fill" :style="{ width: progressOf(t) + '%' }"></div></div>
-        <span class="task-meta">{{ progressOf(t).toFixed(0) }}% · {{ formatSize(t.received) }}/{{ formatSize(t.totalSize) }} · {{ formatSpeed(t.speed) }}</span>
+        <div class="bar" :class="{ indet: !t.totalSize }"><div class="fill" :style="{ width: progressOf(t) + '%' }"></div></div>
+        <span class="task-meta">{{ progressText(t) }} · {{ formatSize(t.received) }}{{ t.totalSize ? '/' + formatSize(t.totalSize) : '' }} · {{ formatSpeed(t.speed) }}</span>
       </div>
       <div v-else-if="t.status === 'error'" class="task-error">
         {{ t.error }}
@@ -323,11 +340,12 @@ function progressOf(t: DownloadTask): number {
           class="btn small"
           disabled
         >已安装</button>
-        <button
-          v-else-if="isDownloading(r)"
-          class="btn small"
-          disabled
-        >下载中</button>
+        <div v-else-if="isDownloading(r)" class="rel-progress" :title="statusText[taskFor(r)!.status]">
+          <div class="bar" :class="{ indet: !taskFor(r)!.totalSize }">
+            <div class="fill" :style="{ width: progressOf(taskFor(r)!) + '%' }"></div>
+          </div>
+          <span class="rel-pct">{{ progressText(taskFor(r)!) }}</span>
+        </div>
         <button v-else-if="!assetFor(r)" class="btn small" disabled title="该版本无此变体">无此变体</button>
         <button v-else class="btn small primary" @click="download(r)">下载</button>
       </div>
@@ -456,6 +474,41 @@ function progressOf(t: DownloadTask): number {
   border-radius: 3px;
   background: var(--brand);
   transition: width 0.15s linear;
+}
+
+/* 总大小未知时的不确定进度动画 */
+.bar.indet .fill {
+  width: 30% !important;
+  animation: indet-slide 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes indet-slide {
+  from {
+    margin-left: 0;
+  }
+  to {
+    margin-left: 70%;
+  }
+}
+
+/* 版本行内进度条 */
+.rel-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.rel-progress .bar {
+  flex: none;
+  width: 96px;
+  height: 6px;
+}
+
+.rel-pct {
+  font-size: 12px;
+  color: var(--brand);
+  white-space: nowrap;
 }
 
 .task-meta {
