@@ -103,4 +103,4 @@ function downloadFile(url, destPath, opts = {}) {
   }
 }
 
-module.exports = { getJson, downloadFile }
+module.exports = { getText, getJson, downloadFile }
