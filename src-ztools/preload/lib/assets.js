@@ -71,7 +71,8 @@ async function searchAssets(filter, godotVersion, page = 1) {
     query: filter || '',
     type: '0', // 0 = Addon(工具/脚本),1 = 完整项目
     require_release: 'true',
-    sort: 'updated_desc',
+    // 有搜索词时按相关性排序,否则按更新时间排序
+    sort: filter ? 'relevance' : 'updated_desc',
     page: String(page),
     batch_size: '20'
   })
