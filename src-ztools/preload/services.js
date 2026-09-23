@@ -25,6 +25,8 @@ window.services = {
   deleteVersion: (v) => install.deleteVersion(v),
   /** 添加项目(目录或 project.godot 文件) */
   addProject: (inputPath) => projects.addProject(inputPath),
+  /** 新建项目(生成 project.godot 与默认图标并加入列表) */
+  createProject: (opts) => projects.createProject(opts),
   /** 递归扫描目录下的所有项目 */
   scanProjects: (rootDir) => projects.scanProjects(rootDir),
   /** 删除项目记录 */

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getSettings, notify, pickDirectory, putDoc } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
@@ -103,6 +103,68 @@ function addManually() {
   }
 }
 
+// ---------- 新建项目 ----------
+
+const showCreate = ref(false)
+const creating = ref(false)
+const cName = ref('')
+const cParent = ref('')
+const cRenderer = ref<'forward_plus' | 'mobile' | 'gl_compatibility'>('forward_plus')
+const cVersionId = ref('')
+const cOpen = ref(true)
+const nameInput = ref<HTMLInputElement>()
+
+/** 目标目录预览(父目录 + 项目名) */
+const cPreview = computed(() => {
+  if (!cParent.value.trim()) return ''
+  const base = cParent.value.trim().replace(/[\\/]+$/, '')
+  return cName.value.trim() ? `${base}\\${cName.value.trim()}` : base
+})
+
+function openCreate() {
+  cName.value = ''
+  // 预填最近项目的父目录,减少选择成本
+  const recent = [...projects.value].sort((a, b) => (b.lastOpenedAt || b.addedAt) - (a.lastOpenedAt || a.addedAt))[0]
+  cParent.value = recent ? recent.path.replace(/[\\/][^\\/]+$/, '') : ''
+  cVersionId.value =
+    versions.value.find((v) => v._id === settings.defaultVersionId)?._id || versions.value[0]?._id || ''
+  cRenderer.value = 'forward_plus'
+  cOpen.value = true
+  showCreate.value = true
+  nextTick(() => nameInput.value?.focus())
+}
+
+function chooseParent() {
+  const dir = pickDirectory('选择新项目的保存位置', cParent.value || undefined)
+  if (dir) cParent.value = dir
+}
+
+function submitCreate() {
+  if (creating.value) return
+  if (!cName.value.trim() || !cParent.value.trim()) return
+  creating.value = true
+  const v = versions.value.find((x) => x._id === cVersionId.value)
+  const r = window.services.createProject({
+    name: cName.value.trim(),
+    parentDir: cParent.value.trim(),
+    renderer: cRenderer.value,
+    versionTag: v?.tag,
+    versionId: v?._id
+  })
+  creating.value = false
+  if (!r.ok || !r.project) {
+    notify(r.error || '创建失败')
+    return
+  }
+  showCreate.value = false
+  reload()
+  notify(`已创建项目:${r.project.name}`)
+  if (cOpen.value) {
+    const row = projects.value.find((p) => p._id === r.project!.id)
+    if (row) openProjectAction(row)
+  }
+}
+
 // ---------- 项目操作 ----------
 
 function removeProject(p: Row) {
@@ -165,9 +227,14 @@ function gradOf(name: string): string {
 
 function onKeyDown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
+    if (showCreate.value) {
+      showCreate.value = false
+      return
+    }
     selected.value = -1
     return
   }
+  if (showCreate.value) return
   if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(e.key)) return
   const tag = (e.target as HTMLElement)?.tagName
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
@@ -189,6 +256,7 @@ function onKeyDown(e: KeyboardEvent) {
     <div class="view-head">
       <h2><Icon name="folder" :size="16" /> 项目 <span class="count-pill">{{ projects.length }}</span></h2>
       <span class="grow"></span>
+      <button class="btn small ghost" @click="openCreate"><Icon name="plus" :size="13" /> 新建项目</button>
       <button class="btn small primary" @click="addManually"><Icon name="folder-plus" :size="13" /> 添加项目</button>
     </div>
 
@@ -196,9 +264,10 @@ function onKeyDown(e: KeyboardEvent) {
       v-if="!projects.length"
       icon="folder"
       title="还没有 Godot 项目"
-      desc="将项目文件夹拖入 ZTools 主输入框选择「添加Godot项目」,或点击「添加项目」选择目录(支持子目录扫描)。"
+      desc="从零新建一个项目,或将已有项目文件夹拖入 ZTools 主输入框、点击「添加项目」选择目录(支持子目录扫描)。"
     >
-      <button class="btn primary" @click="addManually"><Icon name="folder-plus" :size="14" /> 添加项目</button>
+      <button class="btn primary" @click="openCreate"><Icon name="plus" :size="14" /> 新建项目</button>
+      <button class="btn" @click="addManually"><Icon name="folder-plus" :size="14" /> 添加项目</button>
     </EmptyState>
 
     <template v-else>
@@ -266,6 +335,93 @@ function onKeyDown(e: KeyboardEvent) {
         </div>
       </div>
     </template>
+
+    <!-- 新建项目模态框 -->
+    <Teleport to="body">
+      <div v-if="showCreate" class="modal-mask" @click.self="showCreate = false">
+        <form class="card modal" @submit.prevent="submitCreate">
+          <div class="modal-head">
+            <div class="modal-title"><Icon name="pen" :size="15" /> 新建 Godot 项目</div>
+            <span class="grow"></span>
+            <button type="button" class="btn small ghost icon-x" title="关闭" @click="showCreate = false">
+              <Icon name="x" :size="14" />
+            </button>
+          </div>
+
+          <div class="field">
+            <label class="f-label" for="np-name">项目名称</label>
+            <input
+              id="np-name"
+              ref="nameInput"
+              v-model="cName"
+              class="input"
+              placeholder="例如:My Awesome Game"
+              maxlength="60"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+
+          <div class="field">
+            <label class="f-label" for="np-parent">创建位置</label>
+            <div class="dir-row">
+              <input
+                id="np-parent"
+                v-model="cParent"
+                class="input mono"
+                placeholder="选择新项目的保存位置"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <button type="button" class="btn ghost" @click="chooseParent">
+                <Icon name="folder" :size="14" /> 浏览
+              </button>
+            </div>
+            <div v-if="cPreview" class="f-hint mono" :title="cPreview">将创建于:{{ cPreview }}</div>
+          </div>
+
+          <div class="field">
+            <label class="f-label" for="np-ver">引擎版本</label>
+            <select id="np-ver" v-model="cVersionId" class="select" :disabled="!versions.length">
+              <option value="" disabled>
+                {{ versions.length ? '选择引擎版本' : '尚未安装引擎(将写入通用配置)' }}
+              </option>
+              <option v-for="v in versions" :key="v._id" :value="v._id">
+                {{ v.variant === 'mono' ? `${v.name} (C#)` : v.name }}
+              </option>
+            </select>
+          </div>
+
+          <div class="field">
+            <span class="f-label">渲染器</span>
+            <div class="seg">
+              <button
+                v-for="r in (['forward_plus', 'mobile', 'gl_compatibility'] as const)"
+                :key="r"
+                type="button"
+                :class="{ on: cRenderer === r }"
+                @click="cRenderer = r"
+              >
+                {{ r === 'forward_plus' ? 'Forward+' : r === 'mobile' ? 'Mobile' : '兼容 GL' }}
+              </button>
+            </div>
+          </div>
+
+          <label class="open-row">
+            <input v-model="cOpen" class="switch" type="checkbox" />
+            <span>创建后立即打开编辑器</span>
+          </label>
+
+          <div class="modal-foot">
+            <span class="grow"></span>
+            <button type="button" class="btn ghost" @click="showCreate = false">取消</button>
+            <button type="submit" class="btn primary" :disabled="!cName.trim() || !cParent.trim() || creating">
+              <Icon name="check" :size="13" /> 创建项目
+            </button>
+          </div>
+        </form>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -412,5 +568,119 @@ function onKeyDown(e: KeyboardEvent) {
 
 .star.on {
   color: var(--gold);
+}
+
+/* ---------- 新建项目模态框 ---------- */
+
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(18, 26, 40, 0.45);
+}
+
+.modal {
+  width: min(480px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  padding: 18px 20px;
+  box-shadow: var(--shadow-lift);
+  animation: pop-in 0.16s ease;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.modal-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.icon-x {
+  width: 26px;
+  padding: 3px 0;
+  color: var(--text-3);
+}
+
+.field {
+  margin-bottom: 13px;
+}
+
+.f-label {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.field .input,
+.field .select {
+  width: 100%;
+}
+
+.select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.dir-row {
+  display: flex;
+  gap: 8px;
+}
+
+.dir-row .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.f-hint {
+  margin-top: 5px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.open-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 14px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.modal-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
 }
 </style>

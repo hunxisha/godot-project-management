@@ -125,6 +125,87 @@ function addProject(inputPath, versionIdOverride) {
   }
 }
 
+// ---------- 新建项目 ----------
+
+const RENDERERS = {
+  forward_plus: { feature: 'Forward Plus', method: 'forward_plus', mobileMethod: 'mobile' },
+  mobile: { feature: 'Mobile', method: 'mobile', mobileMethod: 'mobile' },
+  gl_compatibility: { feature: 'GL Compatibility', method: 'gl_compatibility', mobileMethod: 'gl_compatibility' }
+}
+
+const DEFAULT_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 48 48">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5aa6db"/><stop offset="1" stop-color="#33689a"/></linearGradient></defs>
+<rect x="1.5" y="1.5" width="45" height="45" rx="11" fill="url(#g)"/>
+<rect x="14" y="17" width="20" height="17" rx="4.5" fill="#fff"/>
+<rect x="9.6" y="19.6" width="5.2" height="7" rx="1.7" fill="#fff"/>
+<rect x="33.2" y="19.6" width="5.2" height="7" rx="1.7" fill="#fff"/>
+<rect x="18.4" y="22.6" width="4.6" height="6.4" rx="1.5" fill="#33689a"/>
+<rect x="25" y="22.6" width="4.6" height="6.4" rx="1.5" fill="#33689a"/>
+</svg>
+`
+
+/**
+ * 新建项目:在 parentDir 下创建以 name 命名的目录,写入 project.godot 与默认图标,
+ * 然后注册到项目列表(复用 addProject 的解析与自动绑定逻辑)。
+ * opts: { name, parentDir, renderer, versionTag?, versionId? }
+ */
+function createProject(opts) {
+  try {
+    const name = String(opts.name || '').trim()
+    // 去掉 Windows 非法文件名字符
+    const safe = name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '').trim()
+    if (!safe || safe === '.' || safe === '..') {
+      return { ok: false, error: '项目名称无效' }
+    }
+    const parentDir = String(opts.parentDir || '').trim()
+    if (!parentDir) {
+      return { ok: false, error: '请选择创建位置' }
+    }
+
+    const projectDir = path.join(parentDir, safe)
+    if (fs.existsSync(projectDir)) {
+      return { ok: false, error: `目录已存在:${safe}` }
+    }
+    fs.mkdirSync(projectDir, { recursive: true })
+
+    // 引擎版本号:从所选已装版本的 tag 提取 major.minor,兜底 4.3
+    const tagMatch = /^v?(\d+\.\d+)/.exec(String(opts.versionTag || ''))
+    const versionStr = tagMatch ? tagMatch[1] : '4.3'
+    const r = RENDERERS[opts.renderer] || RENDERERS.forward_plus
+
+    const godotIni = [
+      '; Engine configuration file.',
+      "; It's best edited using the editor UI and not directly,",
+      '; since the parameters that go here are not all obvious.',
+      ';',
+      '; Format:',
+      ';   [section] ; section goes between []',
+      ';   param=value ; assign values to parameters',
+      '',
+      'config_version=5',
+      '',
+      '[application]',
+      '',
+      `config/name="${name.replace(/"/g, '')}"`,
+      `config/features=PackedStringArray("${versionStr}", "${r.feature}")`,
+      'config/icon="res://icon.svg"',
+      '',
+      '[rendering]',
+      '',
+      `renderer/rendering_method="${r.method}"`,
+      `renderer/rendering_method.mobile="${r.mobileMethod}"`,
+      ''
+    ].join('\n')
+
+    fs.writeFileSync(path.join(projectDir, 'project.godot'), godotIni, 'utf8')
+    fs.writeFileSync(path.join(projectDir, 'icon.svg'), DEFAULT_ICON_SVG, 'utf8')
+
+    return addProject(projectDir, opts.versionId)
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || '创建失败' }
+  }
+}
+
 /** 递归扫描目录下的项目(忽略 .git/.godot 等,深度 5) */
 function scanProjects(rootDir) {
   const found = []
@@ -155,4 +236,4 @@ function removeProject(id) {
   return { ok: true }
 }
 
-module.exports = { parseProjectGodot, addProject, scanProjects, removeProject, projectDocId, matchVersion }
+module.exports = { parseProjectGodot, addProject, scanProjects, removeProject, projectDocId, matchVersion, createProject }

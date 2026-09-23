@@ -40,6 +40,20 @@ interface Services {
   }
   /** 递归扫描目录,返回所有含 project.godot 的目录 */
   scanProjects(rootDir: string): string[]
+  /** 新建项目:生成 project.godot 与默认图标并加入列表 */
+  createProject(opts: {
+    name: string
+    parentDir: string
+    renderer: 'forward_plus' | 'mobile' | 'gl_compatibility'
+    /** 已装引擎版本 tag(如 4.7.2-stable),用于写入 features 版本号 */
+    versionTag?: string
+    /** 已装引擎版本 id,用于绑定项目与引擎 */
+    versionId?: string
+  }): {
+    ok: boolean
+    error?: string
+    project?: import('./types/godot').GodotProject
+  }
   /** 删除项目记录 */
   removeProject(id: string): { ok: boolean }
   /** 启动项目(editor=编辑器,run=运行) */
