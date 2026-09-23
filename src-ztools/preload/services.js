@@ -47,13 +47,15 @@ window.services = {
   toggleFavorite: (asset) => assets.toggleFavorite(asset),
   /** 是否已收藏 */
   isFavorite: (assetId) => assets.isFavorite(assetId),
-  /** 批量获取资产最新版本号(列表展示用) */
-  getLatestVersions: (assetIds) => assets.getLatestVersions(assetIds),
+  /** 批量获取资产最新 release 信息(版本/兼容 Godot 版本/发布日期) */
+  getReleaseInfos: (assetIds) => assets.getReleaseInfos(assetIds),
+  /** 列出资产全部 release(版本选择用) */
+  listAssetReleases: (assetId) => assets.listAssetReleases(assetId),
   /** 验证 Asset Store API Key */
   verifyApiKey: (key) => assets.verifyApiKey(key),
   /** 列出项目已安装插件 */
   listAddons: (projectId) => assets.listAddons(projectId),
-  /** 安装市场插件 */
+  /** 安装市场插件(version 指定 release 版本,缺省为最新) */
   installAsset: (opts, onProgress) => assets.installAsset(opts, onProgress),
   /** 更新插件 */
   updateAsset: (opts, onProgress) => assets.updateAsset(opts, onProgress),

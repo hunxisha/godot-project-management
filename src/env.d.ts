@@ -84,17 +84,24 @@ interface Services {
   toggleFavorite(asset: import('./types/godot').MarketAsset): boolean
   /** 是否已收藏 */
   isFavorite(assetId: string): boolean
-  /** 批量获取资产最新版本号(列表展示用) */
-  getLatestVersions(assetIds: string[]): Promise<Record<string, string>>
+  /** 批量获取资产最新 release 信息(版本/兼容 Godot 版本/发布日期) */
+  getReleaseInfos(assetIds: string[]): Promise<
+    Record<string, { version: string, minGodot: string, maxGodot: string, created: string }>
+  >
+  /** 列出资产全部 release(版本选择用) */
+  listAssetReleases(assetId: string): Promise<
+    { version: string, created: string, stable: boolean, minGodot: string, maxGodot: string, size: number }[]
+  >
   /** 验证 Asset Store API Key */
   verifyApiKey(key: string): Promise<{ authenticated: boolean, name?: string }>
   /** 列出项目已安装插件 */
   listAddons(projectId: string): import('./types/godot').AddonInfo[]
-  /** 安装市场插件 */
+  /** 安装市场插件(version 指定 release 版本,缺省为最新) */
   installAsset(
     opts: {
-      projectId: string,
-      assetId: string,
+      projectId: string
+      assetId: string
+      version?: string
       assetMeta?: {
         title?: string,
         author?: string,

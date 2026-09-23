@@ -3,14 +3,17 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { notify } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
-import type { AddonInfo, FavoriteAsset, GodotProject, MarketAsset } from '../types/godot'
+import type { AddonInfo, FavoriteAsset, GodotProject, GodotVersion, MarketAsset } from '../types/godot'
 
 const emit = defineEmits<{ (e: 'navigate', tab: string): void }>()
 
 const projects = ref<(GodotProject & { _id: string })[]>([])
+const versions = ref<(GodotVersion & { _id: string })[]>([])
 const targetId = ref('')
 const query = ref('')
 const tagFilter = ref('')
+/** 仅显示兼容当前项目 Godot 版本的插件 */
+const compatOnly = ref(false)
 const searching = ref(false)
 const searchError = ref('')
 const results = ref<MarketAsset[]>([])
@@ -39,6 +42,54 @@ function inGroup(a: MarketAsset, slugs: string[]): boolean {
   return slugs.includes((a.category || '').toLowerCase())
 }
 
+// ---------- Godot 版本兼容(安装目标) ----------
+
+/** 安装目标项目的 Godot 版本(major.minor,优先绑定引擎 tag,回退 project.godot 声明) */
+const targetGodot = computed(() => {
+  const p = target.value
+  if (!p) return ''
+  const v = versions.value.find((x) => x._id === p.versionId)
+  const m = /^v?(\d+\.\d+)/.exec(v?.tag || p.engineVersion || '')
+  return m ? m[1] : ''
+})
+
+/** 版本串 → 可比较数值("4.4"→404,"4"→400),无法解析返回 null */
+function verNum(v?: string): number | null {
+  if (!v) return null
+  const m = /^v?(\d+)(?:\.(\d+))?/.exec(v.trim())
+  if (!m) return null
+  return Number(m[1]) * 100 + Number(m[2] || 0)
+}
+
+/** 资产是否兼容目标项目的 Godot 版本:无要求或项目版本未知返回 null(无法判断) */
+function compatOf(a: MarketAsset): boolean | null {
+  const min = verNum(a.minGodot)
+  const max = verNum(a.maxGodot)
+  const t = verNum(targetGodot.value)
+  if ((min == null && max == null) || t == null) return null
+  if (min != null && t < min) return false
+  if (max != null && t > max) return false
+  return true
+}
+
+/** 兼容版本范围展示文案 */
+function godotRange(a: MarketAsset): string {
+  const min = a.minGodot
+  const max = a.maxGodot
+  if (min && max) return `Godot ${min} ~ ${max}`
+  if (min) return `Godot ${min}+`
+  if (max) return `Godot ≤ ${max}`
+  return ''
+}
+
+/** 最新 release 30 天内发布视为新品 */
+function isNew(a: MarketAsset): boolean {
+  if (!a.releaseCreated) return false
+  const t = Date.parse(a.releaseCreated)
+  if (Number.isNaN(t)) return false
+  return Date.now() - t < 30 * 24 * 3600 * 1000
+}
+
 // ---------- 浏览模式:推荐 / 最近更新 / 收藏,搜索常驻工具栏 ----------
 
 type BrowseMode = 'featured' | 'recent' | 'favorites'
@@ -57,7 +108,7 @@ const MODE_META: Record<BrowseMode, { label: string, icon: string }> = {
   favorites: { label: '收藏', icon: 'star' }
 }
 
-/** 当前展示的资产列表:搜索词非空时优先显示搜索结果;标签筛选在客户端应用 */
+/** 当前展示的资产列表:搜索词非空时优先显示搜索结果;标签/兼容筛选在客户端应用 */
 const displayAssets = computed<MarketAsset[]>(() => {
   let list: MarketAsset[]
   if (query.value.trim()) list = results.value
@@ -65,7 +116,9 @@ const displayAssets = computed<MarketAsset[]>(() => {
   else if (mode.value === 'favorites') list = favorites.value
   else list = featured.value
   const g = TAG_GROUPS.find((x) => x.label === tagFilter.value)
-  return g ? list.filter((a) => inGroup(a, g.slugs)) : list
+  if (g) list = list.filter((a) => inGroup(a, g.slugs))
+  if (compatOnly.value) list = list.filter((a) => compatOf(a) !== false)
+  return list
 })
 
 /** 目标项目已安装的市场资产 ID */
@@ -100,18 +153,22 @@ async function loadBrowse() {
   }
 }
 
-/** 异步拉取列表资产的最新版本号并填充(失败不影响列表展示) */
+/** 异步拉取列表资产的最新 release 信息并填充(版本/兼容范围/发布日期;失败不影响列表展示) */
 async function hydrateVersions(list: MarketAsset[]) {
   const ids = list.map((a) => a.assetId).filter((id) => typeof id === 'string' && id.includes('/'))
   if (!ids.length) return
   try {
-    const map = await window.services.getLatestVersions(ids)
+    const map = await window.services.getReleaseInfos(ids)
     for (const a of list) {
-      const v = map[a.assetId]
-      if (v) a.versionString = v
+      const info = map[a.assetId]
+      if (!info) continue
+      if (info.version) a.versionString = info.version
+      a.minGodot = info.minGodot || undefined
+      a.maxGodot = info.maxGodot || undefined
+      a.releaseCreated = info.created || undefined
     }
   } catch {
-    // 版本号拉取失败时静默跳过
+    // 信息拉取失败时静默跳过
   }
 }
 
@@ -141,6 +198,7 @@ watch(query, () => {
 
 onBeforeUnmount(() => {
   if (searchTimer) clearTimeout(searchTimer)
+  window.removeEventListener('keydown', onKeydown)
 })
 
 function changeRecentPage(delta: number) {
@@ -165,12 +223,18 @@ const target = computed(() => projects.value.find((p) => p._id === targetId.valu
 onMounted(() => {
   projects.value = window.ztools.db.allDocs('godot/project/') as any[]
   projects.value.sort((a, b) => (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0))
+  versions.value = window.ztools.db.allDocs('godot/version/') as any[]
   if (projects.value.length) {
     targetId.value = projects.value[0]._id
     reloadAddons()
   }
   loadBrowse()
+  window.addEventListener('keydown', onKeydown)
 })
+
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && relPicker.value) relPicker.value = null
+}
 
 function onTargetChange() {
   reloadAddons()
@@ -242,13 +306,15 @@ function percent(p: { received?: number, total?: number }): number {
   return Math.min(100, ((p.received || 0) / p.total) * 100)
 }
 
-async function install(asset: MarketAsset) {
+/** 安装插件;version 指定 release 版本(版本选择器),缺省为最新 */
+async function install(asset: MarketAsset, version?: string) {
   if (!targetId.value || installing.value) return
   installing.value = { assetId: asset.assetId, percent: 0, stage: '下载中' }
   const r = await window.services.installAsset(
     {
       projectId: targetId.value,
       assetId: asset.assetId,
+      version,
       assetMeta: {
         title: asset.title,
         author: asset.author,
@@ -272,11 +338,40 @@ async function install(asset: MarketAsset) {
   )
   installing.value = null
   if (r.ok) {
-    notify(`已安装 ${r.addon?.title}${r.addon?.enabled ? '(已启用)' : ''}`)
+    notify(`已安装 ${r.addon?.title}${version ? ` ${r.addon?.versionString}` : ''}${r.addon?.enabled ? '(已启用)' : ''}`)
     reloadAddons()
   } else {
     notify(r.error || '安装失败')
   }
+}
+
+// ---------- 版本选择器 ----------
+
+type ReleaseRow = { version: string, created: string, stable: boolean, minGodot: string, maxGodot: string, size: number }
+
+const relPicker = ref<{ asset: MarketAsset, list: ReleaseRow[], loading: boolean, error: string } | null>(null)
+
+async function openPicker(a: MarketAsset) {
+  if (installing.value) return
+  relPicker.value = { asset: a, list: [], loading: true, error: '' }
+  try {
+    const list = await window.services.listAssetReleases(a.assetId)
+    if (relPicker.value?.asset.assetId !== a.assetId) return
+    relPicker.value.list = list
+  } catch (e: any) {
+    if (relPicker.value?.asset.assetId !== a.assetId) return
+    relPicker.value.error = e?.message || String(e)
+  } finally {
+    if (relPicker.value?.asset.assetId === a.assetId) relPicker.value.loading = false
+  }
+}
+
+/** 从版本选择器安装指定版本 */
+function installFromPicker(r: ReleaseRow) {
+  const a = relPicker.value?.asset
+  if (!a || installing.value) return
+  relPicker.value = null
+  install(a, r.version)
 }
 </script>
 
@@ -308,6 +403,7 @@ async function install(asset: MarketAsset) {
             <select v-model="targetId" class="tb-select" @change="onTargetChange">
               <option v-for="p in projects" :key="p._id" :value="p._id">{{ p.name }}</option>
             </select>
+            <span v-if="targetGodot" class="tb-gver" title="该项目绑定的 Godot 版本">Godot {{ targetGodot }}</span>
           </label>
           <div class="search-box">
             <Icon name="search" :size="13" class="sb-icon" />
@@ -339,6 +435,15 @@ async function install(asset: MarketAsset) {
             </button>
           </div>
           <span class="grow"></span>
+          <div class="compat-seg" title="按目标项目的 Godot 版本筛选兼容插件">
+            <button :class="{ on: !compatOnly }" @click="compatOnly = false">全部</button>
+            <button
+              :class="{ on: compatOnly }"
+              :disabled="!targetGodot"
+              :title="targetGodot ? `仅显示兼容 Godot ${targetGodot} 的插件` : '项目未绑定 Godot 版本'"
+              @click="compatOnly = true"
+            >仅满足版本</button>
+          </div>
         </div>
       </div>
 
@@ -399,6 +504,7 @@ async function install(asset: MarketAsset) {
                 {{ a.title }}
                 <Icon name="external" :size="10" />
               </span>
+              <span v-if="isNew(a)" class="badge-new" title="最新发布 30 天内">新品</span>
               <span v-if="a.versionString" class="asset-ver" :title="a.versionString">v{{ fmtVer(a.versionString) }}</span>
             </div>
           </div>
@@ -407,25 +513,44 @@ async function install(asset: MarketAsset) {
             <span v-if="a.rating && a.rating >= 20" class="rating" :title="`商店评分 ${starsOf(a.rating)} / 5`">
               <Icon name="star" :size="10" :stroke-width="2.2" /> {{ starsOf(a.rating) }}
             </span>
+            <span
+              v-if="godotRange(a)"
+              class="gver"
+              :class="{ bad: compatOf(a) === false }"
+              :title="compatOf(a) === false ? `需要 ${godotRange(a)},当前项目为 Godot ${targetGodot || '未知'}` : `兼容 ${godotRange(a)}`"
+            >{{ godotRange(a) }}<template v-if="compatOf(a) === false"> · 项目 {{ targetGodot || '?' }}</template></span>
             <span v-if="installedIds.has(a.assetId)" class="tag ok">已安装</span>
           </div>
           <div class="asset-author">{{ a.author }}</div>
           <div class="asset-desc" :title="a.description">{{ a.description }}</div>
-          <button
-            v-if="installing && installing.assetId === a.assetId"
-            class="btn small asset-install busy"
-            disabled
-          >
-            <span class="spin"></span>
-            {{ installing.stage }} {{ installing.percent.toFixed(0) }}%
-          </button>
-          <button
-            v-else
-            class="btn small primary asset-install"
-            :disabled="!!installing"
-            :title="target ? `安装到「${target.name}」(可在工具栏切换)` : '安装'"
-            @click="install(a)"
-          ><Icon name="download" :size="12" /> 安装</button>
+          <div class="install-row">
+            <button
+              v-if="installing && installing.assetId === a.assetId"
+              class="btn small asset-install busy"
+              disabled
+            >
+              <span class="spin"></span>
+              {{ installing.stage }} {{ installing.percent.toFixed(0) }}%
+            </button>
+            <button
+              v-else-if="installedIds.has(a.assetId)"
+              class="btn small asset-install ok"
+              disabled
+            >已安装</button>
+            <button
+              v-else
+              class="btn small primary asset-install"
+              :disabled="!!installing"
+              :title="target ? `安装最新版到「${target.name}」` : '安装'"
+              @click="install(a)"
+            ><Icon name="download" :size="12" /> 安装</button>
+            <button
+              class="btn small ghost pick-ver"
+              :disabled="!!installing"
+              :title="`选择版本安装${installedIds.has(a.assetId) ? '(覆盖已装版本)' : ''}`"
+              @click="openPicker(a)"
+            ><Icon name="chevron-down" :size="12" /></button>
+          </div>
         </div>
       </div>
 
@@ -435,6 +560,40 @@ async function install(asset: MarketAsset) {
         <span class="page-info">{{ recentPage }} / {{ recentPages }}</span>
         <button class="btn small" :disabled="recentPage >= recentPages" @click="changeRecentPage(1)">下一页 <Icon name="chevron-right" :size="12" /></button>
       </div>
+
+      <!-- 版本选择器模态框 -->
+      <Teleport to="body">
+        <div v-if="relPicker" class="modal-mask" @click.self="relPicker = null">
+          <div class="card modal">
+            <div class="modal-head">
+              <div class="modal-title"><Icon name="puzzle" :size="15" /> 选择版本 · {{ relPicker.asset.title }}</div>
+              <span class="grow"></span>
+              <button class="btn small ghost icon-x" title="关闭" @click="relPicker = null">
+                <Icon name="x" :size="14" />
+              </button>
+            </div>
+            <p class="picker-tip">选择要安装的 release 版本,安装会覆盖目标项目中已存在的同名插件。</p>
+            <div v-if="relPicker.loading" class="hint-line"><span class="spin"></span> 加载版本列表…</div>
+            <div v-else-if="relPicker.error" class="card error-box">
+              <Icon name="alert" :size="14" />
+              <span>加载失败:{{ relPicker.error }}</span>
+            </div>
+            <div v-else-if="!relPicker.list.length" class="hint-line">该资产没有可用版本</div>
+            <div v-else class="rel-list">
+              <button v-for="r in relPicker.list" :key="r.version" class="rel-row" @click="installFromPicker(r)">
+                <span class="rel-ver mono">v{{ fmtVer(r.version) }}</span>
+                <span v-if="!r.stable" class="tag warn">测试版</span>
+                <span class="rel-date">{{ r.created.slice(0, 10) }}</span>
+                <span class="rel-godot">
+                  {{ r.minGodot || r.maxGodot ? `Godot ${r.minGodot}${r.maxGodot ? ` ~ ${r.maxGodot}` : '+'}` : '无版本要求' }}
+                </span>
+                <span v-if="r.size" class="rel-size mono">{{ fmtSize(r.size) }}</span>
+                <Icon name="download" :size="13" class="rel-dl" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </Teleport>
     </template>
   </div>
 </template>
@@ -495,6 +654,56 @@ async function install(asset: MarketAsset) {
   border-color: var(--brand);
   background: var(--brand-weak);
   box-shadow: none;
+}
+
+/* 安装目标的 Godot 版本 */
+.tb-gver {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+/* 兼容筛选 seg(全部 / 仅满足版本) */
+.compat-seg {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.compat-seg button {
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: calc(var(--radius-sm) - 1px);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+
+.compat-seg button:not(:disabled):hover {
+  color: var(--text);
+}
+
+.compat-seg button.on {
+  background: var(--surface);
+  color: var(--brand);
+  box-shadow: var(--shadow-sm);
+}
+
+.compat-seg button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ---------- 模式标签 ---------- */
@@ -743,13 +952,52 @@ async function install(asset: MarketAsset) {
   min-height: 37px;
 }
 
-.asset-install {
+/* 安装行:安装按钮 + 版本选择按钮 */
+.install-row {
   margin-top: auto;
-  width: 100%;
+  display: flex;
+  gap: 6px;
+}
+
+.install-row .asset-install {
+  flex: 1;
+  min-width: 0;
 }
 
 .asset-install.busy {
   color: var(--brand);
+}
+
+.pick-ver {
+  flex-shrink: 0;
+}
+
+/* 新品徽标 */
+.badge-new {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--brand);
+  background: var(--brand-weak);
+  border: 1px solid var(--brand);
+  width: fit-content;
+  margin-top: 3px;
+}
+
+/* Godot 兼容版本范围 */
+.gver {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.gver.bad {
+  color: var(--danger);
 }
 
 /* ---------- 分页 ---------- */
@@ -764,5 +1012,117 @@ async function install(asset: MarketAsset) {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--text-3);
+}
+
+/* ---------- 版本选择器模态框 ---------- */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(18, 26, 40, 0.45);
+}
+
+.modal {
+  width: min(520px, calc(100vw - 48px));
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  padding: 18px 20px;
+  box-shadow: var(--shadow-lift);
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.modal-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon-x {
+  width: 26px;
+  padding: 3px 0;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.picker-tip {
+  margin: 0 0 10px;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+.rel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.rel-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  font-size: 12.5px;
+}
+
+.rel-row:hover {
+  border-color: var(--brand);
+  background: var(--brand-weak);
+}
+
+.rel-ver {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text);
+  min-width: 74px;
+  text-align: left;
+}
+
+.rel-date {
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.rel-godot {
+  flex: 1;
+  font-size: 11.5px;
+  color: var(--text-2);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rel-size {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.rel-dl {
+  color: var(--brand);
+  flex-shrink: 0;
 }
 </style>

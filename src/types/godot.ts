@@ -125,6 +125,11 @@ export interface MarketAsset {
   /** 商店搜索结果不逐资产提供版本,安装时从 releases 端点实时获取 */
   versionString: string
   godotVersion: string
+  /** 最新 release 兼容的 Godot 版本范围(列表页由 getReleaseInfos 补齐) */
+  minGodot?: string
+  maxGodot?: string
+  /** 最新 release 发布日期(ISO 日期串,判断新品用) */
+  releaseCreated?: string
   /** 商店评分(0-50,除以 10 得星级) */
   rating: number
   iconUrl?: string

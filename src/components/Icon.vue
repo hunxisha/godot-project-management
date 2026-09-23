@@ -32,6 +32,7 @@ const ICONS: Record<string, string> = {
   bookmark: 'M7 3.5h10A1.5 1.5 0 0 1 18.5 5v16l-6.5-3.7L5.5 21V5A1.5 1.5 0 0 1 7 3.5z',
   'chevron-left': 'M14.5 5.5L8 12l6.5 6.5',
   'chevron-right': 'M9.5 5.5L16 12l-6.5 6.5',
+  'chevron-down': 'M5.5 9.5L12 16l6.5-6.5',
   alert: 'M12 3.6L21.4 20H2.6zM12 9.8v4.7M12 17.3v.2',
   check: 'M4.5 12.5l5 5 10-11',
   x: 'M6 6l12 12M18 6L6 18',

@@ -87,17 +87,22 @@ async function searchAssets(filter, godotVersion, page = 1) {
   }
 }
 
-/** 获取资产详情:含最新 release 的版本与下载直链(下载链接为带签名的临时直链,安装时实时获取) */
-async function getAssetDetail(assetId) {
+/**
+ * 获取资产详情:含 release 的版本与下载直链(下载链接为带签名的临时直链,安装时实时获取)。
+ * version 指定时取该版本(找不到时回退最新),否则取最新 release。
+ */
+async function getAssetDetail(assetId, version) {
   const [pub, slug] = splitAssetId(assetId)
   const detail = await getJson(`${API_BASE}/assets/${pub}/${slug}/`)
   const releases = await getJson(`${API_BASE}/releases/${pub}/${slug}/`).catch(() => [])
-  const latest = latestRelease(releases) || {}
+  let rel = version ? releases.find((r) => String(r.version) === String(version)) : latestRelease(releases)
+  if (version && !rel) rel = latestRelease(releases)
+  if (!rel) rel = {}
   return {
     assetId,
     title: detail.name,
-    versionString: latest.version || '',
-    downloadUrl: latest.download_url || '',
+    versionString: rel.version || '',
+    downloadUrl: rel.download_url || '',
     description: detail.description,
     tags: (detail.tags || []).map((t) => t.display_name)
   }
@@ -239,14 +244,15 @@ function listAddons(projectId) {
 
 /**
  * 下载安装市场插件到项目 addons/。
+ * opts: { projectId, assetId, assetMeta, version? } version 指定安装的 release 版本。
  * onProgress({ stage: 'downloading'|'extracting', received, total })
  */
-async function installAsset({ projectId, assetId, assetMeta }, onProgress) {
+async function installAsset({ projectId, assetId, assetMeta, version }, onProgress) {
   let tmpDir = ''
   try {
     const project = getDoc(projectId)
     if (!project) return { ok: false, error: '项目不存在' }
-    const detail = await getAssetDetail(assetId)
+    const detail = await getAssetDetail(assetId, version)
     if (!detail.downloadUrl) return { ok: false, error: '资产没有下载地址' }
 
     const addonsDir = path.join(project.path, 'addons')
@@ -417,16 +423,28 @@ async function verifyApiKey(key) {
   return { authenticated: true, name: info.name || info.id || '已认证用户' }
 }
 
-// ---------- 批量版本号(列表展示用) ----------
+// ---------- 批量版本信息(列表展示用) ----------
 
+/** assetId → { version, minGodot, maxGodot, created } 的内存缓存 */
 const versionCache = new Map()
 
+/** release 精简信息 */
+function pickRelease(r) {
+  if (!r) return { version: '', minGodot: '', maxGodot: '', created: '' }
+  return {
+    version: String(r.version || ''),
+    minGodot: r.min_godot_version != null ? String(r.min_godot_version) : '',
+    maxGodot: r.max_godot_version != null ? String(r.max_godot_version) : '',
+    created: r.created || ''
+  }
+}
+
 /**
- * 批量获取资产最新版本号(并发受限、带内存缓存,失败静默跳过)。
+ * 批量获取资产最新 release 信息(并发受限、带内存缓存,失败静默跳过)。
  * @param {string[]} assetIds
- * @returns {Promise<Record<string, string>>} { [assetId]: version }
+ * @returns {Promise<Record<string, { version, minGodot, maxGodot, created }>>}
  */
-async function getLatestVersions(assetIds) {
+async function getReleaseInfos(assetIds) {
   const ids = [...new Set(assetIds)].filter(
     (id) => typeof id === 'string' && id.includes('/') && !versionCache.has(id)
   )
@@ -438,10 +456,9 @@ async function getLatestVersions(assetIds) {
       try {
         const [pub, slug] = splitAssetId(id)
         const releases = await getJson(`${API_BASE}/releases/${pub}/${slug}/`)
-        const latest = latestRelease(releases)
-        versionCache.set(id, latest ? String(latest.version || '') : '')
+        versionCache.set(id, pickRelease(latestRelease(releases)))
       } catch (e) {
-        versionCache.set(id, '')
+        versionCache.set(id, pickRelease(null))
       }
     }
   }
@@ -453,6 +470,23 @@ async function getLatestVersions(assetIds) {
   return out
 }
 
+/** 列出资产全部 release(版本选择用),按发布时间倒序 */
+async function listAssetReleases(assetId) {
+  const [pub, slug] = splitAssetId(assetId)
+  const releases = await getJson(`${API_BASE}/releases/${pub}/${slug}/`)
+  const list = [...(Array.isArray(releases) ? releases : [])].sort((a, b) =>
+    String(b.created).localeCompare(String(a.created))
+  )
+  return list.map((r) => ({
+    version: String(r.version || ''),
+    created: r.created || '',
+    stable: !!r.stable,
+    minGodot: r.min_godot_version != null ? String(r.min_godot_version) : '',
+    maxGodot: r.max_godot_version != null ? String(r.max_godot_version) : '',
+    size: r.size || 0
+  }))
+}
+
 module.exports = {
   searchAssets,
   listFeatured,
@@ -460,7 +494,8 @@ module.exports = {
   listFavorites,
   toggleFavorite,
   isFavorite,
-  getLatestVersions,
+  getReleaseInfos,
+  listAssetReleases,
   verifyApiKey,
   getAssetDetail,
   listAddons,
