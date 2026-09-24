@@ -9,12 +9,58 @@ const path = require('node:path')
 const zlib = require('node:zlib')
 const { forEachSliced, yieldToLoop, checkCancel } = require('./fsutil')
 
-/** 确保目录存在 */
+/**
+ * zip 中央目录条目。
+ * @typedef {{name: string, method: number, compSize: number, rawSize: number, dataOff: number}} ZipEntry
+ */
+
+/**
+ * createZip 待写出的中央目录条目。
+ * 与读取端的 ZipEntry 字段不同:打包时还持有原始 nameBuf / crc / 偏移量。
+ * @typedef {{
+ *   nameBuf: ByteBuf,
+ *   crc: number,
+ *   method: number,
+ *   time: number,
+ *   date: number,
+ *   compSize: number,
+ *   rawSize: number,
+ *   offset: number,
+ * }} CentralEntry
+ */
+
+/**
+ * 这里用到的 Buffer 能力子集。
+ * 完整的 Buffer 类型需要 node 声明(见 tsconfig.preload.json 里「边界声明」的说明);
+ * 在那之前用结构类型描述实际依赖的这几个方法,而不是标 any —— 后者会让拼错方法名也检查不出来。
+ * @typedef {{
+ *   length: number,
+ *   readUInt8: (off?: number) => number,
+ *   readUInt16LE: (off?: number) => number,
+ *   readUInt32LE: (off?: number) => number,
+ *   writeUInt8: (v: number, off?: number) => number,
+ *   writeUInt16LE: (v: number, off?: number) => number,
+ *   writeUInt32LE: (v: number, off?: number) => number,
+ *   slice: (s?: number, e?: number) => any,
+ *   subarray: (s?: number, e?: number) => any,
+ *   toString: (enc?: string) => string,
+ *   [i: number]: number,
+ * }} ByteBuf
+ */
+
+/**
+ * 确保目录存在。
+ * @param {string} dir
+ */
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true })
 }
 
-/** 定位 EOCD(End Of Central Directory)记录:从缓冲区尾部向前扫描签名 */
+/**
+ * 定位 EOCD(End Of Central Directory)记录:从缓冲区尾部向前扫描签名。
+ * @param {ByteBuf} buf
+ * @returns {number} EOCD 在 buf 内的偏移
+ */
 function findEOCD(buf) {
   const min = Math.max(0, buf.length - 65557) // EOCD + 最大注释长度 65535
   for (let i = buf.length - 22; i >= min; i--) {
@@ -29,7 +75,8 @@ const EOCD_WINDOW = 65557
 /**
  * 从文件句柄读取并解析中央目录。
  * 只读文件尾部窗口 + 中央目录区,不把整个 zip 载入内存(项目备份可能达数 GB)。
- * @returns {{fd:number, size:number, count:number, cd:Buffer}}
+ * @param {string} zipPath
+ * @returns {{fd:number, size:number, count:number, cd:ByteBuf}}
  */
 function openCentralDirectory(zipPath) {
   const fd = fs.openSync(zipPath, 'r')
@@ -59,8 +106,9 @@ function openCentralDirectory(zipPath) {
 }
 
 /**
- * 解析中央目录条目。
- * @returns {{name:string, method:number, compSize:number, rawSize:number, dataOff:number}[]}
+ * 解析中央目录条目。**打开文件句柄且不关闭**,调用方负责 close。
+ * @param {string} zipPath
+ * @returns {{entries: ZipEntry[], fd: number, size: number}}
  */
 function parseEntries(zipPath) {
   const { fd, size, count, cd } = openCentralDirectory(zipPath)
@@ -110,6 +158,7 @@ function parseEntries(zipPath) {
 
 /**
  * 列出 zip 内的条目名(用于校验备份内容是否完整)。
+ * @param {string} zipPath
  * @returns {{entries:string[], count:number}}
  */
 function readZipEntries(zipPath) {
@@ -196,6 +245,8 @@ async function extractZip(zipPath, destDir, opts) {
 
 /**
  * 校验 zip 是否可解析且包含指定条目(如 project.godot)。
+ * @param {string} zipPath
+ * @param {string} [requiredEntry]
  * @returns {{ok:boolean, entries:string[], error?:string}}
  */
 function inspectZip(zipPath, requiredEntry) {
@@ -211,9 +262,14 @@ function inspectZip(zipPath, requiredEntry) {
   }
 }
 
-/** 递归求目录字节大小 */
+/**
+ * 递归求目录字节大小。
+ * @param {string} dir
+ * @returns {number}
+ */
 function dirSize(dir) {
   let total = 0
+  /** @param {string} d */
   const walk = (d) => {
     for (const ent of fs.readdirSync(d, { withFileTypes: true })) {
       const p = path.join(d, ent.name)
@@ -246,13 +302,22 @@ const CRC_TABLE = (() => {
   return t
 })()
 
+/**
+ * CRC-32(zip 条目校验用)。
+ * @param {ByteBuf} buf
+ * @returns {number}
+ */
 function crc32(buf) {
   let c = 0xFFFFFFFF
   for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xFF] ^ (c >>> 8)
   return (c ^ 0xFFFFFFFF) >>> 0
 }
 
-/** Date → ZIP 的 DOS 时间字段 */
+/**
+ * Date → ZIP 的 DOS 时间字段。
+ * @param {Date} d
+ * @returns {{time: number, date: number}}
+ */
 function dosDateTime(d) {
   const year = Math.max(1980, d.getFullYear())
   const time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)
@@ -272,7 +337,9 @@ function dosDateTime(d) {
  *   exclude?: (name:string,isDir:boolean) => boolean,
  *   level?: 1|6|9,
  *   token?: object,
- *   phase?: string
+ *   phase?: string,
+ *   sliceFiles?: number,
+ *   sliceMs?: number
  * }} [opts] includeCache=false 时跳过 .godot;exclude 命中则跳过该目录
  * @returns {Promise<{fileCount:number, bytes:number}>}
  */
@@ -282,7 +349,12 @@ async function createZip(srcDir, zipPath, opts) {
   const exclude = o.exclude
   const level = o.level === 1 || o.level === 9 ? o.level : 6
 
+  /** @type {{abs: string, rel: string}[]} */
   const files = []
+  /**
+   * @param {string} dir
+   * @param {string} rel
+   */
   const walk = (dir, rel) => {
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
       if (exclude && exclude(ent.name, ent.isDirectory())) continue
@@ -297,6 +369,7 @@ async function createZip(srcDir, zipPath, opts) {
   const total = files.length
 
   const fd = fs.openSync(zipPath, 'w')
+  /** @type {CentralEntry[]} */
   const central = []
   let offset = 0
   try {

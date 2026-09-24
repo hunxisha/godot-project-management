@@ -8,8 +8,22 @@ const { trashPath } = require('./fsutil')
 const IGNORE_DIRS = new Set(['.git', '.godot', 'node_modules', '.import', 'build', 'dist', 'addons'])
 
 /**
+ * @typedef {import('../../../src/types/godot').GodotProject} ProjectDoc
+ */
+
+/**
+ * @typedef {object} ProjectGodotInfo project.godot 里我们关心的字段
+ * @property {string} name
+ * @property {number} configVersion
+ * @property {string} [engineVersion]
+ * @property {string} [icon]
+ * @property {boolean} hasPlugins
+ */
+
+/**
  * 解析 project.godot(Godot 配置为 INI 风格,含 PackedStringArray 值)。
- * 返回 { name, configVersion, engineVersion?, icon?, hasPlugins }
+ * @param {string} rootDir
+ * @returns {ProjectGodotInfo}
  */
 function parseProjectGodot(rootDir) {
   const file = path.join(rootDir, 'project.godot')
@@ -50,26 +64,43 @@ function parseProjectGodot(rootDir) {
   return { name: name || path.basename(rootDir), configVersion, engineVersion, icon, hasPlugins }
 }
 
+/**
+ * 去掉 INI 值外层的引号。
+ * @param {string} v
+ * @returns {string}
+ */
 function unquote(v) {
   const m = /^"(.*)"$/.exec(v.trim())
   return m ? m[1] : v.trim()
 }
 
-/** 项目根目录:输入可能是项目目录,也可能是 project.godot 文件本身 */
+/**
+ * 项目根目录:输入可能是项目目录,也可能是 project.godot 文件本身。
+ * @param {string} inputPath
+ * @returns {string}
+ */
 function resolveProjectRoot(inputPath) {
   const stat = fs.statSync(inputPath)
   if (stat.isFile()) return path.dirname(inputPath)
   return inputPath
 }
 
-/** 项目文档 id(路径 md5) */
+/**
+ * 项目文档 id(路径 md5)。
+ * @param {string} rootDir
+ * @returns {string}
+ */
 function projectDocId(rootDir) {
   const abs = path.resolve(rootDir)
   const hash = crypto.createHash('md5').update(abs).digest('hex')
   return `godot/project/${hash}`
 }
 
-/** 为项目自动选择引擎版本:engineVersion major.minor → config_version 兜底 */
+/**
+ * 为项目自动选择引擎版本:engineVersion major.minor → config_version 兜底。
+ * @param {{engineVersion?: string, configVersion?: number}} project
+ * @returns {string | undefined} 命中版本的文档 id
+ */
 function matchVersion(project) {
   const versions = listDocs('godot/version/')
   if (!versions.length) return undefined
@@ -95,7 +126,12 @@ function matchVersion(project) {
   return pool[0].id
 }
 
-/** 添加项目,返回 { ok, error?, project?, exists? } */
+/**
+ * 添加项目(已存在时更新并保留收藏/最近打开等本地字段)。
+ * @param {string} inputPath 项目目录或 project.godot 文件路径
+ * @param {string} [versionIdOverride] 强制绑定的引擎版本 id
+ * @returns {{ok: boolean, error?: string, project?: ProjectDoc, exists?: boolean}}
+ */
 function addProject(inputPath, versionIdOverride) {
   try {
     const rootDir = resolveProjectRoot(inputPath)
@@ -148,7 +184,14 @@ const DEFAULT_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="128" he
 /**
  * 新建项目:在 parentDir 下创建以 name 命名的目录,写入 project.godot 与默认图标,
  * 然后注册到项目列表(复用 addProject 的解析与自动绑定逻辑)。
- * opts: { name, parentDir, renderer, versionTag?, versionId? }
+ * @param {{
+ *   name: string,
+ *   parentDir: string,
+ *   renderer: 'forward_plus'|'mobile'|'gl_compatibility',
+ *   versionTag?: string,
+ *   versionId?: string,
+ * }} opts
+ * @returns {{ok: boolean, error?: string, project?: ProjectDoc, exists?: boolean}}
  */
 function createProject(opts) {
   try {
@@ -207,9 +250,18 @@ function createProject(opts) {
   }
 }
 
-/** 递归扫描目录下的项目(忽略 .git/.godot 等,深度 5) */
+/**
+ * 递归扫描目录下的项目(忽略 .git/.godot 等,深度 5)。
+ * @param {string} rootDir
+ * @returns {string[]} 含 project.godot 的目录路径
+ */
 function scanProjects(rootDir) {
+  /** @type {string[]} */
   const found = []
+  /**
+   * @param {string} dir
+   * @param {number} depth
+   */
   const walk = (dir, depth) => {
     if (depth > 5) return
     let entries = []
@@ -234,6 +286,9 @@ function scanProjects(rootDir) {
 /**
  * 删除项目记录;deleteFiles=true 时同时删除项目文件夹。
  * Windows 下移入回收站(可恢复),其他平台永久删除。
+ * @param {string} id
+ * @param {boolean} [deleteFiles]
+ * @returns {{ok: boolean, error?: string, filesDeleted?: boolean}}
  */
 function removeProject(id, deleteFiles) {
   try {
@@ -254,12 +309,24 @@ function removeProject(id, deleteFiles) {
 }
 
 /**
+ * @typedef {object} MarketSourceRecord 市场来源记录(godot/asset/{projectId}/{assetId})
+ * @property {string} [_id]
+ * @property {string} [_rev]
+ * @property {string} [assetId]
+ * @property {string[]} [dirNames]
+ * @property {string} [projectId]
+ */
+
+/**
  * 把某个 addon 目录在「市场来源」上的记录过户到目标项目。
  *
  * 为什么需要:插件目录本身不携带来源信息,来源记录在 `godot/asset/{projectId}/{assetId}`。
  * 只复制目录会让目标项目把它当成手动放置的插件 —— 显示「未知来源」,并失去商店链接与
  * 版本管理入口。目标已有同 assetId 记录时只补 dirNames,不覆盖目标自己的版本信息。
  *
+ * @param {MarketSourceRecord[]} srcRecords 源项目的市场来源记录(godot/asset/{srcProjectId}/*)
+ * @param {string} dirName 要过户的插件目录名
+ * @param {string} targetProjectId 目标项目文档 id
  * @returns {boolean} 是否新建/补充了记录
  */
 function adoptMarketRecord(srcRecords, dirName, targetProjectId) {
@@ -283,7 +350,11 @@ function adoptMarketRecord(srcRecords, dirName, targetProjectId) {
   return true
 }
 
-/** 复制插件目录到另一个项目(不自动启用) */
+/**
+ * 复制插件目录到另一个项目(不自动启用)。
+ * @param {{sourceProjectId: string, dirNames: string[], targetProjectId: string}} opts
+ * @returns {{ok: boolean, error?: string, copied?: number, skipped?: string[], adopted?: number, targetName?: string}}
+ */
 function copyAddonsToProject({ sourceProjectId, dirNames, targetProjectId }) {
   try {
     const src = getDoc(sourceProjectId)

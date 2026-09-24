@@ -47,7 +47,10 @@ const queue = createTaskQueue({
   terminalPhases: TERMINAL_PHASES
 })
 
-/** 任务快照(按 startedAt 升序,浅拷贝) */
+/**
+ * 任务快照(按 startedAt 升序,浅拷贝)。
+ * @returns {import('../../../src/types/godot').BackupTask[]}
+ */
 function listBackupTasks() {
   return queue.list()
 }
@@ -200,7 +203,7 @@ function normalizeOpts(opts) {
  * @param {string} projectId
  * @param {{mode?:'zip'|'copy', destDir:string, includeCache?:boolean, level?:1|6|9, label?:string, exclude?:string[]}} opts
  * @param {(p:{phase:string,done:number,total:number,current:string,bytes:number}) => void} [onProgress]
- * @returns {Promise<object>} 备份记录(含 missing:false)
+ * @returns {Promise<import('../../../src/types/godot').BackupRecord>} 备份记录(含 missing:false)
  */
 async function backupProject(projectId, opts, onProgress) {
   const o = normalizeOpts(opts)
@@ -343,7 +346,10 @@ function listBackups(arg) {
   return list.map((d) => (withStatus ? { ...d, missing: !existsCached(d.destPath) } : { ...d }))
 }
 
-/** 每个项目最近一份备份(渲染层无需拉全量再折叠) */
+/**
+ * 每个项目最近一份备份(渲染层无需拉全量再折叠)。
+ * @returns {Record<string, import('../../../src/types/godot').BackupRecord>}
+ */
 function listLatestBackups() {
   /** @type {Record<string, import('../../../src/types/godot').BackupRecord>} */
   const map = {}
@@ -504,7 +510,7 @@ function deleteBackups(backupIds, opts) {
 /**
  * 清理备份。**默认 dryRun:true**,只返回将被删除的清单,必须显式传 dryRun:false 才真正删除。
  * @param {{keepPerProject?:number, olderThanDays?:number, dryRun?:boolean}} opts
- * @returns {{ok:boolean, dryRun:boolean, targets:object[], totalSize:number, removed?:number, failed?:object[], error?:string}}
+ * @returns {{ok:boolean, dryRun:boolean, targets:import('../../../src/types/godot').BackupRecord[], totalSize:number, removed?:number, failed?:{id:string,error:string}[], error?:string}}
  */
 function pruneBackups(opts) {
   const o = opts || {}

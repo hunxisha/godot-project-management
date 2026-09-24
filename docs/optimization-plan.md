@@ -659,3 +659,30 @@ B. 手写精简的沙箱声明，刻意不声明 `setImmediate`。
 
 顺带把 `extract.js` 的 `extractZip` opts 类型补全（原先写成 `{onProgress?:Function, token?:object}`，
 缺 `phase` / `sliceFiles` / `sliceMs`，是 `backup.js` 那个 TS2353 的根因）。
+
+### 阶段 4 实施记录 · 第六批（P0-1：`projects` / `extract`）
+
+| 文件 | 错误数 | 结果 |
+|---|---:|---|
+| `projects.js` | 30 → **3** | 全为 node 边界 |
+| `extract.js` | 38 → **11** | 3 个 node 边界 + 8 个 `Buffer` 全局 |
+| **总计** | **204 → 165** | 护栏（backup 101 / addons 40）全部仍绿 |
+
+**查出并修正的两处「JSDoc 写错了」**（不是缺注解，是注解与实现不符）：
+
+1. **`extract.parseEntries`** 的 `@returns` 描述的是 **entries 数组**，而它实际返回
+   `{ entries, fd, size }`。于是 `readZipEntries` 里 `fd` / `size` 全报「不存在」——
+   看起来像代码问题，其实是注解错。改正后这批错误一次性消失。
+2. **`createZip` 里的 `central` 数组与读取端 `ZipEntry` 字段不同**（打包时还持有
+   `nameBuf` / `crc` / `offset` / `time` / `date`）。我先按 `ZipEntry[]` 标注，反而新增 8 个错误；
+   补一个独立的 `CentralEntry` typedef 才对。
+
+**一处「注解太松」被下游发现**：`addProject` / `createProject` 的返回 `project` 我先标成
+`object`，结果 `services.js`（契约要求 `GodotProject`）与 `backup.js`（读 `project.name`）
+同时报错。收紧为 `import('...godot').GodotProject` 后，两处一并消失 —— 这正是
+「共享类型契约」的价值：太松的注解不会静默放过。
+
+**关于 `Buffer`**：`extract.js` 里有 8 个 `Cannot find name 'Buffer'`，属边界依赖。没有标 `any`，
+而是定义了一个描述「实际用到的 Buffer 能力子集」的结构类型 `ByteBuf`（含索引签名与方法签名）。
+它让 `buf[i]`、`buf.readUInt32LE()` 这类用法仍受检查，同时明确记录了我们对 Buffer 的真实依赖面
+—— 将来无论走哪条边界路线，这份清单都有用。
