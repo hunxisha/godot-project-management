@@ -1,14 +1,16 @@
-// preload 服务面契约测试:window.services 与 src/env.d.ts 的 Services 接口必须一致。
+// preload 服务面契约测试:window.services 与类型契约 Services 必须逐项一致。
 //
-// 为什么需要:渲染层访问宿主能力只有一条路 —— window.services(定义在
-// src-ztools/preload/services.js 的 47 个透传方法),而它的类型是**手写**在
-// src/env.d.ts 的 interface Services 里的。两边一旦漂移,渲染层就会拿到
-// 「类型说有、运行时没有」的方法(或缺类型断言),而 TypeScript 无法发现,
-// 因为它只看得见 env.d.ts 那一侧。
+// 为什么需要:渲染层访问宿主能力只有一条路 —— window.services(47 个透传方法,实现在
+// src-ztools/preload/services.js),其类型契约在 src/types/services.ts。
 //
-// 这个测试把「两处手写」变成「一处实现 + 一处声明 + 一个断言」:
-//   - 只改 services.js 忘了改 env.d.ts → 报「声明缺失」
-//   - 只改 env.d.ts 忘了实现         → 报「实现缺失」
+// 演进说明:这份契约原先手写在 src/env.d.ts,与 services.js 各写一遍、靠本测试比对。
+// 现在 services.js 用 `@type {import('../../src/types/services').Services}` 直接引用它,
+// **编译器**已能强制 47 个方法一个不多一个不少(见 docs/optimization-plan.md 的 P0-2)。
+// 这个测试因此从「唯一的护栏」变成「双保险」:
+//   · 编译器管签名是否匹配(本测试看不见的那部分);
+//   · 本测试管运行时对象真的有这些键(编译产物若被手改/降级打包,这里会立刻发现)。
+//
+// 解析对象已从 env.d.ts 改为 src/types/services.ts。
 //
 // 用法:
 //   node src-ztools/preload/lib/__tests__/services.test.js
@@ -17,7 +19,7 @@ const path = require('node:path')
 
 const ROOT = path.resolve(__dirname, '../../../..')
 const SERVICES = path.resolve(ROOT, 'src-ztools/preload/services.js')
-const DTS = path.resolve(ROOT, 'src/env.d.ts')
+const DTS = path.resolve(ROOT, 'src/types/services.ts')
 
 let pass = 0
 const failures = []
@@ -48,9 +50,9 @@ if (!fs.existsSync(DTS)) {
   process.exit(2)
 }
 const dts = fs.readFileSync(DTS, 'utf-8')
-const start = dts.indexOf('interface Services {')
+const start = dts.indexOf('export interface Services {')
 if (start < 0) {
-  console.error('env.d.ts 中找不到 interface Services')
+  console.error('src/types/services.ts 中找不到 export interface Services')
   process.exit(2)
 }
 const end = dts.indexOf('\n}', start)
@@ -62,7 +64,7 @@ const declaredKeys = [...block.matchAll(/^ {2}([A-Za-z_][A-Za-z0-9_]*)\s*[(<]/gm
 
 section('1. 解析结果')
 ok(implKeys.length > 0, `services.js 导出 ${implKeys.length} 个方法`, String(implKeys.length))
-ok(declaredKeys.length > 0, `env.d.ts 声明 ${declaredKeys.length} 个方法`, String(declaredKeys.length))
+ok(declaredKeys.length > 0, `Services 契约声明 ${declaredKeys.length} 个方法`, String(declaredKeys.length))
 
 section('2. 实现与声明逐项一致')
 
@@ -72,7 +74,7 @@ const declSet = new Set(declaredKeys)
 const missingImpl = declaredKeys.filter((k) => !implSet.has(k))
 ok(
   missingImpl.length === 0,
-  'env.d.ts 声明的每个方法都有实现',
+  'Services 契约声明的每个方法都有实现',
   missingImpl.length ? `缺少实现: ${missingImpl.join(', ')}` : ''
 )
 
@@ -80,7 +82,7 @@ const missingDecl = implKeys.filter((k) => !declSet.has(k))
 ok(
   missingDecl.length === 0,
   'services.js 的每个方法都有类型声明',
-  missingDecl.length ? `缺少声明(请补 env.d.ts 的 interface Services): ${missingDecl.join(', ')}` : ''
+  missingDecl.length ? `缺少声明(请补 src/types/services.ts 的 export interface Services): ${missingDecl.join(', ')}` : ''
 )
 
 ok(implKeys.length === declaredKeys.length, '两侧数量一致', `实现 ${implKeys.length} / 声明 ${declaredKeys.length}`)

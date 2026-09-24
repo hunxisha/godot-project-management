@@ -98,7 +98,7 @@ npm test           # 全部 1235 项断言（其中 2 项默认跳过，见下�
 | `npm run test:theme` | 主题令牌完整性、设计约束、10 种组合的 WCAG 对比度 | 134 |
 | `npm run test:preload` | 备份领域层：创建/查询/校验/恢复/取消/清理/删除 | 101（+1 跳过） |
 | `npm run test:preload:sandbox` | 同上，但先删掉 `setImmediate` 以模拟宿主沙箱 | 101（+1 跳过） |
-| `npm run test:preload:unit` | 版本串解析/展示名/平台标识、任务队列语义、文件系统工具与分片让出降级链、HTTP 下载与代理、下载安装编排、`window.services` 与 `env.d.ts` 的契约一致性 | 230 |
+| `npm run test:preload:unit` | 版本串解析/展示名/平台标识、任务队列语义、文件系统工具与分片让出降级链、HTTP 下载与代理、下载安装编排、`window.services` 与类型契约的逐项一致性 | 230 |
 | `npm run test:addons` | 插件来源解析与复制过户（默认 + 沙箱各一遍） | 40 ×2 |
 | `npm run test:renderer` | 渲染层:纯工具(版本兼容/标签分组/头像渐变/格式化)、备份与恢复对话框骨架、市场搜索/浏览/安装、项目列表与新建删除、插件多选/批量/更新/切版本、备份页删除确认与批量备份 | 589 |
 

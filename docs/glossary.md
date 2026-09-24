@@ -55,10 +55,11 @@ graphify 知识图谱抽出了其中 5 组「语义相同、表述不同」的�
 |---|---|---|
 | **渲染层** | Vue 部分（`src/`），跑在 ZTools webview 里 | `src/main.ts` |
 | **preload 层** | CommonJS 的 Node 能力层（`src-ztools/preload/`），跑在渲染进程沙箱内 | `src-ztools/preload/services.js` |
-| **`window.services`** | 渲染层访问 preload 能力的**唯一**出口（47 个方法） | 类型见 `src/env.d.ts`，实现见 `services.js` |
+| **`window.services`** | 渲染层访问 preload 能力的**唯一**出口（47 个方法） | 类型契约见 `src/types/services.ts`，实现见 `src-ztools/preload/services.js` |
 | **bridge** | 渲染层访问 ZTools 宿主 API（db、对话框、通知、shell）的统一出口 | `src/services/bridge.ts` |
 | **任务表** | 长任务（下载/备份/恢复）的注册表 + 快照订阅 + 取消机制 | `src-ztools/preload/lib/taskqueue.js` |
-| **契约测试** | 断言 `window.services` 的 47 个方法与 `env.d.ts` 逐项一致的测试 | `lib/__tests__/services.test.js` |
+| **契约测试** | `window.services` 的 47 个方法与类型契约逐项一致的运行时断言（编译期由 `@type` 强制，这里是双保险） | `lib/__tests__/services.test.js` |
+| **类型契约** | `Services` 接口 —— preload 与渲染层共用的唯一权威定义 | `src/types/services.ts` |
 | **沙箱测试** | 先删掉 `setImmediate` 再跑，模拟 ZTools preload 真实环境 | `npm run test:preload:sandbox` |
 | **`--no-immediate`** | 上述沙箱模拟的开关；**两条路径都要跑**，只跑默认路径会漏掉一整类宿主专属报错 | 同上 |
 

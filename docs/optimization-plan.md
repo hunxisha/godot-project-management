@@ -577,3 +577,36 @@ B. 手写精简的沙箱声明，刻意不声明 `setImmediate`。
 两条都需要那个扫描断言，因为引入 node 类型后类型系统不再会为 `setImmediate` 报警，
 而 `--no-immediate` 沙箱测试只覆盖 backup 路径，新模块误用不会被它抓到。
 **本批未安装任何新依赖**（registry 可达，但换依赖属于需要明确拍板的决定）。
+
+### 阶段 4 实施记录 · 第三批（P0-2 根因解决：类型契约收敛为一份）
+
+原计划 P0-2 的第二步写的是「（可选）由 JSDoc 生成 `services.d.ts`」。实际实施时发现一条
+更简单也更强的路：**把类型契约抽成一个两边都能引用的模块**，于是不需要任何生成步骤。
+
+| 改动 | 说明 |
+|---|---|
+| 新增 `src/types/services.ts` | 把 `Services` / `DownloadParams` / `BackupProgress` 从 `src/env.d.ts` **原样搬过来**并导出；`declare global { Window.services }` 一并搬入（该文件本身是模块，global 增强仍生效） |
+| `src/env.d.ts` | 从 218 行缩到 17 行：只保留 vite/ztools 的类型引用、`*.vue` 模块声明，再 `import './types/services'` 触发 global 声明 |
+| `src-ztools/preload/services.js` | 加一行 `/** @type {import('../../src/types/services').Services} */` |
+| `lib/__tests__/services.test.js` | 解析对象从 `env.d.ts` 改为 `src/types/services.ts`；定位从「唯一的护栏」变为「双保险」 |
+
+**为什么这是更强而非更弱的约束**：加上 `@type` 之后，**编译器**会强制那份对象不多不少地
+实现 47 个方法，签名也要对得上；契约测试只管「运行时对象真有这些键」（防编译产物被手改）。
+原先两组手写声明之间的漂移风险，从「靠一个测试比对」变成了「编译器直接拒绝」。
+
+**它立刻暴露了旧测试看不见的问题**：`services.js` 的 56 个错误降到 8 个，而剩下这 8 个
+全是**真实的签名不匹配** —— 例如 `importLocalExe` 实际返回的 `variant` 是 `string`（lib 模块
+尚未标注类型）而契约要求 `Variant` 联合类型；`verifyApiKey` 的 JSDoc 写成了非 Promise 返回类型
+（TS1064）。旧测试只比键名，这些一个都发现不了。
+
+| 指标 | 本批前 | 本批后 |
+|---|---:|---|
+| `services.js` 类型错误 | 56 | **8**（余项依赖 lib 模块完成标注） |
+| preload 类型错误总数 | 357 | **309** |
+| `src/env.d.ts` 行数 | 218 | **17** |
+| `npm run verify` | ✅ exit 0 | ✅ exit 0（渲染层 `vue-tsc` 也仍 exit 0） |
+
+- 契约测试仍然**能拦住漂移**：探针从 `services.js` 删掉 `downloadAndInstall` → 2 项 FAIL，
+  还原后 7 项全绿（已验证）。
+- 下一步依赖关系变了：`services.js` 的清零**依赖 lib 模块先完成标注**（`assets` / `backup` /
+  `install` 的返回值），所以剩余 JSDoc 工作应聚焦这几个模块。

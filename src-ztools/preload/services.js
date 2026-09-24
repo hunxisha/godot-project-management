@@ -1,5 +1,9 @@
 // 通过 window 对象向渲染进程注入 Node 能力
 // 能力模块位于 lib/ 下,按功能领域拆分
+//
+// 下面的 @type 引用渲染层的类型契约(src/types/services.ts) —— 它是**唯一权威**:
+// 这份对象必须不多不少地实现 Services 的 47 个方法,少一个、多一个、签名不对都会编译失败。
+// 这取代了原先「两处手写 + 一个比对测试」的做法(见 docs/optimization-plan.md 的 P0-2)。
 const { currentPlatform, fetchReleases } = require('./lib/releases')
 const install = require('./lib/install')
 const projects = require('./lib/projects')
@@ -7,6 +11,7 @@ const backup = require('./lib/backup')
 const { launchProject } = require('./lib/launcher')
 const assets = require('./lib/assets')
 
+/** @type {import('../../src/types/services').Services} */
 window.services = {
   /** 当前平台标识 */
   currentPlatform: () => currentPlatform(),
