@@ -3,7 +3,7 @@
   "name": "godot-project-management",
   "title": "Godot项目管理",
   "description": "下载并管理Godot版本,可隔离不同Godot版本项目,快捷打开Godot项目,管理Godot项目插件",
-  "author": "huanxisha944",
+  "author": "冰冻琪露诺",
   "version": "1.0.0",
   "main": "dist/index.html",
   "preload": "preload/services.js",

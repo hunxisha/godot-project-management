@@ -1,282 +1,112 @@
-# {{PLUGIN_NAME}}
+# Godot 项目管理
 
-> {{DESCRIPTION}}
+> 下载并管理 Godot 引擎版本、隔离并快捷打开不同版本的项目、浏览安装 Godot 插件、为项目做完整备份。
 
-这是一个使用 **Vue 3 + Vite + TypeScript** 构建的 ZTools 插件。
+ZTools 插件。渲染层为 **Vue 3 + Vite + TypeScript**，Node 能力由 **preload 层**（CommonJS）注入，
+两者之间只通过 `window.services`（预加载能力）与 `window.ztools`（宿主 API）两个全局对象通信。
 
-## ✨ 功能特性
+支持平台：Windows / macOS / Linux。
 
-### 📌 已包含的示例功能
+## 功能
 
-- **Hello** - 基础功能指令示例
-  - 触发指令：`你好` / `hello`
-  - 展示简单的 Vue 组件界面
+界面分 7 个页面（顶栏标签 + 主题切换按钮）：
 
-- **读文件** - 文件读取功能示例
-  - 功能指令：`读文件`
-  - 匹配指令：支持拖拽文件触发
-  - 演示如何使用 Node.js 能力读取文件内容
+| 页面 | 内容 |
+|---|---|
+| **概览** | 项目与引擎统计、收藏项目快捷入口、默认引擎 |
+| **项目** | 添加/新建/删除项目、绑定引擎版本、拖入 `project.godot` 或项目文件夹、版本不匹配提醒、收藏、**创建备份** |
+| **版本** | 从 GitHub 拉取引擎版本列表（24h 缓存）、队列式下载安装、解压校验、导入本地引擎、删除已装版本 |
+| **市场** | 官方 Asset Store 浏览（热门/推荐/新品/最近更新/收藏 + 标签筛选 + 分页）、按版本安装、支持安装任意历史 release |
+| **已安装** | 列出项目 `addons/` 下的插件、启用/禁用、卸载、从历史版本替换、插件名跳转资产库、批量操作、复制到其他项目（**保留市场来源**） |
+| **备份** | 全部项目备份的集中管理：统计、搜索、筛选、按项目分组 / 时间轴、批量删除、备注、完整性校验、保留策略清理、三步恢复向导 |
+| **设置** | 主题（5 色板 × 明暗）、引擎目录、网络代理、Asset Store 账号、默认打开动作、删除项目行为、备份默认项 |
 
-- **保存为文件** - 文件写入功能示例
-  - 匹配指令：任意文本/图片 → `保存为文件`
-  - 演示如何将剪贴板内容保存为文件
+### 触发指令
 
-## 📁 项目结构
+| 指令 | 触发词 | 进入 |
+|---|---|---|
+| `godot` | `godot` / `Godot管理` | 概览 |
+| `projects` | `gp` / `godot项目` / `打开godot项目` | 项目 |
+| `versions` | `gv` / `godot版本` / `下载godot` | 版本 |
+| `plugins` | `godot插件` / `godot插件市场` | 市场 |
+| `addProject` | 拖入项目文件夹或 `.godot` 文件 | 项目（自动添加） |
+
+### 三处值得说明的设计
+
+- **备份**：底层用「同步 fs + 分片让出事件循环」，因此长任务不会冻结界面，可实时看进度并随时取消；
+  先写 `.gpm-tmp-*` 再原子改名，失败或取消不留任何残留文件或脏记录。
+  恢复提供「恢复为新项目」与「覆盖原项目」两种模式，后者需输入项目名确认，且进入替换阶段后取消会被拒绝。
+  细节见 [docs/backup-redesign-plan.md](docs/backup-redesign-plan.md)。
+- **主题**：色板（5 套）× 明暗（浅/深/跟随宿主）共 10 种外观。语义色（危险/成功/警告）与项目头像渐变
+  刻意不随色板变化——前者承载含义，后者用于区分项目。新增色板的步骤与对比度门槛见
+  [docs/theme-system.md](docs/theme-system.md)。
+- **数据存储**：全部状态存在 ZTools 的 db 中（无独立数据库文件），按文档 ID 前缀区分：
+  `godot/settings`、`godot/version/*`、`godot/project/*`、`godot/asset/*`、`godot/backup/*`。
+
+## 目录结构
 
 ```
-.
-├── src/
-│   ├── main.ts               # 入口文件
-│   ├── main.css              # 全局样式
-│   ├── App.vue               # 根组件
-│   ├── env.d.ts              # 类型声明
-│   ├── Hello/                # Hello 功能组件
-│   │   └── index.vue
-│   ├── Read/                 # 读文件功能组件
-│   │   └── index.vue
-│   └── Write/                # 写文件功能组件
-│       └── index.vue
-├── src-ztools/               # ZTools 插件目录
-│   ├── logo.png              # 插件图标
-│   ├── plugin.json           # 插件配置文件
-│   ├── preload/              # Preload 脚本目录
-│   │   ├── package.json      # Preload 依赖配置
-│   │   └── services.js       # Node.js 能力扩展
-│   └── dist/                 # Vite 构建产物
-├── index.html                # HTML 模板
-├── vite.config.js            # Vite 配置
-├── tsconfig.json             # TypeScript 配置
-├── package.json              # 项目依赖
-└── README.md                 # 项目文档
+├── src/                          渲染层(Vue 3 + TypeScript)
+│   ├── main.ts                   入口 + 环境守卫(缺少宿主 API 时给出可执行提示)
+│   ├── App.vue                   标签路由、KeepAlive、全局任务栏
+│   ├── main.css                  设计令牌与 10 套主题
+│   ├── views/                    7 个页面
+│   ├── components/               通用组件与 dialogs/ 下的 4 个对话框
+│   ├── composables/              useBackups(备份状态) / useTheme(主题) / useProjectActions
+│   ├── services/bridge.ts        宿主 API 统一出口
+│   ├── types/godot.ts            领域模型与文档 ID 约定
+│   └── utils/format.ts           共享格式化
+├── src-ztools/                   ZTools 插件目录
+│   ├── plugin.json               插件清单(指令、preload、图标、平台)
+│   ├── logo.png
+│   ├── preload/
+│   │   ├── services.js           window.services 门面
+│   │   └── lib/                  领域模块:releases/install/extract/godotExe/projects/
+│   │                             launcher/assets/backup + 基础设施 http/store/fsutil
+│   └── dist/                     构建产物(git 忽略)
+├── src-ztools/preload/lib/__tests__/   preload 回归测试
+├── src/composables/__tests__/          组合式函数回归测试
+├── src/__tests__/                      主题回归测试
+└── docs/                         设计文档
 ```
 
-## 🚀 快速开始
-
-### 安装依赖
+## 开发
 
 ```bash
 npm install
+npm run dev        # Vite 监听 127.0.0.1:5173,ZTools 自动加载开发版
+npm run build      # vue-tsc 类型检查 + 构建到 src-ztools/dist/
 ```
 
-### 开发模式
+调试：在 ZTools 中打开插件后，点击插件头像图标 → 「打开开发者工具」。
+直接用浏览器访问 dev 地址会因缺少 ZTools API 而无法运行（入口有环境守卫，会显示原因而不是白屏）。
+
+## 测试
 
 ```bash
-npm run dev
+npm test           # 全部 508 项断言
 ```
 
-开发服务器将在 `http://localhost:5173` 启动。ZTools 会自动加载开发版本。
+| 命令 | 覆盖 | 断言 |
+|---|---|---|
+| `npm run test:theme` | 主题令牌完整性、设计约束、10 种组合的 WCAG 对比度 | 134 |
+| `npm run test:preload` | 备份领域层：创建/查询/校验/恢复/取消/清理/删除 | 102 |
+| `npm run test:preload:sandbox` | 同上，但先删掉 `setImmediate` 以模拟宿主沙箱 | 102 |
+| `npm run test:addons` | 插件来源解析与复制过户（默认 + 沙箱各一遍） | 40 ×2 |
+| `npm run test:composable` | 备份页的筛选/分组/时间轴/批量/巡检逻辑 | 90 |
 
-### 构建生产版本
+不依赖测试框架：脚本用 Node 直接运行；`test:composable` 会先用项目已有的 vite 把组合式函数
+打成自包含包（Node 无法直接加载 `.ts` 与 Vue 响应式依赖）。
 
-```bash
-npm run build
-```
+> **`--no-immediate` 那一条务必保留**：preload 跑在渲染进程沙箱里，那里没有 `setImmediate`
+> （Node 专有全局）。只跑默认路径会漏掉整整一类「本地能跑、宿主里报错」的问题。
 
-构建产物将输出到 `src-ztools/dist/` 目录，插件配置、图标和 Preload 保留在同级目录。
+## 环境要求
 
-## 📖 开发指南
+- Node.js ≥ 18（构建与测试）
+- ZTools 宿主（运行插件）
+- 网络：版本列表走 GitHub，插件市场走 store.godotengine.org，均可通过设置中的 HTTP 代理转发
 
-### 1. 修改插件配置
+## 许可
 
-编辑 `src-ztools/plugin.json` 文件：
-
-```json
-{
-  "name": "你的插件名称",
-  "description": "插件描述",
-  "author": "作者名称",
-  "version": "1.0.0",
-  "features": [
-    // 添加你的功能配置
-  ]
-}
-```
-
-### 2. 创建新功能
-
-#### 步骤 1: 创建 Vue 组件
-
-在 `src/` 目录下创建新的功能组件：
-
-```vue
-<!-- src/MyFeature/index.vue -->
-<template>
-  <div class="my-feature">
-    <h1>{{ title }}</h1>
-    <!-- 你的组件内容 -->
-  </div>
-</template>
-
-<script setup lang="ts">
-import { ref } from 'vue'
-
-const title = ref('我的新功能')
-</script>
-
-<style scoped>
-.my-feature {
-  padding: 20px;
-}
-</style>
-```
-
-#### 步骤 2: 注册路由
-
-在 `src/App.vue` 中添加路由：
-
-```vue
-<script setup lang="ts">
-import MyFeature from './MyFeature/index.vue'
-
-const routes = {
-  hello: Hello,
-  read: Read,
-  write: Write,
-  myfeature: MyFeature // 添加新路由
-}
-</script>
-```
-
-#### 步骤 3: 配置功能
-
-在 `plugin.json` 中添加功能配置：
-
-```json
-{
-  "code": "myfeature",
-  "explain": "我的新功能",
-  "icon": "logo.png",
-  "cmds": ["触发指令"]
-}
-```
-
-### 3. 使用 Node.js 能力
-
-#### 扩展 Preload 服务
-
-编辑 `src-ztools/preload/services.js`：
-
-```javascript
-const fs = require('fs')
-const path = require('path')
-
-module.exports = {
-  // 示例：读取文件
-  readFile: (filePath) => {
-    return fs.readFileSync(filePath, 'utf-8')
-  },
-
-  // 添加你的服务
-  myService: (params) => {
-    // 实现你的逻辑
-    return result
-  }
-}
-```
-
-#### 在 Vue 组件中调用
-
-```vue
-<script setup lang="ts">
-const handleRead = async () => {
-  try {
-    const content = await window.services.readFile('/path/to/file')
-    console.log(content)
-  } catch (error) {
-    console.error('读取失败:', error)
-  }
-}
-</script>
-```
-
-### 4. 使用 ZTools API
-
-```vue
-<script setup lang="ts">
-// 获取剪贴板内容
-const text = await window.ztools.getClipboardContent()
-
-// 隐藏主窗口
-window.ztools.hideMainWindow()
-
-// 显示提示
-window.ztools.showTip('操作成功')
-
-// 更多 API 请参考官方文档
-</script>
-```
-
-## 🎨 样式开发
-
-### 使用 CSS 变量
-
-ZTools 提供了一套 CSS 变量用于主题适配：
-
-```css
-.my-component {
-  background: var(--bg-color);
-  color: var(--text-color);
-  border: 1px solid var(--border-color);
-}
-```
-
-### 暗色模式支持
-
-```css
-@media (prefers-color-scheme: dark) {
-  .my-component {
-    /* 暗色模式样式 */
-  }
-}
-```
-
-## 📦 构建与发布
-
-### 1. 构建插件
-
-```bash
-npm run build
-```
-
-### 2. 测试构建产物
-
-将 `src-ztools/` 作为完整 ZTools 插件目录进行测试或打包。
-
-### 3. 发布到插件市场
-
-1. 确保 `plugin.json` 中的信息完整准确
-2. 准备好插件截图和详细说明
-3. 访问 ZTools 插件市场提交插件
-
-## 📚 相关资源
-
-- [ZTools 官方文档](https://github.com/ztool-center/ztools)
-- [ZTools API 文档](https://github.com/ztool-center/ztools-api-types)
-- [Vue 3 文档](https://vuejs.org/)
-- [Vite 文档](https://vitejs.dev/)
-
-## ❓ 常见问题
-
-### Q: 如何调试插件？
-
-A: 使用 `npm run dev` 启动开发服务器，在插件界面中点击插件头像图标，在弹出的菜单中选择"打开开发者工具"进行调试。
-
-### Q: 如何访问 Node.js 能力？
-
-A: 通过 `src-ztools/preload/services.js` 文件扩展服务，然后在组件中使用 `window.services` 调用。
-
-### Q: 插件图标不显示？
-
-A: 确保 `src-ztools/logo.png` 文件存在，且在 `plugin.json` 中正确配置了 `logo` 字段。
-
-### Q: 如何处理大文件上传？
-
-A: 建议使用 Node.js 流式处理，在 preload 脚本中实现文件分块处理逻辑。
-
-## 📄 开源协议
-
-MIT License
-
----
-
-**祝你开发愉快！** 🎉
+MIT
