@@ -3,28 +3,39 @@
 // 为什么单独一个配置:preload 是 CommonJS + 浏览器沙箱全局(没有 setImmediate、没有 Buffer),
 // 与渲染层的 ESM/DOM 环境不同,不能用同一份 tsconfig 检查。
 //
-// 当前状态(实测)执行 `npx tsc -p tsconfig.preload.json` 会报 **357 个错误**
+// 当前状态(实测)执行 `npx tsc -p tsconfig.preload.json` 会报 **96 个错误**
 // (开工时 400 个),因此**故意不接入 verify** —— 接进去会让 `npm run verify` 直接失败,
 // 那不是「分步开闸」。
 //
 // 进度:已清到 0 错误的文件 —— `taskqueue.js`、`releases.js`;
-//       `godotExe.js` 25 → 11(剩余全部卡在下方的「边界声明」上)。
+//       只剩 node 边界错误的文件 —— `assets.js`(3)、`backup.js`(3)、`projects.js`(3)、
+//       `install.js`(3)、`extract.js`(11 = 3 模块 + 8 Buffer)、`fsutil.js`(6)。
 //
-// 错误分类与处理建议(按数量):
+// **边界探测结论(已实测,不是推测)**:用一份临时的 `node:*` 声明(全部 `any` 壳)叠加检查后,
+// 96 → **55**。也就是说 **41 个错误(43%)纯粹卡在边界声明上**,另有 43 个是 node 值
+// 参与推断后暴露的隐式 any(http.js 为主)。55 个里的构成:
 //
-//   TS7006 ×~210 参数缺类型注解        → 逐模块补 JSDoc,按风险从低到高推进
-//   TS2307 × 30  Cannot find 'node:*'  → 需要 node 模块声明(见下面的注意事项)
-//   TS2339 × 24  属性不存在于推断类型    → 多为 JSDoc 补全后可解
-//   TS7005 × 22  变量隐式 any[]        → 同上
-//   TS7031 × 19  解构参数隐式 any      → 同上
-//   TS2580 × 18  Cannot find 'process' → 需要 node 类型
-//   TS7034 × 14  变量隐式 any          → 同上
-//   TS7053 × 12  字符串索引隐式 any     → 同上
-//   TS7008/2322/7011/7023/1064/2345/2353 → 结构性错误,需逐个人工确认
+//   43  http.js 自有注解缺口(与边界无关,补 JSDoc 即可)
+//    6  探测壳自身的假错误(spawn / Dirent / ChildProcess / URL / EventEmitter 没声明成员)
+//    3  godotExe.js 的 `d` / `code`(child 是 any 才隐式 any;正确声明后自动消失)
+//    2  fsutil.js 的 `setImmediate` —— **故意保留**,见下
+//    1  services.js 的 `version?: GodotVersion` 契约缺口
+//
+// 于是两条路线的取舍有了实测依据,**改推荐 B**(原先推荐 A):
+//   B. 手写一份精简沙箱声明(`process` / `Buffer` / 11 个 `node:*` 模块),刻意**不声明**
+//      `setImmediate`。实测能把 96 降到 ~49,且那 2 个 `setImmediate` 报错**继续可见** ——
+//      等于把 §15 的教训交给编译器看门,而不是交给一份需要人工维护的白名单。
+//   A. 引入 `@types/node`:签名最准,但会把 `setImmediate` 变成合法全局,
+//      §15 的教训从此对类型检查不可见,只能靠额外的源码扫描测试补回来。
+// B 的维护成本由「按实际用到的成员写结构子集」控制 —— 这正是本仓库已在用的手法
+// (`extract.js` 的 `ByteBuf`、`assets.js` 的 `DirEntry`)。
+//
+// 剩余错误分类与处理建议(按数量):
+//
+//   TS7006/7005/7034 ×~50 隐式 any    → 补 JSDoc(http.js 是最后一大块)
+//   TS2307 × 30  Cannot find 'node:*'  → 需要 node 模块声明(见上面的结论)
+//   TS2591 × 11  Cannot find 'process' / 'Buffer' → 同上
 //   TS2304 ×  2  Cannot find 'setImmediate' → **故意保留**,见下
-//
-// 推进顺序建议:先做「不引入 node 类型也能修」的那 300 项(TS7006/7005/7031/7034/7053),
-// 它们只需补 JSDoc;再单独决策 node 类型的引入方式。
 //
 // ⚠️ **边界声明(TS2307/TS2580)需要一个决策,不要直接 `npm i -D @types/node` 了事。**
 // 这个仓库踩过一个坑(见 docs/backup-redesign-plan.md §15):preload 跑在 ZTools 沙箱里,

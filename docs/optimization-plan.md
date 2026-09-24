@@ -686,3 +686,63 @@ B. 手写精简的沙箱声明，刻意不声明 `setImmediate`。
 而是定义了一个描述「实际用到的 Buffer 能力子集」的结构类型 `ByteBuf`（含索引签名与方法签名）。
 它让 `buf[i]`、`buf.readUInt32LE()` 这类用法仍受检查，同时明确记录了我们对 Buffer 的真实依赖面
 —— 将来无论走哪条边界路线，这份清单都有用。
+
+### 阶段 4 实施记录 · 第七批（P0-1：`assets` / `backup` 收口 + 边界探测）
+
+| 文件 | 错误数 | 结果 |
+|---|---:|---|
+| `assets.js` | 41 → **3** | 全为 node 边界 |
+| `backup.js` | 4 → **3** | 全为 node 边界 |
+| `services.js` | 3 → **1** | 只剩 `version?: GodotVersion` 一处契约缺口 |
+| **总计** | **165 → 96** | `npm run verify` exit 0：**1235 PASS + 2 SKIP** |
+
+四个值得记录的发现：
+
+1. **有一类隐式 any 不是「我们缺注解」，而是边界造成的。** 例如 `assets.js` 的
+   `text.replace(sectionRe, (m) => ...)` 报 `m` 隐式 any —— `m` 本该由 `RegExp` 重载上下文推断出来。
+   真因是 `text` 来自 `fs.readFileSync`，而 `node:fs` 不可解析 → `fs` 是 `any` → `text` 是 `any`。
+   同理 `godotExe.js` 的 `d` / `code`（`child` 来自未声明的 `child_process`）。
+   **这类错误补 JSDoc 是白费力气**，得先声明边界。判别方法：看报错参数的推断来源是不是 node 值。
+2. **「返回 any 的函数」是隐式 any 的另一个常见源头。** `readFavorites()` 没有 `@returns`，
+   于是一处错误其实是三个：`findIndex((x)` / `some((x)` 的参数、`push({...asset, addedAt})`
+   的 `addedAt` 不存在于 `MarketAsset`。补上 `FavoriteAsset[]` 后三个一起消失。
+3. **`toggleFavorite` 的入参不能标成 `MarketAsset`。** 它体内有 `delete asset.addedAt`
+   （防止从收藏列表取出的资产带着旧 `addedAt` 被重加）。收紧成 `MarketAsset` 会报错，标 `any`
+   又是放弃检查；正解是补一个 `FavoriteToggleInput = MarketAsset & { addedAt?: number }`。
+   为保持**零行为变更**，`delete` 原样保留（它确实会改到调用方对象，属于既有行为，
+   想改是另一件事）。改完仍满足 `Services` 契约（`(asset: MarketAsset) => boolean`）。
+4. **同一结构在文件里写三遍、两种写法。** `{version, minGodot, maxGodot, created}` 在
+   `pickRelease`（已写全类型）、`getReleaseInfos` 的 `@returns`（匿名成员 → TS7008 ×4）、
+   以及函数体内的 `out` 注解各出现一次。抽出 `ReleaseInfo` typedef 后一处改、三处受益。
+   `addon?: object` 同理：`install` 与 `update` 两处都太松，被 `services.js` 的契约抓出来，
+   抽成 `AddonBrief` 并同时用于两处。
+
+**唯一一次使用 JSDoc 断言**：`backup.js` 的 `listBackupTasks` 把通用任务队列的
+`Record<string, any>[]` 断言回 `BackupTask[]`。理由写在代码注释里（队列本身不承载 schema，
+记录结构由本模块构造），这是真实的类型边界，不是图省事。
+
+#### 边界探测：用实测数据回答「A 还是 B」
+
+前面几轮一直悬着一个决策：node 边界怎么声明。这轮做了一次**探测**（临时配置 + 一份
+把 11 个 `node:*` 声明成 `any` 壳的 d.ts，跑完即删）：**96 → 55**。据此可精确拆分：
+
+| 类别 | 数量 | 说明 |
+|---|---:|---|
+| 纯卡在边界声明上 | **41** | 声明后直接消失（43%） |
+| 声明后仍暴露的隐式 any | 43 | 几乎全在 `http.js`，是自有注解缺口 |
+| 探测壳自身的假错误 | 6 | `spawn`/`Dirent`/`ChildProcess`/`URL`/`EventEmitter` 没成员 |
+| `godotExe.js` 的 `d`/`code` | 3 | 正确声明后自动消失（见发现 1） |
+| **故意保留**的 `setImmediate` | **2** | `fsutil.js`，见 `docs/backup-redesign-plan.md` §15 |
+| 真实自有缺口 | 1 | `services.js` 的 `version?: GodotVersion` |
+
+**结论：改推荐路线 B（手写精简沙箱声明），并撤回我之前对 A 的偏好。**
+理由是探测把 A 的代价显性化了：`@types/node` 会把 `setImmediate` 声明成合法全局，
+那 2 个如今**由编译器盯着**的错误会消失 —— 等于把 §15 的教训从类型检查里撤掉，
+只能靠一份需要人工维护的源码扫描白名单补回来。B 的维护成本可控，因为它沿用本仓库
+已经在用的手法：**只描述实际用到的成员子集**（`extract.js` 的 `ByteBuf`、
+`assets.js` 的 `DirEntry`）。B 先做，A 随时可以后补，反之则要付「教训不可见」的代价。
+
+**下一批的落点因此明确**：① 清 `http.js`（剩余最大一块，43 项自有注解）；
+② 落地 `src-ztools/preload/sandbox.d.ts`（路线 B）+ `setImmediate` 源码扫描护栏测试；
+③ 边界声明落地后 preload 错误应降到 ~50，再评估是否接入 `npm run verify`。
+

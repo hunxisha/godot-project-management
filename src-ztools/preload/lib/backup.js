@@ -34,6 +34,8 @@ const SCHEMA = 2
 /** 备份文件存在性探测缓存时长 */
 const EXISTS_TTL = 5000
 
+/** @typedef {import('../../../src/types/godot').BackupRecord} BackupRecord */
+
 /**
  * 目录名排除器。
  * @typedef {(name: string, isDir: boolean) => boolean} Excluder
@@ -52,7 +54,8 @@ const queue = createTaskQueue({
  * @returns {import('../../../src/types/godot').BackupTask[]}
  */
 function listBackupTasks() {
-  return queue.list()
+  // queue 是通用任务队列,记录结构由本模块构造,故此处断言回备份任务类型
+  return /** @type {import('../../../src/types/godot').BackupTask[]} */ (queue.list())
 }
 
 /**
@@ -363,9 +366,10 @@ function listLatestBackups() {
 /**
  * 单条备份记录。
  * @param {string} backupId
- * @returns {object | null}
+ * @returns {BackupRecord | null}
  */
 function getBackup(backupId) {
+  /** @type {BackupRecord | null} getDoc 返回反序列化后的 JSON */
   const d = getDoc(backupId)
   return d ? { ...d } : null
 }

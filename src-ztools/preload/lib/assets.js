@@ -12,28 +12,66 @@ const API_BASE = 'https://store.godotengine.org/api/v1'
 /** 商店页面地址前缀(格式与 API 返回的 store_url 一致:/asset/{publisher}/{slug}/) */
 const STORE_BASE = 'https://store.godotengine.org'
 
-/** 拆 assetId 为 [publisherSlug, assetSlug] */
+/**
+ * 保证拿到数组:商店 API 的字段可能是 null / 非数组,直接 .map 会炸。
+ * 原先这个三元表达式在文件里重复了 8 次。
+ * @param {any} v
+ * @returns {any[]}
+ */
+function asArray(v) {
+  return Array.isArray(v) ? v : []
+}
+
+/** @typedef {import('../../../src/types/godot').MarketAsset} MarketAsset */
+/** @typedef {import('../../../src/types/godot').AddonInfo} AddonInfo */
+/** @typedef {import('../../../src/types/godot').FavoriteAsset} FavoriteAsset */
+
+/** 列表页展示用的最新 release 摘要 */
+/** @typedef {{version: string, minGodot: string, maxGodot: string, created: string}} ReleaseInfo */
+
+/** 安装/更新成功后回给渲染层的插件摘要(只含即时可展示的字段) */
+/** @typedef {{title: string, versionString: string, dirNames: string[], enabled: boolean}} AddonBrief */
+
+/**
+ * 收藏入参:市场资产若来自收藏列表会带 addedAt(取消收藏时需先剥掉再重加),
+ * 因此比 MarketAsset 多一个可选 addedAt。
+ * @typedef {MarketAsset & { addedAt?: number }} FavoriteToggleInput
+ */
+
+/**
+ * 拆 assetId 为 [publisherSlug, assetSlug]。
+ * @param {string} assetId
+ * @returns {[string, string]}
+ */
 function splitAssetId(assetId) {
   const [pub, slug] = String(assetId).split('/')
   if (!pub || !slug) throw new Error('资产 ID 无效: ' + assetId)
   return [pub, slug]
 }
 
-/** 取 releases 数组中最新的一个(按 created 日期排序) */
+/**
+ * 取 releases 数组中最新的一个(按 created 日期排序)。
+ * @param {any[]} [list]
+ * @returns {any} 最新 release;空列表返回 undefined
+ */
 function latestRelease(list) {
   if (!Array.isArray(list) || !list.length) return undefined
   const sorted = [...list].sort((a, b) => String(b.created).localeCompare(String(a.created)))
   return sorted[0]
 }
 
-/** 商店资产对象 → MarketAsset 统一映射 */
+/**
+ * 商店资产对象 → MarketAsset 统一映射。
+ * @param {any} a 商店 API 返回的资产对象
+ * @returns {MarketAsset}
+ */
 function mapAsset(a) {
   return {
     assetId: `${a.publisher.slug}/${a.slug}`,
     title: a.name,
     author: a.publisher.name,
     category: (a.tags && a.tags[0] && a.tags[0].display_name) || '',
-    tagSlugs: (a.tags || []).map((t) => t.slug),
+    tagSlugs: asArray(a.tags).map((t) => t.slug),
     versionString: '',
     godotVersion: '',
     iconUrl: a.thumbnail || undefined,
@@ -42,16 +80,23 @@ function mapAsset(a) {
   }
 }
 
-/** 官方精选(推荐)Addon */
+/**
+ * 官方精选(推荐)Addon。
+ * @returns {Promise<MarketAsset[]>}
+ */
 async function listFeatured() {
   const list = await getJson(`${API_BASE}/assets/?type=0&featured_only=true&require_release=true&page_size=20`)
-  return (Array.isArray(list) ? list : []).map(mapAsset)
+  return asArray(list).map(mapAsset)
 }
 
 /** 全部资产总数缓存(assets 列表接口不返回 count,用搜索接口补一次) */
 let allAssetCount = 0
 
-/** 全部资产(默认热度排序,分页) */
+/**
+ * 全部资产(默认热度排序,分页)。
+ * @param {number} [page]
+ * @returns {Promise<{result: MarketAsset[], page: number, pages: number}>}
+ */
 async function listAllAssets(page = 1) {
   const list = await getJson(
     `${API_BASE}/assets/?type=0&require_release=true&page_size=20&page=${page}`
@@ -59,17 +104,21 @@ async function listAllAssets(page = 1) {
   if (!allAssetCount) {
     const head = await getJson(
       `${API_BASE}/search/query/?query=&type=0&require_release=true&page=1&batch_size=1`
-    ).catch(() => null)
-    allAssetCount = Number(head && head.count) || (Array.isArray(list) ? list.length : 0)
+    ).catch(/** @returns {any} */ () => null)
+    allAssetCount = Number(head && head.count) || asArray(list).length
   }
   return {
-    result: (Array.isArray(list) ? list : []).map(mapAsset),
+    result: asArray(list).map(mapAsset),
     page,
     pages: Math.max(1, Math.ceil(allAssetCount / 20))
   }
 }
 
-/** 最新上架的资产(按发布时间倒序,分页) */
+/**
+ * 最新上架的资产(按发布时间倒序,分页)。
+ * @param {number} [page]
+ * @returns {Promise<{result: MarketAsset[], page: number, pages: number}>}
+ */
 async function listNewAssets(page = 1) {
   const params = new URLSearchParams({
     query: '',
@@ -82,13 +131,17 @@ async function listNewAssets(page = 1) {
   const data = await getJson(`${API_BASE}/search/query/?${params}`)
   const count = Number(data.count) || 0
   return {
-    result: (data.hits || []).map((h) => mapAsset(h.asset || {})),
+    result: asArray(data.hits).map((h) => mapAsset(h.asset || {})),
     page,
     pages: Math.max(1, Math.ceil(count / 20))
   }
 }
 
-/** 最近更新的 Addon(全库按更新时间倒序) */
+/**
+ * 最近更新的 Addon(全库按更新时间倒序)。
+ * @param {number} [page]
+ * @returns {Promise<{result: MarketAsset[], page: number, pages: number}>}
+ */
 async function listRecentlyUpdated(page = 1) {
   const params = new URLSearchParams({
     query: '',
@@ -101,13 +154,19 @@ async function listRecentlyUpdated(page = 1) {
   const data = await getJson(`${API_BASE}/search/query/?${params}`)
   const count = Number(data.count) || 0
   return {
-    result: (data.hits || []).map((h) => mapAsset(h.asset || {})),
+    result: asArray(data.hits).map((h) => mapAsset(h.asset || {})),
     page,
     pages: Math.max(1, Math.ceil(count / 20))
   }
 }
 
-/** 搜索市场资产(Addon) */
+/**
+ * 搜索市场资产(Addon)。
+ * @param {string} filter 搜索词
+ * @param {string} [godotVersion] 兼容版本过滤
+ * @param {number} [page]
+ * @returns {Promise<{result: MarketAsset[], page: number, pages: number}>}
+ */
 async function searchAssets(filter, godotVersion, page = 1) {
   const params = new URLSearchParams({
     query: filter || '',
@@ -122,7 +181,7 @@ async function searchAssets(filter, godotVersion, page = 1) {
   const data = await getJson(`${API_BASE}/search/query/?${params}`)
   const count = Number(data.count) || 0
   return {
-    result: (data.hits || []).map((h) => mapAsset(h.asset || {})),
+    result: asArray(data.hits).map((h) => mapAsset(h.asset || {})),
     page,
     pages: Math.max(1, Math.ceil(count / 20))
   }
@@ -131,11 +190,17 @@ async function searchAssets(filter, godotVersion, page = 1) {
 /**
  * 获取资产详情:含 release 的版本与下载直链(下载链接为带签名的临时直链,安装时实时获取)。
  * version 指定时取该版本(找不到时回退最新),否则取最新 release。
+ * @param {string} assetId
+ * @param {string} [version]
+ * @returns {Promise<{assetId: string, title: string, versionString: string, downloadUrl: string, description: string, tags: string[]}>}
  */
 async function getAssetDetail(assetId, version) {
   const [pub, slug] = splitAssetId(assetId)
   const detail = await getJson(`${API_BASE}/assets/${pub}/${slug}/`)
-  const releases = await getJson(`${API_BASE}/releases/${pub}/${slug}/`).catch(() => [])
+  /** @type {any[]} 远端 JSON,结构由 API 决定 */
+  const releases = await getJson(`${API_BASE}/releases/${pub}/${slug}/`).catch(
+    /** @returns {any[]} */ () => []
+  )
   let rel = version ? releases.find((r) => String(r.version) === String(version)) : latestRelease(releases)
   if (version && !rel) rel = latestRelease(releases)
   if (!rel) rel = {}
@@ -145,11 +210,15 @@ async function getAssetDetail(assetId, version) {
     versionString: rel.version || '',
     downloadUrl: rel.download_url || '',
     description: detail.description,
-    tags: (detail.tags || []).map((t) => t.display_name)
+    tags: asArray(detail.tags).map((t) => t.display_name)
   }
 }
 
-/** 同盘直接 rename,跨盘(EXDEV/EPERM)回退为复制后删除 */
+/**
+ * 同盘直接 rename,跨盘(EXDEV/EPERM)回退为复制后删除。
+ * @param {string} src
+ * @param {string} dest
+ */
 function moveSync(src, dest) {
   try {
     fs.renameSync(src, dest)
@@ -160,9 +229,19 @@ function moveSync(src, dest) {
   }
 }
 
-/** 递归收集 plugin.cfg 路径(限深 5,跳过隐藏目录) */
+// node:fs Dirent 的最小结构子集(类型闸门下 node 模块不可解析,故按实际用到的成员声明)
+/** @typedef {{ name: string, isDirectory(): boolean }} DirEntry */
+
+/**
+ * 递归收集 plugin.cfg 路径(限深 5,跳过隐藏目录)。
+ * @param {string} dir
+ * @param {number} [depth]
+ * @param {string[]} [out]
+ * @returns {string[]}
+ */
 function findPluginCfgs(dir, depth = 0, out = []) {
   if (depth > 5) return out
+  /** @type {DirEntry[]} */
   let entries
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true })
@@ -182,6 +261,8 @@ function findPluginCfgs(dir, depth = 0, out = []) {
  * 确定安装源目录列表(其直接子项即插件目录)。
  * 兼容多种打包结构:根/addons/x、根/x/addons/x、wrapper/x 等——
  * 统一取 plugin.cfg 所在目录的父目录;无 plugin.cfg 时回退旧逻辑。
+ * @param {string} extractDir
+ * @returns {string[]}
  */
 function locateSources(extractDir) {
   const cfgs = findPluginCfgs(extractDir)
@@ -190,9 +271,14 @@ function locateSources(extractDir) {
   return [fs.existsSync(path.join(extractDir, 'addons')) ? path.join(extractDir, 'addons') : extractDir]
 }
 
-/** 解析 plugin.cfg(取 name/version/author) */
+/**
+ * 解析 plugin.cfg(取 name/version/author)。
+ * @param {string} cfgPath
+ * @returns {Record<string, string>}
+ */
 function parsePluginCfg(cfgPath) {
   try {
+    /** @type {Record<string, string>} */
     const out = {}
     for (const line of fs.readFileSync(cfgPath, 'utf8').split(/\r?\n/)) {
       const m = /^\s*([\w]+)\s*=\s*"?([^"\r\n]*)"?\s*$/.exec(line)
@@ -207,14 +293,19 @@ function parsePluginCfg(cfgPath) {
 /**
  * 在 project.godot 的 [editor_plugins] enabled 行中增删插件路径。
  * 仅精确改写 enabled 一行;缺少 section 时在文件末尾追加。
+ * @param {string} projectPath
+ * @param {string[]} dirNames
+ * @param {boolean} enable
  */
 function setPluginEnabled(projectPath, dirNames, enable) {
   const file = path.join(projectPath, 'project.godot')
+  /** @type {string} */
   const text = fs.readFileSync(file, 'utf8')
   const paths = dirNames.map((d) => `res://addons/${d}/plugin.cfg`)
   const re = /^enabled\s*=\s*PackedStringArray\(([^)]*)\)/m
   const sectionRe = /^\[editor_plugins\]\s*$/m
 
+  /** @type {string[]} */
   let current = []
   const m = re.exec(text)
   if (m) {
@@ -240,16 +331,22 @@ function setPluginEnabled(projectPath, dirNames, enable) {
   fs.writeFileSync(file, text + trailing + '[editor_plugins]\n\n' + newline + '\n')
 }
 
-/** 扫描项目已安装插件 */
+/**
+ * 扫描项目已安装插件。
+ * @param {string} projectId
+ * @returns {AddonInfo[]}
+ */
 function listAddons(projectId) {
   const project = getDoc(projectId)
   if (!project) return []
   const addonsDir = path.join(project.path, 'addons')
   if (!fs.existsSync(addonsDir)) return []
+  /** @type {Record<string, any>} */
   const marketDocs = {}
   for (const doc of listDocs(`godot/asset/${projectId}/`)) {
     marketDocs[doc._id] = doc
   }
+  /** @type {AddonInfo[]} */
   const out = []
   const enabledText = (() => {
     try {
@@ -291,7 +388,9 @@ function listAddons(projectId) {
 /**
  * 下载安装市场插件到项目 addons/。
  * opts: { projectId, assetId, assetMeta, version? } version 指定安装的 release 版本。
- * onProgress({ stage: 'downloading'|'extracting', received, total })
+ * @param {{projectId: string, assetId: string, assetMeta?: object, version?: string}} opts
+ * @param {(p: {stage: 'downloading'|'extracting', received?: number, total?: number}) => void} [onProgress]
+ * @returns {Promise<{ok: boolean, error?: string, addon?: AddonBrief}>}
  */
 async function installAsset({ projectId, assetId, assetMeta, version }, onProgress) {
   let tmpDir = ''
@@ -369,12 +468,21 @@ async function installAsset({ projectId, assetId, assetMeta, version }, onProgre
   }
 }
 
-/** 更新:重新安装覆盖 */
+/**
+ * 更新:重新安装覆盖。
+ * @param {{projectId: string, assetId: string}} opts
+ * @param {(p: {stage: 'downloading'|'extracting', received?: number, total?: number}) => void} [onProgress]
+ * @returns {Promise<{ok: boolean, error?: string, addon?: AddonBrief}>}
+ */
 async function updateAsset({ projectId, assetId }, onProgress) {
   return installAsset({ projectId, assetId }, onProgress)
 }
 
-/** 检查市场端最新版本,返回 { hasUpdate, latest? } */
+/**
+ * 检查市场端最新版本。
+ * @param {{projectId: string, assetId: string}} opts
+ * @returns {Promise<{hasUpdate: boolean, latest?: string, error?: string}>}
+ */
 async function checkAddonUpdate({ projectId, assetId }) {
   try {
     const doc = getDoc(`godot/asset/${projectId}/${assetId}`)
@@ -392,7 +500,11 @@ async function checkAddonUpdate({ projectId, assetId }) {
   }
 }
 
-/** 卸载:删除目录 + 移除启用 + 删除记录 */
+/**
+ * 卸载:删除目录 + 移除启用 + 删除记录。
+ * @param {{projectId: string, dirName: string}} opts
+ * @returns {{ok: boolean, error?: string}}
+ */
 function uninstallAddon({ projectId, dirName }) {
   try {
     const project = getDoc(projectId)
@@ -409,7 +521,11 @@ function uninstallAddon({ projectId, dirName }) {
   }
 }
 
-/** 启用/禁用插件(改写 project.godot) */
+/**
+ * 启用/禁用插件(改写 project.godot)。
+ * @param {{projectId: string, dirName: string, enabled: boolean}} opts
+ * @returns {{ok: boolean, error?: string}}
+ */
 function setAddonEnabled({ projectId, dirName, enabled }) {
   try {
     const project = getDoc(projectId)
@@ -425,6 +541,7 @@ function setAddonEnabled({ projectId, dirName, enabled }) {
 
 const FAVORITES_ID = 'godot/market/favorites'
 
+/** @returns {FavoriteAsset[]} 收藏数据存于本地插件数据库 */
 function readFavorites() {
   return getDoc(FAVORITES_ID)?.items || []
 }
@@ -434,7 +551,11 @@ function listFavorites() {
   return [...readFavorites()].sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0))
 }
 
-/** 收藏/取消收藏,返回收藏状态 */
+/**
+ * 收藏/取消收藏。
+ * @param {FavoriteToggleInput} asset
+ * @returns {boolean} 收藏后为 true
+ */
 function toggleFavorite(asset) {
   const list = readFavorites()
   const idx = list.findIndex((x) => x.assetId === asset.assetId)
@@ -449,6 +570,11 @@ function toggleFavorite(asset) {
   return true
 }
 
+/**
+ * 是否已收藏。
+ * @param {string} assetId
+ * @returns {boolean}
+ */
 function isFavorite(assetId) {
   return readFavorites().some((x) => x.assetId === assetId)
 }
@@ -457,7 +583,8 @@ function isFavorite(assetId) {
 
 /**
  * 验证 Asset Store API Key。
- * @returns {{ authenticated: boolean, name?: string }}
+ * @param {string} key
+ * @returns {Promise<{ authenticated: boolean, name?: string }>}
  */
 async function verifyApiKey(key) {
   const info = await getJson(`${API_BASE}/auth/introspection`, {
@@ -474,7 +601,11 @@ async function verifyApiKey(key) {
 /** assetId → { version, minGodot, maxGodot, created } 的内存缓存 */
 const versionCache = new Map()
 
-/** release 精简信息 */
+/**
+ * release 精简信息。
+ * @param {any} r
+ * @returns {ReleaseInfo}
+ */
 function pickRelease(r) {
   if (!r) return { version: '', minGodot: '', maxGodot: '', created: '' }
   return {
@@ -488,7 +619,7 @@ function pickRelease(r) {
 /**
  * 批量获取资产最新 release 信息(并发受限、带内存缓存,失败静默跳过)。
  * @param {string[]} assetIds
- * @returns {Promise<Record<string, { version, minGodot, maxGodot, created }>>}
+ * @returns {Promise<Record<string, ReleaseInfo>>}
  */
 async function getReleaseInfos(assetIds) {
   const ids = [...new Set(assetIds)].filter(
@@ -509,6 +640,7 @@ async function getReleaseInfos(assetIds) {
     }
   }
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, ids.length) }, worker))
+  /** @type {Record<string, ReleaseInfo>} */
   const out = {}
   for (const id of new Set(assetIds)) {
     if (versionCache.has(id)) out[id] = versionCache.get(id)
@@ -523,11 +655,13 @@ async function getReleaseInfos(assetIds) {
  * 某个 release 返回 0.118271,实际下载到的 zip 为 118,271 字节,即 size × 10^6)。
  * 这里统一换算成字节,与下载进度(Content-Length)以及全项目其它 size 字段保持一致,
  * 否则界面会把它当字节渲染成「0 KB」。
+ * @param {string} assetId
+ * @returns {Promise<{version: string, created: string, stable: boolean, minGodot: string, maxGodot: string, size: number}[]>}
  */
 async function listAssetReleases(assetId) {
   const [pub, slug] = splitAssetId(assetId)
   const releases = await getJson(`${API_BASE}/releases/${pub}/${slug}/`)
-  const list = [...(Array.isArray(releases) ? releases : [])].sort((a, b) =>
+  const list = asArray(releases).sort((a, b) =>
     String(b.created).localeCompare(String(a.created))
   )
   return list.map((r) => ({
