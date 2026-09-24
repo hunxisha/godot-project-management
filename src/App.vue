@@ -7,6 +7,7 @@ import ProjectsView from './views/ProjectsView.vue'
 import VersionsView from './views/VersionsView.vue'
 import MarketplaceView from './views/MarketplaceView.vue'
 import AddonsView from './views/AddonsView.vue'
+import BackupsView from './views/BackupsView.vue'
 import SettingsView from './views/SettingsView.vue'
 import { notify } from './services/bridge'
 import type { DownloadTask } from './types/godot'
@@ -18,6 +19,10 @@ const enterPayload = ref<string[] | null>(null)
 const pendingCreate = ref(false)
 /** 项目页触发「管理插件」:切到已安装页并定位到该项目 */
 const pendingAddonProject = ref<string | null>(null)
+/** 项目页 → 备份页:切到备份页并只显示该项目的备份 */
+const backupScope = ref<string | null>(null)
+/** 备份页 → 项目页:切到项目页并直接打开该项目的备份弹窗 */
+const backupRequest = ref<string | null>(null)
 
 // ---------- 全局下载任务(常驻订阅,切页不断线) ----------
 
@@ -91,6 +96,18 @@ function gotoAddons(id: string) {
   pendingAddonProject.value = id
   tab.value = 'addons'
 }
+
+/** 切到备份页(id 为空表示显示全部项目的备份) */
+function gotoBackups(id?: string) {
+  backupScope.value = id ?? null
+  tab.value = 'backups'
+}
+
+/** 切到项目页并打开该项目的备份弹窗 */
+function gotoCreateBackup(id: string) {
+  backupRequest.value = id
+  tab.value = 'projects'
+}
 </script>
 
 <template>
@@ -104,9 +121,12 @@ function gotoAddons(id: string) {
           v-else-if="tab === 'projects'"
           :enter-payload="enterPayload"
           :auto-create="pendingCreate"
+          :auto-backup="backupRequest"
           @consumed="enterPayload = null"
           @create-done="pendingCreate = false"
+          @backup-consumed="backupRequest = null"
           @manage-addons="gotoAddons"
+          @open-backups="gotoBackups"
         />
         <VersionsView v-else-if="tab === 'versions'" />
         <MarketplaceView v-else-if="tab === 'marketplace'" @navigate="tab = $event" />
@@ -115,6 +135,13 @@ function gotoAddons(id: string) {
           :enter-project-id="pendingAddonProject"
           @navigate="tab = $event"
           @consumed="pendingAddonProject = null"
+        />
+        <BackupsView
+          v-else-if="tab === 'backups'"
+          :enter-project-id="backupScope"
+          @consumed="backupScope = null"
+          @navigate="tab = $event"
+          @backup-project="gotoCreateBackup"
         />
         <SettingsView v-else />
       </KeepAlive>

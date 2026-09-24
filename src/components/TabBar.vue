@@ -7,6 +7,7 @@ const tabs = [
   { key: 'versions', label: '版本', icon: 'package' },
   { key: 'marketplace', label: '市场', icon: 'puzzle' },
   { key: 'addons', label: '已安装', icon: 'check' },
+  { key: 'backups', label: '备份', icon: 'box' },
   { key: 'settings', label: '设置', icon: 'gear' }
 ]
 
@@ -69,6 +70,7 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>()
   align-items: center;
   gap: 9px;
   margin-right: 6px;
+  flex-shrink: 0;
 }
 
 .logo {
@@ -95,6 +97,7 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>()
   color: var(--text-3);
 }
 
+/* 7 个标签 + 品牌区接近窗口宽度上限:允许横向滚动,任何宽度下都不换行、不溢出 */
 .tabs {
   display: flex;
   gap: 2px;
@@ -102,6 +105,13 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>()
   border-radius: 999px;
   background: var(--surface-2);
   border: 1px solid var(--border);
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tab {
@@ -118,6 +128,7 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>()
   cursor: pointer;
   transition: background 0.15s, color 0.15s, box-shadow 0.15s;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .tab:hover {
@@ -129,5 +140,34 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>()
   color: var(--brand);
   font-weight: 600;
   box-shadow: var(--shadow-sm);
+}
+
+/* 窄窗口:先收标签内边距,再隐藏品牌副标题,最后只留品牌图标 */
+@media (max-width: 980px) {
+  .tabbar {
+    gap: 8px;
+    padding: 9px 12px;
+  }
+
+  .tab {
+    padding: 5px 10px;
+    gap: 4px;
+  }
+}
+
+@media (max-width: 900px) {
+  .titles {
+    display: none;
+  }
+}
+
+@media (max-width: 800px) {
+  .tab span {
+    display: none;
+  }
+
+  .tab {
+    padding: 5px 9px;
+  }
 }
 </style>

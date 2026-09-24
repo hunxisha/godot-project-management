@@ -9,11 +9,19 @@ import type { BackupRecord, GodotProject, GodotVersion, OpenAction } from '../ty
 
 type Row = GodotProject & { _id: string }
 
-const props = defineProps<{ enterPayload?: string[] | null, autoCreate?: boolean }>()
+const props = defineProps<{
+  enterPayload?: string[] | null
+  autoCreate?: boolean
+  /** 从备份页「立即备份」跳入:直接打开该项目的备份弹窗 */
+  autoBackup?: string | null
+}>()
 const emit = defineEmits<{
   (e: 'consumed'): void
   (e: 'create-done'): void
+  (e: 'backup-consumed'): void
   (e: 'manage-addons', id: string): void
+  /** 跳转备份管理页(id 为空表示显示全部) */
+  (e: 'open-backups', id?: string): void
 }>()
 
 const settings = getSettings()
@@ -62,6 +70,8 @@ onMounted(() => {
     openCreate()
     emit('create-done')
   }
+  // 备份页「立即备份」联动:进入本页时自动打开该项目的备份弹窗
+  if (props.autoBackup) openBackupFor(props.autoBackup)
 })
 
 onBeforeUnmount(() => {
@@ -79,6 +89,13 @@ watch(
     emit('consumed')
   },
   { immediate: true }
+)
+
+watch(
+  () => props.autoBackup,
+  (id) => {
+    if (id) openBackupFor(id)
+  }
 )
 
 function addFromPaths(paths: string[]) {
@@ -269,6 +286,13 @@ function openBackup(p: Row) {
   showBackup.value = true
 }
 
+/** 从备份页跳转过来:打开指定项目的备份弹窗,并消费这次请求 */
+function openBackupFor(id: string) {
+  const row = projects.value.find((p) => p._id === id)
+  if (row) openBackup(row)
+  emit('backup-consumed')
+}
+
 function chooseBackupDir() {
   const d = pickDirectory('选择备份保存位置')
   if (d) bDir.value = d
@@ -413,6 +437,9 @@ function onKeyDown(e: KeyboardEvent) {
         </button>
       </div>
       <span class="grow"></span>
+      <button class="btn small ghost" title="集中管理所有项目的备份" @click="emit('open-backups')">
+        <Icon name="box" :size="13" /> 备份管理
+      </button>
       <button class="btn small ghost" @click="openCreate"><Icon name="plus" :size="13" /> 新建项目</button>
       <button class="btn small primary" @click="addManually"><Icon name="folder-plus" :size="13" /> 添加项目</button>
     </div>
@@ -465,11 +492,12 @@ function onKeyDown(e: KeyboardEvent) {
                 </option>
               </select>
               <span class="opened"><Icon name="clock" :size="11" /> {{ formatRelative(p.lastOpenedAt, '从未打开') }}</span>
-              <span
+              <button
                 v-if="lastBackups[p._id]"
-                class="opened"
-                :title="`最近备份:${lastBackups[p._id].destPath}(${lastBackups[p._id].mode === 'zip' ? 'zip 打包' : '完整快照'})`"
-              ><Icon name="box" :size="11" /> 备份于 {{ formatRelative(lastBackups[p._id].createdAt) }}</span>
+                class="opened link-opened"
+                :title="`最近备份:${lastBackups[p._id].destPath}(${lastBackups[p._id].mode === 'zip' ? 'zip 打包' : '完整快照'}) · 点击查看全部备份`"
+                @click="emit('open-backups', p._id)"
+              ><Icon name="box" :size="11" /> 备份于 {{ formatRelative(lastBackups[p._id].createdAt) }}</button>
             </div>
           </div>
           <div class="row-actions">
@@ -969,6 +997,22 @@ function onKeyDown(e: KeyboardEvent) {
   gap: 4px;
   font-size: 12px;
   color: var(--text-3);
+}
+
+/* 「备份于 X 前」可点击跳转备份管理 */
+.link-opened {
+  border: none;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.link-opened:hover {
+  color: var(--brand);
+  text-decoration: underline;
 }
 
 .row-actions {
