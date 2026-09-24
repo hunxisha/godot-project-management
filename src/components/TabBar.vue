@@ -19,20 +19,26 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>()
 <template>
   <nav class="tabbar">
     <div class="brand">
-      <!-- 品牌标识:机器人齿轮 -->
+      <!-- 品牌标识:齿轮冠 + 机器人头 + 项目立方体(与 src-ztools/logo.png 同源,见 design/logo.svg) -->
       <svg class="logo" viewBox="0 0 48 48" width="30" height="30" aria-hidden="true">
         <defs>
-          <linearGradient id="gpm-logo-g" x1="0" y1="0" x2="1" y2="1">
+          <linearGradient id="gpm-logo-g" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
             <stop offset="0" stop-color="#5aa6db" />
-            <stop offset="1" stop-color="#33689a" />
+            <stop offset="1" stop-color="#478cbf" />
           </linearGradient>
         </defs>
-        <rect x="1.5" y="1.5" width="45" height="45" rx="11" fill="url(#gpm-logo-g)" />
-        <rect x="14" y="17" width="20" height="17" rx="4.5" fill="#fff" />
-        <rect x="9.6" y="19.6" width="5.2" height="7" rx="1.7" fill="#fff" />
-        <rect x="33.2" y="19.6" width="5.2" height="7" rx="1.7" fill="#fff" />
-        <rect x="18.4" y="22.6" width="4.6" height="6.4" rx="1.5" fill="#33689a" />
-        <rect x="25" y="22.6" width="4.6" height="6.4" rx="1.5" fill="#33689a" />
+        <rect width="48" height="48" rx="11" fill="url(#gpm-logo-g)" />
+        <g fill="#ffffff">
+          <circle cx="24" cy="25" r="14.3" />
+          <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)" />
+          <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)" />
+          <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)" />
+          <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)" />
+        </g>
+        <g fill="none" stroke="url(#gpm-logo-g)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round">
+          <path d="M24 16.6l7.2 4.2v8.4L24 33.4l-7.2-4.2v-8.4z" />
+          <path d="M16.8 20.8L24 25l7.2-4.2M24 25v8.4" />
+        </g>
       </svg>
       <div class="titles">
         <span class="name">Godot 管理</span>
