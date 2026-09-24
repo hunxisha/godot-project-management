@@ -95,14 +95,27 @@ const {
   notify
 })
 
+/**
+ * 收藏状态的唯一真相是浏览层那份 `favorites` 列表。
+ * 原先每个卡片的三处绑定各自调一次 `window.services.isFavorite()`,有两个问题:
+ *   1. 那是普通函数调用,不是响应式依赖 —— 收藏后星标能不能重绘,取决于组件恰好因别的原因重渲染;
+ *   2. 一屏 18 张卡片 × 3 处 = 每次渲染 54 次跨层同步调用。
+ * 现在改成从 `favorites` 派生的集合:收藏列表一变,星标必然跟着变。
+ */
+const favIds = computed(() => new Set(favorites.value.map((f) => String(f.assetId))))
+
 function isFav(id: string): boolean {
-  return window.services.isFavorite(id)
+  return favIds.value.has(String(id))
 }
 
 function toggleFav(a: MarketAsset) {
+  const before = isFav(a.assetId)
   window.services.toggleFavorite(a)
   reloadFavorites()
-  notify(isFav(a.assetId) ? '已收藏 ' + a.title : '已取消收藏')
+  const after = isFav(a.assetId)
+  // 写库失败时前后状态相同 —— 如实报错,不要谎报成功
+  if (after === before) notify('收藏失败,请重试')
+  else notify(after ? '已收藏 ' + a.title : '已取消收藏')
 }
 
 onBeforeUnmount(() => {
@@ -127,6 +140,8 @@ onMounted(() => {
     reloadAddons()
   }
   loadBrowse()
+  // 星标状态派生自 favorites,任意浏览模式下都要先把它读出来(否则推荐/全部模式的星标会是空的)
+  reloadFavorites()
   window.addEventListener('keydown', onKeydown)
 })
 
@@ -139,6 +154,8 @@ onActivated(() => {
     targetId.value = sortedProjects.value[0]._id
   }
   reloadAddons()
+  // 本页在别处(如插件页卸载)被改动过收藏时,重新进入也保持一致
+  reloadFavorites()
 })
 
 function onKeydown(e: KeyboardEvent) {

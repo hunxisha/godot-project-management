@@ -553,21 +553,32 @@ function listFavorites() {
 
 /**
  * 收藏/取消收藏。
+ *
+ * 三条约束(踩过坑,别简化):
+ *  1. **不得改动入参**。原先这里有 `delete asset.addedAt`,会改到渲染层的响应式资产对象;
+ *     而且它是多余动作 —— 下面显式写了 `addedAt: Date.now()`,展开时带过来的旧值本就会被覆盖。
+ *  2. **assetId 必须归一化**。它决定「是否已收藏」的判断,展开入参对象得到的值可能是数字
+ *     (已安装插件记录里的 assetId 就是数字),数字与字符串混用会让同一个插件出现两条收藏。
+ *  3. **写库结果必须回读校验**。宿主 db 失败时既可能返回 `{error}` 也可能不抛错却没落盘;
+ *     原先直接忽略返回值,于是「收藏」会静默失败,而调用方还以为成功了。
+ *
  * @param {FavoriteToggleInput} asset
- * @returns {boolean} 收藏后为 true
+ * @returns {boolean} 操作后是否处于「已收藏」状态(写入失败时返回原状态)
  */
 function toggleFavorite(asset) {
+  const assetId = asset && asset.assetId != null ? String(asset.assetId) : ''
+  // 没有 assetId 就无从判断身份,直接失败比写一条永远匹配不上的脏记录好
+  if (!assetId) return false
+
   const list = readFavorites()
-  const idx = list.findIndex((x) => x.assetId === asset.assetId)
-  if (idx >= 0) {
-    list.splice(idx, 1)
-    putDoc(FAVORITES_ID, { items: list })
-    return false
-  }
-  delete asset.addedAt
-  list.push({ ...asset, addedAt: Date.now() })
-  putDoc(FAVORITES_ID, { items: list })
-  return true
+  const exists = list.some((x) => x && String(x.assetId) === assetId)
+  // 一律生成新数组:不改入参,也不改库里的那个数组(宿主 db.get 可能返回同一个引用)
+  const next = exists
+    ? list.filter((x) => !x || String(x.assetId) !== assetId)
+    : [...list, { ...asset, assetId, addedAt: Date.now() }]
+
+  if (!putDoc(FAVORITES_ID, { items: next })) return exists
+  return isFavorite(assetId)
 }
 
 /**
@@ -576,7 +587,10 @@ function toggleFavorite(asset) {
  * @returns {boolean}
  */
 function isFavorite(assetId) {
-  return readFavorites().some((x) => x.assetId === assetId)
+  // 两侧都按字符串比:库里存的是字符串,调用方可能传数字(已安装插件的 assetId 是数字)
+  if (assetId == null || assetId === '') return false
+  const key = String(assetId)
+  return readFavorites().some((x) => x && String(x.assetId) === key)
 }
 
 // ---------- 账号(API Key) ----------
