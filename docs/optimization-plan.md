@@ -348,7 +348,10 @@ function fmtVer(v?: string): string { return (v || '').replace(/^v+/i, '') }
 - [x] `npm run verify` 一条命令跑通 typecheck + test
 - [x] services 键比对断言就位：**故意从 `services.js` 删一个键会失败**（已用探针验证）
 - [x] `displayName` 全仓只剩一份定义；版本归一化只剩一份且行为有断言锁定
-- [ ] `tsconfig.json` 的 `strict: false` 至少推进到 `noImplicitAny: true`，且 preload 纳入检查
+- [x] `tsconfig.json` 的 `strict: false` 至少推进到 `noImplicitAny: true`，且 preload 纳入检查
+      —— **超额完成（第八、九批）**：preload 已纳入检查并清零（`tsconfig.preload.json`，并入 `verify`）；
+      渲染层**探测后直接开了 `strict: true`**（先测 `noImplicitAny: true` 零错误，再测 `strict: true`
+      只差 1 个契约，见第九批）。唯一未开的是 preload 的 `strictNullChecks`（实测还差 17 项）。
 - [x] `install.js` 与 `backup.js` 的「取消 / 关闭 / 订阅」由同一模块提供（`taskqueue.js`）
 - [x] 无生产文件脚本超过 300 行；`MarketplaceView.vue` 脚本 172 行（口径已按 SFC 样式块实际占比更正）
 - [x] `npm test` 不再写用户回收站（默认跳过，`GPM_TEST_TRASH=1` 可显式开启）
@@ -400,7 +403,7 @@ _（每完成一项在阶段小节内标注 commit，与 `docs/backup-redesign-p
 | 阶段 1 · 收敛与护栏 | ✅ 已完成（commit `dfb1af1`，记录 `e04335d`） |
 | 阶段 2 · 结构性抽取 | ✅ 已完成（commit `0a0d6ce`，记录 `964c0d8`） |
 | 阶段 3 · 视图拆分 | ✅ 已完成（第一批 `14587b6`；第二批 `2a080fc`） |
-| 阶段 4 · 类型闸门 / 测试 / CI | 🔄 进行中：P2-1 测试补口 ✅、P2-2 CI ✅、P2-3 术语表 ✅；P0-1 类型闸门已量化未开工 |
+| 阶段 4 · 类型闸门 / 测试 / CI | 🔄 进行中：P2-1 测试补口 ✅、P2-2 CI ✅、P2-3 术语表 ✅；**P0-1 类型闸门 ✅（preload 400→0 并接入 verify；渲染层同时开到 `strict: true`）**；P0-2 ✅；P2-4 ✅。剩余：CI 尚未在 GitHub 真实跑过、渲染层人工验收清单、preload 的 `strictNullChecks`（实测差 17 项，非必须） |
 
 ### 阶段 1 实施记录（commit `dfb1af1`）
 
@@ -745,4 +748,93 @@ B. 手写精简的沙箱声明，刻意不声明 `setImmediate`。
 **下一批的落点因此明确**：① 清 `http.js`（剩余最大一块，43 项自有注解）；
 ② 落地 `src-ztools/preload/sandbox.d.ts`（路线 B）+ `setImmediate` 源码扫描护栏测试；
 ③ 边界声明落地后 preload 错误应降到 ~50，再评估是否接入 `npm run verify`。
+
+### 阶段 4 实施记录 · 第八批（P0-1 收口：路线 B 落地 + **类型闸门清零并接入 verify**）
+
+**结果先说：preload 类型错误 400 → 0，`typecheck:preload` 已并进 `npm run verify`。**
+本批的错误数变化分成两跳，第二跳才是关键：
+
+| 时点 | 错误数 | 动作 |
+|---|---:|---|
+| 上批末 | 96 | — |
+| 加 `sandbox.d.ts`（带真实签名） | **45** | 41 项纯边界 + 43 项 http.js 派生隐式 any 一起消 |
+| 补 `http.js` 等自有注解 + 契约收口 | **3** | 只剩 2 个刻意保留的 `setImmediate` + 1 个 `Variant` 契约缺口 |
+| `@ts-expect-error` 标注 2 处 `setImmediate` | **0** | 闸门清零 |
+
+**探测预测被实测超越。** 上一批用 `any` 壳探测时预计「落地边界后剩 ~49」，实际是 45 ——
+差别在于这份声明写的是**真实签名**：`https.get(url, opts, cb: (res: GpmIncoming) => void)`
+让 `res` / `socket` / `chunk` 这类回调参数终于有了**上下文类型**，于是 http.js 那 43 项
+「由 node 值派生的隐式 any」无需逐个补 JSDoc 就消失了。这一条把「边界声明」从
+『不得不做的妥协』变成了**收益最大的单点改动**：一处声明文件（约 200 行）抵掉上百行逐点注解。
+
+**声明文件本身也被编译器审了一遍。** 第一版漏了 3 个真实成员，立刻被抓出来：
+`extract.js` 用 `stat.mtime`（我只写了 `mtimeMs`）、`launcher.js` 用 `child.unref()`、
+`https.get` 还有 `(options, cb)` 这个重载。这正是「写真实签名」的价值 —— 如果当初图省事
+全写 `any`，这三处会静默留在代码里直到运行时。
+
+**顺手收掉的最后一处契约缺口**：`install.importLocalExe` 的 `version?: object` 对不上
+`GodotVersion`。根因是 `variant` 三元表达式被推成 `string`，而契约要 `Variant` 联合类型；
+把 `godotExe.currentPlatform` 标成 `Platform`、`variant` 标成 `Variant` 后闭合。
+（这就是第 5 批记过的「太松的注解不会静默放过」再次生效。）
+
+#### 为什么路线 B 的代价这次只花了 1 个文件
+
+`@types/node` 描述的是**完整 Node**，而 preload 需要的是**沙箱能提供的子集**；
+声明面与使用面必须一致这件事，本批交给了测试而不是靠自觉：
+
+`sandbox.test.js`（14 项断言）扫描全仓，断言「用到的 node 模块 == 声明里的模块」**双向相等**
+——多了说明声明在腐化，少了说明有人扩大了运行时依赖却不想留痕。另外钉住
+`setImmediate` 全仓只允许 2 处代码使用、必须在 `fsutil.js` 且紧跟 `@ts-expect-error`、
+降级链（setImmediate → MessageChannel → setTimeout）不得退化成两级。
+
+#### `@ts-expect-error` 在这里不只是抑制，是一道反向开关
+
+2 处 `setImmediate` 标成 `@ts-expect-error` 后，出现了一个原本没设计、但很有用的性质：
+**如果将来有人引入 `@types/node`（或手滑在声明里加了 `setImmediate`），这 2 条抑制会变成
+「未使用的 @ts-expect-error」(TS2578) 而报错。** 也就是说 §15 的教训不是靠文档和自觉守住，
+而是被做成了一个**不对称开关**：
+- 不引入 → 2 处报错？不，被显式抑制了，闸门绿；任何**新增**的 `setImmediate` 用法都无抑制、直接红。
+- 引入 `@types/node` → 抑制失效 → 立刻红，逼当事人去看 §15 并显式做决定。
+两条路都不会静默通过，这比上一批讨论的「源码扫描白名单」更强：白名单要人维护，这个是编译器免费的。
+
+**关于「一处都没写 `any` 消音」**：唯一两处刻意的 `any` 都写在声明文件并附了理由 ——
+`Buffer: any`（真实依赖面由 `extract.js` 的 `ByteBuf` 描述，再写一份只会造成两份真相）
+与各自不透明返回值的 `any`（参数一律写实）。
+
+### 阶段 4 实施记录 · 第九批（渲染层直接开到 `strict: true`）
+
+同批顺手做了一次探测，结论比预期好得多 —— **P0-1 原计划的「分三步开闸」一步到位了**：
+
+| 探测（同一套 111 个文件的对照，已用 `--listFilesOnly` 核对文件集合一致） | 错误数 |
+|---|---:|
+| 现状（`strict: false` / `noImplicitAny: false`） | 0 |
+| `noImplicitAny: true` | **0** |
+| `strict: true`（含 `strictNullChecks`） | **1** |
+
+那唯一 1 个错误是真实契约问题：`VersionsView.vue:128` 把 `asset.size`（`number | undefined`）
+传给了 `DownloadParams.totalSize: number`。核对下游后确认**契约写严了**：`totalSize` 一路传给
+`downloadFile(url, dest, { total })`，而 http.js 里的用法本来就是
+`parseInt(content-length) || opts.total || 0` —— 这个字段的实际语义是「进度条分母的提示值」，
+可能缺失且缺失是安全的。因此按现实放宽为 `totalSize?: number`（纯类型放宽，零运行期影响），
+然后直接把 `tsconfig.json` 改成 `"strict": true`。
+
+**两条方法论上的收获**：
+
+1. **「严格开关关着」和「代码不满足严格」是两件事。** 渲染层的开关从第一天起就是 `false`，
+   很容易被读成"这块代码债很重"；实测发现它其实早就干净了 —— 三个阶段反复重构、抽取 11 个
+   组合式函数的过程中，类型被顺带写实了。**先探测再立项**，否则会凭空造出一个不存在的工程。
+2. **探测要用同一份文件集做对照。** 第一次跑 `noImplicitAny` 得到的 0 太可疑，于是用
+   `--listFilesOnly` 把探测配置与真实配置的文件清单 diff 了一遍（111 == 111，无差异）才敢下结论。
+   否则「0 错误」完全可能是「一个文件都没检查」。
+
+**仍然没开的**：`tsconfig.preload.json` 的 `strictNullChecks`（当前显式 `false`）。
+实测还差 **17 项**（`http.js` 8 / `backup.js` 7 / `projects.js` 1 / `install.js` 1）。
+不并进本批的理由：这 17 项都在处理"可能为空的中间状态"（请求句柄、写入流、记录查找），
+改动会碰到取消/失败路径的判空逻辑 —— 属"行为可能被改变"的范畴，应当在备份/下载的护栏测试
+逐个受控推进，而不是搭在类型批次的顺风车上。数量已经测出来了，留给下一批。
+
+**本批验收**：`npm run verify` exit 0（**1249 PASS + 2 SKIP**），`npm run build` exit 0，
+两个 tsconfig 均 0 错误。
+
+
 

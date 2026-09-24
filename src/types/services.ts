@@ -32,7 +32,8 @@ export interface DownloadParams {
   platform: Platform
   url: string
   fileName: string
-  totalSize: number
+  /** 安装包字节数;商店/发布列表偶尔缺这个字段,下游只把它当进度条分母的提示值 */
+  totalSize?: number
 }
 
 /** 备份/恢复进度回调载荷 */

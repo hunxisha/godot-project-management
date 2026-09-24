@@ -1,57 +1,28 @@
-// preload 层的类型检查配置 —— **目标态,尚未接入 `npm run verify`**。
+// preload 层的类型检查配置 —— **已接入 `npm run verify`**(经 `typecheck:preload`)。
 //
-// 为什么单独一个配置:preload 是 CommonJS + 浏览器沙箱全局(没有 setImmediate、没有 Buffer),
+// 为什么单独一个配置:preload 是 CommonJS + 浏览器沙箱全局(没有 setImmediate、Buffer 也不完整),
 // 与渲染层的 ESM/DOM 环境不同,不能用同一份 tsconfig 检查。
 //
-// 当前状态(实测)执行 `npx tsc -p tsconfig.preload.json` 会报 **96 个错误**
-// (开工时 400 个),因此**故意不接入 verify** —— 接进去会让 `npm run verify` 直接失败,
-// 那不是「分步开闸」。
+// 当前状态(实测):**0 个错误** —— 阶段 4 开工时 400 个,本批清零并接入闸门。
+// 清零靠三件事,缺一不可:
+//   1. 逐模块补 JSDoc(占比最大,见 docs/optimization-plan.md 阶段 4 各批记录);
+//   2. `src-ztools/preload/sandbox.d.ts` —— **路线 B:手写精简沙箱声明**。边界探测实测:
+//      用一份 `any` 壳声明 node 模块即可把 96 降到 55,说明 41 项(43%)纯粹是边界卡点;
+//      写成带真实签名的声明后,连 http.js 那 43 项「由 node 值派生的隐式 any」也一并消失
+//      (回调参数终于有了上下文类型)。
+//   3. `fsutil.js` 里 2 处 `setImmediate` 显式标注 `@ts-expect-error`。
 //
-// 进度:已清到 0 错误的文件 —— `taskqueue.js`、`releases.js`;
-//       只剩 node 边界错误的文件 —— `assets.js`(3)、`backup.js`(3)、`projects.js`(3)、
-//       `install.js`(3)、`extract.js`(11 = 3 模块 + 8 Buffer)、`fsutil.js`(6)。
+// ⚠️ **为什么不用 `@types/node`(这是本仓库的硬约束,不要"顺手优化"掉)**
+// `docs/backup-redesign-plan.md` §15 记过一次真实事故:preload 里用了 Node 专有的
+// `setImmediate`,只跑 Node 的测试全绿,一进宿主就 `setImmediate is not defined`。
+// `@types/node` 会把它声明成合法全局 —— 那 2 处 `@ts-expect-error` 随即变成「未使用的抑制」
+// (TS2578)而**报错**,这正是我们要的:把「谁把 setImmediate 变成合法了」直接变成一条编译错误,
+// 而不是静默通过。也就是说,将来即使有人引入 `@types/node`,闸门也会立刻拦下来,
+// 提醒他去看 §15,并显式决定要不要放开。
 //
-// **边界探测结论(已实测,不是推测)**:用一份临时的 `node:*` 声明(全部 `any` 壳)叠加检查后,
-// 96 → **55**。也就是说 **41 个错误(43%)纯粹卡在边界声明上**,另有 43 个是 node 值
-// 参与推断后暴露的隐式 any(http.js 为主)。55 个里的构成:
-//
-//   43  http.js 自有注解缺口(与边界无关,补 JSDoc 即可)
-//    6  探测壳自身的假错误(spawn / Dirent / ChildProcess / URL / EventEmitter 没声明成员)
-//    3  godotExe.js 的 `d` / `code`(child 是 any 才隐式 any;正确声明后自动消失)
-//    2  fsutil.js 的 `setImmediate` —— **故意保留**,见下
-//    1  services.js 的 `version?: GodotVersion` 契约缺口
-//
-// 于是两条路线的取舍有了实测依据,**改推荐 B**(原先推荐 A):
-//   B. 手写一份精简沙箱声明(`process` / `Buffer` / 11 个 `node:*` 模块),刻意**不声明**
-//      `setImmediate`。实测能把 96 降到 ~49,且那 2 个 `setImmediate` 报错**继续可见** ——
-//      等于把 §15 的教训交给编译器看门,而不是交给一份需要人工维护的白名单。
-//   A. 引入 `@types/node`:签名最准,但会把 `setImmediate` 变成合法全局,
-//      §15 的教训从此对类型检查不可见,只能靠额外的源码扫描测试补回来。
-// B 的维护成本由「按实际用到的成员写结构子集」控制 —— 这正是本仓库已在用的手法
-// (`extract.js` 的 `ByteBuf`、`assets.js` 的 `DirEntry`)。
-//
-// 剩余错误分类与处理建议(按数量):
-//
-//   TS7006/7005/7034 ×~50 隐式 any    → 补 JSDoc(http.js 是最后一大块)
-//   TS2307 × 30  Cannot find 'node:*'  → 需要 node 模块声明(见上面的结论)
-//   TS2591 × 11  Cannot find 'process' / 'Buffer' → 同上
-//   TS2304 ×  2  Cannot find 'setImmediate' → **故意保留**,见下
-//
-// ⚠️ **边界声明(TS2307/TS2580)需要一个决策,不要直接 `npm i -D @types/node` 了事。**
-// 这个仓库踩过一个坑(见 docs/backup-redesign-plan.md §15):preload 跑在 ZTools 沙箱里,
-// **没有 `setImmediate`**,只跑 Node 的测试全绿但一进宿主就报 `setImmediate is not defined`。
-// 而 `@types/node` 会把 `setImmediate` 声明成合法全局 —— 于是类型检查从此**不再能提醒**
-// 这件事,等于把那条教训撤销。
-//
-// 两条可行路线(择一,都需要补一个「setImmediate 使用护栏」测试):
-//   A. 引入 `@types/node`(准确、省事),并加一个源码扫描断言:只允许 `fsutil.js`
-//      的 `yieldToLoop` 提及 `setImmediate`。新增模块若要用必须显式改白名单 ——
-//      这比类型报错更强制(会直接让 CI 红)。
-//   B. 手写一份精简的沙箱声明(`process` / `Buffer` / 各 `node:*` 模块),
-//      刻意**不声明** `setImmediate`。最贴合沙箱契约,但要维护签名准确性。
-//
-// 无论走哪条,`fsutil.js` 里那 2 处 `setImmediate` 都应显式标注
-// `// @ts-expect-error Node 专有全局,沙箱内不保证存在`,而不是让它变「合法」。
+// 配套护栏测试:`src-ztools/preload/lib/__tests__/sandbox.test.js`(14 项断言)负责扫描侧的把关
+// —— 用到的 node 模块与 sandbox.d.ts 的声明面必须完全一致(多了说明声明在腐化,少了说明
+// 有人扩大了运行时依赖却不想留痕)、setImmediate 全仓只允许 2 处且必须带抑制、降级链仍在。
 //
 // 检查范围**排除** `lib/__tests__`:测试跑在真 Node 里,用 setImmediate 是合理的,
 // 参与静态检查只会引入噪音。
@@ -77,6 +48,6 @@
     // 与「引入 @types/node」是两件事:它描述的是宿主契约,不是 Node 运行时。
     "types": ["@ztools-center/ztools-api-types"]
   },
-  "include": ["src-ztools/preload/**/*.js"],
+  "include": ["src-ztools/preload/**/*.js", "src-ztools/preload/sandbox.d.ts"],
   "exclude": ["src-ztools/preload/lib/__tests__/**"]
 }

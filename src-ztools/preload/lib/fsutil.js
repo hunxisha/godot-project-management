@@ -75,7 +75,9 @@ function getChannel() {
 }
 
 function yieldToLoop() {
+  // @ts-expect-error Node 专有全局,沙箱内不保证存在(见 docs/backup-redesign-plan.md §15)
   if (typeof setImmediate === 'function') {
+    // @ts-expect-error 同上;若将来引入 @types/node,这两条指令会变成「未使用」而报错
     return new Promise((resolve) => setImmediate(resolve))
   }
   const ch = getChannel()

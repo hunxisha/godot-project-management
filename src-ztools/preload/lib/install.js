@@ -160,7 +160,7 @@ function watchTasks(fn) {
 /**
  * 导入本地 Godot 可执行文件。
  * @param {string} exePath
- * @returns {Promise<{ok: boolean, error?: string, version?: object}>}
+ * @returns {Promise<{ok: boolean, error?: string, version?: import('../../../src/types/godot').GodotVersion}>}
  */
 async function importLocalExe(exePath) {
   try {
@@ -168,6 +168,7 @@ async function importLocalExe(exePath) {
     const fileName = path.basename(exePath)
     const { ok: verified, output } = await verifyExecutable(exePath)
     const tag = parseVersionOutput(output) || parseTagFromFileName(fileName) || 'local'
+    /** @type {import('../../../src/types/godot').Variant} mono 版文件名带 mono,其余按 standard */
     const variant = /mono/i.test(fileName) ? 'mono' : 'standard'
     const platform = currentPlatform()
     if (process.platform !== 'win32') {

@@ -22,6 +22,11 @@ function currentProxy() {
 /**
  * GET 请求统一入口:无代理直接连接;配置了代理时通过 HTTP CONNECT 隧道。
  * 返回对象支持 .on('error', fn) 与 .destroy()(代理路径返回中转 stub)。
+ * 返回类型只声明这两件事 —— 真实请求句柄与代理 stub 都满足它。
+ * @param {string} url
+ * @param {Record<string, string>} headers
+ * @param {(res: GpmIncoming) => void} cb
+ * @returns {GpmSocket}
  */
 function httpsGet(url, headers, cb) {
   const proxy = currentProxy()
@@ -30,8 +35,11 @@ function httpsGet(url, headers, cb) {
   }
 
   const stub = new EventEmitter()
+  /** @type {GpmRequest | null} CONNECT 隧道请求 */
   let connectReq = null
+  /** @type {GpmSocket | null} 隧道内的 TLS 套接字 */
   let tlsSock = null
+  /** @param {Error} err */
   const fail = (err) => {
     if (!stub.listenerCount('error')) return
     stub.emit('error', err)
@@ -60,6 +68,7 @@ function httpsGet(url, headers, cb) {
 
   const target = `${u.hostname}:${u.port || 443}`
   const proxyPort = Number(pu.port) || 80
+  /** @type {Record<string, string>} CONNECT 请求头(username 存在时追加 Proxy-Authorization) */
   const connectHeaders = { Host: target }
   if (pu.username) {
     connectHeaders['Proxy-Authorization'] =
@@ -100,7 +109,12 @@ function httpsGet(url, headers, cb) {
   return stub
 }
 
-/** GET 文本(HTML 等),自动跟随重定向 */
+/**
+ * GET 文本(HTML 等),自动跟随重定向
+ * @param {string} url
+ * @param {Record<string, string>} [headers]
+ * @returns {Promise<string>}
+ */
 function getText(url, headers) {
   return new Promise((resolve, reject) => {
     httpsGet(url, headers, (res) => {
@@ -112,6 +126,7 @@ function getText(url, headers) {
         res.resume()
         return reject(new Error(`HTTP ${res.statusCode}: ${url}`))
       }
+      /** @type {any[]} */
       const chunks = []
       res.on('data', (c) => chunks.push(c))
       res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
@@ -119,7 +134,12 @@ function getText(url, headers) {
   })
 }
 
-/** GET JSON,自动跟随重定向 */
+/**
+ * GET JSON,自动跟随重定向
+ * @param {string} url
+ * @param {Record<string, string>} [headers]
+ * @returns {Promise<any>} 远端 JSON(结构由各 API 决定)
+ */
 function getJson(url, headers) {
   return getText(url, headers).then((text) => {
     try {
@@ -139,14 +159,17 @@ function getJson(url, headers) {
  */
 function downloadFile(url, destPath, opts = {}) {
   let aborted = false
+  /** @type {GpmSocket | null} 当前请求句柄(供 cancel 销毁) */
   let activeReq = null
+  /** @type {GpmWritable | null} 当前写入流(供 cancel 销毁) */
   let activeWs = null
   /** 一旦了结(成功或失败)就不再二次了结 */
   let settled = false
-  /** 供 cancel() 主动了结用 */
+  /** @type {((err: Error) => void) | null} 供 cancel() 主动了结用 */
   let rejectOnce = null
 
   const promise = new Promise((resolve, reject) => {
+    /** @param {Error} err */
     rejectOnce = (err) => {
       if (settled) return
       settled = true
@@ -157,6 +180,10 @@ function downloadFile(url, destPath, opts = {}) {
       settled = true
       resolve()
     }
+    /**
+     * @param {string} currentUrl
+     * @param {number} [depth]
+     */
     const attempt = (currentUrl, depth = 0) => {
       if (aborted) return rejectOnce(new Error('已取消'))
       if (depth > 5) return rejectOnce(new Error('重定向次数过多'))

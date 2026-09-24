@@ -107,7 +107,10 @@ function verifyExecutable(exePath) {
   })
 }
 
-/** 当前平台的 Godot 资产标识(win64 / macos / linux64) */
+/**
+ * 当前平台的 Godot 资产标识(win64 / macos / linux64)。
+ * @returns {import('../../../src/types/godot').Platform}
+ */
 function currentPlatform() {
   if (process.platform === 'win32') return 'win64'
   if (process.platform === 'darwin') return 'macos'
