@@ -651,15 +651,54 @@ for (let i = 0; i < files.length; i++) {
 
 ---
 
-## 13. 待确认的取舍（需决策）
+## 13. 待确认的取舍（已决策）
 
-1. **压缩级别是否纳入首版？** `createZip` 现在固定 `level: 6`（extract.js L174）。
-   开放 L1/L9 是小改动、大体验（大项目差异明显），建议纳入。
-2. **是否把备份任务接入全局任务栏（阶段 4.21）？** 收益是跨页可见 + 完成通知；
-   代价是要泛化 `App.vue` 的任务栏（现在只认 `DownloadTask`）。建议纳入，但排在 UI 重构之后。
-3. **是否自动排除 `.git` / `build/`？** 默认**不排除**（备份应保真），只在高级选项里提供，
-   并在估算里体现「排除后体积」。
-4. **TabBar 第 7 个标签 vs 项目页内二级导航？** 前者符合「备份管理是独立功能」的定位；
-   若实测窄窗口无法容纳，退路是备份页入口只放在项目页页头 + 概览页。
-5. **备份记录是否要加校验和（内容哈希）？** 大项目全量哈希代价高。建议只用
-   「zip EOCD 可读 + 含 project.godot」做有效性校验，不做内容哈希。
+> 2026-09-24 决策：Q1/Q2/Q3/Q5 采用建议方案，Q4 采用「第 7 个标签」。
+
+1. **压缩级别纳入首版** ✅（`createZip` 已支持 `level: 1|6|9`，默认 6）
+2. **备份任务接入全局任务栏** ✅ 建议方案（排在 UI 重构之后，即阶段 4；
+   任务表与 `watchBackupTasks` 已在阶段 1 就位）
+3. **不自动排除 `.git` / `build`** ✅（默认保真，仅在高级选项提供 `exclude`，已实现）
+4. **采用第 7 个「备份」标签页** ✅（阶段 2 实施；需实测窄窗口宽度，见 §5.6）
+5. **不加内容校验和** ✅（校验仅为「zip 可读 + 含 `project.godot`」，已实现 `verifyBackup`）
+
+---
+
+## 14. 实施进度
+
+### 阶段 0 · 地基 ✅ 已完成（commit `1354b1e`）
+
+| 交付 | 说明 |
+|---|---|
+| `preload/lib/fsutil.js`（新增） | `yieldToLoop` / `createCancelToken` / `forEachSliced` / `walkFiles` / `copyTree` / `estimateTree` / `trashPath` / `sanitizeName` / `stampSec` / `uniquePath` / `tempPath` / `makeExcluder` / `rmQuiet` |
+| `preload/lib/extract.js`（改造） | `createZip` 支持 `level` / `includeCache` / `exclude` / 分片让出 / 取消；`extractZip` 改为 fd 随机读取（不再整包入内存）+ 异步 + 进度 + 取消；新增 `readZipEntries` / `inspectZip` |
+| `src/utils/format.ts`（新增） | `fmtSize` / `formatTime` / `formatRelative` / `fmtDuration`，消除 `ProjectsView` 内的重复实现 |
+
+### 阶段 1 · preload 领域层 ✅ 已完成（commit `1354b1e`）
+
+| 交付 | 说明 |
+|---|---|
+| `preload/lib/backup.js`（新增） | 创建 / 预估 / 查询 / 统计 / 备注 / 校验 / 单条与批量删除 / 清理预览 / 恢复（new + overwrite）/ 任务表与订阅 / 取消 |
+| `preload/lib/projects.js`（瘦身） | 504 → 305 行；备份逻辑全部移出；`removeProject` 改用 `fsutil.trashPath` |
+| `preload/services.js` | 暴露 17 个备份相关方法（原 4 个） |
+| `src/types/godot.ts` | `BackupRecord` 扩展 12 个可选字段；新增 `BackupStats` / `BackupTask` / `BackupPhase` / `DOC_PREFIX`；`GodotSettings` 扩展 5 个备份项 |
+| `src/env.d.ts` | 全部新 API 的类型声明 |
+| 依赖方向 | `services → backup → projects → fsutil`，无循环依赖 |
+
+**验证方式**：Node 中桩掉 `window.ztools.db`，直接驱动 preload 模块跑通 18 组场景、**101 项断言全部通过**，其中包含：
+
+- 分片让出的直接证据：备份期间外部事件循环**转动 7 次**（纯同步实现应为 0）
+- 取消：终态 `canceled`、无脏记录、目标目录文件数不变、无 `.gpm-tmp-*` 残留
+- 覆盖恢复进入 `replacing` 后 `cancelBackupTask` 返回 `false`；解包阶段取消则生效
+- 同一秒内重复备份不覆盖（原实现同分钟会静默覆盖）
+- 截断 zip / 文件缺失均被 `verifyBackup` 判为无效
+- L9 压缩体积小于 L1（`5347 < 15430`）
+
+`npx vue-tsc` 类型检查通过（exit 0）。
+
+### 阶段 2 · 备份管理页 ⏳ 待实施
+### 阶段 3 · 创建与恢复流程 ⏳ 待实施
+### 阶段 4 · 可选增强 ⏳ 待实施
+
+> 阶段 1 已完成「不动 UI」的底层替换，现有 `ProjectsView` 的备份弹窗仍沿用旧界面，
+> 但已自动获得实时进度、可取消与原子落盘 —— 阶段 2/3 只做界面迁移。
