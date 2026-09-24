@@ -9,7 +9,7 @@
   body { margin:0; padding:28px 32px 60px; background:var(--bg); color:var(--text);
          font-family:-apple-system,'Segoe UI','Microsoft YaHei','PingFang SC',sans-serif; }
   h1 { font-size:20px; margin:0 0 8px; }
-  .lead { font-size:13px; color:var(--text-2); line-height:1.85; margin:0 0 22px; max-width:78ch; }
+  .lead { font-size:13px; color:var(--text-2); line-height:1.85; margin:0 0 22px; max-width:80ch; }
   .lead code { background:#fff; border:1px solid var(--border); border-radius:4px; padding:1px 5px; font-size:12px; }
   .lead b { color:var(--text); }
   h2 { font-size:14px; margin:28px 0 10px; color:var(--text-2); font-weight:650; }
@@ -19,13 +19,16 @@
            background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px 16px; }
   .strip-item { display:flex; flex-direction:column; align-items:center; gap:4px; }
   .strip-item em { font-style:normal; font-size:10px; color:var(--text-3); font-variant-numeric:tabular-nums; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:14px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:14px; }
   .card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px 16px;
           box-shadow:0 1px 2px rgba(23,37,56,.05); }
-  header { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+  header { display:flex; align-items:center; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
   .id { display:inline-flex; align-items:center; justify-content:center; min-width:26px; height:22px; padding:0 7px;
         border-radius:6px; background:#478cbf; color:#fff; font-size:12px; font-weight:700; }
   .name { font-size:14px; font-weight:650; }
+  .tag { font-size:10.5px; padding:1px 7px; border-radius:999px; }
+  .tag.brand { background:rgba(71,140,191,.13); color:#478cbf; }
+  .tag.official { background:rgba(47,55,71,.1); color:#2f3747; }
   .file { margin-left:auto; font-size:10.5px; color:var(--text-3); font-family:Consolas,monospace; }
   .sizes { display:flex; align-items:flex-end; gap:18px; margin-bottom:12px; }
   .size { display:flex; flex-direction:column; align-items:center; gap:5px; }
@@ -35,280 +38,469 @@
   .on-light { background:#fff; border:1px solid var(--border); color:var(--text-3); }
   .on-dark  { background:#1b212b; border:1px solid #2c3646; color:#75879c; }
   .desc { margin:0; font-size:12px; line-height:1.7; color:var(--text-2); }
-  .note { margin-top:28px; font-size:12px; line-height:1.85; color:var(--text-3); max-width:78ch; }
+  .note { margin-top:28px; font-size:12px; line-height:1.85; color:var(--text-3); max-width:80ch; }
 </style>
 </head>
 <body>
   <h1>Godot 项目管理 · 图标候选</h1>
   <p class="lead">
-    10 个候选,统一规格:<code>48×48 viewBox</code>、<code>rx=11</code> 圆角方块底、白色标记,
-    与现有图标同一格式,可直接替换。<br>
-    底色渐变沿用当前品牌色(<code>#5aa6db → #33689a</code>)。<b>形状与配色是两件独立的事</b> ——
-    选定形状后底色也能换(例如跟随主题色)。<br>
-    请回复编号,如「用 07」。想微调也行:更粗/更细、去掉某个元素、换底色、改圆角。
+    头形按官方 Godot 图标重做:<b>圆头 + 上半圈 4 颗齿轮齿(中间两颗夹出 V 形缺口)+ 圆下巴</b>,
+    再做项目管理方向的变形。<br>
+    两套配色:<b>品牌配色</b>(01–07)= 蓝底白机器人,沿用插件既有渐变,与主题化后的顶栏协调;
+    <b>官方配色</b>(08–10)= 浅底蓝机器人 + 白眼球 + 深色瞳孔,最接近官方造型。<br>
+    <code>48×48 viewBox</code>、<code>rx=11</code> 圆角方块,与现有图标同一格式。<br>
+    请回复编号(如「用 09」)。想微调也行:齿的数量/角度、嘴的台阶数、眼睛大小、配色、圆角。
   </p>
 
   <h2>并排对比</h2>
-  <div class="strip"><span class="strip-item" title="01 项目列表"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
+  <div class="strip"><span class="strip-item" title="01 经典机器人"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g0" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g0)"/>
-  <g fill="#fff">
-    <rect x="11" y="12.5" width="26" height="6" rx="3"/>
-    <rect x="11" y="21" width="26" height="6" rx="3" opacity=".72"/>
-    <rect x="11" y="29.5" width="17" height="6" rx="3" opacity=".45"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="url(#g0)"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="url(#g0)"/>
+  </g>
+  <rect x="22.9" y="25.2" width="2.2" height="3.6" rx="1.1" fill="url(#g0)"/>
+  <path d="M15 31.6 L18.6 31.6 L18.6 34.8 L22.2 34.8 L22.2 31.6 L25.8 31.6 L25.8 34.8 L29.4 34.8 L29.4 31.6 L33 31.6" fill="none" stroke="url(#g0)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
-</span><em>01</em></span><span class="strip-item" title="02 文件夹"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
+</span><em>01</em></span><span class="strip-item" title="02 极简机器人"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g1" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g1)"/>
-  <path d="M9 17a4 4 0 0 1 4-4h4.6a3 3 0 0 1 2.4 1.2l1.5 2.1H35a4 4 0 0 1 4 4V33a4 4 0 0 1-4 4H13a4 4 0 0 1-4-4z" fill="#fff"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.18" cy="23.02" r="4.84" fill="url(#g1)"/>
+    <circle cx="30.82" cy="23.02" r="4.84" fill="url(#g1)"/>
+  </g>
 </svg>
-</span><em>02</em></span><span class="strip-item" title="03 悬浮立方体"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
+</span><em>02</em></span><span class="strip-item" title="03 齿轮头 + 项目立方体"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g2" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g2)"/>
-  <g fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
-    <path d="M24 9.3l12.7 7.4v14.6L24 38.7 11.3 31.3V16.7z"/>
-    <path d="M11.3 16.7L24 24.1l12.7-7.4M24 24.1v14.6"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g fill="none" stroke="url(#g2)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M24 16.6l7.2 4.2v8.4L24 33.4l-7.2-4.2v-8.4z"/>
+    <path d="M16.8 20.8L24 25l7.2-4.2M24 25v8.4"/>
   </g>
 </svg>
-</span><em>03</em></span><span class="strip-item" title="04 G 字标"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
+</span><em>03</em></span><span class="strip-item" title="04 齿轮头 + 文件夹"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g3" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g3)"/>
-  <path d="M31.4 15.2A11.5 11.5 0 1 0 35.5 24H24.4" fill="none" stroke="#fff" stroke-width="4.6" stroke-linecap="round"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <path d="M15.5 25.6a2 2 0 0 1 2-2h3.7a1.6 1.6 0 0 1 1.3.7l1 1.4h7a2 2 0 0 1 2 2v5.4a2 2 0 0 1-2 2H17.5a2 2 0 0 1-2-2z" fill="url(#g3)"/>
 </svg>
-</span><em>04</em></span><span class="strip-item" title="05 机器人(现有重绘)"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
+</span><em>04</em></span><span class="strip-item" title="05 机器人 + 齿轮角标"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g4" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g4)"/>
-  <g fill="#fff">
-    <rect x="15" y="15.5" width="18.5" height="17" rx="4.5"/>
-    <rect x="9.6" y="19" width="5.6" height="9.2" rx="2.4"/>
-    <rect x="33.3" y="19" width="5.6" height="9.2" rx="2.4"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
-  <g fill="url(#g4)">
-    <rect x="19.4" y="21.4" width="4.5" height="6.8" rx="1.7"/>
-    <rect x="25.7" y="21.4" width="4.5" height="6.8" rx="1.7"/>
+  <g>
+    <circle cx="17.49" cy="23.11" r="4.62" fill="url(#g4)"/>
+    <circle cx="30.51" cy="23.11" r="4.62" fill="url(#g4)"/>
+  </g>
+  <g transform="translate(37.4 37.4)">
+    <circle r="9" fill="url(#g4)"/>
+    <g fill="#ffffff">
+      <circle r="5.4"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(0)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(60)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(120)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(180)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(240)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(300)"/>
+    </g>
+    <circle r="1.8" fill="url(#g4)"/>
   </g>
 </svg>
-</span><em>05</em></span><span class="strip-item" title="06 项目网格"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
+</span><em>05</em></span><span class="strip-item" title="06 机器人 + 播放三角"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g5" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g5)"/>
-  <g fill="#fff">
-    <rect x="10.4" y="10.4" width="12.6" height="12.6" rx="3.2"/>
-    <rect x="25" y="10.4" width="12.6" height="12.6" rx="3.2"/>
-    <rect x="10.4" y="25" width="12.6" height="12.6" rx="3.2"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
-  <rect x="25" y="25" width="12.6" height="12.6" rx="3.2" fill="none" stroke="#fff" stroke-width="2.7"/>
-  <path d="M31.3 28.4v5.8M28.4 31.3h5.8" stroke="#fff" stroke-width="2.3" stroke-linecap="round"/>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="url(#g5)"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="url(#g5)"/>
+  </g>
+  <path d="M21.40 25.80l5.20 5.80-5.20 5.80z" fill="url(#g5)"/>
 </svg>
-</span><em>06</em></span><span class="strip-item" title="07 立方体 + 播放"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
+</span><em>06</em></span><span class="strip-item" title="07 机器人 + 项目卡片"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g6" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g6)"/>
-  <path d="M24 8.4l13.5 7.8v15.6L24 39.6 10.5 31.8V16.2z" fill="#fff"/>
-  <path d="M20.2 19.2l9.8 5.6-9.8 5.6z" fill="url(#g6)"/>
+  <rect x="21" y="6.6" width="23" height="23" rx="5.2" fill="none" stroke="url(#g6)" stroke-width="2.6"/>
+  <g fill="#ffffff" transform="translate(20.4 27.2) scale(0.74) translate(-24 -25)">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g transform="translate(20.4 27.2) scale(0.74) translate(-24 -25)">
+    <circle cx="19.16" cy="23.60" r="3.43" fill="url(#g6)"/>
+    <circle cx="28.84" cy="23.60" r="3.43" fill="url(#g6)"/>
+  </g>
 </svg>
-</span><em>07</em></span><span class="strip-item" title="08 罗盘"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
+</span><em>07</em></span><span class="strip-item" title="08 经典机器人 · 官方配色"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g7" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g7)"/>
-  <circle cx="24" cy="24" r="13.6" fill="none" stroke="#fff" stroke-width="3"/>
-  <path d="M31.2 16.8l-4.4 10.4-10.4 4.4 4.4-10.4z" fill="#fff"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="17.80" cy="23.20" r="2.40" fill="#2f3747"/>
+    <circle cx="30.20" cy="23.20" r="2.40" fill="#2f3747"/>
+  </g>
+  <rect x="22.9" y="25.2" width="2.2" height="3.6" rx="1.1" fill="#ffffff"/>
+  <path d="M15 31.6 L18.6 31.6 L18.6 34.8 L22.2 34.8 L22.2 31.6 L25.8 31.6 L25.8 34.8 L29.4 34.8 L29.4 31.6 L33 31.6" fill="none" stroke="#ffffff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
-</span><em>08</em></span><span class="strip-item" title="09 文档 + 播放"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
+</span><em>08</em></span><span class="strip-item" title="09 极简机器人 · 官方配色"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g8" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g8)"/>
-  <path d="M13.4 13.6a4 4 0 0 1 4-4h9.3L36.6 19v15.4a4 4 0 0 1-4 4H17.4a4 4 0 0 1-4-4z" fill="#fff"/>
-  <path d="M26.7 9.6V19h9.9" fill="none" stroke="url(#g8)" stroke-width="3" stroke-linejoin="round"/>
-  <path d="M21.6 22.6l7.2 4.1-7.2 4.1z" fill="url(#g8)"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.18" cy="23.02" r="4.84" fill="#ffffff"/>
+    <circle cx="30.82" cy="23.02" r="4.84" fill="#ffffff"/>
+    <circle cx="17.18" cy="23.02" r="2.64" fill="#2f3747"/>
+    <circle cx="30.82" cy="23.02" r="2.64" fill="#2f3747"/>
+  </g>
 </svg>
-</span><em>09</em></span><span class="strip-item" title="10 卡片堆叠"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
+</span><em>09</em></span><span class="strip-item" title="10 机器人 + 播放 · 官方配色"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g9" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g9)"/>
-  <g fill="#fff" stroke="url(#g9)" stroke-width="3" stroke-linejoin="round">
-    <rect x="15.5" y="9.4" width="23.5" height="16" rx="3.6"/>
-    <rect x="12.2" y="16" width="23.5" height="16" rx="3.6"/>
-    <rect x="8.9" y="22.6" width="23.5" height="16" rx="3.6"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="17.80" cy="23.20" r="2.40" fill="#2f3747"/>
+    <circle cx="30.20" cy="23.20" r="2.40" fill="#2f3747"/>
+  </g>
+  <path d="M21.53 26.09l4.94 5.51-4.94 5.51z" fill="#ffffff"/>
 </svg>
 </span><em>10</em></span></div>
 
   <h2>小尺寸并排(接近实际使用尺寸)</h2>
-  <div class="strip"><span class="strip-item" title="01 项目列表"><span class="box" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
+  <div class="strip"><span class="strip-item" title="01 经典机器人"><span class="box" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g0" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g0)"/>
-  <g fill="#fff">
-    <rect x="11" y="12.5" width="26" height="6" rx="3"/>
-    <rect x="11" y="21" width="26" height="6" rx="3" opacity=".72"/>
-    <rect x="11" y="29.5" width="17" height="6" rx="3" opacity=".45"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="url(#g0)"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="url(#g0)"/>
+  </g>
+  <rect x="22.9" y="25.2" width="2.2" height="3.6" rx="1.1" fill="url(#g0)"/>
+  <path d="M15 31.6 L18.6 31.6 L18.6 34.8 L22.2 34.8 L22.2 31.6 L25.8 31.6 L25.8 34.8 L29.4 34.8 L29.4 31.6 L33 31.6" fill="none" stroke="url(#g0)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
-</span><em>01</em></span><span class="strip-item" title="02 文件夹"><span class="box" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
+</span><em>01</em></span><span class="strip-item" title="02 极简机器人"><span class="box" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g1" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g1)"/>
-  <path d="M9 17a4 4 0 0 1 4-4h4.6a3 3 0 0 1 2.4 1.2l1.5 2.1H35a4 4 0 0 1 4 4V33a4 4 0 0 1-4 4H13a4 4 0 0 1-4-4z" fill="#fff"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.18" cy="23.02" r="4.84" fill="url(#g1)"/>
+    <circle cx="30.82" cy="23.02" r="4.84" fill="url(#g1)"/>
+  </g>
 </svg>
-</span><em>02</em></span><span class="strip-item" title="03 悬浮立方体"><span class="box" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
+</span><em>02</em></span><span class="strip-item" title="03 齿轮头 + 项目立方体"><span class="box" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g2" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g2)"/>
-  <g fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
-    <path d="M24 9.3l12.7 7.4v14.6L24 38.7 11.3 31.3V16.7z"/>
-    <path d="M11.3 16.7L24 24.1l12.7-7.4M24 24.1v14.6"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g fill="none" stroke="url(#g2)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M24 16.6l7.2 4.2v8.4L24 33.4l-7.2-4.2v-8.4z"/>
+    <path d="M16.8 20.8L24 25l7.2-4.2M24 25v8.4"/>
   </g>
 </svg>
-</span><em>03</em></span><span class="strip-item" title="04 G 字标"><span class="box" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
+</span><em>03</em></span><span class="strip-item" title="04 齿轮头 + 文件夹"><span class="box" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g3" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g3)"/>
-  <path d="M31.4 15.2A11.5 11.5 0 1 0 35.5 24H24.4" fill="none" stroke="#fff" stroke-width="4.6" stroke-linecap="round"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <path d="M15.5 25.6a2 2 0 0 1 2-2h3.7a1.6 1.6 0 0 1 1.3.7l1 1.4h7a2 2 0 0 1 2 2v5.4a2 2 0 0 1-2 2H17.5a2 2 0 0 1-2-2z" fill="url(#g3)"/>
 </svg>
-</span><em>04</em></span><span class="strip-item" title="05 机器人(现有重绘)"><span class="box" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
+</span><em>04</em></span><span class="strip-item" title="05 机器人 + 齿轮角标"><span class="box" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g4" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g4)"/>
-  <g fill="#fff">
-    <rect x="15" y="15.5" width="18.5" height="17" rx="4.5"/>
-    <rect x="9.6" y="19" width="5.6" height="9.2" rx="2.4"/>
-    <rect x="33.3" y="19" width="5.6" height="9.2" rx="2.4"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
-  <g fill="url(#g4)">
-    <rect x="19.4" y="21.4" width="4.5" height="6.8" rx="1.7"/>
-    <rect x="25.7" y="21.4" width="4.5" height="6.8" rx="1.7"/>
+  <g>
+    <circle cx="17.49" cy="23.11" r="4.62" fill="url(#g4)"/>
+    <circle cx="30.51" cy="23.11" r="4.62" fill="url(#g4)"/>
+  </g>
+  <g transform="translate(37.4 37.4)">
+    <circle r="9" fill="url(#g4)"/>
+    <g fill="#ffffff">
+      <circle r="5.4"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(0)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(60)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(120)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(180)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(240)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(300)"/>
+    </g>
+    <circle r="1.8" fill="url(#g4)"/>
   </g>
 </svg>
-</span><em>05</em></span><span class="strip-item" title="06 项目网格"><span class="box" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
+</span><em>05</em></span><span class="strip-item" title="06 机器人 + 播放三角"><span class="box" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g5" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g5)"/>
-  <g fill="#fff">
-    <rect x="10.4" y="10.4" width="12.6" height="12.6" rx="3.2"/>
-    <rect x="25" y="10.4" width="12.6" height="12.6" rx="3.2"/>
-    <rect x="10.4" y="25" width="12.6" height="12.6" rx="3.2"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
-  <rect x="25" y="25" width="12.6" height="12.6" rx="3.2" fill="none" stroke="#fff" stroke-width="2.7"/>
-  <path d="M31.3 28.4v5.8M28.4 31.3h5.8" stroke="#fff" stroke-width="2.3" stroke-linecap="round"/>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="url(#g5)"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="url(#g5)"/>
+  </g>
+  <path d="M21.40 25.80l5.20 5.80-5.20 5.80z" fill="url(#g5)"/>
 </svg>
-</span><em>06</em></span><span class="strip-item" title="07 立方体 + 播放"><span class="box" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
+</span><em>06</em></span><span class="strip-item" title="07 机器人 + 项目卡片"><span class="box" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g6" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g6)"/>
-  <path d="M24 8.4l13.5 7.8v15.6L24 39.6 10.5 31.8V16.2z" fill="#fff"/>
-  <path d="M20.2 19.2l9.8 5.6-9.8 5.6z" fill="url(#g6)"/>
+  <rect x="21" y="6.6" width="23" height="23" rx="5.2" fill="none" stroke="url(#g6)" stroke-width="2.6"/>
+  <g fill="#ffffff" transform="translate(20.4 27.2) scale(0.74) translate(-24 -25)">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g transform="translate(20.4 27.2) scale(0.74) translate(-24 -25)">
+    <circle cx="19.16" cy="23.60" r="3.43" fill="url(#g6)"/>
+    <circle cx="28.84" cy="23.60" r="3.43" fill="url(#g6)"/>
+  </g>
 </svg>
-</span><em>07</em></span><span class="strip-item" title="08 罗盘"><span class="box" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
+</span><em>07</em></span><span class="strip-item" title="08 经典机器人 · 官方配色"><span class="box" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g7" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g7)"/>
-  <circle cx="24" cy="24" r="13.6" fill="none" stroke="#fff" stroke-width="3"/>
-  <path d="M31.2 16.8l-4.4 10.4-10.4 4.4 4.4-10.4z" fill="#fff"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="17.80" cy="23.20" r="2.40" fill="#2f3747"/>
+    <circle cx="30.20" cy="23.20" r="2.40" fill="#2f3747"/>
+  </g>
+  <rect x="22.9" y="25.2" width="2.2" height="3.6" rx="1.1" fill="#ffffff"/>
+  <path d="M15 31.6 L18.6 31.6 L18.6 34.8 L22.2 34.8 L22.2 31.6 L25.8 31.6 L25.8 34.8 L29.4 34.8 L29.4 31.6 L33 31.6" fill="none" stroke="#ffffff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
-</span><em>08</em></span><span class="strip-item" title="09 文档 + 播放"><span class="box" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
+</span><em>08</em></span><span class="strip-item" title="09 极简机器人 · 官方配色"><span class="box" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g8" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g8)"/>
-  <path d="M13.4 13.6a4 4 0 0 1 4-4h9.3L36.6 19v15.4a4 4 0 0 1-4 4H17.4a4 4 0 0 1-4-4z" fill="#fff"/>
-  <path d="M26.7 9.6V19h9.9" fill="none" stroke="url(#g8)" stroke-width="3" stroke-linejoin="round"/>
-  <path d="M21.6 22.6l7.2 4.1-7.2 4.1z" fill="url(#g8)"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.18" cy="23.02" r="4.84" fill="#ffffff"/>
+    <circle cx="30.82" cy="23.02" r="4.84" fill="#ffffff"/>
+    <circle cx="17.18" cy="23.02" r="2.64" fill="#2f3747"/>
+    <circle cx="30.82" cy="23.02" r="2.64" fill="#2f3747"/>
+  </g>
 </svg>
-</span><em>09</em></span><span class="strip-item" title="10 卡片堆叠"><span class="box" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
+</span><em>09</em></span><span class="strip-item" title="10 机器人 + 播放 · 官方配色"><span class="box" style="width:24px;height:24px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g9" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g9)"/>
-  <g fill="#fff" stroke="url(#g9)" stroke-width="3" stroke-linejoin="round">
-    <rect x="15.5" y="9.4" width="23.5" height="16" rx="3.6"/>
-    <rect x="12.2" y="16" width="23.5" height="16" rx="3.6"/>
-    <rect x="8.9" y="22.6" width="23.5" height="16" rx="3.6"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="17.80" cy="23.20" r="2.40" fill="#2f3747"/>
+    <circle cx="30.20" cy="23.20" r="2.40" fill="#2f3747"/>
+  </g>
+  <path d="M21.53 26.09l4.94 5.51-4.94 5.51z" fill="#ffffff"/>
 </svg>
 </span><em>10</em></span></div>
 
@@ -317,68 +509,101 @@
       <section class="card">
         <header>
           <span class="id">01</span>
-          <span class="name">项目列表</span>
-          <span class="file">01-project-list.svg</span>
+          <span class="name">经典机器人</span>
+          <span class="tag brand">品牌配色</span>
+          <span class="file">01-robot-full.svg</span>
         </header>
         <div class="sizes">
           <div class="size"><span class="box" style="width:128px;height:128px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g0" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g0)"/>
-  <g fill="#fff">
-    <rect x="11" y="12.5" width="26" height="6" rx="3"/>
-    <rect x="11" y="21" width="26" height="6" rx="3" opacity=".72"/>
-    <rect x="11" y="29.5" width="17" height="6" rx="3" opacity=".45"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="url(#g0)"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="url(#g0)"/>
+  </g>
+  <rect x="22.9" y="25.2" width="2.2" height="3.6" rx="1.1" fill="url(#g0)"/>
+  <path d="M15 31.6 L18.6 31.6 L18.6 34.8 L22.2 34.8 L22.2 31.6 L25.8 31.6 L25.8 34.8 L29.4 34.8 L29.4 31.6 L33 31.6" fill="none" stroke="url(#g0)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
 </span><span>128</span></div>
           <div class="size"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g0" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g0)"/>
-  <g fill="#fff">
-    <rect x="11" y="12.5" width="26" height="6" rx="3"/>
-    <rect x="11" y="21" width="26" height="6" rx="3" opacity=".72"/>
-    <rect x="11" y="29.5" width="17" height="6" rx="3" opacity=".45"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="url(#g0)"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="url(#g0)"/>
+  </g>
+  <rect x="22.9" y="25.2" width="2.2" height="3.6" rx="1.1" fill="url(#g0)"/>
+  <path d="M15 31.6 L18.6 31.6 L18.6 34.8 L22.2 34.8 L22.2 31.6 L25.8 31.6 L25.8 34.8 L29.4 34.8 L29.4 31.6 L33 31.6" fill="none" stroke="url(#g0)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
 </span><span>64</span></div>
           <div class="size"><span class="box" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g0" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g0)"/>
-  <g fill="#fff">
-    <rect x="11" y="12.5" width="26" height="6" rx="3"/>
-    <rect x="11" y="21" width="26" height="6" rx="3" opacity=".72"/>
-    <rect x="11" y="29.5" width="17" height="6" rx="3" opacity=".45"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="url(#g0)"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="url(#g0)"/>
+  </g>
+  <rect x="22.9" y="25.2" width="2.2" height="3.6" rx="1.1" fill="url(#g0)"/>
+  <path d="M15 31.6 L18.6 31.6 L18.6 34.8 L22.2 34.8 L22.2 31.6 L25.8 31.6 L25.8 34.8 L29.4 34.8 L29.4 31.6 L33 31.6" fill="none" stroke="url(#g0)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
 </span><span>32</span></div>
           <div class="size"><span class="box" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g0" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g0)"/>
-  <g fill="#fff">
-    <rect x="11" y="12.5" width="26" height="6" rx="3"/>
-    <rect x="11" y="21" width="26" height="6" rx="3" opacity=".72"/>
-    <rect x="11" y="29.5" width="17" height="6" rx="3" opacity=".45"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="url(#g0)"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="url(#g0)"/>
+  </g>
+  <rect x="22.9" y="25.2" width="2.2" height="3.6" rx="1.1" fill="url(#g0)"/>
+  <path d="M15 31.6 L18.6 31.6 L18.6 34.8 L22.2 34.8 L22.2 31.6 L25.8 31.6 L25.8 34.8 L29.4 34.8 L29.4 31.6 L33 31.6" fill="none" stroke="url(#g0)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
 </span><span>16</span></div>
         </div>
@@ -387,84 +612,141 @@
   <defs>
     <linearGradient id="g0" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g0)"/>
-  <g fill="#fff">
-    <rect x="11" y="12.5" width="26" height="6" rx="3"/>
-    <rect x="11" y="21" width="26" height="6" rx="3" opacity=".72"/>
-    <rect x="11" y="29.5" width="17" height="6" rx="3" opacity=".45"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="url(#g0)"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="url(#g0)"/>
+  </g>
+  <rect x="22.9" y="25.2" width="2.2" height="3.6" rx="1.1" fill="url(#g0)"/>
+  <path d="M15 31.6 L18.6 31.6 L18.6 34.8 L22.2 34.8 L22.2 31.6 L25.8 31.6 L25.8 34.8 L29.4 34.8 L29.4 31.6 L33 31.6" fill="none" stroke="url(#g0)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
 </span><span>浅色标签栏</span></div>
           <div class="on-dark"><span class="box" style="width:30px;height:30px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g0" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g0)"/>
-  <g fill="#fff">
-    <rect x="11" y="12.5" width="26" height="6" rx="3"/>
-    <rect x="11" y="21" width="26" height="6" rx="3" opacity=".72"/>
-    <rect x="11" y="29.5" width="17" height="6" rx="3" opacity=".45"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="url(#g0)"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="url(#g0)"/>
+  </g>
+  <rect x="22.9" y="25.2" width="2.2" height="3.6" rx="1.1" fill="url(#g0)"/>
+  <path d="M15 31.6 L18.6 31.6 L18.6 34.8 L22.2 34.8 L22.2 31.6 L25.8 31.6 L25.8 34.8 L29.4 34.8 L29.4 31.6 L33 31.6" fill="none" stroke="url(#g0)" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
 </span><span>深色标签栏</span></div>
         </div>
-        <p class="desc">三条渐次缩短的横条,像一列项目。抽象、极简,16px 下最稳。</p>
+        <p class="desc">完整官方造型:齿轮冠 + 双眼 + 鼻梁 + 锯齿嘴。关联度最高。</p>
       </section>
       <section class="card">
         <header>
           <span class="id">02</span>
-          <span class="name">文件夹</span>
-          <span class="file">02-folder.svg</span>
+          <span class="name">极简机器人</span>
+          <span class="tag brand">品牌配色</span>
+          <span class="file">02-robot-minimal.svg</span>
         </header>
         <div class="sizes">
           <div class="size"><span class="box" style="width:128px;height:128px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g1" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g1)"/>
-  <path d="M9 17a4 4 0 0 1 4-4h4.6a3 3 0 0 1 2.4 1.2l1.5 2.1H35a4 4 0 0 1 4 4V33a4 4 0 0 1-4 4H13a4 4 0 0 1-4-4z" fill="#fff"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.18" cy="23.02" r="4.84" fill="url(#g1)"/>
+    <circle cx="30.82" cy="23.02" r="4.84" fill="url(#g1)"/>
+  </g>
 </svg>
 </span><span>128</span></div>
           <div class="size"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g1" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g1)"/>
-  <path d="M9 17a4 4 0 0 1 4-4h4.6a3 3 0 0 1 2.4 1.2l1.5 2.1H35a4 4 0 0 1 4 4V33a4 4 0 0 1-4 4H13a4 4 0 0 1-4-4z" fill="#fff"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.18" cy="23.02" r="4.84" fill="url(#g1)"/>
+    <circle cx="30.82" cy="23.02" r="4.84" fill="url(#g1)"/>
+  </g>
 </svg>
 </span><span>64</span></div>
           <div class="size"><span class="box" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g1" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g1)"/>
-  <path d="M9 17a4 4 0 0 1 4-4h4.6a3 3 0 0 1 2.4 1.2l1.5 2.1H35a4 4 0 0 1 4 4V33a4 4 0 0 1-4 4H13a4 4 0 0 1-4-4z" fill="#fff"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.18" cy="23.02" r="4.84" fill="url(#g1)"/>
+    <circle cx="30.82" cy="23.02" r="4.84" fill="url(#g1)"/>
+  </g>
 </svg>
 </span><span>32</span></div>
           <div class="size"><span class="box" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g1" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g1)"/>
-  <path d="M9 17a4 4 0 0 1 4-4h4.6a3 3 0 0 1 2.4 1.2l1.5 2.1H35a4 4 0 0 1 4 4V33a4 4 0 0 1-4 4H13a4 4 0 0 1-4-4z" fill="#fff"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.18" cy="23.02" r="4.84" fill="url(#g1)"/>
+    <circle cx="30.82" cy="23.02" r="4.84" fill="url(#g1)"/>
+  </g>
 </svg>
 </span><span>16</span></div>
         </div>
@@ -473,45 +755,73 @@
   <defs>
     <linearGradient id="g1" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g1)"/>
-  <path d="M9 17a4 4 0 0 1 4-4h4.6a3 3 0 0 1 2.4 1.2l1.5 2.1H35a4 4 0 0 1 4 4V33a4 4 0 0 1-4 4H13a4 4 0 0 1-4-4z" fill="#fff"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.18" cy="23.02" r="4.84" fill="url(#g1)"/>
+    <circle cx="30.82" cy="23.02" r="4.84" fill="url(#g1)"/>
+  </g>
 </svg>
 </span><span>浅色标签栏</span></div>
           <div class="on-dark"><span class="box" style="width:30px;height:30px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g1" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g1)"/>
-  <path d="M9 17a4 4 0 0 1 4-4h4.6a3 3 0 0 1 2.4 1.2l1.5 2.1H35a4 4 0 0 1 4 4V33a4 4 0 0 1-4 4H13a4 4 0 0 1-4-4z" fill="#fff"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.18" cy="23.02" r="4.84" fill="url(#g1)"/>
+    <circle cx="30.82" cy="23.02" r="4.84" fill="url(#g1)"/>
+  </g>
 </svg>
 </span><span>深色标签栏</span></div>
         </div>
-        <p class="desc">最直白的"项目"隐喻,带标签页的文件夹剪影。</p>
+        <p class="desc">只留齿轮冠 + 双眼,眼睛略放大。16px 下最清晰。</p>
       </section>
       <section class="card">
         <header>
           <span class="id">03</span>
-          <span class="name">悬浮立方体</span>
-          <span class="file">03-cube-outline.svg</span>
+          <span class="name">齿轮头 + 项目立方体</span>
+          <span class="tag brand">品牌配色</span>
+          <span class="file">03-robot-cube.svg</span>
         </header>
         <div class="sizes">
           <div class="size"><span class="box" style="width:128px;height:128px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g2" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g2)"/>
-  <g fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
-    <path d="M24 9.3l12.7 7.4v14.6L24 38.7 11.3 31.3V16.7z"/>
-    <path d="M11.3 16.7L24 24.1l12.7-7.4M24 24.1v14.6"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g fill="none" stroke="url(#g2)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M24 16.6l7.2 4.2v8.4L24 33.4l-7.2-4.2v-8.4z"/>
+    <path d="M16.8 20.8L24 25l7.2-4.2M24 25v8.4"/>
   </g>
 </svg>
 </span><span>128</span></div>
@@ -519,13 +829,20 @@
   <defs>
     <linearGradient id="g2" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g2)"/>
-  <g fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
-    <path d="M24 9.3l12.7 7.4v14.6L24 38.7 11.3 31.3V16.7z"/>
-    <path d="M11.3 16.7L24 24.1l12.7-7.4M24 24.1v14.6"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g fill="none" stroke="url(#g2)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M24 16.6l7.2 4.2v8.4L24 33.4l-7.2-4.2v-8.4z"/>
+    <path d="M16.8 20.8L24 25l7.2-4.2M24 25v8.4"/>
   </g>
 </svg>
 </span><span>64</span></div>
@@ -533,13 +850,20 @@
   <defs>
     <linearGradient id="g2" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g2)"/>
-  <g fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
-    <path d="M24 9.3l12.7 7.4v14.6L24 38.7 11.3 31.3V16.7z"/>
-    <path d="M11.3 16.7L24 24.1l12.7-7.4M24 24.1v14.6"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g fill="none" stroke="url(#g2)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M24 16.6l7.2 4.2v8.4L24 33.4l-7.2-4.2v-8.4z"/>
+    <path d="M16.8 20.8L24 25l7.2-4.2M24 25v8.4"/>
   </g>
 </svg>
 </span><span>32</span></div>
@@ -547,13 +871,20 @@
   <defs>
     <linearGradient id="g2" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g2)"/>
-  <g fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
-    <path d="M24 9.3l12.7 7.4v14.6L24 38.7 11.3 31.3V16.7z"/>
-    <path d="M11.3 16.7L24 24.1l12.7-7.4M24 24.1v14.6"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g fill="none" stroke="url(#g2)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M24 16.6l7.2 4.2v8.4L24 33.4l-7.2-4.2v-8.4z"/>
+    <path d="M16.8 20.8L24 25l7.2-4.2M24 25v8.4"/>
   </g>
 </svg>
 </span><span>16</span></div>
@@ -563,13 +894,20 @@
   <defs>
     <linearGradient id="g2" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g2)"/>
-  <g fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
-    <path d="M24 9.3l12.7 7.4v14.6L24 38.7 11.3 31.3V16.7z"/>
-    <path d="M11.3 16.7L24 24.1l12.7-7.4M24 24.1v14.6"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g fill="none" stroke="url(#g2)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M24 16.6l7.2 4.2v8.4L24 33.4l-7.2-4.2v-8.4z"/>
+    <path d="M16.8 20.8L24 25l7.2-4.2M24 25v8.4"/>
   </g>
 </svg>
 </span><span>浅色标签栏</span></div>
@@ -577,68 +915,104 @@
   <defs>
     <linearGradient id="g2" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g2)"/>
-  <g fill="none" stroke="#fff" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
-    <path d="M24 9.3l12.7 7.4v14.6L24 38.7 11.3 31.3V16.7z"/>
-    <path d="M11.3 16.7L24 24.1l12.7-7.4M24 24.1v14.6"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g fill="none" stroke="url(#g2)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M24 16.6l7.2 4.2v8.4L24 33.4l-7.2-4.2v-8.4z"/>
+    <path d="M16.8 20.8L24 25l7.2-4.2M24 25v8.4"/>
   </g>
 </svg>
 </span><span>深色标签栏</span></div>
         </div>
-        <p class="desc">描边等距立方体,呼应 Godot 的引擎属性。线条轻,观感偏工具。</p>
+        <p class="desc">齿轮冠保留,脸的位置换成等距立方体 —— 引擎与项目两层含义。</p>
       </section>
       <section class="card">
         <header>
           <span class="id">04</span>
-          <span class="name">G 字标</span>
-          <span class="file">04-monogram-g.svg</span>
+          <span class="name">齿轮头 + 文件夹</span>
+          <span class="tag brand">品牌配色</span>
+          <span class="file">04-robot-folder.svg</span>
         </header>
         <div class="sizes">
           <div class="size"><span class="box" style="width:128px;height:128px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g3" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g3)"/>
-  <path d="M31.4 15.2A11.5 11.5 0 1 0 35.5 24H24.4" fill="none" stroke="#fff" stroke-width="4.6" stroke-linecap="round"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <path d="M15.5 25.6a2 2 0 0 1 2-2h3.7a1.6 1.6 0 0 1 1.3.7l1 1.4h7a2 2 0 0 1 2 2v5.4a2 2 0 0 1-2 2H17.5a2 2 0 0 1-2-2z" fill="url(#g3)"/>
 </svg>
 </span><span>128</span></div>
           <div class="size"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g3" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g3)"/>
-  <path d="M31.4 15.2A11.5 11.5 0 1 0 35.5 24H24.4" fill="none" stroke="#fff" stroke-width="4.6" stroke-linecap="round"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <path d="M15.5 25.6a2 2 0 0 1 2-2h3.7a1.6 1.6 0 0 1 1.3.7l1 1.4h7a2 2 0 0 1 2 2v5.4a2 2 0 0 1-2 2H17.5a2 2 0 0 1-2-2z" fill="url(#g3)"/>
 </svg>
 </span><span>64</span></div>
           <div class="size"><span class="box" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g3" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g3)"/>
-  <path d="M31.4 15.2A11.5 11.5 0 1 0 35.5 24H24.4" fill="none" stroke="#fff" stroke-width="4.6" stroke-linecap="round"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <path d="M15.5 25.6a2 2 0 0 1 2-2h3.7a1.6 1.6 0 0 1 1.3.7l1 1.4h7a2 2 0 0 1 2 2v5.4a2 2 0 0 1-2 2H17.5a2 2 0 0 1-2-2z" fill="url(#g3)"/>
 </svg>
 </span><span>32</span></div>
           <div class="size"><span class="box" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g3" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g3)"/>
-  <path d="M31.4 15.2A11.5 11.5 0 1 0 35.5 24H24.4" fill="none" stroke="#fff" stroke-width="4.6" stroke-linecap="round"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <path d="M15.5 25.6a2 2 0 0 1 2-2h3.7a1.6 1.6 0 0 1 1.3.7l1 1.4h7a2 2 0 0 1 2 2v5.4a2 2 0 0 1-2 2H17.5a2 2 0 0 1-2-2z" fill="url(#g3)"/>
 </svg>
 </span><span>16</span></div>
         </div>
@@ -647,50 +1021,80 @@
   <defs>
     <linearGradient id="g3" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g3)"/>
-  <path d="M31.4 15.2A11.5 11.5 0 1 0 35.5 24H24.4" fill="none" stroke="#fff" stroke-width="4.6" stroke-linecap="round"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <path d="M15.5 25.6a2 2 0 0 1 2-2h3.7a1.6 1.6 0 0 1 1.3.7l1 1.4h7a2 2 0 0 1 2 2v5.4a2 2 0 0 1-2 2H17.5a2 2 0 0 1-2-2z" fill="url(#g3)"/>
 </svg>
 </span><span>浅色标签栏</span></div>
           <div class="on-dark"><span class="box" style="width:30px;height:30px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g3" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g3)"/>
-  <path d="M31.4 15.2A11.5 11.5 0 1 0 35.5 24H24.4" fill="none" stroke="#fff" stroke-width="4.6" stroke-linecap="round"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <path d="M15.5 25.6a2 2 0 0 1 2-2h3.7a1.6 1.6 0 0 1 1.3.7l1 1.4h7a2 2 0 0 1 2 2v5.4a2 2 0 0 1-2 2H17.5a2 2 0 0 1-2-2z" fill="url(#g3)"/>
 </svg>
 </span><span>深色标签栏</span></div>
         </div>
-        <p class="desc">几何化的字母 G,兼顾品牌辨识与"Godot"。与图形类拉开差别。</p>
+        <p class="desc">齿轮冠里放文件夹,直指"项目"。比立方体更直白。</p>
       </section>
       <section class="card">
         <header>
           <span class="id">05</span>
-          <span class="name">机器人(现有重绘)</span>
-          <span class="file">05-robot.svg</span>
+          <span class="name">机器人 + 齿轮角标</span>
+          <span class="tag brand">品牌配色</span>
+          <span class="file">05-robot-gear-badge.svg</span>
         </header>
         <div class="sizes">
           <div class="size"><span class="box" style="width:128px;height:128px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g4" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g4)"/>
-  <g fill="#fff">
-    <rect x="15" y="15.5" width="18.5" height="17" rx="4.5"/>
-    <rect x="9.6" y="19" width="5.6" height="9.2" rx="2.4"/>
-    <rect x="33.3" y="19" width="5.6" height="9.2" rx="2.4"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
-  <g fill="url(#g4)">
-    <rect x="19.4" y="21.4" width="4.5" height="6.8" rx="1.7"/>
-    <rect x="25.7" y="21.4" width="4.5" height="6.8" rx="1.7"/>
+  <g>
+    <circle cx="17.49" cy="23.11" r="4.62" fill="url(#g4)"/>
+    <circle cx="30.51" cy="23.11" r="4.62" fill="url(#g4)"/>
+  </g>
+  <g transform="translate(37.4 37.4)">
+    <circle r="9" fill="url(#g4)"/>
+    <g fill="#ffffff">
+      <circle r="5.4"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(0)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(60)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(120)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(180)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(240)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(300)"/>
+    </g>
+    <circle r="1.8" fill="url(#g4)"/>
   </g>
 </svg>
 </span><span>128</span></div>
@@ -698,18 +1102,33 @@
   <defs>
     <linearGradient id="g4" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g4)"/>
-  <g fill="#fff">
-    <rect x="15" y="15.5" width="18.5" height="17" rx="4.5"/>
-    <rect x="9.6" y="19" width="5.6" height="9.2" rx="2.4"/>
-    <rect x="33.3" y="19" width="5.6" height="9.2" rx="2.4"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
-  <g fill="url(#g4)">
-    <rect x="19.4" y="21.4" width="4.5" height="6.8" rx="1.7"/>
-    <rect x="25.7" y="21.4" width="4.5" height="6.8" rx="1.7"/>
+  <g>
+    <circle cx="17.49" cy="23.11" r="4.62" fill="url(#g4)"/>
+    <circle cx="30.51" cy="23.11" r="4.62" fill="url(#g4)"/>
+  </g>
+  <g transform="translate(37.4 37.4)">
+    <circle r="9" fill="url(#g4)"/>
+    <g fill="#ffffff">
+      <circle r="5.4"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(0)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(60)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(120)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(180)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(240)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(300)"/>
+    </g>
+    <circle r="1.8" fill="url(#g4)"/>
   </g>
 </svg>
 </span><span>64</span></div>
@@ -717,18 +1136,33 @@
   <defs>
     <linearGradient id="g4" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g4)"/>
-  <g fill="#fff">
-    <rect x="15" y="15.5" width="18.5" height="17" rx="4.5"/>
-    <rect x="9.6" y="19" width="5.6" height="9.2" rx="2.4"/>
-    <rect x="33.3" y="19" width="5.6" height="9.2" rx="2.4"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
-  <g fill="url(#g4)">
-    <rect x="19.4" y="21.4" width="4.5" height="6.8" rx="1.7"/>
-    <rect x="25.7" y="21.4" width="4.5" height="6.8" rx="1.7"/>
+  <g>
+    <circle cx="17.49" cy="23.11" r="4.62" fill="url(#g4)"/>
+    <circle cx="30.51" cy="23.11" r="4.62" fill="url(#g4)"/>
+  </g>
+  <g transform="translate(37.4 37.4)">
+    <circle r="9" fill="url(#g4)"/>
+    <g fill="#ffffff">
+      <circle r="5.4"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(0)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(60)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(120)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(180)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(240)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(300)"/>
+    </g>
+    <circle r="1.8" fill="url(#g4)"/>
   </g>
 </svg>
 </span><span>32</span></div>
@@ -736,18 +1170,33 @@
   <defs>
     <linearGradient id="g4" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g4)"/>
-  <g fill="#fff">
-    <rect x="15" y="15.5" width="18.5" height="17" rx="4.5"/>
-    <rect x="9.6" y="19" width="5.6" height="9.2" rx="2.4"/>
-    <rect x="33.3" y="19" width="5.6" height="9.2" rx="2.4"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
-  <g fill="url(#g4)">
-    <rect x="19.4" y="21.4" width="4.5" height="6.8" rx="1.7"/>
-    <rect x="25.7" y="21.4" width="4.5" height="6.8" rx="1.7"/>
+  <g>
+    <circle cx="17.49" cy="23.11" r="4.62" fill="url(#g4)"/>
+    <circle cx="30.51" cy="23.11" r="4.62" fill="url(#g4)"/>
+  </g>
+  <g transform="translate(37.4 37.4)">
+    <circle r="9" fill="url(#g4)"/>
+    <g fill="#ffffff">
+      <circle r="5.4"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(0)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(60)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(120)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(180)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(240)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(300)"/>
+    </g>
+    <circle r="1.8" fill="url(#g4)"/>
   </g>
 </svg>
 </span><span>16</span></div>
@@ -757,18 +1206,33 @@
   <defs>
     <linearGradient id="g4" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g4)"/>
-  <g fill="#fff">
-    <rect x="15" y="15.5" width="18.5" height="17" rx="4.5"/>
-    <rect x="9.6" y="19" width="5.6" height="9.2" rx="2.4"/>
-    <rect x="33.3" y="19" width="5.6" height="9.2" rx="2.4"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
-  <g fill="url(#g4)">
-    <rect x="19.4" y="21.4" width="4.5" height="6.8" rx="1.7"/>
-    <rect x="25.7" y="21.4" width="4.5" height="6.8" rx="1.7"/>
+  <g>
+    <circle cx="17.49" cy="23.11" r="4.62" fill="url(#g4)"/>
+    <circle cx="30.51" cy="23.11" r="4.62" fill="url(#g4)"/>
+  </g>
+  <g transform="translate(37.4 37.4)">
+    <circle r="9" fill="url(#g4)"/>
+    <g fill="#ffffff">
+      <circle r="5.4"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(0)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(60)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(120)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(180)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(240)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(300)"/>
+    </g>
+    <circle r="1.8" fill="url(#g4)"/>
   </g>
 </svg>
 </span><span>浅色标签栏</span></div>
@@ -776,97 +1240,133 @@
   <defs>
     <linearGradient id="g4" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g4)"/>
-  <g fill="#fff">
-    <rect x="15" y="15.5" width="18.5" height="17" rx="4.5"/>
-    <rect x="9.6" y="19" width="5.6" height="9.2" rx="2.4"/>
-    <rect x="33.3" y="19" width="5.6" height="9.2" rx="2.4"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
-  <g fill="url(#g4)">
-    <rect x="19.4" y="21.4" width="4.5" height="6.8" rx="1.7"/>
-    <rect x="25.7" y="21.4" width="4.5" height="6.8" rx="1.7"/>
+  <g>
+    <circle cx="17.49" cy="23.11" r="4.62" fill="url(#g4)"/>
+    <circle cx="30.51" cy="23.11" r="4.62" fill="url(#g4)"/>
+  </g>
+  <g transform="translate(37.4 37.4)">
+    <circle r="9" fill="url(#g4)"/>
+    <g fill="#ffffff">
+      <circle r="5.4"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(0)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(60)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(120)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(180)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(240)"/>
+      <rect x="-1.3" y="-7.5" width="2.6" height="4.2" rx="1" transform="rotate(300)"/>
+    </g>
+    <circle r="1.8" fill="url(#g4)"/>
   </g>
 </svg>
 </span><span>深色标签栏</span></div>
         </div>
-        <p class="desc">当前图标的重绘版:头 + 两侧耳廓 + 两枚眼睛。作为对照基线。</p>
+        <p class="desc">极简机器人 + 右下齿轮,表达"管理"。角标有底色圆环隔离。</p>
       </section>
       <section class="card">
         <header>
           <span class="id">06</span>
-          <span class="name">项目网格</span>
-          <span class="file">06-tiles-add.svg</span>
+          <span class="name">机器人 + 播放三角</span>
+          <span class="tag brand">品牌配色</span>
+          <span class="file">06-robot-play.svg</span>
         </header>
         <div class="sizes">
           <div class="size"><span class="box" style="width:128px;height:128px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g5" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g5)"/>
-  <g fill="#fff">
-    <rect x="10.4" y="10.4" width="12.6" height="12.6" rx="3.2"/>
-    <rect x="25" y="10.4" width="12.6" height="12.6" rx="3.2"/>
-    <rect x="10.4" y="25" width="12.6" height="12.6" rx="3.2"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
-  <rect x="25" y="25" width="12.6" height="12.6" rx="3.2" fill="none" stroke="#fff" stroke-width="2.7"/>
-  <path d="M31.3 28.4v5.8M28.4 31.3h5.8" stroke="#fff" stroke-width="2.3" stroke-linecap="round"/>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="url(#g5)"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="url(#g5)"/>
+  </g>
+  <path d="M21.40 25.80l5.20 5.80-5.20 5.80z" fill="url(#g5)"/>
 </svg>
 </span><span>128</span></div>
           <div class="size"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g5" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g5)"/>
-  <g fill="#fff">
-    <rect x="10.4" y="10.4" width="12.6" height="12.6" rx="3.2"/>
-    <rect x="25" y="10.4" width="12.6" height="12.6" rx="3.2"/>
-    <rect x="10.4" y="25" width="12.6" height="12.6" rx="3.2"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
-  <rect x="25" y="25" width="12.6" height="12.6" rx="3.2" fill="none" stroke="#fff" stroke-width="2.7"/>
-  <path d="M31.3 28.4v5.8M28.4 31.3h5.8" stroke="#fff" stroke-width="2.3" stroke-linecap="round"/>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="url(#g5)"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="url(#g5)"/>
+  </g>
+  <path d="M21.40 25.80l5.20 5.80-5.20 5.80z" fill="url(#g5)"/>
 </svg>
 </span><span>64</span></div>
           <div class="size"><span class="box" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g5" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g5)"/>
-  <g fill="#fff">
-    <rect x="10.4" y="10.4" width="12.6" height="12.6" rx="3.2"/>
-    <rect x="25" y="10.4" width="12.6" height="12.6" rx="3.2"/>
-    <rect x="10.4" y="25" width="12.6" height="12.6" rx="3.2"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
-  <rect x="25" y="25" width="12.6" height="12.6" rx="3.2" fill="none" stroke="#fff" stroke-width="2.7"/>
-  <path d="M31.3 28.4v5.8M28.4 31.3h5.8" stroke="#fff" stroke-width="2.3" stroke-linecap="round"/>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="url(#g5)"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="url(#g5)"/>
+  </g>
+  <path d="M21.40 25.80l5.20 5.80-5.20 5.80z" fill="url(#g5)"/>
 </svg>
 </span><span>32</span></div>
           <div class="size"><span class="box" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g5" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g5)"/>
-  <g fill="#fff">
-    <rect x="10.4" y="10.4" width="12.6" height="12.6" rx="3.2"/>
-    <rect x="25" y="10.4" width="12.6" height="12.6" rx="3.2"/>
-    <rect x="10.4" y="25" width="12.6" height="12.6" rx="3.2"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
-  <rect x="25" y="25" width="12.6" height="12.6" rx="3.2" fill="none" stroke="#fff" stroke-width="2.7"/>
-  <path d="M31.3 28.4v5.8M28.4 31.3h5.8" stroke="#fff" stroke-width="2.3" stroke-linecap="round"/>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="url(#g5)"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="url(#g5)"/>
+  </g>
+  <path d="M21.40 25.80l5.20 5.80-5.20 5.80z" fill="url(#g5)"/>
 </svg>
 </span><span>16</span></div>
         </div>
@@ -875,92 +1375,143 @@
   <defs>
     <linearGradient id="g5" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g5)"/>
-  <g fill="#fff">
-    <rect x="10.4" y="10.4" width="12.6" height="12.6" rx="3.2"/>
-    <rect x="25" y="10.4" width="12.6" height="12.6" rx="3.2"/>
-    <rect x="10.4" y="25" width="12.6" height="12.6" rx="3.2"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
-  <rect x="25" y="25" width="12.6" height="12.6" rx="3.2" fill="none" stroke="#fff" stroke-width="2.7"/>
-  <path d="M31.3 28.4v5.8M28.4 31.3h5.8" stroke="#fff" stroke-width="2.3" stroke-linecap="round"/>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="url(#g5)"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="url(#g5)"/>
+  </g>
+  <path d="M21.40 25.80l5.20 5.80-5.20 5.80z" fill="url(#g5)"/>
 </svg>
 </span><span>浅色标签栏</span></div>
           <div class="on-dark"><span class="box" style="width:30px;height:30px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g5" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g5)"/>
-  <g fill="#fff">
-    <rect x="10.4" y="10.4" width="12.6" height="12.6" rx="3.2"/>
-    <rect x="25" y="10.4" width="12.6" height="12.6" rx="3.2"/>
-    <rect x="10.4" y="25" width="12.6" height="12.6" rx="3.2"/>
+  <g fill="#ffffff">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
-  <rect x="25" y="25" width="12.6" height="12.6" rx="3.2" fill="none" stroke="#fff" stroke-width="2.7"/>
-  <path d="M31.3 28.4v5.8M28.4 31.3h5.8" stroke="#fff" stroke-width="2.3" stroke-linecap="round"/>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="url(#g5)"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="url(#g5)"/>
+  </g>
+  <path d="M21.40 25.80l5.20 5.80-5.20 5.80z" fill="url(#g5)"/>
 </svg>
 </span><span>深色标签栏</span></div>
         </div>
-        <p class="desc">2×2 磁贴,右下角是"新建"的加号 —— 直接对应项目页的核心动作。</p>
+        <p class="desc">嘴的位置换成播放三角,指向"快捷运行项目"。</p>
       </section>
       <section class="card">
         <header>
           <span class="id">07</span>
-          <span class="name">立方体 + 播放</span>
-          <span class="file">07-cube-play.svg</span>
+          <span class="name">机器人 + 项目卡片</span>
+          <span class="tag brand">品牌配色</span>
+          <span class="file">07-robot-card.svg</span>
         </header>
         <div class="sizes">
           <div class="size"><span class="box" style="width:128px;height:128px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g6" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g6)"/>
-  <path d="M24 8.4l13.5 7.8v15.6L24 39.6 10.5 31.8V16.2z" fill="#fff"/>
-  <path d="M20.2 19.2l9.8 5.6-9.8 5.6z" fill="url(#g6)"/>
+  <rect x="21" y="6.6" width="23" height="23" rx="5.2" fill="none" stroke="url(#g6)" stroke-width="2.6"/>
+  <g fill="#ffffff" transform="translate(20.4 27.2) scale(0.74) translate(-24 -25)">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g transform="translate(20.4 27.2) scale(0.74) translate(-24 -25)">
+    <circle cx="19.16" cy="23.60" r="3.43" fill="url(#g6)"/>
+    <circle cx="28.84" cy="23.60" r="3.43" fill="url(#g6)"/>
+  </g>
 </svg>
 </span><span>128</span></div>
           <div class="size"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g6" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g6)"/>
-  <path d="M24 8.4l13.5 7.8v15.6L24 39.6 10.5 31.8V16.2z" fill="#fff"/>
-  <path d="M20.2 19.2l9.8 5.6-9.8 5.6z" fill="url(#g6)"/>
+  <rect x="21" y="6.6" width="23" height="23" rx="5.2" fill="none" stroke="url(#g6)" stroke-width="2.6"/>
+  <g fill="#ffffff" transform="translate(20.4 27.2) scale(0.74) translate(-24 -25)">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g transform="translate(20.4 27.2) scale(0.74) translate(-24 -25)">
+    <circle cx="19.16" cy="23.60" r="3.43" fill="url(#g6)"/>
+    <circle cx="28.84" cy="23.60" r="3.43" fill="url(#g6)"/>
+  </g>
 </svg>
 </span><span>64</span></div>
           <div class="size"><span class="box" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g6" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g6)"/>
-  <path d="M24 8.4l13.5 7.8v15.6L24 39.6 10.5 31.8V16.2z" fill="#fff"/>
-  <path d="M20.2 19.2l9.8 5.6-9.8 5.6z" fill="url(#g6)"/>
+  <rect x="21" y="6.6" width="23" height="23" rx="5.2" fill="none" stroke="url(#g6)" stroke-width="2.6"/>
+  <g fill="#ffffff" transform="translate(20.4 27.2) scale(0.74) translate(-24 -25)">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g transform="translate(20.4 27.2) scale(0.74) translate(-24 -25)">
+    <circle cx="19.16" cy="23.60" r="3.43" fill="url(#g6)"/>
+    <circle cx="28.84" cy="23.60" r="3.43" fill="url(#g6)"/>
+  </g>
 </svg>
 </span><span>32</span></div>
           <div class="size"><span class="box" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g6" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g6)"/>
-  <path d="M24 8.4l13.5 7.8v15.6L24 39.6 10.5 31.8V16.2z" fill="#fff"/>
-  <path d="M20.2 19.2l9.8 5.6-9.8 5.6z" fill="url(#g6)"/>
+  <rect x="21" y="6.6" width="23" height="23" rx="5.2" fill="none" stroke="url(#g6)" stroke-width="2.6"/>
+  <g fill="#ffffff" transform="translate(20.4 27.2) scale(0.74) translate(-24 -25)">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g transform="translate(20.4 27.2) scale(0.74) translate(-24 -25)">
+    <circle cx="19.16" cy="23.60" r="3.43" fill="url(#g6)"/>
+    <circle cx="28.84" cy="23.60" r="3.43" fill="url(#g6)"/>
+  </g>
 </svg>
 </span><span>16</span></div>
         </div>
@@ -969,82 +1520,155 @@
   <defs>
     <linearGradient id="g6" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g6)"/>
-  <path d="M24 8.4l13.5 7.8v15.6L24 39.6 10.5 31.8V16.2z" fill="#fff"/>
-  <path d="M20.2 19.2l9.8 5.6-9.8 5.6z" fill="url(#g6)"/>
+  <rect x="21" y="6.6" width="23" height="23" rx="5.2" fill="none" stroke="url(#g6)" stroke-width="2.6"/>
+  <g fill="#ffffff" transform="translate(20.4 27.2) scale(0.74) translate(-24 -25)">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g transform="translate(20.4 27.2) scale(0.74) translate(-24 -25)">
+    <circle cx="19.16" cy="23.60" r="3.43" fill="url(#g6)"/>
+    <circle cx="28.84" cy="23.60" r="3.43" fill="url(#g6)"/>
+  </g>
 </svg>
 </span><span>浅色标签栏</span></div>
           <div class="on-dark"><span class="box" style="width:30px;height:30px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g6" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
       <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="1" stop-color="#478cbf"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g6)"/>
-  <path d="M24 8.4l13.5 7.8v15.6L24 39.6 10.5 31.8V16.2z" fill="#fff"/>
-  <path d="M20.2 19.2l9.8 5.6-9.8 5.6z" fill="url(#g6)"/>
+  <rect x="21" y="6.6" width="23" height="23" rx="5.2" fill="none" stroke="url(#g6)" stroke-width="2.6"/>
+  <g fill="#ffffff" transform="translate(20.4 27.2) scale(0.74) translate(-24 -25)">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g transform="translate(20.4 27.2) scale(0.74) translate(-24 -25)">
+    <circle cx="19.16" cy="23.60" r="3.43" fill="url(#g6)"/>
+    <circle cx="28.84" cy="23.60" r="3.43" fill="url(#g6)"/>
+  </g>
 </svg>
 </span><span>深色标签栏</span></div>
         </div>
-        <p class="desc">实心立方体上镂出播放三角,指向"快捷运行项目"。块面重,远看最醒目。</p>
+        <p class="desc">缩小机器人、身后放一张项目卡片轮廓,像一张"Godot 项目卡"。</p>
       </section>
       <section class="card">
         <header>
           <span class="id">08</span>
-          <span class="name">罗盘</span>
-          <span class="file">08-compass.svg</span>
+          <span class="name">经典机器人 · 官方配色</span>
+          <span class="tag official">官方配色</span>
+          <span class="file">08-robot-full-official.svg</span>
         </header>
         <div class="sizes">
           <div class="size"><span class="box" style="width:128px;height:128px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g7" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g7)"/>
-  <circle cx="24" cy="24" r="13.6" fill="none" stroke="#fff" stroke-width="3"/>
-  <path d="M31.2 16.8l-4.4 10.4-10.4 4.4 4.4-10.4z" fill="#fff"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="17.80" cy="23.20" r="2.40" fill="#2f3747"/>
+    <circle cx="30.20" cy="23.20" r="2.40" fill="#2f3747"/>
+  </g>
+  <rect x="22.9" y="25.2" width="2.2" height="3.6" rx="1.1" fill="#ffffff"/>
+  <path d="M15 31.6 L18.6 31.6 L18.6 34.8 L22.2 34.8 L22.2 31.6 L25.8 31.6 L25.8 34.8 L29.4 34.8 L29.4 31.6 L33 31.6" fill="none" stroke="#ffffff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
 </span><span>128</span></div>
           <div class="size"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g7" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g7)"/>
-  <circle cx="24" cy="24" r="13.6" fill="none" stroke="#fff" stroke-width="3"/>
-  <path d="M31.2 16.8l-4.4 10.4-10.4 4.4 4.4-10.4z" fill="#fff"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="17.80" cy="23.20" r="2.40" fill="#2f3747"/>
+    <circle cx="30.20" cy="23.20" r="2.40" fill="#2f3747"/>
+  </g>
+  <rect x="22.9" y="25.2" width="2.2" height="3.6" rx="1.1" fill="#ffffff"/>
+  <path d="M15 31.6 L18.6 31.6 L18.6 34.8 L22.2 34.8 L22.2 31.6 L25.8 31.6 L25.8 34.8 L29.4 34.8 L29.4 31.6 L33 31.6" fill="none" stroke="#ffffff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
 </span><span>64</span></div>
           <div class="size"><span class="box" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g7" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g7)"/>
-  <circle cx="24" cy="24" r="13.6" fill="none" stroke="#fff" stroke-width="3"/>
-  <path d="M31.2 16.8l-4.4 10.4-10.4 4.4 4.4-10.4z" fill="#fff"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="17.80" cy="23.20" r="2.40" fill="#2f3747"/>
+    <circle cx="30.20" cy="23.20" r="2.40" fill="#2f3747"/>
+  </g>
+  <rect x="22.9" y="25.2" width="2.2" height="3.6" rx="1.1" fill="#ffffff"/>
+  <path d="M15 31.6 L18.6 31.6 L18.6 34.8 L22.2 34.8 L22.2 31.6 L25.8 31.6 L25.8 34.8 L29.4 34.8 L29.4 31.6 L33 31.6" fill="none" stroke="#ffffff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
 </span><span>32</span></div>
           <div class="size"><span class="box" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g7" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g7)"/>
-  <circle cx="24" cy="24" r="13.6" fill="none" stroke="#fff" stroke-width="3"/>
-  <path d="M31.2 16.8l-4.4 10.4-10.4 4.4 4.4-10.4z" fill="#fff"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="17.80" cy="23.20" r="2.40" fill="#2f3747"/>
+    <circle cx="30.20" cy="23.20" r="2.40" fill="#2f3747"/>
+  </g>
+  <rect x="22.9" y="25.2" width="2.2" height="3.6" rx="1.1" fill="#ffffff"/>
+  <path d="M15 31.6 L18.6 31.6 L18.6 34.8 L22.2 34.8 L22.2 31.6 L25.8 31.6 L25.8 34.8 L29.4 34.8 L29.4 31.6 L33 31.6" fill="none" stroke="#ffffff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
 </span><span>16</span></div>
         </div>
@@ -1052,87 +1676,154 @@
           <div class="on-light"><span class="box" style="width:30px;height:30px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g7" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g7)"/>
-  <circle cx="24" cy="24" r="13.6" fill="none" stroke="#fff" stroke-width="3"/>
-  <path d="M31.2 16.8l-4.4 10.4-10.4 4.4 4.4-10.4z" fill="#fff"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="17.80" cy="23.20" r="2.40" fill="#2f3747"/>
+    <circle cx="30.20" cy="23.20" r="2.40" fill="#2f3747"/>
+  </g>
+  <rect x="22.9" y="25.2" width="2.2" height="3.6" rx="1.1" fill="#ffffff"/>
+  <path d="M15 31.6 L18.6 31.6 L18.6 34.8 L22.2 34.8 L22.2 31.6 L25.8 31.6 L25.8 34.8 L29.4 34.8 L29.4 31.6 L33 31.6" fill="none" stroke="#ffffff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
 </span><span>浅色标签栏</span></div>
           <div class="on-dark"><span class="box" style="width:30px;height:30px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g7" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g7)"/>
-  <circle cx="24" cy="24" r="13.6" fill="none" stroke="#fff" stroke-width="3"/>
-  <path d="M31.2 16.8l-4.4 10.4-10.4 4.4 4.4-10.4z" fill="#fff"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="17.80" cy="23.20" r="2.40" fill="#2f3747"/>
+    <circle cx="30.20" cy="23.20" r="2.40" fill="#2f3747"/>
+  </g>
+  <rect x="22.9" y="25.2" width="2.2" height="3.6" rx="1.1" fill="#ffffff"/>
+  <path d="M15 31.6 L18.6 31.6 L18.6 34.8 L22.2 34.8 L22.2 31.6 L25.8 31.6 L25.8 34.8 L29.4 34.8 L29.4 31.6 L33 31.6" fill="none" stroke="#ffffff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
 </span><span>深色标签栏</span></div>
         </div>
-        <p class="desc">圆环中的指针,寓意"导航/定位项目"。与其它方块类形状完全不同。</p>
+        <p class="desc">与 01 同形,改用官方配色:浅底 + 蓝机器人 + 白眼球 + 深色瞳孔。最像 Godot。</p>
       </section>
       <section class="card">
         <header>
           <span class="id">09</span>
-          <span class="name">文档 + 播放</span>
-          <span class="file">09-file-play.svg</span>
+          <span class="name">极简机器人 · 官方配色</span>
+          <span class="tag official">官方配色</span>
+          <span class="file">09-robot-minimal-official.svg</span>
         </header>
         <div class="sizes">
           <div class="size"><span class="box" style="width:128px;height:128px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g8" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g8)"/>
-  <path d="M13.4 13.6a4 4 0 0 1 4-4h9.3L36.6 19v15.4a4 4 0 0 1-4 4H17.4a4 4 0 0 1-4-4z" fill="#fff"/>
-  <path d="M26.7 9.6V19h9.9" fill="none" stroke="url(#g8)" stroke-width="3" stroke-linejoin="round"/>
-  <path d="M21.6 22.6l7.2 4.1-7.2 4.1z" fill="url(#g8)"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.18" cy="23.02" r="4.84" fill="#ffffff"/>
+    <circle cx="30.82" cy="23.02" r="4.84" fill="#ffffff"/>
+    <circle cx="17.18" cy="23.02" r="2.64" fill="#2f3747"/>
+    <circle cx="30.82" cy="23.02" r="2.64" fill="#2f3747"/>
+  </g>
 </svg>
 </span><span>128</span></div>
           <div class="size"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g8" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g8)"/>
-  <path d="M13.4 13.6a4 4 0 0 1 4-4h9.3L36.6 19v15.4a4 4 0 0 1-4 4H17.4a4 4 0 0 1-4-4z" fill="#fff"/>
-  <path d="M26.7 9.6V19h9.9" fill="none" stroke="url(#g8)" stroke-width="3" stroke-linejoin="round"/>
-  <path d="M21.6 22.6l7.2 4.1-7.2 4.1z" fill="url(#g8)"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.18" cy="23.02" r="4.84" fill="#ffffff"/>
+    <circle cx="30.82" cy="23.02" r="4.84" fill="#ffffff"/>
+    <circle cx="17.18" cy="23.02" r="2.64" fill="#2f3747"/>
+    <circle cx="30.82" cy="23.02" r="2.64" fill="#2f3747"/>
+  </g>
 </svg>
 </span><span>64</span></div>
           <div class="size"><span class="box" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g8" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g8)"/>
-  <path d="M13.4 13.6a4 4 0 0 1 4-4h9.3L36.6 19v15.4a4 4 0 0 1-4 4H17.4a4 4 0 0 1-4-4z" fill="#fff"/>
-  <path d="M26.7 9.6V19h9.9" fill="none" stroke="url(#g8)" stroke-width="3" stroke-linejoin="round"/>
-  <path d="M21.6 22.6l7.2 4.1-7.2 4.1z" fill="url(#g8)"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.18" cy="23.02" r="4.84" fill="#ffffff"/>
+    <circle cx="30.82" cy="23.02" r="4.84" fill="#ffffff"/>
+    <circle cx="17.18" cy="23.02" r="2.64" fill="#2f3747"/>
+    <circle cx="30.82" cy="23.02" r="2.64" fill="#2f3747"/>
+  </g>
 </svg>
 </span><span>32</span></div>
           <div class="size"><span class="box" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g8" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g8)"/>
-  <path d="M13.4 13.6a4 4 0 0 1 4-4h9.3L36.6 19v15.4a4 4 0 0 1-4 4H17.4a4 4 0 0 1-4-4z" fill="#fff"/>
-  <path d="M26.7 9.6V19h9.9" fill="none" stroke="url(#g8)" stroke-width="3" stroke-linejoin="round"/>
-  <path d="M21.6 22.6l7.2 4.1-7.2 4.1z" fill="url(#g8)"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.18" cy="23.02" r="4.84" fill="#ffffff"/>
+    <circle cx="30.82" cy="23.02" r="4.84" fill="#ffffff"/>
+    <circle cx="17.18" cy="23.02" r="2.64" fill="#2f3747"/>
+    <circle cx="30.82" cy="23.02" r="2.64" fill="#2f3747"/>
+  </g>
 </svg>
 </span><span>16</span></div>
         </div>
@@ -1140,97 +1831,154 @@
           <div class="on-light"><span class="box" style="width:30px;height:30px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g8" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g8)"/>
-  <path d="M13.4 13.6a4 4 0 0 1 4-4h9.3L36.6 19v15.4a4 4 0 0 1-4 4H17.4a4 4 0 0 1-4-4z" fill="#fff"/>
-  <path d="M26.7 9.6V19h9.9" fill="none" stroke="url(#g8)" stroke-width="3" stroke-linejoin="round"/>
-  <path d="M21.6 22.6l7.2 4.1-7.2 4.1z" fill="url(#g8)"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.18" cy="23.02" r="4.84" fill="#ffffff"/>
+    <circle cx="30.82" cy="23.02" r="4.84" fill="#ffffff"/>
+    <circle cx="17.18" cy="23.02" r="2.64" fill="#2f3747"/>
+    <circle cx="30.82" cy="23.02" r="2.64" fill="#2f3747"/>
+  </g>
 </svg>
 </span><span>浅色标签栏</span></div>
           <div class="on-dark"><span class="box" style="width:30px;height:30px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g8" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g8)"/>
-  <path d="M13.4 13.6a4 4 0 0 1 4-4h9.3L36.6 19v15.4a4 4 0 0 1-4 4H17.4a4 4 0 0 1-4-4z" fill="#fff"/>
-  <path d="M26.7 9.6V19h9.9" fill="none" stroke="url(#g8)" stroke-width="3" stroke-linejoin="round"/>
-  <path d="M21.6 22.6l7.2 4.1-7.2 4.1z" fill="url(#g8)"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
+  </g>
+  <g>
+    <circle cx="17.18" cy="23.02" r="4.84" fill="#ffffff"/>
+    <circle cx="30.82" cy="23.02" r="4.84" fill="#ffffff"/>
+    <circle cx="17.18" cy="23.02" r="2.64" fill="#2f3747"/>
+    <circle cx="30.82" cy="23.02" r="2.64" fill="#2f3747"/>
+  </g>
 </svg>
 </span><span>深色标签栏</span></div>
         </div>
-        <p class="desc">折角文档(project.godot)加播放三角,强调"打开/运行这个项目"。</p>
+        <p class="desc">与 02 同形,官方配色。那双白眼睛在浅底上识别度最高。</p>
       </section>
       <section class="card">
         <header>
           <span class="id">10</span>
-          <span class="name">卡片堆叠</span>
-          <span class="file">10-card-stack.svg</span>
+          <span class="name">机器人 + 播放 · 官方配色</span>
+          <span class="tag official">官方配色</span>
+          <span class="file">10-robot-play-official.svg</span>
         </header>
         <div class="sizes">
           <div class="size"><span class="box" style="width:128px;height:128px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g9" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g9)"/>
-  <g fill="#fff" stroke="url(#g9)" stroke-width="3" stroke-linejoin="round">
-    <rect x="15.5" y="9.4" width="23.5" height="16" rx="3.6"/>
-    <rect x="12.2" y="16" width="23.5" height="16" rx="3.6"/>
-    <rect x="8.9" y="22.6" width="23.5" height="16" rx="3.6"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="17.80" cy="23.20" r="2.40" fill="#2f3747"/>
+    <circle cx="30.20" cy="23.20" r="2.40" fill="#2f3747"/>
+  </g>
+  <path d="M21.53 26.09l4.94 5.51-4.94 5.51z" fill="#ffffff"/>
 </svg>
 </span><span>128</span></div>
           <div class="size"><span class="box" style="width:64px;height:64px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g9" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g9)"/>
-  <g fill="#fff" stroke="url(#g9)" stroke-width="3" stroke-linejoin="round">
-    <rect x="15.5" y="9.4" width="23.5" height="16" rx="3.6"/>
-    <rect x="12.2" y="16" width="23.5" height="16" rx="3.6"/>
-    <rect x="8.9" y="22.6" width="23.5" height="16" rx="3.6"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="17.80" cy="23.20" r="2.40" fill="#2f3747"/>
+    <circle cx="30.20" cy="23.20" r="2.40" fill="#2f3747"/>
+  </g>
+  <path d="M21.53 26.09l4.94 5.51-4.94 5.51z" fill="#ffffff"/>
 </svg>
 </span><span>64</span></div>
           <div class="size"><span class="box" style="width:32px;height:32px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g9" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g9)"/>
-  <g fill="#fff" stroke="url(#g9)" stroke-width="3" stroke-linejoin="round">
-    <rect x="15.5" y="9.4" width="23.5" height="16" rx="3.6"/>
-    <rect x="12.2" y="16" width="23.5" height="16" rx="3.6"/>
-    <rect x="8.9" y="22.6" width="23.5" height="16" rx="3.6"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="17.80" cy="23.20" r="2.40" fill="#2f3747"/>
+    <circle cx="30.20" cy="23.20" r="2.40" fill="#2f3747"/>
+  </g>
+  <path d="M21.53 26.09l4.94 5.51-4.94 5.51z" fill="#ffffff"/>
 </svg>
 </span><span>32</span></div>
           <div class="size"><span class="box" style="width:16px;height:16px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g9" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g9)"/>
-  <g fill="#fff" stroke="url(#g9)" stroke-width="3" stroke-linejoin="round">
-    <rect x="15.5" y="9.4" width="23.5" height="16" rx="3.6"/>
-    <rect x="12.2" y="16" width="23.5" height="16" rx="3.6"/>
-    <rect x="8.9" y="22.6" width="23.5" height="16" rx="3.6"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="17.80" cy="23.20" r="2.40" fill="#2f3747"/>
+    <circle cx="30.20" cy="23.20" r="2.40" fill="#2f3747"/>
+  </g>
+  <path d="M21.53 26.09l4.94 5.51-4.94 5.51z" fill="#ffffff"/>
 </svg>
 </span><span>16</span></div>
         </div>
@@ -1238,41 +1986,59 @@
           <div class="on-light"><span class="box" style="width:30px;height:30px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g9" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g9)"/>
-  <g fill="#fff" stroke="url(#g9)" stroke-width="3" stroke-linejoin="round">
-    <rect x="15.5" y="9.4" width="23.5" height="16" rx="3.6"/>
-    <rect x="12.2" y="16" width="23.5" height="16" rx="3.6"/>
-    <rect x="8.9" y="22.6" width="23.5" height="16" rx="3.6"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="17.80" cy="23.20" r="2.40" fill="#2f3747"/>
+    <circle cx="30.20" cy="23.20" r="2.40" fill="#2f3747"/>
+  </g>
+  <path d="M21.53 26.09l4.94 5.51-4.94 5.51z" fill="#ffffff"/>
 </svg>
 </span><span>浅色标签栏</span></div>
           <div class="on-dark"><span class="box" style="width:30px;height:30px"><svg xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 48 48" width="512" height="512">
   <defs>
     <linearGradient id="g9" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="48" y2="48">
-      <stop offset="0" stop-color="#5aa6db"/>
-      <stop offset="1" stop-color="#33689a"/>
+      <stop offset="0" stop-color="#f8fbfd"/>
+      <stop offset="1" stop-color="#dde7f1"/>
     </linearGradient>
   </defs>
   <rect width="48" height="48" rx="11" fill="url(#g9)"/>
-  <g fill="#fff" stroke="url(#g9)" stroke-width="3" stroke-linejoin="round">
-    <rect x="15.5" y="9.4" width="23.5" height="16" rx="3.6"/>
-    <rect x="12.2" y="16" width="23.5" height="16" rx="3.6"/>
-    <rect x="8.9" y="22.6" width="23.5" height="16" rx="3.6"/>
+  <g fill="#478cbf">
+    <circle cx="24" cy="25" r="14.3"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-46 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(-15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(15 24 25)"/>
+    <rect x="21.1" y="5.8" width="5.8" height="9.8" rx="1.6" transform="rotate(46 24 25)"/>
   </g>
+  <g>
+    <circle cx="17.80" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="30.20" cy="23.20" r="4.40" fill="#ffffff"/>
+    <circle cx="17.80" cy="23.20" r="2.40" fill="#2f3747"/>
+    <circle cx="30.20" cy="23.20" r="2.40" fill="#2f3747"/>
+  </g>
+  <path d="M21.53 26.09l4.94 5.51-4.94 5.51z" fill="#ffffff"/>
 </svg>
 </span><span>深色标签栏</span></div>
         </div>
-        <p class="desc">三张错位卡片,像多个项目/多份备份摞在一起,带一点层次与纵深。</p>
+        <p class="desc">与 06 同形,官方配色。兼顾"Godot 感"与"运行项目"的动作感。</p>
       </section>
   </div>
 
   <p class="note">
-    看的时候建议重点看两处:① 每张卡片里 <b>16px 那一格</b> —— 它决定图标在标题栏/任务栏里的可读性;
-    ② 底部<b>浅色 / 深色标签栏</b>两格 —— 图标会出现在插件顶栏左侧,要在这两种底色上都站得住。
+    重点看两处:① 每张卡片里 <b>16px 那一格</b> —— 图标最终会缩到这么小,鼻梁和嘴大概会糊掉,只剩齿轮冠 + 双眼;
+    ② 底部<b>浅色 / 深色标签栏</b>两格 —— 图标会出现在顶栏左侧,要在这两种底色上都站得住。
   </p>
 </body>
 </html>
