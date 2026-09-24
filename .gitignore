@@ -3,3 +3,4 @@ src-ztools/dist/
 *.local
 .DS_Store
 graphify-out/
+.gpm-test/

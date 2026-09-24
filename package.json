@@ -5,7 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc && vite build"
+    "build": "vue-tsc && vite build",
+    "test": "npm run test:preload && npm run test:preload:sandbox && npm run test:composable",
+    "test:preload": "node src-ztools/preload/lib/__tests__/backup.test.js",
+    "test:preload:sandbox": "node src-ztools/preload/lib/__tests__/backup.test.js --no-immediate",
+    "test:composable": "node src/composables/__tests__/build-bundle.mjs && node src/composables/__tests__/useBackups.test.mjs"
   },
   "dependencies": {
     "vue": "^3.5.13"

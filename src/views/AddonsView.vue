@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { notify } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
+import { fmtSize } from '../utils/format'
 import type { AddonInfo, GodotProject } from '../types/godot'
 
 const props = defineProps<{ enterProjectId?: string | null }>()
@@ -87,12 +88,6 @@ function onTargetChange() {
   confirmingBatch.value = false
   checked.value = []
   reload()
-}
-
-function fmtSize(n?: number): string {
-  if (!n) return ''
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`
-  return `${(n / 1024 / 1024).toFixed(1)} MB`
 }
 
 function percent(p: { received?: number, total?: number }): number {
