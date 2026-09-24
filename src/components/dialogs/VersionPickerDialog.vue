@@ -3,7 +3,7 @@
 // 自己拉取 release 列表;选中的版本通过 pick 事件抛出,进度与结果由父组件负责。
 import { ref, watch } from 'vue'
 import Icon from '../Icon.vue'
-import { fmtSize } from '../../utils/format'
+import { fmtSize, normVersion } from '../../utils/format'
 
 type ReleaseRow = {
   version: string
@@ -40,17 +40,8 @@ const list = ref<ReleaseRow[]>([])
 const loading = ref(false)
 const error = ref('')
 
-/** 归一化版本号用于比较:去掉前缀 v/V */
-function norm(v?: string) {
-  return String(v || '').trim().replace(/^v/i, '')
-}
-
 function isCurrent(v: string) {
-  return !!props.currentVersion && norm(v) === norm(props.currentVersion)
-}
-
-function fmtVer(v: string) {
-  return norm(v)
+  return !!props.currentVersion && normVersion(v) === normVersion(props.currentVersion)
 }
 
 async function load() {
@@ -115,10 +106,10 @@ function pick(r: ReleaseRow) {
             class="vp-row"
             :class="{ current: isCurrent(r.version) }"
             :disabled="isCurrent(r.version)"
-            :title="isCurrent(r.version) ? '当前已安装此版本' : `切换到 v${fmtVer(r.version)}`"
+            :title="isCurrent(r.version) ? '当前已安装此版本' : `切换到 v${normVersion(r.version)}`"
             @click="pick(r)"
           >
-            <span class="vp-ver mono">v{{ fmtVer(r.version) }}</span>
+            <span class="vp-ver mono">v{{ normVersion(r.version) }}</span>
             <span v-if="!r.stable" class="tag warn">测试版</span>
             <span v-if="isCurrent(r.version)" class="tag ok">
               <Icon name="check" :size="10" /> 当前

@@ -90,6 +90,25 @@ function verifyExecutable(exePath) {
   })
 }
 
+/** 当前平台的 Godot 资产标识(win64 / macos / linux64) */
+function currentPlatform() {
+  if (process.platform === 'win32') return 'win64'
+  if (process.platform === 'darwin') return 'macos'
+  return 'linux64'
+}
+
+/**
+ * 版本 tag 的展示名:4.7.2-stable → 4.7.2 Stable;无频道后缀时原样返回。
+ * 原实现分别存在于 lib/install.js 与 lib/releases.js(函数体逐字相同),此处为唯一实现。
+ */
+function displayName(tag) {
+  const idx = tag.indexOf('-')
+  if (idx < 0) return tag
+  const ver = tag.slice(0, idx)
+  const channel = tag.slice(idx + 1)
+  return `${ver} ${channel.charAt(0).toUpperCase()}${channel.slice(1)}`
+}
+
 /** 从 --version 输出解析版本号:如 "4.3.stable.official.xxx" → "4.3-stable" */
 function parseVersionOutput(output) {
   const m = /^(\d+\.\d+(?:\.\d+)?)\.(stable|beta\d*|rc\d*|alpha\d*|dev\d*)/i.exec(output.trim())
@@ -103,4 +122,11 @@ function parseTagFromFileName(fileName) {
   return m ? `${m[1]}-${m[2].toLowerCase()}` : null
 }
 
-module.exports = { findExecutable, verifyExecutable, parseVersionOutput, parseTagFromFileName }
+module.exports = {
+  findExecutable,
+  verifyExecutable,
+  parseVersionOutput,
+  parseTagFromFileName,
+  currentPlatform,
+  displayName
+}

@@ -13,8 +13,11 @@
 // 沙箱(那里没有 setImmediate 这个 Node 专有全局)。**两条路径都要跑**:只跑默认路径会漏掉
 // 一整类「在 Node 里能跑、在宿主里报错」的问题(详见 docs/backup-redesign-plan.md §15)。
 //
-// 副作用:其中一项断言会验证「删除备份 → 移入回收站」,会在 Windows 回收站里留下一个
-// 几百字节的临时文件;被删除的对象位于本次运行的临时工作目录内。
+// 回收站:「真实删除 → 移入回收站」这条链路默认**跳过**。它会调用 Windows 资源管理器
+// 的 SendToRecycleBin,每次运行都在系统回收站里留下一个临时文件,使 `npm test` 变成
+// 非幂等(详见 lib/__tests__/README.md 的「已知副作用」)。需要验证该链路时显式开启:
+//   GPM_TEST_TRASH=1 npm run test:preload
+// 其余删除断言一律走 keepRecordOnly,只动记录、不碰磁盘。
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -35,6 +38,11 @@ if (!fs.existsSync(path.join(LIB, 'backup.js'))) {
 if (flags.has('--no-immediate')) {
   delete globalThis.setImmediate
   console.log('[harness] setImmediate 已移除,用于验证 yieldToLoop 的降级路径')
+}
+/** 是否验证「删除 → 移入回收站」真实链路(默认关闭,避免污染系统回收站) */
+const TRASH = process.env.GPM_TEST_TRASH === '1'
+if (TRASH) {
+  console.log('[harness] GPM_TEST_TRASH=1:将验证「删除 → 移入回收站」真实链路(会写入系统回收站)')
 }
 console.log(`[harness] lib=${LIB}`)
 console.log(`[harness] work=${WORK}`)
@@ -80,6 +88,12 @@ function ok(cond, label, extra) {
 }
 function section(t) {
   console.log(`\n=== ${t} ===`)
+}
+/** 显式跳过的断言:必须打印出来,不能静默少跑 */
+let skipped = 0
+function skip(label) {
+  skipped++
+  console.log(`  SKIP  ${label}`)
 }
 // 让出一次事件循环(harness 自身也要能在无 setImmediate 的模拟沙箱里运行)
 const tick = () =>
@@ -443,17 +457,22 @@ async function main() {
   ok(backup.getBackup(rec3._id) === null, 'keepRecordOnly 移除记录')
 
   const toDelete = backup.listBackups({ withStatus: false }).slice(0, 2).map((d) => d._id)
-  const delRes = backup.deleteBackups(toDelete)
-  ok(delRes.ok && delRes.removed === 2, `批量删除 ${delRes.removed}/2`)
+  // keepRecordOnly:只移除记录,不动磁盘文件 —— 避免每次回归都往回收站塞东西
+  const delRes = backup.deleteBackups(toDelete, { keepRecordOnly: true })
+  ok(delRes.ok && delRes.removed === 2, `批量删除 ${delRes.removed}/2(仅移除记录)`)
   ok(toDelete.every((id) => backup.getBackup(id) === null), '记录均已移除')
   const delEmpty = backup.deleteBackups([])
   ok(delEmpty.ok && delEmpty.removed === 0, '空数组批量删除安全')
-  const victim = backup.listBackups({ withStatus: false })[0]
-  ok(backup.deleteBackup(victim._id).ok, '真实删除(移入回收站)成功')
+  if (TRASH) {
+    const victim = backup.listBackups({ withStatus: false })[0]
+    ok(backup.deleteBackup(victim._id).ok, '真实删除(移入回收站)成功')
+  } else {
+    skip('真实删除(移入回收站)成功 —— 默认跳过,设 GPM_TEST_TRASH=1 开启')
+  }
 
   // ---------- 结果 ----------
   console.log(`\n${'='.repeat(56)}`)
-  console.log(`PASS ${pass}  FAIL ${failures.length}`)
+  console.log(`PASS ${pass}  SKIP ${skipped}  FAIL ${failures.length}`)
   if (failures.length) {
     console.log('失败项:')
     for (const f of failures) console.log('  - ' + f)

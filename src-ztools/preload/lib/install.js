@@ -3,7 +3,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { downloadFile } = require('./http')
 const { extractZip, ensureDir, dirSize } = require('./extract')
-const { findExecutable, verifyExecutable, parseVersionOutput, parseTagFromFileName } = require('./godotExe')
+const { findExecutable, verifyExecutable, parseVersionOutput, parseTagFromFileName, currentPlatform, displayName } = require('./godotExe')
 const { putDoc, removeDoc } = require('./store')
 
 // ---------- 任务注册表 ----------
@@ -39,16 +39,6 @@ async function pump() {
     pump()
   }
 }
-
-function displayName(tag) {
-  const idx = tag.indexOf('-')
-  if (idx < 0) return tag
-  const ver = tag.slice(0, idx)
-  const channel = tag.slice(idx + 1)
-  return `${ver} ${channel.charAt(0).toUpperCase()}${channel.slice(1)}`
-}
-
-const platformOfProcess = () => (process.platform === 'win32' ? 'win64' : process.platform === 'darwin' ? 'macos' : 'linux64')
 
 /**
  * 下载并安装一个版本(入队,立即返回任务 id)。
@@ -187,7 +177,7 @@ async function importLocalExe(exePath) {
     const { ok: verified, output } = await verifyExecutable(exePath)
     const tag = parseVersionOutput(output) || parseTagFromFileName(fileName) || 'local'
     const variant = /mono/i.test(fileName) ? 'mono' : 'standard'
-    const platform = platformOfProcess()
+    const platform = currentPlatform()
     if (process.platform !== 'win32') {
       try {
         fs.chmodSync(exePath, 0o755)

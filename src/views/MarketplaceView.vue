@@ -4,7 +4,7 @@ import { notify } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import VersionPickerDialog from '../components/dialogs/VersionPickerDialog.vue'
-import { fmtSize } from '../utils/format'
+import { fmtSize, normVersion } from '../utils/format'
 import type { AddonInfo, FavoriteAsset, GodotProject, GodotVersion, MarketAsset } from '../types/godot'
 
 // 被 App 的 KeepAlive 缓存:切走再切回不重新加载浏览数据(直到插件重启)
@@ -413,11 +413,6 @@ function openStore(a: MarketAsset) {
   if (a.storeUrl) window.ztools.shellOpenExternal(a.storeUrl)
 }
 
-/** 去掉版本串的前导 v(展示时统一补 v 前缀) */
-function fmtVer(v?: string): string {
-  return (v || '').replace(/^v+/i, '')
-}
-
 async function search() {
   searching.value = true
   searchError.value = ''
@@ -639,7 +634,7 @@ function installFromPicker(version: string) {
                 {{ a.title }}
                 <Icon name="external" :size="10" />
               </span>
-              <span v-if="a.versionString" class="asset-ver" :title="a.versionString">v{{ fmtVer(a.versionString) }}</span>
+              <span v-if="a.versionString" class="asset-ver" :title="a.versionString">v{{ normVersion(a.versionString) }}</span>
             </div>
           </div>
           <div class="asset-tags">

@@ -1,27 +1,12 @@
 // Godot 官方下载归档(godotengine.org/download/archive):版本列表解析 + 官方 CDN 直链构造(24h 缓存)
 const { getText } = require('./http')
 const { getDoc, putDoc } = require('./store')
+const { currentPlatform, displayName } = require('./godotExe')
 
 const ARCHIVE_URL = 'https://godotengine.org/download/archive/'
 const CDN = 'https://downloads.godotengine.org/'
 const CACHE_ID = 'godot/cache/releases'
 const TTL = 24 * 60 * 60 * 1000
-
-/** 当前平台标识 */
-function currentPlatform() {
-  if (process.platform === 'win32') return 'win64'
-  if (process.platform === 'darwin') return 'macos'
-  return 'linux64'
-}
-
-/** 展示名:4.7.2-stable → 4.7.2 Stable */
-function displayName(tag) {
-  const idx = tag.indexOf('-')
-  if (idx < 0) return tag
-  const ver = tag.slice(0, idx)
-  const channel = tag.slice(idx + 1)
-  return `${ver} ${channel.charAt(0).toUpperCase()}${channel.slice(1)}`
-}
 
 /** 英文日期 → ISO 字符串,如 '18 August 2026' → '2026-08-18T00:00:00Z' */
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
@@ -119,4 +104,5 @@ async function fetchReleases(force) {
   return releases
 }
 
+// currentPlatform 继续对外导出:services.js 从这里取,实现已统一到 godotExe.js
 module.exports = { currentPlatform, fetchReleases }

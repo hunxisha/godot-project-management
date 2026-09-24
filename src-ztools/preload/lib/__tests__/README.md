@@ -7,6 +7,8 @@ preload 领域层的回归测试。在 Node 中桩掉 `window.ztools.db`，**req
 |---|---|
 | `backup.test.js` | 备份领域层（`backup.js` / `fsutil.js` / `extract.js`） |
 | `addons.test.js` | 插件来源与复制（`assets.js` 的 `listAddons`、`projects.js` 的 `copyAddonsToProject`） |
+| `godotExe.test.js` | 版本串解析 / 展示名 / 平台标识（`godotExe.js`），并守住「这些工具函数全仓只有一处定义」 |
+| `services.test.js` | 服务面契约：`window.services` 的 47 个方法 与 `src/env.d.ts` 的 `interface Services` 必须逐项一致 |
 
 ## 运行
 
@@ -14,6 +16,7 @@ preload 领域层的回归测试。在 Node 中桩掉 `window.ztools.db`，**req
 npm run test:preload            # 备份:默认路径
 npm run test:preload:sandbox    # 备份:模拟 ZTools 沙箱（先删掉 setImmediate）
 npm run test:addons             # 插件来源与复制:默认 + 沙箱各跑一遍
+npm run test:preload:unit       # godotExe + services 契约（纯函数，秒级）
 npm test                        # 全部（含主题与组合式函数测试）
 ```
 
@@ -22,6 +25,8 @@ npm test                        # 全部（含主题与组合式函数测试）
 ```bash
 node src-ztools/preload/lib/__tests__/backup.test.js [libDir] [workDir] [--no-immediate]
 node src-ztools/preload/lib/__tests__/addons.test.js [libDir] [workDir] [--no-immediate]
+node src-ztools/preload/lib/__tests__/godotExe.test.js
+node src-ztools/preload/lib/__tests__/services.test.js
 ```
 
 ## 为什么必须有 `--no-immediate` 这一条
@@ -49,7 +54,7 @@ node src-ztools/preload/lib/__tests__/addons.test.js [libDir] [workDir] [--no-im
 | 修改 | 备注写入 / trim / 清除、不存在的记录返回失败 |
 | 恢复 | 恢复为新项目（快照与 zip 两条路径）、覆盖恢复及回滚保护 |
 | 取消 | 备份取消的终态与无残留、恢复解包阶段可取消、覆盖恢复进入 `replacing` 后取消被拒绝 |
-| 清理与删除 | `pruneBackups` 默认 dryRun 只预览、单条 / 批量删除、`keepRecordOnly` |
+| 清理与删除 | `pruneBackups` 默认 dryRun 只预览、单条 / 批量删除、`keepRecordOnly`；「删除→回收站」真实链路默认跳过（见下） |
 | 排除规则 | `.git` / `addons` 等按目录名排除并记入记录 |
 
 ## addons.test.js 覆盖范围
@@ -63,9 +68,18 @@ node src-ztools/preload/lib/__tests__/addons.test.js [libDir] [workDir] [--no-im
 | 合并 | 同一资产对应多个目录时并入同一条记录（`dirNames` 取并集） |
 | 边界 | 不能复制到同一项目、不存在的目录计入 `skipped`、不存在的项目返回空列表 |
 
-## 已知副作用
+## 已知副作用（默认已关闭）
 
-`backup.test.js` 中有一项断言会验证「删除备份 → 移入回收站」这条真实链路，因此
-**每次运行都会在 Windows 回收站里留下一个几百字节的临时文件**。被删对象位于本次运行的临时
-工作目录内（默认 `os.tmpdir()` 下新建的 `gpm-backup-test-*`），不影响仓库内容。
+`backup.test.js` 里唯一会写系统回收站的断言是「真实删除 → 移入回收站」这条链路，
+它调用 Windows 的 `SendToRecycleBin`，**每次运行都会在回收站里留下一个几百字节的临时文件**。
+
+为了不让 `npm test` 变成非幂等操作，该断言**默认跳过**（结果行会打印 `SKIP`，不会静默少跑），
+其余删除断言一律走 `keepRecordOnly`，只移除记录、不碰磁盘。需要验证这条真实链路时显式开启：
+
+```bash
+GPM_TEST_TRASH=1 npm run test:preload     # Windows PowerShell: $env:GPM_TEST_TRASH=1; npm run test:preload
+```
+
+被删对象位于本次运行的临时工作目录内（默认 `os.tmpdir()` 下新建的 `gpm-backup-test-*`），
+不影响仓库内容。
 

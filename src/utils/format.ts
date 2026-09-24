@@ -43,3 +43,16 @@ export function fmtDuration(ms?: number): string {
   const s = Math.round(sec % 60)
   return `${m} 分 ${String(s).padStart(2, '0')} 秒`
 }
+
+/**
+ * 归一化版本号,用于显示与比较:去首尾空白 + 去掉前缀 `v`/`V`(连续多个也一并去掉)。
+ *
+ * 原实现分散在 `VersionPickerDialog.vue`(norm)与 `MarketplaceView.vue`(fmtVer),
+ * 且两处**行为不一致**:一处 trim 且只去掉一个 `v`,另一处不 trim 且去掉连续多个 `v`。
+ * 这是唯一实现 —— 不要在各视图里再写一份。
+ *
+ * @example normVersion(' v4.3') === '4.3' · normVersion('vv4.3') === '4.3'
+ */
+export function normVersion(v?: string): string {
+  return String(v ?? '').trim().replace(/^v+/i, '')
+}

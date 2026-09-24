@@ -65,8 +65,8 @@ ZTools 插件。渲染层为 **Vue 3 + Vite + TypeScript**，Node 能力由 **pr
 │   │                             launcher/assets/backup + 基础设施 http/store/fsutil
 │   └── dist/                     构建产物(git 忽略)
 ├── src-ztools/preload/lib/__tests__/   preload 回归测试
-├── src/composables/__tests__/          组合式函数回归测试
-├── src/__tests__/                      主题回归测试
+├── src/composables/__tests__/          组合式函数回归测试 + .ts 打包脚本
+├── src/__tests__/                      主题与格式化回归测试
 └── docs/                         设计文档
 ```
 
@@ -84,22 +84,30 @@ npm run build      # vue-tsc 类型检查 + 构建到 src-ztools/dist/
 ## 测试
 
 ```bash
-npm test           # 全部 508 项断言
+npm run verify     # 类型检查 + 全部回归断言（提交前跑这一条）
+npm test           # 全部 557 项断言（其中 2 项默认跳过，见下）
 ```
 
 | 命令 | 覆盖 | 断言 |
 |---|---|---|
+| `npm run typecheck` | `vue-tsc --noEmit` 类型检查 | — |
 | `npm run test:theme` | 主题令牌完整性、设计约束、10 种组合的 WCAG 对比度 | 134 |
-| `npm run test:preload` | 备份领域层：创建/查询/校验/恢复/取消/清理/删除 | 102 |
-| `npm run test:preload:sandbox` | 同上，但先删掉 `setImmediate` 以模拟宿主沙箱 | 102 |
+| `npm run test:format` | 版本号归一化行为，并守住「全渲染层只有一份实现」 | 19 |
+| `npm run test:preload` | 备份领域层：创建/查询/校验/恢复/取消/清理/删除 | 101（+1 跳过） |
+| `npm run test:preload:sandbox` | 同上，但先删掉 `setImmediate` 以模拟宿主沙箱 | 101（+1 跳过） |
+| `npm run test:preload:unit` | 版本串解析/展示名/平台标识；`window.services` 与 `env.d.ts` 的契约一致性 | 32 |
 | `npm run test:addons` | 插件来源解析与复制过户（默认 + 沙箱各一遍） | 40 ×2 |
 | `npm run test:composable` | 备份页的筛选/分组/时间轴/批量/巡检逻辑 | 90 |
 
-不依赖测试框架：脚本用 Node 直接运行；`test:composable` 会先用项目已有的 vite 把组合式函数
-打成自包含包（Node 无法直接加载 `.ts` 与 Vue 响应式依赖）。
+不依赖测试框架：脚本用 Node 直接运行；`test:format` 与 `test:composable` 会先用项目已有的 vite
+把 `.ts` 源码打成自包含包（Node 无法直接加载 `.ts` 与 Vue 响应式依赖）。
 
 > **`--no-immediate` 那一条务必保留**：preload 跑在渲染进程沙箱里，那里没有 `setImmediate`
 > （Node 专有全局）。只跑默认路径会漏掉整整一类「本地能跑、宿主里报错」的问题。
+
+> **回收站那一条默认跳过**：`test:preload` 里「删除 → 移入回收站」的真实链路会写系统回收站，
+> 使 `npm test` 变成非幂等，因此默认跳过（结果行会打印 `SKIP`，不会静默少跑）。需要验证时用
+> `GPM_TEST_TRASH=1 npm run test:preload` 显式开启。
 
 ## 环境要求
 

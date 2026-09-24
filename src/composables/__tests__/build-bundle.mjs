@@ -1,8 +1,12 @@
-// 把 useBackups.ts 打成一个自包含 ESM 包,供 useBackups.test.mjs 导入。
+// 把渲染层的 .ts 源码打成自包含 ESM 包,供 Node 里的回归测试导入。
 //
-// 为什么需要这一步:useBackups 依赖 Vue 响应式 API 且是 .ts 源码(import 路径无扩展名),
-// Node 无法直接加载。用项目已有的 vite(devDependency)打成单文件即可在 Node 里运行,
-// 不需要引入测试框架。
+// 为什么需要这一步:被测源码是 .ts(import 路径无扩展名),Node 无法直接加载。
+// 用项目已有的 vite(devDependency)打成单文件即可在 Node 里运行,
+// 不需要引入测试框架,也不需要依赖 Node 24 的类型剥离(README 声明支持 Node ≥ 18)。
+//
+// 产物(.gpm-test/ 已被 .gitignore 忽略):
+//   .gpm-test/out/usebackups.mjs  ← src/composables/useBackups.ts  (useBackups.test.mjs)
+//   .gpm-test/out/format.mjs      ← src/utils/format.ts            (src/__tests__/format.test.mjs)
 //
 // 用法:node src/composables/__tests__/build-bundle.mjs
 import { build } from 'vite'
@@ -24,13 +28,18 @@ await build({
     emptyOutDir: true,
     minify: false,
     lib: {
-      entry: path.join(root, 'src', 'composables', 'useBackups.ts'),
+      entry: {
+        usebackups: path.join(root, 'src', 'composables', 'useBackups.ts'),
+        format: path.join(root, 'src', 'utils', 'format.ts')
+      },
       formats: ['es'],
-      fileName: () => 'usebackups.mjs'
+      fileName: (_format, entryName) => `${entryName}.mjs`
     },
     // 不 externalize:把 vue 一起打进来,产物才能脱离 node_modules 独立运行
     rollupOptions: { external: [] }
   }
 })
 
-console.log(`bundle built: ${path.join(root, OUT_DIR, 'usebackups.mjs')}`)
+for (const name of ['usebackups', 'format']) {
+  console.log(`bundle built: ${path.join(root, OUT_DIR, `${name}.mjs`)}`)
+}
