@@ -85,7 +85,7 @@ npm run build      # vue-tsc 类型检查 + 构建到 src-ztools/dist/
 
 ```bash
 npm run verify     # 类型检查 + 全部回归断言（提交前跑这一条）
-npm test           # 全部 850 项断言（其中 2 项默认跳过，见下）
+npm test           # 全部 1112 项断言（其中 2 项默认跳过，见下）
 ```
 
 | 命令 | 覆盖 | 断言 |
@@ -96,7 +96,7 @@ npm test           # 全部 850 项断言（其中 2 项默认跳过，见下）
 | `npm run test:preload:sandbox` | 同上，但先删掉 `setImmediate` 以模拟宿主沙箱 | 101（+1 跳过） |
 | `npm run test:preload:unit` | 版本串解析/展示名/平台标识、任务队列语义、下载安装编排、`window.services` 与 `env.d.ts` 的契约一致性 | 107 |
 | `npm run test:addons` | 插件来源解析与复制过户（默认 + 沙箱各一遍） | 40 ×2 |
-| `npm run test:renderer` | 渲染层:版本号归一化与去重护栏、Godot 版本兼容与标签分组、备份/恢复对话框骨架、市场搜索/浏览/安装、备份页筛选与批量逻辑 | 327 |
+| `npm run test:renderer` | 渲染层:纯工具(版本兼容/标签分组/头像渐变/格式化)、备份与恢复对话框骨架、市场搜索/浏览/安装、项目列表与新建删除、插件多选/批量/更新/切版本、备份页删除确认与批量备份 | 589 |
 
 渲染层测试一次性打包、共用同一份 vue chunk（`test:renderer` 先跑 `build-bundle.mjs`）：
 脚本用 Node 直接运行，**不依赖测试框架**。也可以单独跑其中一条（`test:format` /

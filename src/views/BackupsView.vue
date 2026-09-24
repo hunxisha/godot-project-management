@@ -10,6 +10,7 @@ import BackupCreateDialog from '../components/dialogs/BackupCreateDialog.vue'
 import PruneDialog from '../components/dialogs/PruneDialog.vue'
 import RestoreDialog from '../components/dialogs/RestoreDialog.vue'
 import { useBackups } from '../composables/useBackups'
+import { useBackupPageActions } from '../composables/useBackupPageActions'
 import { notify } from '../services/bridge'
 import { fmtSize, formatTime } from '../utils/format'
 import type { BackupRecord } from '../types/godot'
@@ -32,6 +33,31 @@ const {
 } = bk
 
 const busyId = ref('')
+
+// 页面级动作(删除确认文案、批量备份)在 useBackupPageActions 里
+const {
+  removeOpen,
+  removeTargets,
+  removeBusy,
+  allMissing,
+  removeMessage,
+  removeDetails,
+  askRemove,
+  askRemoveSelected,
+  doRemove,
+  backingAll,
+  backAllProgress,
+  backupAllUncovered
+} = useBackupPageActions({
+  uncovered,
+  selectedRecords,
+  batchMode,
+  exitBatch,
+  removeOne,
+  removeMany,
+  backupMany,
+  notify
+})
 
 // ---------- 生命周期 ----------
 
@@ -81,52 +107,6 @@ function doVerifySelected() {
   verifyMany(ids)
 }
 
-// ---------- 删除确认 ----------
-
-const removeOpen = ref(false)
-const removeTargets = ref<BackupRecord[]>([])
-const removeBusy = ref(false)
-
-const allMissing = computed(() => removeTargets.value.length > 0 && removeTargets.value.every((r) => r.missing))
-
-const removeMessage = computed(() => {
-  const n = removeTargets.value.length
-  const size = removeTargets.value.reduce((s, r) => s + (r.size || 0), 0)
-  if (allMissing.value) {
-    return n === 1
-      ? '这份备份的文件已不存在,此操作只移除数据库里的记录。'
-      : `这 ${n} 份备份的文件均已不存在,此操作只移除数据库里的记录。`
-  }
-  return n === 1
-    ? `将删除这份备份(${fmtSize(size)})。Windows 下文件移入回收站可恢复,其他平台为永久删除。`
-    : `将删除 ${n} 份备份,合计 ${fmtSize(size)}。Windows 下文件移入回收站可恢复,其他平台为永久删除。`
-})
-
-function askRemove(record: BackupRecord) {
-  removeTargets.value = [record]
-  removeOpen.value = true
-}
-
-function askRemoveSelected() {
-  if (!selectedRecords.value.length) return
-  removeTargets.value = [...selectedRecords.value]
-  removeOpen.value = true
-}
-
-function doRemove() {
-  const targets = removeTargets.value
-  removeBusy.value = true
-  try {
-    if (targets.length === 1) removeOne(targets[0]._id)
-    else removeMany(targets.map((r) => r._id))
-    removeOpen.value = false
-    removeTargets.value = []
-    if (batchMode.value) exitBatch()
-  } finally {
-    removeBusy.value = false
-  }
-}
-
 // ---------- 恢复 ----------
 
 const restoreOpen = ref(false)
@@ -158,34 +138,7 @@ function openCreate() {
 
 const pruneOpen = ref(false)
 
-// ---------- 批量备份(未备份项目) ----------
-
-const backingAll = ref(false)
-const backAllProgress = ref('')
-
-async function backupAllUncovered() {
-  const ids = uncovered.value.map((p) => p._id)
-  if (!ids.length || backingAll.value) return
-  backingAll.value = true
-  try {
-    const r = await backupMany(ids, (done, total, name) => {
-      backAllProgress.value = done < total ? `${done}/${total} ${name}` : ''
-    })
-    if (!r.ok) notify(r.error || '批量备份失败')
-    else notify(`已为 ${r.count}/${ids.length} 个项目创建备份`)
-  } finally {
-    backingAll.value = false
-    backAllProgress.value = ''
-  }
-}
-
 // ---------- 展示辅助 ----------
-
-const removeDetails = computed(() =>
-  removeTargets.value.map(
-    (r) => `${r.label || r.projectName} · ${fmtSize(r.size)} · ${r.destPath}`
-  )
-)
 
 const hasAnyProject = computed(() => projects.value.length > 0)
 const showUncovered = computed(() => status.value === 'uncovered')

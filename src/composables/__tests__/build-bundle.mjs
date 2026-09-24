@@ -42,9 +42,17 @@ await build({
         useassethydration: path.join(root, 'src', 'composables', 'useAssetHydration.ts'),
         usemarketbrowse: path.join(root, 'src', 'composables', 'useMarketBrowse.ts'),
         usemarketinstall: path.join(root, 'src', 'composables', 'useMarketInstall.ts'),
+        useprojectlist: path.join(root, 'src', 'composables', 'useProjectList.ts'),
+        useprojectcreate: path.join(root, 'src', 'composables', 'useProjectCreate.ts'),
+        useprojectdelete: path.join(root, 'src', 'composables', 'useProjectDelete.ts'),
+        useinstallprogress: path.join(root, 'src', 'composables', 'useInstallProgress.ts'),
+        useaddonselection: path.join(root, 'src', 'composables', 'useAddonSelection.ts'),
+        useaddonactions: path.join(root, 'src', 'composables', 'useAddonActions.ts'),
+        usebackuppageactions: path.join(root, 'src', 'composables', 'useBackupPageActions.ts'),
         format: path.join(root, 'src', 'utils', 'format.ts'),
         godotversion: path.join(root, 'src', 'utils', 'godotVersion.ts'),
         markettags: path.join(root, 'src', 'utils', 'marketTags.ts'),
+        avatar: path.join(root, 'src', 'utils', 'avatar.ts'),
         // 测试专用:暴露 vue(与各入口共享同一个 chunk),供测试创建 ref
         vueshim: path.join(root, 'src', 'composables', '__tests__', 'vue-shim.mjs')
       },
@@ -56,6 +64,6 @@ await build({
   }
 })
 
-for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'format', 'godotversion', 'markettags', 'vueshim']) {
+for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'format', 'godotversion', 'markettags', 'avatar', 'vueshim']) {
   console.log(`bundle built: ${path.join(root, OUT_DIR, `${name}.mjs`)}`)
 }

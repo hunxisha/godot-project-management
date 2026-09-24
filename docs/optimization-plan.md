@@ -326,7 +326,7 @@ function fmtVer(v?: string): string { return (v || '').replace(/^v+/i, '') }
 - [x] `displayName` 全仓只剩一份定义；版本归一化只剩一份且行为有断言锁定
 - [ ] `tsconfig.json` 的 `strict: false` 至少推进到 `noImplicitAny: true`，且 preload 纳入检查
 - [x] `install.js` 与 `backup.js` 的「取消 / 关闭 / 订阅」由同一模块提供（`taskqueue.js`）
-- [ ] `MarketplaceView.vue` 脚本 < 250 行；无生产文件脚本超过 300 行（口径已按 SFC 样式块实际占比更正）
+- [x] 无生产文件脚本超过 300 行；`MarketplaceView.vue` 脚本 172 行（口径已按 SFC 样式块实际占比更正）
 - [x] `npm test` 不再写用户回收站（默认跳过，`GPM_TEST_TRASH=1` 可显式开启）
 - [ ] CI 在每次提交上跑 `build` + `test`
 - [ ] 5 组术语各只有一个正名
@@ -375,7 +375,7 @@ _（每完成一项在阶段小节内标注 commit，与 `docs/backup-redesign-p
 |---|---|
 | 阶段 1 · 收敛与护栏 | ✅ 已完成（commit `dfb1af1`，记录 `e04335d`） |
 | 阶段 2 · 结构性抽取 | ✅ 已完成（commit `0a0d6ce`，记录 `964c0d8`） |
-| 阶段 3 · 视图拆分 | 🔄 进行中：`MarketplaceView.vue` 已完成；`AddonsView` / `BackupsView` / `ProjectsView` 待做 |
+| 阶段 3 · 视图拆分 | ✅ 已完成（第一批：`MarketplaceView`，commit `14587b6`；第二批：其余三个视图） |
 | 阶段 4 · 类型闸门 / 测试 / CI | ⬜ 未开始 |
 
 ### 阶段 1 实施记录（commit `dfb1af1`）
@@ -450,3 +450,38 @@ _（每完成一项在阶段小节内标注 commit，与 `docs/backup-redesign-p
 - 测试基建顺带收敛：渲染层测试原本 3 条脚本各自起一次 vite，改为 `test:renderer` **一次打包、7 个测试文件共用**（Rollup 会把 vue 提成共享 chunk，于是新增的 `__tests__/vue-shim.mjs` 能让测试拿到同一份 vue 去创建 ref 并触发 `watch`）。单条脚本（`test:format` / `test:taskdialog` / `test:composable`）保留，便于定位。
 - 仍待做：`AddonsView.vue`（脚本 290）/ `BackupsView.vue`（脚本 210）/ `ProjectsView.vue`（脚本 327）用同一套做法拆分。
 - **渲染层仍需人工验收**（自动化只覆盖抽出的逻辑，模板绑定由 `vue-tsc` 把关）：插件的**搜索**（输入防抖、回车立即搜、清空回到浏览）、**五种浏览模式**切换、**标签筛选 + 翻页**（聚合池行为）、**兼容开关**、**收藏/取消收藏**、**安装进度**与**版本选择器安装**。
+
+### 阶段 3 实施记录 · 第二批（其余三个视图）
+
+| 视图 | 脚本行数 | 新模块 |
+|---|---|---|
+| `ProjectsView.vue` | 327 → **241** | `useProjectList`(75) / `useProjectCreate`(105) / `useProjectDelete`(63) |
+| `AddonsView.vue` | 290 → **125** | `useAddonSelection`(89) / `useAddonActions`(242) / `useInstallProgress`(65) |
+| `BackupsView.vue` | 210 → **163** | `useBackupPageActions`(119) |
+
+七个视图的脚本行数：`ProjectsView` 241 · `VersionsView` 229 · `MarketplaceView` 172 · `BackupsView` 163 · `AddonsView` 125 · `SettingsView` 97 · `Dashboard` 49（**全部 < 300**）。
+
+**过程中又发现并收敛的两处重复**（与阶段 1 同类缺陷）：
+
+1. **`gradOf()`**（项目名 → 头像渐变组）在 `ProjectsView.vue` 与 `Dashboard.vue` 里逐字相同 → 合入 `src/utils/avatar.ts`，并用固定输入的断言钉住哈希（改了会让所有项目头像换色）。
+2. **安装进度映射**（`percent` 换算 + 进度回调 → 阶段文案）在**三处**各写一遍（市场安装 / 更新 / 切换版本）→ 合入 `src/composables/useInstallProgress.ts`，`useMarketInstall` 也改为使用它（107 → 86 行）。
+
+**对计划的一处更正**：`BackupsView.vue` 其实**早已按预期拆过** —— 它的列表/筛选/分组/多选/巡检逻辑都在 `useBackups` 里（正是那 90 项断言的来源）。剩下能抽且有判断逻辑的只有「删除确认文案」与「批量备份」两块，按此实施；其余是各对话框的开关状态，抽出来属于churn。
+
+**验收结果**
+
+| 指标 | 阶段 3 前 | 阶段 3 完成后 |
+|---|---|---|
+| 断言总数 | 683 PASS + 2 SKIP | **1112 PASS** + 2 SKIP |
+| 七个视图的脚本行数合计 | 1,714 | **1,076**（−37%） |
+| 最大的视图脚本 | `MarketplaceView` 506 | `ProjectsView` 241 |
+| `npm run verify` | ✅ exit 0 | ✅ exit 0 |
+| 测试文件数 | 12 | 23 |
+
+**渲染层人工验收清单**（自动化覆盖不到的部分，模板绑定只有 `vue-tsc` 把关）：
+
+- 项目页：搜索过滤 / 收藏筛选 / 排序（收藏→最近打开→名称）、新建项目（预填父目录与引擎）、删除确认（`ask`/`always`/`never` 三种设置的默认勾选）、拖拽添加、键盘上下+回车打开
+- 插件页：多选与全选、批量启用/禁用、批量卸载（**点两次**）、单个卸载（点两次）、检查更新、更新、切换历史版本、复制到其他项目、商店链接
+- 备份页：删除确认文案（文件还在 vs 已丢失）、批量备份未备份项目、恢复向导、备注编辑、巡检
+- 市场页：搜索防抖/回车、五种浏览模式、标签筛选后翻页（聚合池）、兼容开关、收藏、安装与版本选择器
+- 备份/恢复对话框：进度、取消、替换阶段取消应被拒绝

@@ -55,3 +55,19 @@ export function godotRange(a: Pick<MarketAsset, 'minGodot' | 'maxGodot'>): strin
   if (max) return `Godot ≤ ${max}`
   return ''
 }
+
+/**
+ * 项目绑定的引擎版本 与 project.godot 里声明的引擎版本是否不一致。
+ * 任一信息缺失(未绑定引擎、未声明版本、绑定记录已不存在)都返回 false —— 无法判断时**不报警**,
+ * 否则刚添加的新项目会满屏「版本不匹配」。
+ */
+export function versionMismatch(
+  project: Pick<GodotProject, 'engineVersion' | 'versionId'> | null | undefined,
+  versions: (GodotVersion & { _id?: string })[]
+): boolean {
+  if (!project || !project.engineVersion || !project.versionId) return false
+  const bound = versions.find((x) => x._id === project.versionId)
+  if (!bound) return false
+  const minor = project.engineVersion.split('.').slice(0, 2).join('.')
+  return !bound.tag.startsWith(minor + '.') && !bound.tag.startsWith(minor + '-')
+}

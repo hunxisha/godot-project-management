@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { getSettings, listDocs, pickDirectory, saveSettings, showInFolder } from '../services/bridge'
 import { openProjectAction } from '../composables/useProjectActions'
+import { gradOf } from '../utils/avatar'
 import Icon from '../components/Icon.vue'
 import type { GodotProject, GodotVersion } from '../types/godot'
 
@@ -43,13 +44,6 @@ function chooseRoot() {
     saveSettings({ versionsRoot: dir })
     settings.versionsRoot = dir
   }
-}
-
-/** 项目名 → 头像渐变组 */
-function gradOf(name: string): string {
-  let h = 0
-  for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0
-  return ['a', 'b', 'c', 'd'][h % 4]
 }
 </script>
 

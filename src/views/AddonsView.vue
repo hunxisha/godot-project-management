@@ -4,7 +4,9 @@ import { notify, openExternal } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import VersionPickerDialog from '../components/dialogs/VersionPickerDialog.vue'
-import { fmtSize } from '../utils/format'
+import { useAddonSelection } from '../composables/useAddonSelection'
+import { useAddonActions } from '../composables/useAddonActions'
+import type { ProjectRow } from '../composables/useProjectList'
 import type { AddonInfo, GodotProject } from '../types/godot'
 
 const props = defineProps<{ enterProjectId?: string | null }>()
@@ -16,30 +18,54 @@ const emit = defineEmits<{
 const projects = ref<(GodotProject & { _id: string })[]>([])
 const targetId = ref('')
 const addons = ref<AddonInfo[]>([])
-const checking = ref(false)
-const updating = ref<{ assetId: string, percent: number, stage: string } | null>(null)
-const updateInfo = ref<Record<string, { hasUpdate: boolean, latest?: string }>>({})
-const confirmingDir = ref<string | null>(null)
 
-// ---------- 多选 / 批量 ----------
+// 多选与各类操作分别在两个组合式函数里;本视图只做装配与页面级联动。
+const selection = useAddonSelection(addons)
+const {
+  checked,
+  confirmingBatch,
+  selAddons,
+  allChecked,
+  hasEnabledSel,
+  hasDisabledSel,
+  toggleCheck,
+  toggleAll,
+  clear: clearSelection,
+  prune,
+  disarmBatchConfirm
+} = selection
 
-const checked = ref<string[]>([])
-const confirmingBatch = ref(false)
-
-// ---------- 复制到项目 ----------
-
-const showCopy = ref(false)
-const copyTargetId = ref('')
-const copying = ref(false)
+const {
+  updating,
+  checking,
+  updateInfo,
+  versionTarget,
+  confirmingDir,
+  showCopy,
+  copyTargetId,
+  copying,
+  copyTargets,
+  openCopy,
+  confirmCopy,
+  batchToggle,
+  batchUninstall,
+  toggleEnabled,
+  uninstall,
+  checkUpdates,
+  update,
+  openVersions,
+  installVersion
+} = useAddonActions({
+  targetId,
+  projects,
+  addons,
+  selection,
+  reload,
+  notify
+})
 
 const target = computed(() => projects.value.find((p) => p._id === targetId.value))
 const enabledCount = computed(() => addons.value.filter((a) => a.enabled).length)
-const selAddons = computed(() => addons.value.filter((a) => checked.value.includes(a.dirName)))
-const allChecked = computed(() => addons.value.length > 0 && checked.value.length === addons.value.length)
-const hasEnabledSel = computed(() => selAddons.value.some((a) => a.enabled))
-const hasDisabledSel = computed(() => selAddons.value.some((a) => !a.enabled))
-/** 可作为复制目标的项目(排除当前项目) */
-const copyTargets = computed(() => projects.value.filter((p) => p._id !== targetId.value))
 
 onMounted(() => {
   projects.value = window.ztools.db.allDocs('godot/project/') as any[]
@@ -65,226 +91,35 @@ onBeforeUnmount(() => {
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     if (showCopy.value) showCopy.value = false
-    confirmingBatch.value = false
+    disarmBatchConfirm()
   }
 }
 
 function reload() {
   if (!targetId.value) {
     addons.value = []
-    checked.value = []
+    clearSelection()
     return
   }
   addons.value = window.services.listAddons(targetId.value)
-  // 清掉已不存在的选择
-  if (checked.value.length) {
-    const live = new Set(addons.value.map((a) => a.dirName))
-    checked.value = checked.value.filter((d) => live.has(d))
-  }
+  // 清掉已不存在的选择(卸载/换项目后不留幽灵选中项)
+  prune()
 }
 
 function onTargetChange() {
   updateInfo.value = {}
   confirmingDir.value = null
-  confirmingBatch.value = false
-  checked.value = []
+  disarmBatchConfirm()
+  clearSelection()
   reload()
 }
 
-function percent(p: { received?: number, total?: number }): number {
-  if (!p.total) return 0
-  return Math.min(100, ((p.received || 0) / p.total) * 100)
-}
-
-// ---------- 多选 ----------
-
-function toggleCheck(dirName: string) {
-  const i = checked.value.indexOf(dirName)
-  if (i >= 0) checked.value.splice(i, 1)
-  else checked.value.push(dirName)
-  confirmingBatch.value = false
-}
-
-function toggleAll() {
-  checked.value = allChecked.value ? [] : addons.value.map((a) => a.dirName)
-  confirmingBatch.value = false
-}
-
-// ---------- 批量操作 ----------
-
-function batchToggle(enabled: boolean) {
-  const dirs = selAddons.value.filter((a) => a.hasCfg && a.enabled !== enabled).map((a) => a.dirName)
-  if (!dirs.length) {
-    notify(enabled ? '所选插件均已启用' : '所选插件均已禁用')
-    return
-  }
-  let n = 0
-  for (const d of dirs) {
-    const r = window.services.setAddonEnabled({ projectId: targetId.value, dirName: d, enabled })
-    if (r.ok) n++
-  }
-  reload()
-  notify(`已${enabled ? '启用' : '禁用'} ${n} 个插件`)
-}
-
-function batchUninstall() {
-  if (confirmingBatch.value) {
-    confirmingBatch.value = false
-    const dirs = [...checked.value]
-    let n = 0
-    const failed: string[] = []
-    for (const d of dirs) {
-      const r = window.services.uninstallAddon({ projectId: targetId.value, dirName: d })
-      if (r.ok) n++
-      else failed.push(d)
-    }
-    checked.value = []
-    reload()
-    notify(failed.length ? `已卸载 ${n} 个,失败 ${failed.length} 个(${failed.join('、')})` : `已卸载 ${n} 个插件`)
-  } else {
-    confirmingBatch.value = true
-    setTimeout(() => (confirmingBatch.value = false), 2500)
-  }
-}
-
-// ---------- 复制到其他项目 ----------
-
-function openCopy() {
-  if (!checked.value.length) return
-  copyTargetId.value = copyTargets.value[0]?._id || ''
-  showCopy.value = true
-}
-
-function confirmCopy() {
-  if (!copyTargetId.value || copying.value) return
-  copying.value = true
-  const r = window.services.copyAddonsToProject({
-    sourceProjectId: targetId.value,
-    dirNames: [...checked.value],
-    targetProjectId: copyTargetId.value
-  })
-  copying.value = false
-  if (!r.ok) {
-    notify(r.error || '复制失败')
-    return
-  }
-  showCopy.value = false
-  const skipped = r.skipped?.length ? `,跳过:${r.skipped.join('、')}` : ''
-  const adopted = r.adopted ? `,其中 ${r.adopted} 个已补回市场来源` : ''
-  notify(`已复制 ${r.copied} 个插件到「${r.targetName}」${skipped}${adopted}`)
-}
-
-// ---------- 商店链接 / 版本管理 ----------
+// ---------- 商店链接 ----------
 
 /** 在浏览器中打开该插件的资产库页面 */
 function openStore(a: AddonInfo) {
   if (!a.storeUrl) return
   openExternal(a.storeUrl)
-}
-
-/** 版本管理:选中要切换到的历史版本 */
-const versionTarget = ref<AddonInfo | null>(null)
-
-function openVersions(a: AddonInfo) {
-  if (!a.assetId || updating.value) return
-  versionTarget.value = a
-}
-
-/** 把插件替换为指定 release 版本(覆盖安装) */
-async function installVersion(version: string) {
-  const a = versionTarget.value
-  versionTarget.value = null
-  if (!targetId.value || !a?.assetId || updating.value) return
-  updating.value = { assetId: a.assetId, percent: 0, stage: '下载中' }
-  const r = await window.services.installAsset(
-    {
-      projectId: targetId.value,
-      assetId: a.assetId,
-      version,
-      assetMeta: { title: a.name, storeUrl: a.storeUrl }
-    },
-    (p) => {
-      if (!updating.value || updating.value.assetId !== a.assetId) return
-      if (p.stage === 'downloading') {
-        updating.value = { assetId: a.assetId!, percent: percent(p), stage: `下载中 ${fmtSize(p.received)}` }
-      } else {
-        updating.value = { assetId: a.assetId!, percent: 100, stage: '解压中' }
-      }
-    }
-  )
-  updating.value = null
-  if (r.ok) {
-    notify(`${a.name} 已切换到 ${r.addon?.versionString || version}`)
-    // 版本变了,之前的「可更新」判断作废
-    updateInfo.value = {}
-    reload()
-  } else {
-    notify(r.error || '版本切换失败')
-  }
-}
-
-// ---------- 检查更新 / 更新 ----------
-
-async function checkUpdates() {
-  if (!targetId.value || checking.value) return
-  checking.value = true
-  const jobs = addons.value.filter((a) => a.fromMarket && a.assetId)
-  const next: Record<string, { hasUpdate: boolean, latest?: string }> = {}
-  await Promise.all(
-    jobs.map(async (a) => {
-      const r = await window.services.checkAddonUpdate({ projectId: targetId.value, assetId: a.assetId! })
-      if (r.hasUpdate) next[a.dirName] = { hasUpdate: true, latest: r.latest }
-    })
-  )
-  updateInfo.value = next
-  checking.value = false
-  const count = Object.keys(next).length
-  notify(count ? `${count} 个插件有新版本` : '所有插件均为最新版本')
-}
-
-async function update(a: AddonInfo) {
-  if (!targetId.value || !a.assetId || updating.value) return
-  updating.value = { assetId: a.assetId, percent: 0, stage: '下载中' }
-  const r = await window.services.updateAsset(
-    { projectId: targetId.value, assetId: a.assetId },
-    (p) => {
-      if (p.stage === 'downloading') {
-        updating.value = { assetId: a.assetId!, percent: percent(p), stage: `下载中 ${fmtSize(p.received)}` }
-      } else {
-        updating.value = { assetId: a.assetId!, percent: 100, stage: '解压中' }
-      }
-    }
-  )
-  updating.value = null
-  if (r.ok) {
-    notify(`${a.name} 已更新到 ${r.addon?.versionString}`)
-    reload()
-    checkUpdates()
-  } else {
-    notify(r.error || '更新失败')
-  }
-}
-
-// ---------- 启用 / 卸载 ----------
-
-function toggleEnabled(a: AddonInfo) {
-  const r = window.services.setAddonEnabled({ projectId: targetId.value, dirName: a.dirName, enabled: !a.enabled })
-  if (r.ok) reload()
-  else notify(r.error || '操作失败')
-}
-
-function uninstall(a: AddonInfo) {
-  if (confirmingDir.value === a.dirName) {
-    confirmingDir.value = null
-    const r = window.services.uninstallAddon({ projectId: targetId.value, dirName: a.dirName })
-    if (r.ok) reload()
-    else notify(r.error || '卸载失败')
-  } else {
-    confirmingDir.value = a.dirName
-    setTimeout(() => {
-      if (confirmingDir.value === a.dirName) confirmingDir.value = null
-    }, 2500)
-  }
 }
 </script>
 

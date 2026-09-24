@@ -1,14 +1,19 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { getSettings, isWindows, notify, pickDirectory, putDoc } from '../services/bridge'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { getSettings, isWindows, notify, pickDirectory } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import BackupCreateDialog from '../components/dialogs/BackupCreateDialog.vue'
 import { openProjectAction } from '../composables/useProjectActions'
+import { useProjectList, type ProjectRow } from '../composables/useProjectList'
+import { useProjectCreate } from '../composables/useProjectCreate'
+import { useProjectDelete } from '../composables/useProjectDelete'
+import { gradOf } from '../utils/avatar'
+import { versionMismatch } from '../utils/godotVersion'
 import { formatRelative } from '../utils/format'
-import type { BackupRecord, GodotProject, GodotVersion, OpenAction } from '../types/godot'
+import type { BackupRecord, OpenAction } from '../types/godot'
 
-type Row = GodotProject & { _id: string }
+type Row = ProjectRow
 
 const props = defineProps<{
   enterPayload?: string[] | null
@@ -26,37 +31,66 @@ const emit = defineEmits<{
 }>()
 
 const settings = getSettings()
-const projects = ref<Row[]>([])
-const versions = ref<(GodotVersion & { _id: string })[]>([])
-const filter = ref('')
-const selected = ref(-1)
 const isWin = isWindows()
 
 const ACTION_LABEL: Record<OpenAction, string> = { editor: '打开', run: '运行', folder: '目录' }
 const ACTION_ICON: Record<OpenAction, string> = { editor: 'pencil', run: 'play', folder: 'folder' }
 
-const visible = computed<Row[]>(() => {
-  const kw = filter.value.trim().toLowerCase()
-  const list = projects.value.filter((p) => {
-    if (favOnly.value && !p.favorite) return false
-    return !kw || p.name.toLowerCase().includes(kw) || p.path.toLowerCase().includes(kw)
-  })
-  return [...list].sort((a, b) => {
-    if (!!a.favorite !== !!b.favorite) return a.favorite ? -1 : 1
-    if ((b.lastOpenedAt || 0) !== (a.lastOpenedAt || 0)) return (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0)
-    return a.name.localeCompare(b.name)
-  })
+// ---------- 列表 / 新建 / 删除 ----------
+// 三块各自独立成组合式函数;本视图只做装配与页面级联动(拖拽、键盘、跨页跳转)。
+
+const {
+  projects,
+  versions,
+  filter,
+  selected,
+  favOnly,
+  visible,
+  favCount,
+  reload,
+  toggleFavorite,
+  bindVersion,
+  dropLocal
+} = useProjectList()
+
+const {
+  showCreate,
+  creating,
+  cName,
+  cParent,
+  cRenderer,
+  cVersionId,
+  cOpen,
+  nameInput,
+  cPreview,
+  openCreate,
+  chooseParent,
+  submitCreate
+} = useProjectCreate({
+  projects,
+  versions,
+  defaultVersionId: settings.defaultVersionId,
+  notify,
+  reload,
+  openProject: (row) => openProject(row)
 })
 
-// ---------- 收藏筛选 ----------
+const {
+  showDelete,
+  deleteTarget,
+  delFiles,
+  deleting,
+  askDelete,
+  confirmDelete
+} = useProjectDelete({
+  projects,
+  policy: settings.deleteProjectFiles,
+  notify,
+  dropLocal
+})
 
-const favOnly = ref(false)
-const favCount = computed(() => projects.value.filter((p) => p.favorite).length)
-
-function reload() {
-  projects.value = window.ztools.db.allDocs('godot/project/') as any[]
-  versions.value = window.ztools.db.allDocs('godot/version/') as any[]
-}
+/** 绑定的引擎版本与 project.godot 声明不一致(判定逻辑在 utils/godotVersion) */
+const mismatch = (p: Row) => versionMismatch(p, versions.value)
 
 onMounted(() => {
   reload()
@@ -141,110 +175,7 @@ function addManually() {
 }
 
 // ---------- 新建项目 ----------
-
-const showCreate = ref(false)
-const creating = ref(false)
-const cName = ref('')
-const cParent = ref('')
-const cRenderer = ref<'forward_plus' | 'mobile' | 'gl_compatibility'>('forward_plus')
-const cVersionId = ref('')
-const cOpen = ref(true)
-const nameInput = ref<HTMLInputElement>()
-
-/** 目标目录预览(父目录 + 项目名) */
-const cPreview = computed(() => {
-  if (!cParent.value.trim()) return ''
-  const base = cParent.value.trim().replace(/[\\/]+$/, '')
-  return cName.value.trim() ? `${base}\\${cName.value.trim()}` : base
-})
-
-function openCreate() {
-  cName.value = ''
-  // 预填最近项目的父目录,减少选择成本
-  const recent = [...projects.value].sort((a, b) => (b.lastOpenedAt || b.addedAt) - (a.lastOpenedAt || a.addedAt))[0]
-  cParent.value = recent ? recent.path.replace(/[\\/][^\\/]+$/, '') : ''
-  cVersionId.value =
-    versions.value.find((v) => v._id === settings.defaultVersionId)?._id || versions.value[0]?._id || ''
-  cRenderer.value = 'forward_plus'
-  cOpen.value = true
-  showCreate.value = true
-  nextTick(() => nameInput.value?.focus())
-}
-
-function chooseParent() {
-  const dir = pickDirectory('选择新项目的保存位置', cParent.value || undefined)
-  if (dir) cParent.value = dir
-}
-
-function submitCreate() {
-  if (creating.value) return
-  if (!cName.value.trim() || !cParent.value.trim()) return
-  creating.value = true
-  const v = versions.value.find((x) => x._id === cVersionId.value)
-  const r = window.services.createProject({
-    name: cName.value.trim(),
-    parentDir: cParent.value.trim(),
-    renderer: cRenderer.value,
-    versionTag: v?.tag,
-    versionId: v?._id
-  })
-  creating.value = false
-  if (!r.ok || !r.project) {
-    notify(r.error || '创建失败')
-    return
-  }
-  showCreate.value = false
-  reload()
-  notify(`已创建项目:${r.project.name}`)
-  if (cOpen.value) {
-    const row = projects.value.find((p) => p._id === r.project!.id)
-    if (row) openProjectAction(row)
-  }
-}
-
-// ---------- 项目操作 ----------
-
-// ---------- 删除项目(模态确认,可选同时删除文件) ----------
-
-const showDelete = ref(false)
-const deleteTarget = ref<Row | null>(null)
-const delFiles = ref(false)
-const deleting = ref(false)
-
-function removeProject(p: Row) {
-  deleteTarget.value = p
-  // 全局设置为「总是删除」时默认勾选
-  delFiles.value = settings.deleteProjectFiles === 'always'
-  showDelete.value = true
-}
-
-function confirmDelete() {
-  const p = deleteTarget.value
-  if (!p || deleting.value) return
-  deleting.value = true
-  const deleteFiles = settings.deleteProjectFiles !== 'never' && delFiles.value
-  const r = window.services.removeProject(p._id, deleteFiles)
-  deleting.value = false
-  if (!r.ok) {
-    notify(r.error || '删除失败')
-    return
-  }
-  showDelete.value = false
-  projects.value = projects.value.filter((x) => x._id !== p._id)
-  notify(deleteFiles ? `已删除项目及文件(回收站):${p.name}` : `已移除项目记录:${p.name}`)
-}
-
-function toggleFavorite(p: Row) {
-  p.favorite = !p.favorite
-  const { _id, ...data } = p
-  putDoc(_id, data)
-}
-
-function bindVersion(p: Row, versionId: string) {
-  p.versionId = versionId || undefined
-  const { _id, ...data } = p
-  putDoc(_id, data)
-}
+// 表单状态与提交在 useProjectCreate 里(上面已装配)。
 
 // ---------- 项目备份(创建在项目页,查看与管理在备份页) ----------
 
@@ -273,23 +204,6 @@ function openBackupFor(id: string) {
 
 function openProject(p: Row, action?: OpenAction) {
   openProjectAction(p, action)
-}
-
-// ---------- 展示辅助 ----------
-
-function mismatch(p: Row): boolean {
-  if (!p.engineVersion || !p.versionId) return false
-  const v = versions.value.find((x) => x._id === p.versionId)
-  if (!v) return false
-  const minor = p.engineVersion.split('.').slice(0, 2).join('.')
-  return !v.tag.startsWith(minor + '.') && !v.tag.startsWith(minor + '-')
-}
-
-/** 项目名 → 头像渐变组 */
-function gradOf(name: string): string {
-  let h = 0
-  for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0
-  return ['a', 'b', 'c', 'd'][h % 4]
 }
 
 // ---------- 键盘导航(插件页获得焦点时生效) ----------
@@ -431,7 +345,7 @@ function onKeyDown(e: KeyboardEvent) {
             <button class="btn small ghost star" :class="{ on: p.favorite }" title="收藏" @click="toggleFavorite(p)">
               <Icon name="star" :size="13" :stroke-width="p.favorite ? 2.4 : 1.7" />
             </button>
-            <button class="btn small danger-text" @click="removeProject(p)">删除</button>
+            <button class="btn small danger-text" @click="askDelete(p)">删除</button>
           </div>
         </div>
       </div>

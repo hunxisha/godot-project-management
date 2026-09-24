@@ -1,8 +1,11 @@
-// 渲染层纯逻辑测试:Godot 版本兼容判定 + 商店标签分组。
+// 渲染层纯工具测试:Godot 版本兼容/不匹配判定 + 商店标签分组 + 头像渐变。
 //
-// 这两块原本内联在 MarketplaceView.vue(一个 1,100 行的视图)里,是纯函数却无法被断言。
-// 抽成 utils 后在这里逐条锁边界 —— 尤其是 verNum 的数值化(4.10 必须大于 4.4,
-// 不能按字符串比)与 compatOf 的 null/false 语义区分。
+// 这些都是从视图里抽出来的纯函数(原本内联在 MarketplaceView / ProjectsView / Dashboard 里),
+// 抽成 utils 后在这里逐条锁边界 —— 尤其是:
+//   · verNum 的数值化(4.10 必须大于 4.4,不能按字符串比)
+//   · compatOf 的 null/false 语义区分(「无法判断」不能当成「不兼容」)
+//   · versionMismatch 在信息缺失时**不报警**(否则新项目一添加就满屏「版本不匹配」)
+//   · gradOf 的哈希必须稳定(改了会让所有项目头像换色)
 //
 // 用法(npm script 会先跑打包步骤):
 //   npm run test:renderer
@@ -13,14 +16,17 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const OUT = path.resolve(__dirname, '../../.gpm-test/out')
 
-if (!existsSync(path.join(OUT, 'godotversion.mjs')) || !existsSync(path.join(OUT, 'markettags.mjs'))) {
-  console.error(`找不到打包产物: ${OUT}`)
-  console.error('请先运行: node src/composables/__tests__/build-bundle.mjs')
-  process.exit(2)
+for (const name of ['godotversion', 'markettags', 'avatar']) {
+  if (!existsSync(path.join(OUT, `${name}.mjs`))) {
+    console.error(`找不到打包产物: ${path.join(OUT, `${name}.mjs`)}`)
+    console.error('请先运行: node src/composables/__tests__/build-bundle.mjs')
+    process.exit(2)
+  }
 }
 
 const V = await import(pathToFileURL(path.join(OUT, 'godotversion.mjs')).href)
 const T = await import(pathToFileURL(path.join(OUT, 'markettags.mjs')).href)
+const A = await import(pathToFileURL(path.join(OUT, 'avatar.mjs')).href)
 
 let pass = 0
 const failures = []
@@ -99,6 +105,42 @@ ok(T.inGroup({ category: 'Tools' }, ['tool', 'tools']) === true, '无 tagSlugs �
 ok(T.inGroup({ category: 'Tools' }, ['2d']) === false, '兜底分类不匹配 → false')
 ok(T.inGroup({}, ['2d']) === false, '既无 tagSlugs 也无分类 → false')
 ok(T.inGroup({ tagSlugs: [] }, ['2d']) === false, '空 tagSlugs 走分类兜底,不误判为命中')
+
+// ---------- 6. versionMismatch ----------
+section('6. versionMismatch:绑定版本与声明版本是否不一致')
+{
+  const vs = [
+    { _id: 'godot/version/4.7.2-stable-standard-win64', tag: '4.7.2-stable' },
+    { _id: 'godot/version/4.3-stable-standard-win64', tag: '4.3-stable' }
+  ]
+  ok(V.versionMismatch({ engineVersion: '4.7', versionId: vs[0]._id }, vs) === false, '声明 4.7 / 绑定 4.7.2 → 一致')
+  ok(V.versionMismatch({ engineVersion: '4.7.2', versionId: vs[0]._id }, vs) === false, '声明到 patch 位也一致')
+  ok(V.versionMismatch({ engineVersion: '4.3', versionId: vs[0]._id }, vs) === true, '声明 4.3 / 绑定 4.7.2 → 不匹配')
+
+  // 信息缺失时一律不报警,否则新项目一添加就满屏「版本不匹配」
+  ok(V.versionMismatch({ versionId: vs[0]._id }, vs) === false, '未声明 engineVersion → 不报警')
+  ok(V.versionMismatch({ engineVersion: '4.3' }, vs) === false, '未绑定 versionId → 不报警')
+  ok(V.versionMismatch({ engineVersion: '4.3', versionId: '已删除的版本' }, vs) === false, '绑定记录已不存在 → 不报警')
+  ok(V.versionMismatch(null, vs) === false, '无项目 → 不报警')
+}
+
+// ---------- 7. gradOf ----------
+section('7. gradOf:项目名 → 头像渐变组')
+{
+  const groups = ['a', 'b', 'c', 'd']
+  ok(groups.includes(A.gradOf('Alpha')), '返回合法的渐变组', A.gradOf('Alpha'))
+  ok(A.gradOf('Alpha') === A.gradOf('Alpha'), '同名稳定(同色)')
+  ok(A.gradOf('') === 'a', '空名不抛错', A.gradOf(''))
+  // 哈希一旦改动,所有项目头像都会换色 —— 用固定值把它钉住
+  const FIXED = { Alpha: A.gradOf('Alpha'), Beta: A.gradOf('Beta'), '我的项目': A.gradOf('我的项目') }
+  ok(
+    FIXED.Alpha === 'c' && FIXED.Beta === 'a' && FIXED['我的项目'] === 'a',
+    '固定输入得到固定分组(哈希未漂移)',
+    JSON.stringify(FIXED)
+  )
+  const spread = new Set(['Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon', 'Zeta'].map((n) => A.gradOf(n)))
+  ok(spread.size >= 3, '多个不同项目能分散到多个组(不是全挤一组)', [...spread].join(','))
+}
 
 // ---------- 结果 ----------
 console.log(`\n${'='.repeat(56)}`)
