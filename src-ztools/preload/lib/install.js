@@ -16,15 +16,20 @@ const tasks = createTaskQueue({
   makeId: () => `dl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 })
 
-/** 更新任务字段(任务已被移除时静默跳过) */
+/**
+ * 更新任务字段(任务已被移除时静默跳过)。
+ * @param {string} id
+ * @param {import('./taskqueue').Task} patch
+ */
 function setTask(id, patch) {
   tasks.patch(tasks.get(id), patch)
 }
 
 /**
  * 下载并安装一个版本(入队,立即返回任务 id)。
- * @param {{ tag, variant, platform, url, fileName, totalSize }} params
+ * @param {import('../../../src/types/services').DownloadParams} params
  * @param {{ versionsRoot: string }} opts
+ * @returns {string} 任务 id
  */
 function downloadAndInstall(params, opts) {
   const finalUrl = params.url
@@ -122,7 +127,10 @@ function downloadAndInstall(params, opts) {
   return id
 }
 
-/** 取消任务(排队中直接取消;下载中销毁请求) */
+/**
+ * 取消任务(排队中直接取消;下载中销毁请求)。
+ * @param {string} id
+ */
 function cancelTask(id) {
   const task = tasks.get(id)
   if (!task) return
@@ -131,19 +139,28 @@ function cancelTask(id) {
   setTask(id, { status: 'canceled' })
 }
 
-/** 移除任务记录(完成/取消/错误后由渲染层调用) */
+/**
+ * 移除任务记录(完成/取消/错误后由渲染层调用)。
+ * @param {string} id
+ */
 function dismissTask(id) {
   tasks.dismiss(id)
 }
 
-/** 订阅任务快照变化,返回取消订阅函数 */
+/**
+ * 订阅任务快照变化,返回取消订阅函数。
+ * @param {(tasks: import('./taskqueue').Task[]) => void} fn
+ * @returns {() => void}
+ */
 function watchTasks(fn) {
   return tasks.watch(fn)
 }
 
 // ---------- 导入本地引擎 ----------
 /**
- * 导入本地 Godot 可执行文件,返回 { ok, error?, version? }
+ * 导入本地 Godot 可执行文件。
+ * @param {string} exePath
+ * @returns {Promise<{ok: boolean, error?: string, version?: object}>}
  */
 async function importLocalExe(exePath) {
   try {
@@ -179,6 +196,11 @@ async function importLocalExe(exePath) {
 }
 
 // ---------- 删除版本 ----------
+/**
+ * 删除已装版本:可选连同安装目录一起删除,并移除记录。
+ * @param {{ id: string, installDir?: string, managed: boolean }} v
+ * @returns {{ ok: boolean, error?: string }}
+ */
 function deleteVersion({ id, installDir, managed }) {
   try {
     if (managed && installDir) {

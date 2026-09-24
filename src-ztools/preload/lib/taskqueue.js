@@ -29,7 +29,9 @@ const TERMINAL_PHASES = { done: true, error: true, canceled: true }
 
 /**
  * 取消令牌 / 取消句柄:只需实现 cancel()。
- * @typedef {{ cancel: () => boolean }} Cancelable
+ * 返回值刻意放宽为 unknown —— 取消令牌返回 boolean(是否被接受),
+ * 而下载句柄的 cancel() 不返回任何东西,两者都要能登记进来。
+ * @typedef {{ cancel: () => unknown }} Cancelable
  */
 
 /**

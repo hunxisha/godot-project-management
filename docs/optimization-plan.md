@@ -610,3 +610,26 @@ B. 手写精简的沙箱声明，刻意不声明 `setImmediate`。
   还原后 7 项全绿（已验证）。
 - 下一步依赖关系变了：`services.js` 的清零**依赖 lib 模块先完成标注**（`assets` / `backup` /
   `install` 的返回值），所以剩余 JSDoc 工作应聚焦这几个模块。
+
+### 阶段 4 实施记录 · 第四批（继续 P0-1：`install.js`）
+
+| 文件 | 错误数 | 结果 |
+|---|---:|---|
+| `install.js` | 19 → **3** | 其余全部卡在 node 类型边界（`node:fs` / `node:path` / `process`） |
+| `taskqueue.js` | 0 → 0 | 顺带放宽 `Cancelable` 的 `cancel()` 返回值 |
+| **总计** | **309 → 293** | 护栏（taskqueue 41 / install 34）全部仍绿 |
+
+两处值得记录的细节：
+
+1. **`Cancelable` 的返回值本来就不该是 `boolean`。** `taskqueue` 原先把取消句柄的类型写成
+   `{ cancel: () => boolean }`，但下载句柄的 `cancel()` 不返回任何东西 —— 是共享类型契约
+   （`services.js` 引用 `Services`）把这个不匹配暴露出来的。已放宽为 `() => unknown`：
+   取消令牌返回「是否被接受」，下载句柄返回空，两者都要能登记。
+2. **JSDoc 里的相对路径写错被编译器抓住。** 从 `lib/` 引用 `src/types/services` 需要**三级**
+   `../`（`lib` → `preload` → `src-ztools` → 仓库根），我写了两级。这类错误在运行时不会报，
+   只有类型检查会。
+
+**类型闸门累计进度**（阶段 4 起点 → 现在）：**400 → 293**；已清零文件
+`taskqueue.js` / `releases.js`；`godotExe.js` 25→11、`install.js` 19→3、
+`services.js` 56→8，余项均为下述两类之一：
+（a）node 类型边界；（b）依赖尚未标注的 lib 模块（`backup` / `assets` / `projects` / `extract` / `fsutil` / `http`）。
