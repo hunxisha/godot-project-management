@@ -195,7 +195,7 @@ function openStoreSite() {
 
     <div class="card section">
       <div class="sec-head">
-        <span class="sec-ico"><Icon name="box" :size="15" /></span>
+        <span class="sec-ico"><Icon name="archive" :size="15" /></span>
         <span class="sec-title">备份与恢复</span>
       </div>
 

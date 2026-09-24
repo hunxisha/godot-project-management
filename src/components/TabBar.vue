@@ -7,7 +7,7 @@ const tabs = [
   { key: 'versions', label: '版本', icon: 'package' },
   { key: 'marketplace', label: '市场', icon: 'puzzle' },
   { key: 'addons', label: '已安装', icon: 'check' },
-  { key: 'backups', label: '备份', icon: 'box' },
+  { key: 'backups', label: '备份', icon: 'archive' },
   { key: 'settings', label: '设置', icon: 'gear' }
 ]
 

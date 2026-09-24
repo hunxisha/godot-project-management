@@ -244,7 +244,7 @@ function close() {
     <div v-if="open" class="modal-mask" @click.self="close">
       <div class="card modal">
         <div class="modal-head">
-          <div class="modal-title"><Icon name="box" :size="15" /> 新建备份</div>
+          <div class="modal-title"><Icon name="archive" :size="15" /> 新建备份</div>
           <span class="grow"></span>
           <button type="button" class="btn small ghost icon-x" title="关闭" :disabled="running" @click="close">
             <Icon name="x" :size="14" />
@@ -422,7 +422,7 @@ function close() {
               <Icon name="external" :size="13" /> 打开所在位置
             </button>
             <button v-else type="button" class="btn primary" :disabled="!canStart" @click="start">
-              <Icon name="box" :size="13" /> 开始备份
+              <Icon name="archive" :size="13" /> 开始备份
             </button>
           </template>
         </div>

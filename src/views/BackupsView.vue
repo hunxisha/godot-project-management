@@ -211,7 +211,7 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
 <template>
   <div class="backups view">
     <div class="view-head">
-      <h2><Icon name="box" :size="16" /> 备份 <span class="count-pill">{{ stats.count }}</span></h2>
+      <h2><Icon name="archive" :size="16" /> 备份 <span class="count-pill">{{ stats.count }}</span></h2>
       <span class="grow"></span>
       <button
         v-if="records.length"
@@ -377,7 +377,7 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
           <span v-else class="gh-meta">建议至少保留一份可回滚的版本</span>
           <button class="btn small primary" :disabled="backingAll" @click="backupAllUncovered">
             <span v-if="backingAll" class="spin"></span>
-            <Icon v-else name="box" :size="12" />
+            <Icon v-else name="archive" :size="12" />
             {{ backingAll ? '备份中…' : '全部备份' }}
           </button>
         </div>
@@ -391,7 +391,7 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
               <div class="pr-path mono" :title="p.path">{{ p.path }}</div>
             </div>
             <button class="btn small primary" @click="emit('backup-project', p._id)">
-              <Icon name="box" :size="12" /> 立即备份
+              <Icon name="archive" :size="12" /> 立即备份
             </button>
           </div>
         </div>
@@ -402,7 +402,7 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
     <template v-else-if="viewMode === 'group'">
       <EmptyState
         v-if="listEmpty"
-        icon="box"
+        icon="archive"
         :title="records.length ? '没有匹配的备份' : '还没有任何备份'"
         :desc="records.length
           ? '换个关键词,或切换筛选条件试试。'
@@ -453,7 +453,7 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
     <template v-else>
       <EmptyState
         v-if="listEmpty"
-        icon="box"
+        icon="archive"
         title="没有匹配的备份"
         desc="换个关键词,或切换筛选条件试试。"
       />

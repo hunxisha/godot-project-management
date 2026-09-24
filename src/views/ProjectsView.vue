@@ -337,7 +337,7 @@ function onKeyDown(e: KeyboardEvent) {
       </div>
       <span class="grow"></span>
       <button class="btn small ghost" title="集中管理所有项目的备份" @click="emit('open-backups')">
-        <Icon name="box" :size="13" /> 备份管理
+        <Icon name="archive" :size="13" /> 备份管理
       </button>
       <button class="btn small ghost" @click="openCreate"><Icon name="plus" :size="13" /> 新建项目</button>
       <button class="btn small primary" @click="addManually"><Icon name="folder-plus" :size="13" /> 添加项目</button>
@@ -396,7 +396,7 @@ function onKeyDown(e: KeyboardEvent) {
                 class="opened link-opened"
                 :title="`最近备份:${lastBackups[p._id].destPath}(${lastBackups[p._id].mode === 'zip' ? 'zip 打包' : '完整快照'}) · 点击查看全部备份`"
                 @click="emit('open-backups', p._id)"
-              ><Icon name="box" :size="11" /> 备份于 {{ formatRelative(lastBackups[p._id].createdAt) }}</button>
+              ><Icon name="archive" :size="11" /> 备份于 {{ formatRelative(lastBackups[p._id].createdAt) }}</button>
             </div>
           </div>
           <div class="row-actions">
@@ -426,7 +426,7 @@ function onKeyDown(e: KeyboardEvent) {
               title="为该项目创建备份"
               @click="openBackupCreate(p._id)"
             >
-              <Icon name="box" :size="13" />
+              <Icon name="archive" :size="13" />
             </button>
             <button class="btn small ghost star" :class="{ on: p.favorite }" title="收藏" @click="toggleFavorite(p)">
               <Icon name="star" :size="13" :stroke-width="p.favorite ? 2.4 : 1.7" />
