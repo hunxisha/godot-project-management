@@ -67,7 +67,9 @@ ZTools 插件。渲染层为 **Vue 3 + Vite + TypeScript**，Node 能力由 **pr
 ├── src-ztools/preload/lib/__tests__/   preload 回归测试
 ├── src/composables/__tests__/          组合式函数回归测试 + .ts 打包脚本
 ├── src/__tests__/                      主题与格式化回归测试
-└── docs/                         设计文档
+│   ├── backup-redesign-plan.md    备份功能的设计与实施计划
+│   ├── theme-system.md            主题（色板 × 明暗）系统说明
+│   └── glossary.md                术语表（正名 + 实现入口）
 ```
 
 ## 开发
@@ -81,11 +83,13 @@ npm run build      # vue-tsc 类型检查 + 构建到 src-ztools/dist/
 调试：在 ZTools 中打开插件后，点击插件头像图标 → 「打开开发者工具」。
 直接用浏览器访问 dev 地址会因缺少 ZTools API 而无法运行（入口有环境守卫，会显示原因而不是白屏）。
 
+术语（分片让出、原子落盘、来源过户、保留策略…）见 [`docs/glossary.md`](docs/glossary.md)。
+
 ## 测试
 
 ```bash
 npm run verify     # 类型检查 + 全部回归断言（提交前跑这一条）
-npm test           # 全部 1112 项断言（其中 2 项默认跳过，见下）
+npm test           # 全部 1235 项断言（其中 2 项默认跳过，见下）
 ```
 
 | 命令 | 覆盖 | 断言 |
@@ -94,9 +98,11 @@ npm test           # 全部 1112 项断言（其中 2 项默认跳过，见下�
 | `npm run test:theme` | 主题令牌完整性、设计约束、10 种组合的 WCAG 对比度 | 134 |
 | `npm run test:preload` | 备份领域层：创建/查询/校验/恢复/取消/清理/删除 | 101（+1 跳过） |
 | `npm run test:preload:sandbox` | 同上，但先删掉 `setImmediate` 以模拟宿主沙箱 | 101（+1 跳过） |
-| `npm run test:preload:unit` | 版本串解析/展示名/平台标识、任务队列语义、下载安装编排、`window.services` 与 `env.d.ts` 的契约一致性 | 107 |
+| `npm run test:preload:unit` | 版本串解析/展示名/平台标识、任务队列语义、文件系统工具与分片让出降级链、HTTP 下载与代理、下载安装编排、`window.services` 与 `env.d.ts` 的契约一致性 | 230 |
 | `npm run test:addons` | 插件来源解析与复制过户（默认 + 沙箱各一遍） | 40 ×2 |
 | `npm run test:renderer` | 渲染层:纯工具(版本兼容/标签分组/头像渐变/格式化)、备份与恢复对话框骨架、市场搜索/浏览/安装、项目列表与新建删除、插件多选/批量/更新/切版本、备份页删除确认与批量备份 | 589 |
+
+提交与 PR 由 GitHub Actions 跑同一条命令（见 `.github/workflows/ci.yml`）。
 
 渲染层测试一次性打包、共用同一份 vue chunk（`test:renderer` 先跑 `build-bundle.mjs`）：
 脚本用 Node 直接运行，**不依赖测试框架**。也可以单独跑其中一条（`test:format` /

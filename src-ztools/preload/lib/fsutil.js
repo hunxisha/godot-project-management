@@ -129,7 +129,7 @@ function stamp() {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`
 }
 
-/** 精确到秒的时间戳片段 YYYYMMDD_HHmmss(避免同分钟重复备份互相覆盖) */
+/** 精确到秒的时间戳片段 YYYYMMDD_HHmm_ss(避免同分钟重复备份互相覆盖) */
 function stampSec() {
   const d = new Date()
   const p = (n) => String(n).padStart(2, '0')

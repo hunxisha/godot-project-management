@@ -352,8 +352,8 @@ function fmtVer(v?: string): string { return (v || '').replace(/^v+/i, '') }
 - [x] `install.js` 与 `backup.js` 的「取消 / 关闭 / 订阅」由同一模块提供（`taskqueue.js`）
 - [x] 无生产文件脚本超过 300 行；`MarketplaceView.vue` 脚本 172 行（口径已按 SFC 样式块实际占比更正）
 - [x] `npm test` 不再写用户回收站（默认跳过，`GPM_TEST_TRASH=1` 可显式开启）
-- [ ] CI 在每次提交上跑 `build` + `test`
-- [ ] 5 组术语各只有一个正名
+- [x] CI 在每次提交上跑 `build` + `test`（`.github/workflows/ci.yml`，跑的就是 `npm run verify` + `npm run build`；两条命令均已本地验证，但**尚未在 GitHub 上真实跑过一次**）
+- [x] 5 组术语各只有一个正名（`docs/glossary.md`）
 
 ## 5. 明确不做（避免范围蔓延）
 
@@ -399,8 +399,8 @@ _（每完成一项在阶段小节内标注 commit，与 `docs/backup-redesign-p
 |---|---|
 | 阶段 1 · 收敛与护栏 | ✅ 已完成（commit `dfb1af1`，记录 `e04335d`） |
 | 阶段 2 · 结构性抽取 | ✅ 已完成（commit `0a0d6ce`，记录 `964c0d8`） |
-| 阶段 3 · 视图拆分 | ✅ 已完成（第一批：`MarketplaceView`，commit `14587b6`；第二批：其余三个视图） |
-| 阶段 4 · 类型闸门 / 测试 / CI | ⬜ 未开始 |
+| 阶段 3 · 视图拆分 | ✅ 已完成（第一批 `14587b6`；第二批 `2a080fc`） |
+| 阶段 4 · 类型闸门 / 测试 / CI | 🔄 进行中：P2-1 测试补口 ✅、P2-2 CI ✅、P2-3 术语表 ✅；P0-1 类型闸门已量化未开工 |
 
 ### 阶段 1 实施记录（commit `dfb1af1`）
 
@@ -509,3 +509,47 @@ _（每完成一项在阶段小节内标注 commit，与 `docs/backup-redesign-p
 - 备份页：删除确认文案（文件还在 vs 已丢失）、批量备份未备份项目、恢复向导、备注编辑、巡检
 - 市场页：搜索防抖/回车、五种浏览模式、标签筛选后翻页（聚合池）、兼容开关、收藏、安装与版本选择器
 - 备份/恢复对话框：进度、取消、替换阶段取消应被拒绝
+
+### 阶段 4 实施记录 · 第一批（P2-1 测试补口 / P2-2 CI / P2-3 术语表）
+
+**P2-1 · 补上两个高风险模块的测试**
+
+`fsutil.js`（79 项）与 `http.js`（44 项）此前只被间接覆盖 / 完全没有覆盖，而它们分别是
+「环境差异」与「网络」这两类最难排查问题的高发区。补测过程中查出三件事：
+
+| 发现 | 性质 | 处理 |
+|---|---|---|
+| `downloadFile().cancel()` 让 promise **永久悬空**（既不 resolve 也不 reject） | **真 bug** | 已修：`cancel()` 显式以 `已取消` 拒绝，并用 `settled` 标志防止二次了结 |
+| `stampSec()` 实际产出 `YYYYMMDD_HHmm_ss`（三段），注释写的是 `YYYYMMDD_HHmmss` | 注释与实现不符 | 已改注释（**不动格式** —— 改了会影响既有备份文件名） |
+| `walkFiles()` 对不存在的目录直接抛 ENOENT（不做 try/catch） | 既有行为 | 测试里钉住，避免被无声改掉 |
+
+那个 cancel bug 的实际影响值得说明：`install.js` 的下载队列是**串行**的（`pump()` 靠 job 的
+finally 推进）。若 `await dl.promise` 永不返回，`running` 标志就永远不释放 ——
+**取消一次下载之后，后续所有下载都不会再开始**。修复前它只会在用户「取消下载后再装另一个版本」
+时暴露，且现象是「点了没反应」，极难从报错定位。
+
+**P2-2 · 接入最小 CI**
+
+`.github/workflows/ci.yml`：`npm ci` → `npm run verify` → `npm run build`。
+刻意只跑与本地完全相同的命令，避免「CI 绿了但本地命令还红」的口径分叉。
+两条命令均已在本机验证通过（`verify` exit 0、`build` 产出 `src-ztools/dist`）。
+
+**P2-3 · 术语表**
+
+新增 `docs/glossary.md`：把图谱抽出的 5 组「同一机制两种表述」各定一个正名
+（三步恢复向导 / 来源过户 / 分片让出 / 原子落盘 / 保留策略），每条附实现入口，
+另收 8 个高频术语。README 已加指针。
+
+**验收结果**
+
+| 指标 | 阶段 4 前 | 本批后 |
+|---|---|---|
+| 断言总数 | 1112 PASS + 2 SKIP | **1235 PASS** + 2 SKIP |
+| 测试文件数 | 23 | 25 |
+| `npm run verify` | ✅ exit 0 | ✅ exit 0 |
+| `npm run build` | 未纳入验收 | ✅ exit 0（并已纳入 CI） |
+| 真实 bug 修复 | — | 1（下载取消导致队列卡死） |
+
+**仍未开工：P0-1 类型闸门。** 起点已量化在 `tsconfig.preload.json`（390 个错误，
+分类见该文件注释与本节上方的表）。它需要逐模块补 JSDoc，且**不能**用引入 `@types/node` 的
+方式走捷径 —— 理由见该文件里那条关于 `setImmediate` 的说明。计划中把它列为「持续」项。

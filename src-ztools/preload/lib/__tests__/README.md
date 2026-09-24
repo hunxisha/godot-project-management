@@ -9,6 +9,8 @@ preload 领域层的回归测试。在 Node 中桩掉 `window.ztools.db`，**req
 | `addons.test.js` | 插件来源与复制（`assets.js` 的 `listAddons`、`projects.js` 的 `copyAddonsToProject`） |
 | `godotExe.test.js` | 版本串解析 / 展示名 / 平台标识（`godotExe.js`），并守住「这些工具函数全仓只有一处定义」 |
 | `taskqueue.test.js` | 任务队列语义（`taskqueue.js`）：快照拷贝、监听器异常隔离、终态才可 dismiss、取消令牌、串行执行 |
+| `fsutil.test.js` | 文件系统工具（`fsutil.js`）：名称/路径处理、取消令牌与 lock 语义、**分片让出的三级降级链**、递归收集与复制、预估 |
+| `http.test.js` | 网络层（`http.js`）：文本/JSON、重定向、代理校验与 CONNECT 隧道、下载进度、**取消必须了结 promise** |
 | `install.test.js` | 下载安装编排（`install.js`）：串行队列、状态机、取消、失败路径（`http` / `extract` / `store` 打桩） |
 | `services.test.js` | 服务面契约：`window.services` 的 47 个方法 与 `src/env.d.ts` 的 `interface Services` 必须逐项一致 |
 
@@ -18,7 +20,7 @@ preload 领域层的回归测试。在 Node 中桩掉 `window.ztools.db`，**req
 npm run test:preload            # 备份:默认路径
 npm run test:preload:sandbox    # 备份:模拟 ZTools 沙箱（先删掉 setImmediate）
 npm run test:addons             # 插件来源与复制:默认 + 沙箱各跑一遍
-npm run test:preload:unit       # godotExe + taskqueue + install + services 契约（纯函数与打桩，秒级）
+npm run test:preload:unit       # godotExe + taskqueue + fsutil + http + install + services 契约（打桩，秒级）
 npm test                        # 全部（含主题、格式化、对话框骨架与组合式函数测试）
 ```
 
@@ -29,6 +31,8 @@ node src-ztools/preload/lib/__tests__/backup.test.js [libDir] [workDir] [--no-im
 node src-ztools/preload/lib/__tests__/addons.test.js [libDir] [workDir] [--no-immediate]
 node src-ztools/preload/lib/__tests__/godotExe.test.js
 node src-ztools/preload/lib/__tests__/taskqueue.test.js
+node src-ztools/preload/lib/__tests__/fsutil.test.js
+node src-ztools/preload/lib/__tests__/http.test.js
 node src-ztools/preload/lib/__tests__/install.test.js
 node src-ztools/preload/lib/__tests__/services.test.js
 ```

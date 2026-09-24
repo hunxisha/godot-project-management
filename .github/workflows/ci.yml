@@ -1,0 +1,33 @@
+# 提交/PR 上的最小验证:类型检查 + 全部回归断言。
+#
+# 只跑 `npm run verify` 这一条 —— 与本地提交前跑的命令完全一致,避免「CI 绿了但本地命令还红」
+# 这类口径分叉。`verify` 内含 typecheck 与全部测试套件(主题/渲染层/preload/插件)。
+name: verify
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # package.json 未声明 engines;README 要求 Node ≥ 18,vite 6 需要 18+。
+          # 用 20 LTS 作为基线。
+          node-version: 20
+          cache: npm
+
+      - name: 安装依赖(严格按 lockfile)
+        run: npm ci
+
+      - name: 类型检查 + 回归断言
+        run: npm run verify
+
+      - name: 构建产物(确认 vue-tsc + vite build 可过)
+        run: npm run build
+        # build 里已含 vue-tsc;单独跑一次是为了确认打包产物也能生成
+        # (插件分发依赖 src-ztools/dist,见 README「开发」)

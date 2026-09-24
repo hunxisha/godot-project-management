@@ -141,11 +141,25 @@ function downloadFile(url, destPath, opts = {}) {
   let aborted = false
   let activeReq = null
   let activeWs = null
+  /** 一旦了结(成功或失败)就不再二次了结 */
+  let settled = false
+  /** 供 cancel() 主动了结用 */
+  let rejectOnce = null
 
   const promise = new Promise((resolve, reject) => {
+    rejectOnce = (err) => {
+      if (settled) return
+      settled = true
+      reject(err)
+    }
+    const resolveOnce = () => {
+      if (settled) return
+      settled = true
+      resolve()
+    }
     const attempt = (currentUrl, depth = 0) => {
-      if (aborted) return reject(new Error('已取消'))
-      if (depth > 5) return reject(new Error('重定向次数过多'))
+      if (aborted) return rejectOnce(new Error('已取消'))
+      if (depth > 5) return rejectOnce(new Error('重定向次数过多'))
       activeReq = httpsGet(currentUrl, {}, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           res.resume()
@@ -153,7 +167,7 @@ function downloadFile(url, destPath, opts = {}) {
         }
         if (res.statusCode !== 200) {
           res.resume()
-          return reject(new Error(`下载失败 HTTP ${res.statusCode}`))
+          return rejectOnce(new Error(`下载失败 HTTP ${res.statusCode}`))
         }
         const total = parseInt(res.headers['content-length'], 10) || opts.total || 0
         let received = 0
@@ -169,13 +183,13 @@ function downloadFile(url, destPath, opts = {}) {
         })
         res.pipe(activeWs)
         activeWs.on('finish', () => {
-          if (aborted) return reject(new Error('已取消'))
+          if (aborted) return rejectOnce(new Error('已取消'))
           opts.onProgress && opts.onProgress(received, total)
-          resolve()
+          resolveOnce()
         })
-        activeWs.on('error', (e) => reject(new Error('写入文件失败: ' + e.message)))
+        activeWs.on('error', (e) => rejectOnce(new Error('写入文件失败: ' + e.message)))
       })
-      activeReq.on('error', (e) => reject(new Error('网络错误: ' + e.message)))
+      activeReq.on('error', (e) => rejectOnce(new Error('网络错误: ' + e.message)))
     }
     attempt(url)
   })
@@ -193,6 +207,10 @@ function downloadFile(url, destPath, opts = {}) {
       try {
         fs.existsSync(destPath) && fs.unlinkSync(destPath)
       } catch (e) { /* ignore */ }
+      // 必须主动了结:销毁请求与写入流只会触发 'close',不会触发 'finish'/'error',
+      // 于是 await dl.promise 会永久悬空 —— 下载队列(install.js 的串行 pump)就再也
+      // 不会推进到下一个任务。这里显式以「已取消」拒绝。
+      if (rejectOnce) rejectOnce(new Error('已取消'))
     }
   }
 }
