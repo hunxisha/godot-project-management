@@ -85,23 +85,22 @@ npm run build      # vue-tsc 类型检查 + 构建到 src-ztools/dist/
 
 ```bash
 npm run verify     # 类型检查 + 全部回归断言（提交前跑这一条）
-npm test           # 全部 683 项断言（其中 2 项默认跳过，见下）
+npm test           # 全部 850 项断言（其中 2 项默认跳过，见下）
 ```
 
 | 命令 | 覆盖 | 断言 |
 |---|---|---|
 | `npm run typecheck` | `vue-tsc --noEmit` 类型检查 | — |
 | `npm run test:theme` | 主题令牌完整性、设计约束、10 种组合的 WCAG 对比度 | 134 |
-| `npm run test:format` | 版本号归一化行为，并守住「全渲染层只有一份实现」 | 19 |
 | `npm run test:preload` | 备份领域层：创建/查询/校验/恢复/取消/清理/删除 | 101（+1 跳过） |
 | `npm run test:preload:sandbox` | 同上，但先删掉 `setImmediate` 以模拟宿主沙箱 | 101（+1 跳过） |
 | `npm run test:preload:unit` | 版本串解析/展示名/平台标识、任务队列语义、下载安装编排、`window.services` 与 `env.d.ts` 的契约一致性 | 107 |
 | `npm run test:addons` | 插件来源解析与复制过户（默认 + 沙箱各一遍） | 40 ×2 |
-| `npm run test:taskdialog` | 备份/恢复对话框共用骨架：任务订阅、可取消判断、进度百分比、取消失败提示 | 51 |
-| `npm run test:composable` | 备份页的筛选/分组/时间轴/批量/巡检逻辑 | 90 |
+| `npm run test:renderer` | 渲染层:版本号归一化与去重护栏、Godot 版本兼容与标签分组、备份/恢复对话框骨架、市场搜索/浏览/安装、备份页筛选与批量逻辑 | 327 |
 
-不依赖测试框架：脚本用 Node 直接运行；`test:format`、`test:taskdialog` 与 `test:composable`
-会先用项目已有的 vite 把 `.ts` 源码打成自包含包（Node 无法直接加载 `.ts` 与 Vue 响应式依赖）。
+渲染层测试一次性打包、共用同一份 vue chunk（`test:renderer` 先跑 `build-bundle.mjs`）：
+脚本用 Node 直接运行，**不依赖测试框架**。也可以单独跑其中一条（`test:format` /
+`test:taskdialog` / `test:composable` 会各自先打包，便于定位）。
 
 > **`--no-immediate` 那一条务必保留**：preload 跑在渲染进程沙箱里，那里没有 `setImmediate`
 > （Node 专有全局）。只跑默认路径会漏掉整整一类「本地能跑、宿主里报错」的问题。

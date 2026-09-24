@@ -5,9 +5,15 @@
 // 不需要引入测试框架,也不需要依赖 Node 24 的类型剥离(README 声明支持 Node ≥ 18)。
 //
 // 产物(.gpm-test/ 已被 .gitignore 忽略):
-//   .gpm-test/out/usebackups.mjs   ← src/composables/useBackups.ts    (useBackups.test.mjs)
-//   .gpm-test/out/usetaskdialog.mjs← src/composables/useTaskDialog.ts (useTaskDialog.test.mjs)
-//   .gpm-test/out/format.mjs       ← src/utils/format.ts              (src/__tests__/format.test.mjs)
+//   .gpm-test/out/usebackups.mjs      ← src/composables/useBackups.ts       (useBackups.test.mjs)
+//   .gpm-test/out/usetaskdialog.mjs   ← src/composables/useTaskDialog.ts    (useTaskDialog.test.mjs)
+//   .gpm-test/out/usemarketsearch.mjs ← src/composables/useMarketSearch.ts  (useMarketSearch.test.mjs)
+//   .gpm-test/out/useassethydration.mjs ← src/composables/useAssetHydration.ts (useMarketSearch.test.mjs)
+//   .gpm-test/out/format.mjs          ← src/utils/format.ts                 (src/__tests__/format.test.mjs)
+//   .gpm-test/out/godotversion.mjs    ← src/utils/godotVersion.ts           (src/__tests__/marketUtils.test.mjs)
+//   .gpm-test/out/markettags.mjs      ← src/utils/marketTags.ts             (src/__tests__/marketUtils.test.mjs)
+//
+// 一次打包供全部渲染层测试共用(npm run test:renderer),避免每个测试各起一次 vite。
 //
 // 用法:node src/composables/__tests__/build-bundle.mjs
 import { build } from 'vite'
@@ -32,7 +38,15 @@ await build({
       entry: {
         usebackups: path.join(root, 'src', 'composables', 'useBackups.ts'),
         usetaskdialog: path.join(root, 'src', 'composables', 'useTaskDialog.ts'),
-        format: path.join(root, 'src', 'utils', 'format.ts')
+        usemarketsearch: path.join(root, 'src', 'composables', 'useMarketSearch.ts'),
+        useassethydration: path.join(root, 'src', 'composables', 'useAssetHydration.ts'),
+        usemarketbrowse: path.join(root, 'src', 'composables', 'useMarketBrowse.ts'),
+        usemarketinstall: path.join(root, 'src', 'composables', 'useMarketInstall.ts'),
+        format: path.join(root, 'src', 'utils', 'format.ts'),
+        godotversion: path.join(root, 'src', 'utils', 'godotVersion.ts'),
+        markettags: path.join(root, 'src', 'utils', 'marketTags.ts'),
+        // 测试专用:暴露 vue(与各入口共享同一个 chunk),供测试创建 ref
+        vueshim: path.join(root, 'src', 'composables', '__tests__', 'vue-shim.mjs')
       },
       formats: ['es'],
       fileName: (_format, entryName) => `${entryName}.mjs`
@@ -42,6 +56,6 @@ await build({
   }
 })
 
-for (const name of ['usebackups', 'usetaskdialog', 'format']) {
+for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'format', 'godotversion', 'markettags', 'vueshim']) {
   console.log(`bundle built: ${path.join(root, OUT_DIR, `${name}.mjs`)}`)
 }

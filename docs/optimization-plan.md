@@ -304,6 +304,11 @@ function fmtVer(v?: string): string { return (v || '').replace(/^v+/i, '') }
 - 同法推进 `AddonsView.vue` / `BackupsView.vue` / `ProjectsView.vue`
 - 验收：无生产文件超过 700 行；页面功能与交互零变化（人工过一遍 7 个页面）
 
+> **实施时对验收口径的更正**：原写「`MarketplaceView.vue` < 450 行」是按**整个 SFC** 定的，
+> 但这个文件的 431 行是 `scoped` 样式 —— 拆脚本不会减少样式行数，该目标不可达。
+> Vue 单文件组件的样式块本来就应该随组件走，所以**改用脚本行数作为口径**：
+> `MarketplaceView` 脚本 506 → 172 行（总行数 1,142 → 808）。
+
 ### 阶段 4 · 持续
 
 - P0-1 类型闸门分步开启（`noImplicitAny` → `strictNullChecks` → `strict`）
@@ -321,7 +326,7 @@ function fmtVer(v?: string): string { return (v || '').replace(/^v+/i, '') }
 - [x] `displayName` 全仓只剩一份定义；版本归一化只剩一份且行为有断言锁定
 - [ ] `tsconfig.json` 的 `strict: false` 至少推进到 `noImplicitAny: true`，且 preload 纳入检查
 - [x] `install.js` 与 `backup.js` 的「取消 / 关闭 / 订阅」由同一模块提供（`taskqueue.js`）
-- [ ] `MarketplaceView.vue` < 450 行；无生产文件超过 700 行
+- [ ] `MarketplaceView.vue` 脚本 < 250 行；无生产文件脚本超过 300 行（口径已按 SFC 样式块实际占比更正）
 - [x] `npm test` 不再写用户回收站（默认跳过，`GPM_TEST_TRASH=1` 可显式开启）
 - [ ] CI 在每次提交上跑 `build` + `test`
 - [ ] 5 组术语各只有一个正名
@@ -369,8 +374,8 @@ _（每完成一项在阶段小节内标注 commit，与 `docs/backup-redesign-p
 | 阶段 | 状态 |
 |---|---|
 | 阶段 1 · 收敛与护栏 | ✅ 已完成（commit `dfb1af1`，记录 `e04335d`） |
-| 阶段 2 · 结构性抽取 | ✅ 已完成（commit `0a0d6ce`） |
-| 阶段 3 · 视图拆分 | ⬜ 未开始 |
+| 阶段 2 · 结构性抽取 | ✅ 已完成（commit `0a0d6ce`，记录 `964c0d8`） |
+| 阶段 3 · 视图拆分 | 🔄 进行中：`MarketplaceView.vue` 已完成；`AddonsView` / `BackupsView` / `ProjectsView` 待做 |
 | 阶段 4 · 类型闸门 / 测试 / CI | ⬜ 未开始 |
 
 ### 阶段 1 实施记录（commit `dfb1af1`）
@@ -419,3 +424,29 @@ _（每完成一项在阶段小节内标注 commit，与 `docs/backup-redesign-p
 
 - 抽取过程被备份测试当场抓住一个真 bug：`finish()` 最初把阶段**值**当成字段**名**写入（`phaseField` 与取值混用同一个访问器），表现为 11 项取消/终态断言失败。这正是 `backup.test.js` 作为重构护栏的价值 —— 若没有它，这个 bug 只会在用户点「取消备份」时暴露。已在 `taskqueue.test.js` 第 5 节加断言锁住该类错误。
 - 两个对话框属于**渲染层改动**：`test:taskdialog` 覆盖了抽出去的那部分逻辑，但模板绑定（`:disabled="running"` 等）只有 `vue-tsc` 把关，仍需人工过一遍「新建备份」「恢复向导」两个流程（见「阶段 3 的人工验收」）。
+
+### 阶段 3 实施记录 · 第一批（`MarketplaceView.vue`）
+
+按「哪个接缝是真的」拆，而不是按行数切 —— 拆出 5 个模块 + 2 个纯工具：
+
+| 新模块 | 内容 | 为什么是独立接缝 |
+|---|---|---|
+| `src/utils/godotVersion.ts` | `verNum` / `projectGodotVersion` / `compatOf` / `godotRange` | 纯函数、零 Vue 依赖；版本换算的边界（`4.10 > 4.4`、未知版本返回 `null` 而非 `false`）最需要断言 |
+| `src/utils/marketTags.ts` | `MARKET_TAG_GROUPS` / `tagSlugsOf` / `inGroup` | 同一份标签映射被「聚合拉取」与「展示过滤」共用，放在视图里两边各引一次容易漂移 |
+| `src/composables/useAssetHydration.ts` | `hydrateVersions` | 携带一条关键约束：**只请求尚未补齐的资产**（聚合翻屏靠它避免重复请求） |
+| `src/composables/useMarketSearch.ts` | 关键词防抖、请求状态、结果 | 自带 ref，无需注入；补全能力由调用方注入以与浏览共用 |
+| `src/composables/useMarketBrowse.ts` | 五种模式取数 + 分页 + 标签聚合池 + 展示过滤 | 视图脚本里最大的一块；搜索状态通过参数注入，保持接缝清晰 |
+| `src/composables/useMarketInstall.ts` | 安装进度、已装集合、版本选择器 | 唯一会写目标项目目录的操作；进度必须按 `assetId` 配对 |
+
+**验收结果**
+
+| 指标 | 阶段 3 前 | 阶段 3 第一批后 |
+|---|---|---|
+| `MarketplaceView.vue` 总行数 | 1,142 | **808** |
+| `MarketplaceView.vue` **脚本**行数 | 506 | **172** |
+| 断言总数 | 683 PASS + 2 SKIP | **850 PASS** + 2 SKIP |
+| `npm run verify` | ✅ exit 0 | ✅ exit 0 |
+
+- 测试基建顺带收敛：渲染层测试原本 3 条脚本各自起一次 vite，改为 `test:renderer` **一次打包、7 个测试文件共用**（Rollup 会把 vue 提成共享 chunk，于是新增的 `__tests__/vue-shim.mjs` 能让测试拿到同一份 vue 去创建 ref 并触发 `watch`）。单条脚本（`test:format` / `test:taskdialog` / `test:composable`）保留，便于定位。
+- 仍待做：`AddonsView.vue`（脚本 290）/ `BackupsView.vue`（脚本 210）/ `ProjectsView.vue`（脚本 327）用同一套做法拆分。
+- **渲染层仍需人工验收**（自动化只覆盖抽出的逻辑，模板绑定由 `vue-tsc` 把关）：插件的**搜索**（输入防抖、回车立即搜、清空回到浏览）、**五种浏览模式**切换、**标签筛选 + 翻页**（聚合池行为）、**兼容开关**、**收藏/取消收藏**、**安装进度**与**版本选择器安装**。

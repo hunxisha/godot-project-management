@@ -4,348 +4,95 @@ import { notify } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import VersionPickerDialog from '../components/dialogs/VersionPickerDialog.vue'
-import { fmtSize, normVersion } from '../utils/format'
-import type { AddonInfo, FavoriteAsset, GodotProject, GodotVersion, MarketAsset } from '../types/godot'
+import { useAssetHydration } from '../composables/useAssetHydration'
+import { useMarketSearch } from '../composables/useMarketSearch'
+import { useMarketBrowse, MODE_META, type BrowseMode } from '../composables/useMarketBrowse'
+import { useMarketInstall } from '../composables/useMarketInstall'
+import { compatOf as assetCompat, godotRange, projectGodotVersion } from '../utils/godotVersion'
+import { MARKET_TAG_GROUPS } from '../utils/marketTags'
+import { normVersion } from '../utils/format'
+import type { AddonInfo, GodotProject, GodotVersion, MarketAsset } from '../types/godot'
 
 // 被 App 的 KeepAlive 缓存:切走再切回不重新加载浏览数据(直到插件重启)
 defineOptions({ name: 'MarketplaceView' })
 
 const emit = defineEmits<{ (e: 'navigate', tab: string): void }>()
 
+// 本视图自己持有的状态:目标项目、标签筛选、兼容开关、图标回退、已装插件
 const projects = ref<(GodotProject & { _id: string })[]>([])
 const versions = ref<(GodotVersion & { _id: string })[]>([])
 const targetId = ref('')
-const query = ref('')
 const tagFilter = ref('')
 /** 仅显示兼容当前项目 Godot 版本的插件 */
 const compatOnly = ref(false)
-const searching = ref(false)
-const searchError = ref('')
-const results = ref<MarketAsset[]>([])
 const addons = ref<AddonInfo[]>([])
-const installing = ref<{ assetId: string, percent: number, stage: string } | null>(null)
 const brokenIcons = ref(new Set<string>())
 
-// ---------- 标签筛选(商店 API 不支持服务端过滤,客户端按标签 slug 筛) ----------
+// 资产 release 信息补齐(浏览与搜索共用同一实现)
+const { hydrateVersions } = useAssetHydration()
 
-/** 商店标签为自由标签,按 slug 聚合为常用分类 */
-const TAG_GROUPS: { label: string, slugs: string[] }[] = [
-  { label: '2D', slugs: ['2d'] },
-  { label: '3D', slugs: ['3d'] },
-  { label: 'UI', slugs: ['ui', 'gui', 'userinterface'] },
-  { label: 'AI', slugs: ['ai'] },
-  { label: '工具', slugs: ['tool', 'tools', 'editortool', 'tooling'] },
-  { label: '模板', slugs: ['template', 'templates'] },
-  { label: '材质', slugs: ['material', 'materials'] },
-  { label: '着色器', slugs: ['shader', 'shaders'] },
-  { label: '编辑器', slugs: ['editor', 'editors'] }
-]
-
-/** 资产是否属于标签组(旧收藏无标签列表时按分类名兜底) */
-function inGroup(a: MarketAsset, slugs: string[]): boolean {
-  if (a.tagSlugs?.length) return a.tagSlugs.some((s) => slugs.includes(s))
-  return slugs.includes((a.category || '').toLowerCase())
-}
+// 搜索:关键词防抖、请求状态、结果列表
+const {
+  query,
+  searching,
+  searchError,
+  results,
+  hasSearched,
+  onSearchEnter
+} = useMarketSearch({ hydrate: hydrateVersions })
 
 // ---------- Godot 版本兼容(安装目标) ----------
+// 换算逻辑在 src/utils/godotVersion.ts(纯函数、可独立测试);这里只把当前目标项目接上去。
 
-/** 安装目标项目的 Godot 版本(major.minor,优先绑定引擎 tag,回退 project.godot 声明) */
-const targetGodot = computed(() => {
-  const p = target.value
-  if (!p) return ''
-  const v = versions.value.find((x) => x._id === p.versionId)
-  const m = /^v?(\d+\.\d+)/.exec(v?.tag || p.engineVersion || '')
-  return m ? m[1] : ''
+/** 安装目标项目的 Godot 版本(major.minor) */
+const targetGodot = computed(() => projectGodotVersion(target.value, versions.value))
+
+/** 资产是否兼容当前目标项目(模板里按单参数调用) */
+const compatOf = (a: MarketAsset): boolean | null => assetCompat(a, targetGodot.value)
+
+// ---------- 浏览与安装 ----------
+// 浏览(模式/分页/标签聚合池/展示过滤)与安装(进度/已装集合/版本选择器)分别在两个
+// 组合式函数里,本视图只做装配与页面级交互。
+
+const {
+  mode,
+  pageNum,
+  pageTotal,
+  favorites,
+  browsing,
+  browseError,
+  matchPool,
+  poolFetched,
+  poolDone,
+  poolPages,
+  poolLoading,
+  aggregating,
+  displayAssets,
+  switchMode,
+  changePage,
+  loadBrowse,
+  reloadFavorites
+} = useMarketBrowse({
+  tagFilter,
+  query,
+  results,
+  compatOnly,
+  compatOf,
+  hydrate: hydrateVersions
 })
 
-/** 版本串 → 可比较数值("4.4"→404,"4"→400),无法解析返回 null */
-function verNum(v?: string): number | null {
-  if (!v) return null
-  const m = /^v?(\d+)(?:\.(\d+))?/.exec(v.trim())
-  if (!m) return null
-  return Number(m[1]) * 100 + Number(m[2] || 0)
-}
-
-/** 资产是否兼容目标项目的 Godot 版本:无要求或项目版本未知返回 null(无法判断) */
-function compatOf(a: MarketAsset): boolean | null {
-  const min = verNum(a.minGodot)
-  const max = verNum(a.maxGodot)
-  const t = verNum(targetGodot.value)
-  if ((min == null && max == null) || t == null) return null
-  if (min != null && t < min) return false
-  if (max != null && t > max) return false
-  return true
-}
-
-/** 兼容版本范围展示文案 */
-function godotRange(a: MarketAsset): string {
-  const min = a.minGodot
-  const max = a.maxGodot
-  if (min && max) return `Godot ${min} ~ ${max}`
-  if (min) return `Godot ${min}+`
-  if (max) return `Godot ≤ ${max}`
-  return ''
-}
-
-// ---------- 浏览模式:全部 / 推荐 / 新品 / 最近更新 / 收藏,搜索常驻工具栏 ----------
-
-type BrowseMode = 'all' | 'featured' | 'new' | 'recent' | 'favorites'
-const mode = ref<BrowseMode>('featured')
-const all = ref<MarketAsset[]>([])
-const featured = ref<MarketAsset[]>([])
-const fresh = ref<MarketAsset[]>([])
-const recent = ref<MarketAsset[]>([])
-/** 分页模式(全部/新品/最近更新)共用页码 */
-const pageNum = ref(1)
-const pageTotal = ref(1)
-const favorites = ref<FavoriteAsset[]>([])
-const browsing = ref(false)
-const browseError = ref('')
-
-// ---------- 标签聚合分页 ----------
-// 商店 API 不支持服务端标签过滤,分页模式下每页仅少量匹配项会"看着不满一页"。
-// 标签筛选 + 分页模式(全部/新品/最近更新)时改用聚合池:批量并发拉服务端多页,
-// 把匹配项汇入本地池,每屏固定展示 20 个匹配项;翻页按需继续聚合,直到拉完全库。
-
-const POOL_PAGE = 20
-/** 聚合池:按当前(模式+标签)收集的匹配资产 */
-const matchPool = ref<MarketAsset[]>([])
-/** 已拉取的服务端页数 */
-const poolFetched = ref(0)
-/** 服务端是否已拉完(无更多页) */
-const poolDone = ref(false)
-/** 服务端总页数(首批返回前未知) */
-const poolTotalPages = ref(Infinity)
-const poolLoading = ref(false)
-
-/** 聚合模式:分页模式 + 已选标签 */
-const aggregating = computed(
-  () => !!tagFilter.value && (mode.value === 'all' || mode.value === 'new' || mode.value === 'recent')
-)
-/** 聚合池的客户端页数(未拉完时持续增长,展示时加 + 号) */
-const poolPages = computed(() => Math.max(1, Math.ceil(matchPool.value.length / POOL_PAGE)))
-
-const MODE_META: Record<BrowseMode, { label: string, icon: string }> = {
-  all: { label: '全部', icon: 'grid' },
-  featured: { label: '推荐', icon: 'sparkle' },
-  new: { label: '新品', icon: 'zap' },
-  recent: { label: '最近更新', icon: 'clock' },
-  favorites: { label: '收藏', icon: 'star' }
-}
-
-/** 当前展示的资产列表:搜索词非空时优先显示搜索结果;标签/兼容筛选在客户端应用 */
-const displayAssets = computed<MarketAsset[]>(() => {
-  // 聚合模式:池内已按标签过滤,直接按客户端页码切片(每屏凑满匹配项)
-  if (aggregating.value && !query.value.trim()) {
-    const start = (pageNum.value - 1) * POOL_PAGE
-    let list = matchPool.value.slice(start, start + POOL_PAGE)
-    if (compatOnly.value) list = list.filter((a) => compatOf(a) !== false)
-    return list
-  }
-  let list: MarketAsset[]
-  if (query.value.trim()) list = results.value
-  else if (mode.value === 'all') list = all.value
-  else if (mode.value === 'new') list = fresh.value
-  else if (mode.value === 'recent') list = recent.value
-  else if (mode.value === 'favorites') list = favorites.value
-  else list = featured.value
-  const g = TAG_GROUPS.find((x) => x.label === tagFilter.value)
-  if (g) list = list.filter((a) => inGroup(a, g.slugs))
-  if (compatOnly.value) list = list.filter((a) => compatOf(a) !== false)
-  return list
-})
-
-/** 目标项目已安装的市场资产 ID */
-const installedIds = computed(
-  () => new Set(addons.value.filter((a) => a.fromMarket && a.assetId).map((a) => a.assetId!))
-)
-
-/** 按当前模式拉取服务端指定页(全部/新品/最近更新共用) */
-function fetchPage(page: number) {
-  if (mode.value === 'all') return window.services.listAllAssets(page)
-  if (mode.value === 'new') return window.services.listNewAssets(page)
-  return window.services.listRecentlyUpdated(page)
-}
-
-/** 重置聚合池 */
-function resetPool() {
-  matchPool.value = []
-  poolFetched.value = 0
-  poolDone.value = false
-  poolTotalPages.value = Infinity
-  pageNum.value = 1
-}
-
-/**
- * 聚合服务端多页数据(每批 4 页并发,按页序追加保持排序):
- * 把匹配当前标签的资产汇入池,直到凑满 targetCount 个或拉完全库。
- */
-async function fillPool(targetCount: number) {
-  if (poolDone.value || poolLoading.value) return
-  poolLoading.value = true
-  browsing.value = true
-  browseError.value = ''
-  const g = TAG_GROUPS.find((x) => x.label === tagFilter.value)
-  try {
-    while (!poolDone.value && matchPool.value.length < targetCount) {
-      const batch: number[] = []
-      while (batch.length < 4 && poolFetched.value + batch.length + 1 <= poolTotalPages.value) {
-        batch.push(poolFetched.value + batch.length + 1)
-      }
-      if (!batch.length) {
-        poolDone.value = true
-        break
-      }
-      const rs = await Promise.all(batch.map((p) => fetchPage(p)))
-      for (const r of rs) {
-        poolFetched.value += 1
-        if (r.pages) poolTotalPages.value = r.pages
-        const matched = g ? r.result.filter((a) => inGroup(a, g.slugs)) : r.result
-        matchPool.value.push(...matched)
-        if (!r.result.length || poolFetched.value >= poolTotalPages.value) poolDone.value = true
-      }
-    }
-  } catch (e: any) {
-    browseError.value = e?.message || String(e)
-  } finally {
-    poolLoading.value = false
-    browsing.value = false
-  }
-}
-
-/** 给聚合模式下当前屏可见资产补齐 release 信息 */
-function hydrateScreen() {
-  const start = (pageNum.value - 1) * POOL_PAGE
-  hydrateVersions(matchPool.value.slice(start, start + POOL_PAGE))
-}
-
-/** 加载当前模式的数据(推荐只拉一次;全部/新品/最近更新按页;收藏读本地) */
-async function loadBrowse() {
-  if (mode.value === 'favorites') {
-    favorites.value = window.services.listFavorites()
-    hydrateVersions(favorites.value)
-    return
-  }
-  // 聚合模式:重置池并填充第一屏
-  if (aggregating.value) {
-    resetPool()
-    await fillPool(POOL_PAGE)
-    hydrateScreen()
-    return
-  }
-  if (mode.value === 'featured' && featured.value.length) return
-  browsing.value = true
-  browseError.value = ''
-  try {
-    if (mode.value === 'featured') {
-      featured.value = await window.services.listFeatured()
-      hydrateVersions(featured.value)
-    } else if (mode.value === 'all') {
-      const r = await window.services.listAllAssets(pageNum.value)
-      all.value = r.result
-      pageTotal.value = r.pages
-      hydrateVersions(all.value)
-    } else if (mode.value === 'new') {
-      const r = await window.services.listNewAssets(pageNum.value)
-      fresh.value = r.result
-      pageTotal.value = r.pages
-      hydrateVersions(fresh.value)
-    } else if (mode.value === 'recent') {
-      const r = await window.services.listRecentlyUpdated(pageNum.value)
-      recent.value = r.result
-      pageTotal.value = r.pages
-      hydrateVersions(recent.value)
-    }
-  } catch (e: any) {
-    browseError.value = e?.message || String(e)
-  } finally {
-    browsing.value = false
-  }
-}
-
-/** 异步拉取列表资产的最新 release 信息并填充(版本/兼容范围/发布日期;失败不影响列表展示) */
-async function hydrateVersions(list: MarketAsset[]) {
-  // 只拉取尚未填充过的资产(聚合模式翻屏时避免重复请求)
-  const need = list.filter(
-    (a) => a.assetId && a.assetId.includes('/') && !a.versionString && !a.minGodot && !a.maxGodot && !a.releaseCreated
-  )
-  if (!need.length) return
-  try {
-    const map = await window.services.getReleaseInfos(need.map((a) => a.assetId))
-    for (const a of need) {
-      const info = map[a.assetId]
-      if (!info) continue
-      if (info.version) a.versionString = info.version
-      a.minGodot = info.minGodot || undefined
-      a.maxGodot = info.maxGodot || undefined
-      a.releaseCreated = info.created || undefined
-    }
-  } catch {
-    // 信息拉取失败时静默跳过
-  }
-}
-
-function switchMode(m: BrowseMode) {
-  query.value = ''
-  if (mode.value === m) return
-  mode.value = m
-  pageNum.value = 1
-  loadBrowse()
-}
-
-// 输入防抖自动搜索;清空关键词即回到浏览模式
-let searchTimer: ReturnType<typeof setTimeout> | null = null
-/** 已完成过一次搜索(区分"防抖等待中"与"确实没有结果") */
-const hasSearched = ref(false)
-
-watch(query, () => {
-  if (searchTimer) clearTimeout(searchTimer)
-  const kw = query.value.trim()
-  if (!kw) {
-    results.value = []
-    searchError.value = ''
-    hasSearched.value = false
-    return
-  }
-  searchTimer = setTimeout(search, 400)
-})
-
-onBeforeUnmount(() => {
-  if (searchTimer) clearTimeout(searchTimer)
-  window.removeEventListener('keydown', onKeydown)
-})
-
-async function changePage(delta: number) {
-  const next = pageNum.value + delta
-  if (next < 1) return
-  if (aggregating.value) {
-    // 聚合模式:池数据不够覆盖下一屏时继续向后聚合
-    const need = next * POOL_PAGE
-    if (matchPool.value.length < need && !poolDone.value) {
-      await fillPool(need)
-      if (browseError.value) return
-    }
-    if ((next - 1) * POOL_PAGE < matchPool.value.length) {
-      pageNum.value = next
-      hydrateScreen()
-    }
-    return
-  }
-  if (next > pageTotal.value) return
-  pageNum.value = next
-  loadBrowse()
-}
-
-// 标签筛选变化:聚合模式下重建匹配池;离开聚合模式时页码是池页码,需回到服务端第 1 页
-watch(tagFilter, (_nv, ov) => {
-  const wasAgg = !!ov && (mode.value === 'all' || mode.value === 'new' || mode.value === 'recent')
-  if (aggregating.value) {
-    resetPool()
-    fillPool(POOL_PAGE).then(hydrateScreen)
-  } else if (wasAgg) {
-    pageNum.value = 1
-    loadBrowse()
-  }
+const {
+  installing,
+  installedIds,
+  picker,
+  install,
+  openPicker,
+  installFromPicker
+} = useMarketInstall({
+  targetId,
+  addons,
+  reloadAddons: () => reloadAddons(),
+  notify
 })
 
 function isFav(id: string): boolean {
@@ -354,9 +101,13 @@ function isFav(id: string): boolean {
 
 function toggleFav(a: MarketAsset) {
   window.services.toggleFavorite(a)
-  favorites.value = window.services.listFavorites()
+  reloadFavorites()
   notify(isFav(a.assetId) ? '已收藏 ' + a.title : '已取消收藏')
 }
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
+})
 
 const target = computed(() => projects.value.find((p) => p._id === targetId.value))
 
@@ -406,101 +157,16 @@ function reloadAddons() {
   addons.value = window.services.listAddons(targetId.value)
 }
 
-// ---------- 搜索 ----------
+// ---------- 商店入口 ----------
 
 /** 打开商店页面 */
 function openStore(a: MarketAsset) {
   if (a.storeUrl) window.ztools.shellOpenExternal(a.storeUrl)
 }
 
-async function search() {
-  searching.value = true
-  searchError.value = ''
-  try {
-    const r = await window.services.searchAssets(query.value.trim())
-    results.value = r.result
-    hydrateVersions(results.value)
-  } catch (e: any) {
-    searchError.value = e?.message || String(e)
-  } finally {
-    searching.value = false
-    hasSearched.value = true
-  }
-}
-
-/** 回车立即搜索(绕过防抖) */
-function onSearchEnter() {
-  if (!query.value.trim()) return
-  if (searchTimer) clearTimeout(searchTimer)
-  search()
-}
-
 /** 图标加载失败时回退到占位块 */
 function onIconError(id: string) {
   brokenIcons.value = new Set(brokenIcons.value).add(id)
-}
-
-// ---------- 安装 ----------
-
-function percent(p: { received?: number, total?: number }): number {
-  if (!p.total) return 0
-  return Math.min(100, ((p.received || 0) / p.total) * 100)
-}
-
-/** 安装插件;version 指定 release 版本(版本选择器),缺省为最新 */
-async function install(asset: MarketAsset, version?: string) {
-  if (!targetId.value || installing.value) return
-  installing.value = { assetId: asset.assetId, percent: 0, stage: '下载中' }
-  const r = await window.services.installAsset(
-    {
-      projectId: targetId.value,
-      assetId: asset.assetId,
-      version,
-      assetMeta: {
-        title: asset.title,
-        author: asset.author,
-        category: asset.category,
-        iconUrl: asset.iconUrl,
-        description: asset.description,
-        storeUrl: asset.storeUrl
-      }
-    },
-    (p) => {
-      if (!installing.value || installing.value.assetId !== asset.assetId) return
-      if (p.stage === 'downloading') {
-        installing.value.percent = percent(p)
-        installing.value.stage = `下载中 ${fmtSize(p.received)}`
-      } else {
-        installing.value.percent = 100
-        installing.value.stage = '解压中'
-      }
-    }
-  )
-  installing.value = null
-  if (r.ok) {
-    notify(`已安装 ${r.addon?.title}${version ? ` ${r.addon?.versionString}` : ''}${r.addon?.enabled ? '(已启用)' : ''}`)
-    reloadAddons()
-  } else {
-    notify(r.error || '安装失败')
-  }
-}
-
-// ---------- 版本选择器 ----------
-
-/** 只保留「要选哪个资产」;release 列表与加载态由对话框自己管 */
-const picker = ref<{ asset: MarketAsset } | null>(null)
-
-function openPicker(a: MarketAsset) {
-  if (installing.value) return
-  picker.value = { asset: a }
-}
-
-/** 从版本选择器安装指定版本 */
-function installFromPicker(version: string) {
-  const a = picker.value?.asset
-  if (!a || installing.value) return
-  picker.value = null
-  install(a, version)
 }
 </script>
 
@@ -546,7 +212,7 @@ function installFromPicker(version: string) {
           </div>
           <select v-model="tagFilter" class="sb-ver" title="按标签筛选当前列表">
             <option value="">全部标签</option>
-            <option v-for="g in TAG_GROUPS" :key="g.label" :value="g.label">{{ g.label }}</option>
+            <option v-for="g in MARKET_TAG_GROUPS" :key="g.label" :value="g.label">{{ g.label }}</option>
           </select>
         </div>
         <div class="tb-row">
