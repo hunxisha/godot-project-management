@@ -108,14 +108,28 @@ function isFav(id: string): boolean {
   return favIds.value.has(String(id))
 }
 
+/** 收藏失败时的诊断信息(仅失败时显示):把宿主的原因摆到界面上,而不是让点击静默无效 */
+const favDiag = ref('')
+
 function toggleFav(a: MarketAsset) {
   const before = isFav(a.assetId)
-  window.services.toggleFavorite(a)
+  favDiag.value = ''
+  try {
+    window.services.toggleFavorite(a)
+  } catch (e) {
+    favDiag.value = `收藏失败:${(e as any)?.message || String(e)}`
+    notify(favDiag.value)
+    return
+  }
   reloadFavorites()
   const after = isFav(a.assetId)
-  // 写库失败时前后状态相同 —— 如实报错,不要谎报成功
-  if (after === before) notify('收藏失败,请重试')
-  else notify(after ? '已收藏 ' + a.title : '已取消收藏')
+  if (after === before) {
+    // 没抛错但状态没变:说明写入既没报错也没生效
+    favDiag.value = `收藏未生效:assetId=${a.assetId} 前=${before} 后=${after} 收藏数=${favorites.value.length}`
+    notify('收藏失败,请重试')
+  } else {
+    notify(after ? '已收藏 ' + a.title : '已取消收藏')
+  }
 }
 
 onBeforeUnmount(() => {
@@ -257,6 +271,13 @@ function onIconError(id: string) {
             >仅满足版本</button>
           </div>
         </div>
+      </div>
+
+      <!-- 收藏失败诊断:只在失败时出现,便于定位「点了没反应」是写库被拒还是没生效 -->
+      <div v-if="favDiag" class="fav-diag" @click="favDiag = ''">
+        <Icon name="alert" :size="12" />
+        <span>{{ favDiag }}</span>
+        <Icon name="x" :size="11" />
       </div>
 
       <!-- 搜索结果概要 -->
@@ -567,6 +588,22 @@ function onIconError(id: string) {
 .rl-text {
   font-size: 12.5px;
   color: var(--text-2);
+}
+
+/* 收藏失败诊断条:仅失败时渲染,点击可关闭 */
+.fav-diag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 7px 10px;
+  border: 1px solid var(--danger, #d9534f);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--danger, #d9534f) 10%, transparent);
+  color: var(--danger, #d9534f);
+  font-size: 12px;
+  cursor: pointer;
+  word-break: break-all;
 }
 
 .error-box {

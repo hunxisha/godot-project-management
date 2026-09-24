@@ -27,8 +27,9 @@ global.window = {
     db: {
       get: (id) => (docs.has(id) ? { ...docs.get(id) } : null),
       put: (doc) => {
-        if (putFails) return { error: 'write failed' }
-        if (!doc || !doc._id) return { error: 'no id' }
+        // 宿主是 CouchDB 风格:失败时返回 { error: true, name, message }
+        if (putFails) return { error: true, name: 'conflict', message: 'Document update conflict' }
+        if (!doc || !doc._id) return { error: true, name: 'bad_request', message: 'no id' }
         rev++
         docs.set(doc._id, { ...doc, _rev: `r${rev}` })
         return { ok: true }
@@ -111,40 +112,51 @@ ok(stored().length === countAfterNum - 1, '用字符串形式再点一次是取�
 ok(assets.isFavorite(NUM) === false, '取消后数字查询也为 false')
 
 // ---------- 4. 缺 assetId / 空值不写脏数据 ----------
-section('4. 缺 assetId 明确失败,不写脏记录')
+section('4. 缺 assetId 明确报错,不写脏记录')
 
 const before = stored().length
-ok(assets.toggleFavorite({ title: '无 id' }) === false, '缺 assetId 返回 false')
-ok(assets.toggleFavorite({ assetId: '' }) === false, '空串 assetId 返回 false')
-ok(assets.toggleFavorite(null) === false, 'null 入参返回 false')
+const throws = (fn) => {
+  try { fn(); return null } catch (e) { return e && e.message }
+}
+ok(!!throws(() => assets.toggleFavorite({ title: '无 id' })), '缺 assetId 抛出错误')
+ok(!!throws(() => assets.toggleFavorite({ assetId: '' })), '空串 assetId 抛出错误')
+ok(!!throws(() => assets.toggleFavorite(null)), 'null 入参抛出错误')
+ok(/assetId/.test(throws(() => assets.toggleFavorite({ title: '无 id' })) || ''), '错误消息点明缺的是 assetId')
 ok(stored().length === before, '三次失败都没有往库里写东西', String(stored().length))
 ok(assets.isFavorite('') === false, 'isFavorite("") 为 false')
 ok(assets.isFavorite(null) === false, 'isFavorite(null) 为 false')
 ok(assets.listFavorites().every((x) => x && x.assetId), '库里不存在没有 assetId 的条目')
 
-// ---------- 5. 写库失败:不谎报成功,也不留半条脏数据 ----------
-section('5. 写库失败的处理')
+// ---------- 5. 写库失败:抛出宿主的原因,不留半条脏数据 ----------
+section('5. 写库失败必须带出宿主原因')
 
 const B = assetOf('ramokz/phantom-camera', 'Phantom Camera')
 ok(assets.toggleFavorite(B) === true, '先正常收藏一条作为基线')
 const baseCount = stored().length
 
 putFails = true
-const failAdd = assets.toggleFavorite(assetOf('some/failing', 'Failing'))
-const failRemove = assets.toggleFavorite(B)
+const addErr = throws(() => assets.toggleFavorite(assetOf('some/failing', 'Failing')))
+const removeErr = throws(() => assets.toggleFavorite(B))
 putFails = false
 
-ok(failAdd === false, '写库失败时新增返回 false(而不是谎报已收藏)')
-ok(failRemove === true, '写库失败时取消返回原状态 true(而不是谎报已取消)')
+ok(!!addErr, '写库失败时新增抛出错误(而不是谎报已收藏)')
+ok(/conflict/.test(addErr || ''), '错误消息带出宿主的原因(桩返回 conflict)', addErr)
+ok(!!removeErr, '写库失败时取消也抛出错误')
 ok(assets.isFavorite('some/failing') === false, '失败的新增没有落库')
 ok(assets.isFavorite(B.assetId) === true, '失败的取消没有把已有收藏弄丢')
 ok(stored().length === baseCount, '库内容与失败前一致', `期望 ${baseCount} 实际 ${stored().length}`)
+ok(assets.toggleFavorite(B) === false, '宿主恢复后可以正常取消收藏')
 
 // ---------- 6. 排序:按收藏时间倒序 ----------
 section('6. listFavorites 按收藏时间倒序')
 
+// 前几节把库清过,这里显式铺两条(第二条更新的 addedAt 必须排前面)
+assets.toggleFavorite(assetOf('a/older', 'Older'))
+assets.toggleFavorite(assetOf('b/newer', 'Newer'))
+
 const list = assets.listFavorites()
 ok(list.length >= 2, '至少有 2 条可以验证顺序', String(list.length))
+ok(list[0].addedAt >= list[list.length - 1].addedAt, '最新的排在最前', list.map((x) => `${x.title}:${x.addedAt}`).join(' > '))
 let desc = true
 for (let i = 1; i < list.length; i++) {
   if ((list[i - 1].addedAt || 0) < (list[i].addedAt || 0)) desc = false

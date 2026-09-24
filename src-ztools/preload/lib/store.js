@@ -21,6 +21,26 @@ function putDoc(id, data) {
 }
 
 /**
+ * 同 putDoc,但把**宿主的失败原因**带出来。
+ *
+ * 宿主 db 是 CouchDB 风格:失败时返回 `{ error: true, name, message }`(`name` 常见取值
+ * `conflict`),成功时只回 `{ ok: true, id, rev }`。`putDoc` 只回布尔值,于是「写了但没生效」
+ * 这类问题在界面上完全没有线索 —— 排查收藏按钮时正是卡在这里。需要报错给用户时用本函数。
+ *
+ * @param {string} id
+ * @param {object} data
+ * @returns {{ok: boolean, reason: string}} reason 仅在失败时非空
+ */
+function putDocVerbose(id, data) {
+  const old = getDoc(id)
+  const res = window.ztools.db.put({ _id: id, _rev: old && old._rev, ...data })
+  if (res && !res.error) return { ok: true, reason: '' }
+  if (!res) return { ok: false, reason: '宿主 db.put 没有返回结果' }
+  const detail = [res.name, res.message].filter(Boolean).join(' / ')
+  return { ok: false, reason: detail || '宿主未给出原因' }
+}
+
+/**
  * 删除文档(不存在时视为成功)。
  * @param {string} id
  * @returns {boolean}
@@ -40,4 +60,4 @@ function listDocs(prefix) {
   return window.ztools.db.allDocs(prefix) || []
 }
 
-module.exports = { getDoc, putDoc, removeDoc, listDocs }
+module.exports = { getDoc, putDoc, putDocVerbose, removeDoc, listDocs }

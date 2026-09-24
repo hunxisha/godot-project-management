@@ -6,7 +6,7 @@ const path = require('node:path')
 const os = require('node:os')
 const { getJson, downloadFile } = require('./http')
 const { extractZip, ensureDir } = require('./extract')
-const { getDoc, putDoc, removeDoc, listDocs } = require('./store')
+const { getDoc, putDoc, putDocVerbose, removeDoc, listDocs } = require('./store')
 
 const API_BASE = 'https://store.godotengine.org/api/v1'
 /** 商店页面地址前缀(格式与 API 返回的 store_url 一致:/asset/{publisher}/{slug}/) */
@@ -559,16 +559,17 @@ function listFavorites() {
  *     而且它是多余动作 —— 下面显式写了 `addedAt: Date.now()`,展开时带过来的旧值本就会被覆盖。
  *  2. **assetId 必须归一化**。它决定「是否已收藏」的判断,展开入参对象得到的值可能是数字
  *     (已安装插件记录里的 assetId 就是数字),数字与字符串混用会让同一个插件出现两条收藏。
- *  3. **写库结果必须回读校验**。宿主 db 失败时既可能返回 `{error}` 也可能不抛错却没落盘;
- *     原先直接忽略返回值,于是「收藏」会静默失败,而调用方还以为成功了。
+ *  3. **写库失败必须抛出原因**。原先忽略 `putDoc` 的返回值,「点收藏没反应」在界面上毫无线索;
+ *     现在把宿主返回的 name/message(如 conflict)带进错误消息,由界面显示出来。
  *
  * @param {FavoriteToggleInput} asset
- * @returns {boolean} 操作后是否处于「已收藏」状态(写入失败时返回原状态)
+ * @returns {boolean} 操作后是否处于「已收藏」状态
+ * @throws {Error} 资产缺少 assetId,或宿主写库失败
  */
 function toggleFavorite(asset) {
   const assetId = asset && asset.assetId != null ? String(asset.assetId) : ''
-  // 没有 assetId 就无从判断身份,直接失败比写一条永远匹配不上的脏记录好
-  if (!assetId) return false
+  // 没有 assetId 就无从判断身份 —— 直接报错比写一条永远匹配不上的脏记录好,而且不必静默
+  if (!assetId) throw new Error('该资产没有 assetId,无法收藏')
 
   const list = readFavorites()
   const exists = list.some((x) => x && String(x.assetId) === assetId)
@@ -577,7 +578,8 @@ function toggleFavorite(asset) {
     ? list.filter((x) => !x || String(x.assetId) !== assetId)
     : [...list, { ...asset, assetId, addedAt: Date.now() }]
 
-  if (!putDoc(FAVORITES_ID, { items: next })) return exists
+  const res = putDocVerbose(FAVORITES_ID, { items: next })
+  if (!res.ok) throw new Error(`写入收藏失败:${res.reason}`)
   return isFavorite(assetId)
 }
 
