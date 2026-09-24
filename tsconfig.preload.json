@@ -61,7 +61,10 @@
     "forceConsistentCasingInFileNames": true,
     "noImplicitAny": true,
     "strictNullChecks": false,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    // 宿主 API 类型(ZTools 的 window.ztools.*)。这是本项目已有的 devDependency,
+    // 与「引入 @types/node」是两件事:它描述的是宿主契约,不是 Node 运行时。
+    "types": ["@ztools-center/ztools-api-types"]
   },
   "include": ["src-ztools/preload/**/*.js"],
   "exclude": ["src-ztools/preload/lib/__tests__/**"]

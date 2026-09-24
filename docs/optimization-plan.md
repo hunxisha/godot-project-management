@@ -629,7 +629,33 @@ B. 手写精简的沙箱声明，刻意不声明 `setImmediate`。
    `../`（`lib` → `preload` → `src-ztools` → 仓库根），我写了两级。这类错误在运行时不会报，
    只有类型检查会。
 
-**类型闸门累计进度**（阶段 4 起点 → 现在）：**400 → 293**；已清零文件
-`taskqueue.js` / `releases.js`；`godotExe.js` 25→11、`install.js` 19→3、
-`services.js` 56→8，余项均为下述两类之一：
-（a）node 类型边界；（b）依赖尚未标注的 lib 模块（`backup` / `assets` / `projects` / `extract` / `fsutil` / `http`）。
+**类型闸门累计进度**（阶段 4 起点 → 现在）：**400 → 217**；已清零文件
+`store.js` / `taskqueue.js` / `releases.js`；`backup.js` 36→3、`fsutil.js` 32→6、
+`godotExe.js` 25→11、`install.js` 19→3、`services.js` 56→8。
+余项均为下述两类之一：
+（a）node 类型边界；（b）依赖尚未标注的 lib 模块（`assets` / `projects` / `extract` / `http`）。
+
+### 阶段 4 实施记录 · 第五批（P0-1：`fsutil` / `store` / `backup`）
+
+| 文件 | 错误数 | 结果 |
+|---|---:|---|
+| `store.js` | 9 → **0** | 完全干净 |
+| `fsutil.js` | 32 → **6** | 4 个 node 边界 + 2 个刻意的 `setImmediate` |
+| `backup.js` | 36 → **3** | 全部为 node 边界 |
+| **总计** | **293 → 217** | 护栏（backup 101 / fsutil 79）全部仍绿 |
+
+四个值得记录的发现：
+
+1. **`store.js` 的 `window.ztools` 不需要 `@types/node`。** 它是**宿主契约**，由本项目已有的
+   devDependency `@ztools-center/ztools-api-types` 描述。给 preload 的 tsconfig 加上
+   `"types": ["@ztools-center/ztools-api-types"]` 后，`store.js` 直接清零（连带修掉若干
+   `getDoc` 返回值相关的错误，共 −19）。这与「引入 @types/node」是两件不同的事，不应混为一谈。
+2. **JSDoc 的内联记录类型里有函数成员会退化。** `@returns {{..., exclude: ((n: string) => boolean) | null}}`
+   被 TS 解析成 `object`，于是函数体里读 `o.mode` 全报错。改用 `@typedef` 定义具名类型即可。
+3. **入参与归一化结果要分开定义。** 上面那个 `object` 修好后仍报 9 个错 —— 因为报错的其实是
+   **输入** `opts`（我标成了 `{object}`），不是返回类型。补一个 `BackupCreateOpts` 才彻底解决。
+4. **`report` 的参数不能标成可选字段。** 它是传给 `onProgress` 的，而公开进度载荷
+   （`{phase, done, total, current, bytes}`）是必填的；标成可选反而产生 2 个不兼容错误。
+
+顺带把 `extract.js` 的 `extractZip` opts 类型补全（原先写成 `{onProgress?:Function, token?:object}`，
+缺 `phase` / `sliceFiles` / `sliceMs`，是 `backup.js` 那个 TS2353 的根因）。

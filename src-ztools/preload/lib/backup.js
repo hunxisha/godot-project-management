@@ -34,6 +34,11 @@ const SCHEMA = 2
 /** 备份文件存在性探测缓存时长 */
 const EXISTS_TTL = 5000
 
+/**
+ * 目录名排除器。
+ * @typedef {(name: string, isDir: boolean) => boolean} Excluder
+ */
+
 // ---------- 任务表(进度 + 取消 + 跨页面订阅) ----------
 // 通用机制在 taskqueue.js;这里只保留备份语义(默认字段、终态规则、取消语义)。
 const queue = createTaskQueue({
@@ -55,7 +60,11 @@ function watchBackupTasks(fn) {
   return queue.watch(fn)
 }
 
-/** 新建任务:补齐备份任务的默认字段(phase/done/total/bytes/current) */
+/**
+ * 新建任务:补齐备份任务的默认字段(phase/done/total/bytes/current)。
+ * @param {import('./taskqueue').Task} [fields]
+ * @returns {import('./taskqueue').Task}
+ */
 function newTask(fields) {
   return queue.create({
     kind: 'backup',
@@ -68,10 +77,19 @@ function newTask(fields) {
   })
 }
 
+/**
+ * @param {import('./taskqueue').Task} task
+ * @param {import('./taskqueue').Task} patch
+ */
 function patchTask(task, patch) {
   queue.patch(task, patch)
 }
 
+/**
+ * @param {import('./taskqueue').Task} task
+ * @param {string} phase
+ * @param {string} [error]
+ */
 function finishTask(task, phase, error) {
   queue.finish(task, phase, error)
 }
@@ -79,11 +97,13 @@ function finishTask(task, phase, error) {
 /**
  * 取消进行中的备份/恢复任务。
  * 已进入不可回滚阶段(覆盖恢复替换原目录)后 token 已 lock,返回 false。
+ * @param {string} id
+ * @returns {boolean} 是否被接受
  */
 function cancelBackupTask(id) {
   const token = queue.tokenOf(id)
   if (!token) return false
-  const ok = token.cancel()
+  const ok = !!token.cancel()
   const task = queue.get(id)
   if (ok && task) {
     task.cancelRequested = true
@@ -92,7 +112,11 @@ function cancelBackupTask(id) {
   return ok
 }
 
-/** 移除已结束的任务记录(进行中的任务不可移除) */
+/**
+ * 移除已结束的任务记录(进行中的任务不可移除)。
+ * @param {string} id
+ * @returns {boolean}
+ */
 function dismissBackupTask(id) {
   return queue.dismiss(id)
 }
@@ -101,6 +125,11 @@ function dismissBackupTask(id) {
 
 const existsCache = new Map()
 
+/**
+ * 带 TTL 的「备份文件/目录是否还在」探测。
+ * @param {string} p
+ * @returns {boolean}
+ */
 function existsCached(p) {
   const now = Date.now()
   const hit = existsCache.get(p)
@@ -115,13 +144,42 @@ function existsCached(p) {
   return exists
 }
 
+/**
+ * 失效某个路径的存在性缓存(删除/恢复后调用)。
+ * @param {string} p
+ */
 function invalidateExists(p) {
   if (p) existsCache.delete(p)
 }
 
 // ---------- 创建 ----------
 
-/** 归一化备份参数(创建与预估共用) */
+/**
+ * @typedef {object} BackupCreateOpts 备份创建/预估的入参(全部可选)
+ * @property {'zip'|'copy'} [mode]
+ * @property {string} [destDir]
+ * @property {boolean} [includeCache]
+ * @property {1|6|9} [level]
+ * @property {string} [label]
+ * @property {string[]} [exclude]
+ */
+
+/**
+ * @typedef {object} NormalizedBackupOpts 归一化后的备份参数(创建与预估共用)
+ * @property {'zip'|'copy'} mode
+ * @property {string} destDir
+ * @property {boolean} includeCache
+ * @property {string} label
+ * @property {string[]} excludeNames
+ * @property {Excluder | null} exclude 目录名排除器(见 fsutil.makeExcluder)
+ * @property {1|6|9} level
+ */
+
+/**
+ * 归一化备份参数:补齐默认值、规整 exclude 列表。
+ * @param {BackupCreateOpts} [opts]
+ * @returns {NormalizedBackupOpts}
+ */
 function normalizeOpts(opts) {
   const o = opts || {}
   const mode = o.mode === 'copy' ? 'copy' : 'zip'
@@ -165,6 +223,9 @@ async function backupProject(projectId, opts, onProgress) {
   const token = createCancelToken()
   queue.setToken(task.id, token)
 
+  /**
+   * @param {{phase: string, done: number, total: number, current: string, bytes: number}} p
+   */
   const report = (p) => {
     patchTask(task, {
       phase: p.phase,
@@ -237,6 +298,7 @@ async function backupProject(projectId, opts, onProgress) {
     rmQuiet(tmp)
     if (e instanceof CanceledError || (e && e.canceled)) {
       finishTask(task, 'canceled')
+      /** @type {Error & { canceled?: boolean }} */
       const err = new Error('已取消')
       err.canceled = true
       throw err
@@ -248,7 +310,12 @@ async function backupProject(projectId, opts, onProgress) {
   }
 }
 
-/** 预估备份规模(文件数 + 字节),分片让出避免卡界面 */
+/**
+ * 预估备份规模(文件数 + 字节),分片让出避免卡界面。
+ * @param {string} projectId
+ * @param {BackupCreateOpts} [opts]
+ * @returns {Promise<{fileCount: number, bytes: number}>}
+ */
 async function estimateBackup(projectId, opts) {
   const o = normalizeOpts(opts)
   const project = getDoc(projectId)
@@ -278,6 +345,7 @@ function listBackups(arg) {
 
 /** 每个项目最近一份备份(渲染层无需拉全量再折叠) */
 function listLatestBackups() {
+  /** @type {Record<string, import('../../../src/types/godot').BackupRecord>} */
   const map = {}
   for (const d of listDocs(BACKUP_PREFIX)) {
     const cur = map[d.projectId]
@@ -286,6 +354,11 @@ function listLatestBackups() {
   return map
 }
 
+/**
+ * 单条备份记录。
+ * @param {string} backupId
+ * @returns {object | null}
+ */
 function getBackup(backupId) {
   const d = getDoc(backupId)
   return d ? { ...d } : null
@@ -322,7 +395,12 @@ function backupStats() {
 
 // ---------- 修改 ----------
 
-/** 更新备份备注名(label 传空串则清除) */
+/**
+ * 更新备份备注名(label 传空串则清除)。
+ * @param {string} backupId
+ * @param {{label?: string}} patch
+ * @returns {{ok: boolean, error?: string}}
+ */
 function updateBackup(backupId, patch) {
   try {
     const rec = getDoc(backupId)
@@ -343,6 +421,8 @@ function updateBackup(backupId, patch) {
 /**
  * 校验备份内容是否可用:文件是否存在 + 是否含 project.godot。
  * zip 只读取尾部窗口与中央目录,不整包载入(项目备份可能达数 GB)。
+ * @param {string} backupId
+ * @returns {{ok: boolean, valid: boolean, error?: string, entryCount?: number}}
  */
 function verifyBackup(backupId) {
   const rec = getDoc(backupId)
@@ -383,7 +463,9 @@ function verifyBackup(backupId) {
 
 /**
  * 删除备份。
+ * @param {string} backupId
  * @param {{keepRecordOnly?:boolean}} [opts] keepRecordOnly=true 仅移除记录,保留磁盘文件
+ * @returns {{ok: boolean, error?: string}}
  */
 function deleteBackup(backupId, opts) {
   try {
@@ -401,7 +483,12 @@ function deleteBackup(backupId, opts) {
   }
 }
 
-/** 批量删除(一次调用,避免渲染层发起 N 次往返) */
+/**
+ * 批量删除(一次调用,避免渲染层发起 N 次往返)。
+ * @param {string[]} backupIds
+ * @param {{keepRecordOnly?:boolean}} [opts]
+ * @returns {{ok: boolean, removed: number, failed: {id: string, error: string}[]}}
+ */
 function deleteBackups(backupIds, opts) {
   const ids = Array.isArray(backupIds) ? backupIds : []
   const failed = []
@@ -477,8 +564,10 @@ function pruneBackups(opts) {
  * mode 'new':恢复到新目录并注册为新项目(安全,可取消)
  * mode 'overwrite':替换原项目目录(原目录先改名,成功后移入回收站,失败自动回滚;
  *                 进入替换阶段后 token 锁定,不再响应取消)
+ * @param {string} backupId
  * @param {{mode?:'overwrite'|'new', destDir?:string, newName?:string}} opts
  * @param {(p:{phase:string,done:number,total:number,current:string,bytes:number}) => void} [onProgress]
+ * @returns {Promise<{ok: boolean, error?: string, canceled?: boolean, newProjectName?: string, newProjectId?: string}>}
  */
 async function restoreBackup(backupId, opts, onProgress) {
   const o = opts || {}
@@ -499,6 +588,9 @@ async function restoreBackup(backupId, opts, onProgress) {
   const token = createCancelToken()
   queue.setToken(task.id, token)
 
+  /**
+   * @param {{phase: string, done: number, total: number, current: string, bytes: number}} p
+   */
   const report = (p) => {
     patchTask(task, {
       phase: p.phase,

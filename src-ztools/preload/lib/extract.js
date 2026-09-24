@@ -123,7 +123,13 @@ function readZipEntries(zipPath) {
  * 逐个条目随机读取(峰值内存 = 单个最大文件),分片让出事件循环,支持取消与进度。
  * @param {string} zipPath zip 文件路径(任意扩展名)
  * @param {string} destDir 目标目录(自动创建)
- * @param {{onProgress?:Function, token?:object}} [opts]
+ * @param {{
+ *   onProgress?: (p:{phase:string,done:number,total:number,current:string,bytes:number}) => void,
+ *   token?: object,
+ *   sliceFiles?: number,
+ *   sliceMs?: number,
+ *   phase?: string
+ * }} [opts] phase 用于覆盖进度里的阶段名(恢复流程传 'unpacking')
  */
 async function extractZip(zipPath, destDir, opts) {
   const o = opts || {}

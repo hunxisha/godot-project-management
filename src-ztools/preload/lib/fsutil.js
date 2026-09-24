@@ -22,10 +22,43 @@ const SLICE_MS = 30
  *   3. setTimeout(0) —— 兜底,任何环境都有。
  * 直接写 setImmediate 会在 ZTools 里抛 "setImmediate is not defined"。
  */
+/**
+ * 分片/取消相关的通用选项(forEachSliced 与各遍历函数共用)。
+ * @typedef {object} SliceOptions
+ * @property {{ canceled?: boolean }} [token] 取消令牌;已取消时在分片边界抛出
+ * @property {number} [sliceFiles] 每处理 N 个文件让出一次
+ * @property {number} [sliceMs] 或每 N 毫秒让出一次(取先到者)
+ */
+
+/**
+ * 遍历/复制类函数的选项。
+ * @typedef {SliceOptions & {
+ *   includeCache?: boolean,
+ *   exclude?: ((name: string, isDir: boolean) => boolean) | null,
+ *   onProgress?: (p: { phase: string, done: number, total: number, current: string, bytes: number }) => void,
+ *   phase?: string,
+ * }} TreeOptions
+ */
+
+/**
+ * 收集到的文件条目。
+ * @typedef {{ abs: string, rel: string }} WalkedFile
+ */
+
+/** @type {MessageChannel | null} */
 let channel = null
+/**
+ * 等待让出的回调队列。
+ * 元素类型写成 `(value?: any) => void` 而不是 `() => void`:存入的是 Promise 的 resolve,
+ * 它带一个参数,而 TS 不允许把「参数更多的函数」赋给「参数更少的签名」。
+ * @type {Array<(value?: any) => void>}
+ */
 const pendingYields = []
 
-/** 惰性创建 MessageChannel:Node 下走 setImmediate 分支时不必创建 */
+/**
+ * 惰性创建 MessageChannel:Node 下走 setImmediate 分支时不必创建。
+ * @returns {MessageChannel | null}
+ */
 function getChannel() {
   if (channel) return channel
   if (typeof MessageChannel !== 'function') return null
@@ -58,6 +91,7 @@ function yieldToLoop() {
 
 /** 取消信号(被取消时抛出,由调用方转为 canceled 终态) */
 class CanceledError extends Error {
+  /** @param {string} [message] */
   constructor(message) {
     super(message || '已取消')
     this.name = 'CanceledError'
@@ -89,7 +123,10 @@ function createCancelToken() {
   return token
 }
 
-/** 若已取消则抛 CanceledError */
+/**
+ * 若已取消则抛 CanceledError。
+ * @param {{ canceled?: boolean } | null | undefined} token
+ */
 function checkCancel(token) {
   if (token && token.canceled) throw new CanceledError()
 }
@@ -98,7 +135,7 @@ function checkCancel(token) {
  * 分片遍历:逐个交给 handler,周期性让出事件循环并检查取消。
  * @param {any[]} items
  * @param {(item:any, index:number) => void} handler
- * @param {{token?:object, sliceFiles?:number, sliceMs?:number}} [opts]
+ * @param {SliceOptions} [opts]
  */
 async function forEachSliced(items, handler, opts) {
   const o = opts || {}
@@ -117,7 +154,11 @@ async function forEachSliced(items, handler, opts) {
   }
 }
 
-/** Windows 非法文件名字符过滤 */
+/**
+ * Windows 非法文件名字符过滤。
+ * @param {unknown} s
+ * @returns {string}
+ */
 function sanitizeName(s) {
   return String(s || '').replace(/[\\/:*?"<>|]/g, '_').trim() || 'project'
 }
@@ -125,6 +166,7 @@ function sanitizeName(s) {
 /** 时间戳片段 YYYYMMDD_HHmm */
 function stamp() {
   const d = new Date()
+  /** @param {number} n */
   const p = (n) => String(n).padStart(2, '0')
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`
 }
@@ -132,11 +174,16 @@ function stamp() {
 /** 精确到秒的时间戳片段 YYYYMMDD_HHmm_ss(避免同分钟重复备份互相覆盖) */
 function stampSec() {
   const d = new Date()
+  /** @param {number} n */
   const p = (n) => String(n).padStart(2, '0')
   return `${stamp()}_${String(d.getSeconds()).padStart(2, '0')}`
 }
 
-/** 目标路径已存在时追加 _2 / _3 …,直到不冲突 */
+/**
+ * 目标路径已存在时追加 _2 / _3 …,直到不冲突。
+ * @param {string} target
+ * @returns {string}
+ */
 function uniquePath(target) {
   if (!fs.existsSync(target)) return target
   const ext = path.extname(target)
@@ -148,7 +195,11 @@ function uniquePath(target) {
   return `${base}_${Date.now()}${ext}`
 }
 
-/** 移入回收站(Windows)/永久删除(其他平台) */
+/**
+ * 移入回收站(Windows)/永久删除(其他平台)。
+ * @param {string} p
+ * @param {boolean} [isDir]
+ */
 function trashPath(p, isDir) {
   if (process.platform === 'win32') {
     const method = isDir ? 'DeleteDirectory' : 'DeleteFile'
@@ -166,7 +217,10 @@ function trashPath(p, isDir) {
   }
 }
 
-/** 静默删除(用于清理临时产物,失败不抛) */
+/**
+ * 静默删除(用于清理临时产物,失败不抛)。
+ * @param {string} [p]
+ */
 function rmQuiet(p) {
   try {
     if (p && fs.existsSync(p)) fs.rmSync(p, { recursive: true, force: true })
@@ -176,6 +230,10 @@ function rmQuiet(p) {
 /**
  * 临时产物路径:与最终目标同目录,保证 rename 不跨盘、可原子替换。
  * 以 .gpm-tmp- 开头,便于用户识别与事后清理。
+ * @param {string} destDir
+ * @param {string} taskId
+ * @param {boolean} isDir
+ * @returns {string}
  */
 function tempPath(destDir, taskId, isDir) {
   return path.join(destDir, `.gpm-tmp-${taskId}${isDir ? '' : '.zip'}`)
@@ -195,14 +253,19 @@ function makeExcluder(names) {
 /**
  * 递归收集文件清单。
  * @param {string} srcDir
- * @param {{includeCache?:boolean, exclude?:Function}} [opts] includeCache=false 时跳过 .godot
- * @returns {{abs:string, rel:string}[]}
+ * @param {{includeCache?:boolean, exclude?:((name: string, isDir: boolean) => boolean) | null}} [opts] includeCache=false 时跳过 .godot
+ * @returns {WalkedFile[]}
  */
 function walkFiles(srcDir, opts) {
   const o = opts || {}
   const includeCache = o.includeCache !== false
   const exclude = o.exclude
+  /** @type {WalkedFile[]} */
   const files = []
+  /**
+   * @param {string} dir
+   * @param {string} rel
+   */
   const walk = (dir, rel) => {
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
       if (exclude && exclude(ent.name, ent.isDirectory())) continue
@@ -219,6 +282,9 @@ function walkFiles(srcDir, opts) {
 
 /**
  * 递归复制目录(可跳过 .godot 缓存与排除目录),分片让出 + 可取消。
+ * @param {string} src
+ * @param {string} dest
+ * @param {TreeOptions} [opts]
  * @returns {Promise<{fileCount:number, bytes:number}>}
  */
 async function copyTree(src, dest, opts) {
@@ -247,6 +313,8 @@ async function copyTree(src, dest, opts) {
 
 /**
  * 统计目录大小与文件数(用于备份前预估),分片让出 + 可取消。
+ * @param {string} srcDir
+ * @param {TreeOptions} [opts]
  * @returns {Promise<{fileCount:number, bytes:number}>}
  */
 async function estimateTree(srcDir, opts) {
