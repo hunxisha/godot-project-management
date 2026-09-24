@@ -1,0 +1,58 @@
+// preload 层的类型检查配置 —— **目标态,尚未接入 `npm run verify`**。
+//
+// 为什么单独一个配置:preload 是 CommonJS + 浏览器沙箱全局(没有 setImmediate、没有 Buffer),
+// 与渲染层的 ESM/DOM 环境不同,不能用同一份 tsconfig 检查。
+//
+// 当前状态(实测)执行 `npx tsc -p tsconfig.preload.json` 会报 **390 个错误**,
+// 因此**故意不接入 verify** —— 接进去会让 `npm run verify` 直接失败,那不是「分步开闸」。
+//
+// 错误分类与处理建议(按数量):
+//
+//   TS7006 ×233  参数缺类型注解        → 逐模块补 JSDoc,按风险从低到高推进
+//   TS2307 × 28  Cannot find 'node:*'  → 需要 node 模块声明(见下面的注意事项)
+//   TS2339 × 24  属性不存在于推断类型    → 多为 JSDoc 补全后可解
+//   TS7005 × 22  变量隐式 any[]        → 同上
+//   TS7031 × 19  解构参数隐式 any      → 同上
+//   TS2580 × 18  Cannot find 'process' → 需要 node 类型
+//   TS7034 × 14  变量隐式 any          → 同上
+//   TS7053 × 12  字符串索引隐式 any     → 同上
+//   TS7008/2322/7011/7023/1064/2345/2353 → 结构性错误,需逐个人工确认
+//   TS2304 ×  2  Cannot find 'setImmediate' → **故意保留**,见下
+//
+// 推进顺序建议:先做「不引入 node 类型也能修」的那 300 余项(TS7006/7005/7031/7034/7053),
+// 它们只需补 JSDoc;再单独决策 node 类型的引入方式。
+//
+// ⚠️ **不要直接 `npm i -D @types/node` 了事。** 这个仓库踩过一个坑(见
+// docs/backup-redesign-plan.md §15):preload 跑在 ZTools 沙箱里,**没有 `setImmediate`**,
+// 只跑 Node 的测试全绿但一进宿主就报 `setImmediate is not defined`。
+// 而 `@types/node` 会把 `setImmediate` 声明成合法全局 —— 于是类型检查从此**不再能提醒**
+// 这件事,等于把那条教训撤销掉。
+//
+// 刻意不引入 node 类型时,`fsutil.js` 里 `typeof setImmediate === 'function'` 的降级分支
+// 会留下 2 个 TS2304(当前就是这样),这**不是缺陷而是护栏**:改那两处应当用
+// `// @ts-expect-error Node 专有全局,沙箱内不保证存在` 显式标注,而不是让它变"合法"。
+//
+// 检查范围**排除** `lib/__tests__`:测试跑在真 Node 里,用 setImmediate 是合理的,
+// 参与静态检查只会引入噪音。
+//
+// 每推进一个模块,都在 `lib/__tests__` 的既有断言保护下改(backup / install / taskqueue
+// 均已覆盖,见 lib/__tests__/README.md)。
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM"],
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitAny": true,
+    "strictNullChecks": false,
+    "resolveJsonModule": true
+  },
+  "include": ["src-ztools/preload/**/*.js"],
+  "exclude": ["src-ztools/preload/lib/__tests__/**"]
+}

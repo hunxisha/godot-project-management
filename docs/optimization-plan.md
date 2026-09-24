@@ -317,6 +317,30 @@ function fmtVer(v?: string): string { return (v || '').replace(/^v+/i, '') }
 - P0-2 第二步（可选）：由 JSDoc 生成 `services.d.ts`
 - P2-3 术语表
 
+> **P0-1 的起点已量化**（新增 `tsconfig.preload.json`，**目标态，故意未接入 `verify`**）。
+> 实测 `npx tsc -p tsconfig.preload.json` 报 **390 个错误**：
+>
+> | 错误码 | 数量 | 含义 | 处理方式 |
+> |---|---:|---|---|
+> | TS7006 | 233 | 参数缺类型注解 | 补 JSDoc，逐模块推进 |
+> | TS2307 | 28 | `Cannot find module 'node:*'` | 需要 node 模块声明 |
+> | TS2339 | 24 | 属性不在推断类型上 | 多为 JSDoc 补全后可解 |
+> | TS7005 | 22 | 变量隐式 `any[]` | 同上 |
+> | TS7031 | 19 | 解构参数隐式 any | 同上 |
+> | TS2580 | 18 | `Cannot find name 'process'` | 需要 node 类型 |
+> | TS7034 | 14 | 变量隐式 any | 同上 |
+> | TS7053 | 12 | 字符串索引隐式 any | 同上 |
+> | TS2304 | 2 | `Cannot find name 'setImmediate'` | **故意保留**（见下） |
+> | TS7008/2322/7011/7023/1064/2345/2353 | 18 | 结构性错误 | 逐个人工确认 |
+>
+> **关键发现（已写进 `tsconfig.preload.json` 的注释）：不要直接 `npm i -D @types/node` 了事。**
+> `@types/node` 会把 `setImmediate` 声明为合法全局，而 ZTools 沙箱里**没有**它 ——
+> 这正是 `docs/backup-redesign-plan.md` §15 记录过、并已用 `--no-immediate` 测试守住的那个坑。
+> 引入 node 类型会让类型检查**不再能提醒**这件事，等于把那条教训撤销。
+> 因此推进顺序定为：先修「不引入 node 类型也能修」的 300 余项（纯补 JSDoc），
+> 再单独决策 node 类型的引入方式；`fsutil.js` 里那 2 处 `setImmediate` 应当用
+> `@ts-expect-error Node 专有全局,沙箱内不保证存在` 显式标注，而不是让它变「合法」。
+
 ---
 
 ## 4. 验收清单
