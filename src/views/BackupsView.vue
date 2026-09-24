@@ -7,6 +7,7 @@ import EmptyState from '../components/EmptyState.vue'
 import BackupListItem from '../components/BackupListItem.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import BackupCreateDialog from '../components/dialogs/BackupCreateDialog.vue'
+import PruneDialog from '../components/dialogs/PruneDialog.vue'
 import RestoreDialog from '../components/dialogs/RestoreDialog.vue'
 import { useBackups } from '../composables/useBackups'
 import { notify } from '../services/bridge'
@@ -26,7 +27,8 @@ const {
   filtered, groups, timeline, uncovered, statusCounts,
   batchMode, selected, selectedSet, selectedRecords, selectedSize, allSelected,
   isCollapsed, refresh, toggleSelect, toggleSelectAll, enterBatch, exitBatch, toggleGroup,
-  setLabel, verify, verifyMany, removeOne, removeMany, reveal
+  setLabel, verify, verifyMany, removeOne, removeMany, reveal,
+  patrolling, patrolDone, patrolTotal, patrol, backupMany
 } = bk
 
 const busyId = ref('')
@@ -37,6 +39,8 @@ onMounted(() => {
   if (props.enterProjectId) scopedProjectId.value = props.enterProjectId
   refresh()
   if (props.enterProjectId) emit('consumed')
+  // 后台巡检:补全校验结论并确认缺失标记(不阻塞页面)
+  patrol()
 })
 
 // 备份页不进 KeepAlive,但仍保留 onActivated 以便将来加入缓存
@@ -150,6 +154,31 @@ function openCreate() {
   createOpen.value = true
 }
 
+// ---------- 清理 ----------
+
+const pruneOpen = ref(false)
+
+// ---------- 批量备份(未备份项目) ----------
+
+const backingAll = ref(false)
+const backAllProgress = ref('')
+
+async function backupAllUncovered() {
+  const ids = uncovered.value.map((p) => p._id)
+  if (!ids.length || backingAll.value) return
+  backingAll.value = true
+  try {
+    const r = await backupMany(ids, (done, total, name) => {
+      backAllProgress.value = done < total ? `${done}/${total} ${name}` : ''
+    })
+    if (!r.ok) notify(r.error || '批量备份失败')
+    else notify(`已为 ${r.count}/${ids.length} 个项目创建备份`)
+  } finally {
+    backingAll.value = false
+    backAllProgress.value = ''
+  }
+}
+
 // ---------- 展示辅助 ----------
 
 const removeDetails = computed(() =>
@@ -194,6 +223,14 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
       </button>
       <button class="btn small primary" title="为某个项目创建一份新备份" @click="openCreate">
         <Icon name="plus" :size="12" /> 新建备份
+      </button>
+      <button
+        v-if="records.length"
+        class="btn small ghost"
+        title="按保留策略清理旧备份"
+        @click="pruneOpen = true"
+      >
+        <Icon name="trash" :size="12" /> 清理
       </button>
     </div>
 
@@ -305,6 +342,12 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
       </button>
     </div>
 
+    <!-- 后台巡检 -->
+    <div v-if="patrolling" class="patrol-bar">
+      <span class="spin"></span>
+      <span>正在巡检备份完整性 {{ patrolDone }} / {{ patrolTotal }}</span>
+    </div>
+
     <!-- 无项目 -->
     <EmptyState
       v-if="!hasAnyProject"
@@ -330,7 +373,13 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
           <Icon name="alert" :size="14" class="gh-icon" />
           <span class="gh-name">{{ uncovered.length }} 个项目从未备份</span>
           <span class="grow"></span>
-          <span class="gh-meta">建议至少保留一份可回滚的版本</span>
+          <span v-if="backAllProgress" class="gh-meta">{{ backAllProgress }}</span>
+          <span v-else class="gh-meta">建议至少保留一份可回滚的版本</span>
+          <button class="btn small primary" :disabled="backingAll" @click="backupAllUncovered">
+            <span v-if="backingAll" class="spin"></span>
+            <Icon v-else name="box" :size="12" />
+            {{ backingAll ? '备份中…' : '全部备份' }}
+          </button>
         </div>
         <div class="group-body">
           <div v-for="p in uncovered" :key="p._id" class="plain-row">
@@ -490,6 +539,8 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
       @close="createOpen = false"
       @done="refresh"
     />
+
+    <PruneDialog :open="pruneOpen" @close="pruneOpen = false" @done="refresh" />
 
     <RestoreDialog
       :open="restoreOpen"
@@ -665,6 +716,19 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
   border: 1px solid var(--brand);
   color: var(--brand);
   font-weight: 500;
+}
+
+/* 后台巡检提示 */
+.patrol-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px dashed var(--border-strong);
+  font-size: 12px;
+  color: var(--text-3);
 }
 
 /* ---------- 分组 ---------- */

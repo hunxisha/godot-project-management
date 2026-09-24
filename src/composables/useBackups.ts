@@ -1,7 +1,7 @@
 // 备份管理页的状态与动作:列表、统计、筛选、分组、批量选择、备注、校验、删除。
 // 备份页与（阶段 3 的）相关对话框共用这里的数据视图。
 import { computed, ref } from 'vue'
-import { listDocs, notify, showInFolder } from '../services/bridge'
+import { getSettings, listDocs, notify, showInFolder } from '../services/bridge'
 import type { BackupRecord, BackupStats, GodotProject } from '../types/godot'
 
 export type BackupStatusFilter = 'all' | 'zip' | 'copy' | 'missing' | 'uncovered'
@@ -302,6 +302,89 @@ export function useBackups() {
     showInFolder(record.destPath)
   }
 
+  // ---------- 后台巡检 ----------
+
+  const patrolling = ref(false)
+  const patrolDone = ref(0)
+  const patrolTotal = ref(0)
+
+  /**
+   * 进入备份页时后台巡检:校验「从未校验过」与「缺失但尚未判定」的备份,把结论写回记录。
+   * verifyBackup 只读取 zip 尾部与中央目录,本身很快;但记录多时仍分片让出,避免占满主线程。
+   */
+  async function patrol(limit = 300) {
+    if (patrolling.value) return
+    // 已经因文件缺失判为无效的记录不再重复校验(文件回来了会先由 missing 标记翻回 false)
+    const candidates = records.value
+      .filter((r) => r.verified === undefined || (r.missing && r.verified !== false))
+      .slice(0, limit)
+    if (!candidates.length) {
+      patrolDone.value = 0
+      patrolTotal.value = 0
+      return
+    }
+    patrolling.value = true
+    patrolDone.value = 0
+    patrolTotal.value = candidates.length
+    try {
+      const CHUNK = 8
+      for (let i = 0; i < candidates.length; i++) {
+        const target = candidates[i]
+        try {
+          const res = window.services.verifyBackup(target._id)
+          const rec = records.value.find((x) => x._id === target._id)
+          if (rec) {
+            rec.verified = res.valid
+            rec.verifiedAt = Date.now()
+            rec.verifyError = res.error
+          }
+        } catch (e) { /* 单条失败不影响其余 */ }
+        patrolDone.value = i + 1
+        if (i % CHUNK === CHUNK - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 0))
+        }
+      }
+      // 巡检可能改变缺失数量,刷新统计头
+      stats.value = window.services.backupStats()
+    } finally {
+      patrolling.value = false
+    }
+  }
+
+  // ---------- 批量备份 ----------
+
+  /**
+   * 按当前默认设置顺序为多个项目创建备份。
+   * 逐个串行(备份本身很重,并行会同时抢磁盘),单个失败不中断其余。
+   */
+  async function backupMany(
+    projectIds: string[],
+    onProgress?: (done: number, total: number, name: string) => void
+  ) {
+    const s = getSettings()
+    const destDir = s.backupRoot
+    if (!destDir) return { ok: false, error: '请先在「设置 → 备份与恢复」中配置默认备份目录', count: 0 }
+    if (!projectIds.length) return { ok: true, count: 0 }
+    let count = 0
+    for (let i = 0; i < projectIds.length; i++) {
+      const id = projectIds[i]
+      onProgress?.(i, projectIds.length, projectById.value[id]?.name || '')
+      try {
+        await window.services.backupProject(id, {
+          mode: s.backupMode === 'copy' ? 'copy' : 'zip',
+          destDir,
+          includeCache: !!s.backupIncludeCache,
+          level: s.backupLevel === 1 || s.backupLevel === 9 ? s.backupLevel : 6,
+          exclude: s.backupExclude || []
+        })
+        count++
+      } catch (e) { /* 单个项目失败不影响后续 */ }
+    }
+    onProgress?.(projectIds.length, projectIds.length, '')
+    refresh()
+    return { ok: true, count }
+  }
+
   return {
     // 数据
     records,
@@ -330,6 +413,10 @@ export function useBackups() {
     allSelected,
     // 折叠
     isCollapsed,
+    // 巡检
+    patrolling,
+    patrolDone,
+    patrolTotal,
     // 动作
     refresh,
     toggleSelect,
@@ -342,6 +429,8 @@ export function useBackups() {
     verifyMany,
     removeOne,
     removeMany,
-    reveal
+    reveal,
+    patrol,
+    backupMany
   }
 }

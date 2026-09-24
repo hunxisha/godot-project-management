@@ -10,7 +10,7 @@ import AddonsView from './views/AddonsView.vue'
 import BackupsView from './views/BackupsView.vue'
 import SettingsView from './views/SettingsView.vue'
 import { notify } from './services/bridge'
-import type { DownloadTask } from './types/godot'
+import type { BackupTask, DownloadTask } from './types/godot'
 
 const tab = ref('dashboard')
 /** addProject 功能(拖入)带入的文件路径 */
@@ -24,10 +24,12 @@ const backupScope = ref<string | null>(null)
 /** 备份页 → 项目页:切到项目页并直接打开该项目的备份弹窗 */
 const backupRequest = ref<string | null>(null)
 
-// ---------- 全局下载任务(常驻订阅,切页不断线) ----------
+// ---------- 全局任务(引擎下载 + 备份/恢复,常驻订阅,切页不断线) ----------
 
 const tasks = ref<DownloadTask[]>([])
+const backupTasks = ref<BackupTask[]>([])
 let unwatchTasks: (() => void) | null = null
+let unwatchBackupTasks: (() => void) | null = null
 
 const TASK_STATUS: Record<string, string> = {
   queued: '排队中',
@@ -39,20 +41,54 @@ const TASK_STATUS: Record<string, string> = {
   canceled: '已取消'
 }
 
-/** 进行中 / 失败的任务 */
-const activeTasks = computed(() =>
-  tasks.value.filter((t) => t.status !== 'done' && t.status !== 'canceled')
-)
-
-function taskPercent(t: DownloadTask): number {
-  if (!t.totalSize) return 0
-  return Math.min(100, (t.received / t.totalSize) * 100)
+const BACKUP_PHASE: Record<string, string> = {
+  scanning: '扫描中',
+  packing: '打包中',
+  copying: '复制中',
+  finalizing: '收尾中',
+  unpacking: '解压中',
+  replacing: '替换原目录',
+  registering: '注册项目'
 }
 
-function taskBrief(t: DownloadTask): string {
-  const base = TASK_STATUS[t.status] || t.status
-  return t.status === 'downloading' && t.totalSize ? `${base} ${taskPercent(t).toFixed(0)}%` : base
+const BACKUP_TERMINAL: Record<string, true> = { done: true, error: true, canceled: true }
+
+/** 任务栏条目:把两种来源的任务归一化后再渲染 */
+interface BarTask {
+  id: string
+  label: string
+  brief: string
+  error: boolean
 }
+
+const barTasks = computed<BarTask[]>(() => {
+  const out: BarTask[] = []
+  for (const t of tasks.value) {
+    if (t.status === 'done' || t.status === 'canceled') continue
+    const base = TASK_STATUS[t.status] || t.status
+    const pct = t.totalSize ? Math.min(100, (t.received / t.totalSize) * 100) : 0
+    out.push({
+      id: `dl-${t.id}`,
+      label: t.tag,
+      brief: t.status === 'downloading' && t.totalSize ? `${base} ${pct.toFixed(0)}%` : base,
+      error: t.status === 'error'
+    })
+  }
+  for (const t of backupTasks.value) {
+    if (BACKUP_TERMINAL[t.phase]) continue
+    const base = BACKUP_PHASE[t.phase] || t.phase
+    const pct = t.total ? Math.min(100, (t.done / t.total) * 100) : 0
+    out.push({
+      id: `bk-${t.id}`,
+      label: `${t.kind === 'restore' ? '恢复' : '备份'} · ${t.projectName}`,
+      brief: t.total ? `${base} ${pct.toFixed(0)}%` : base,
+      error: t.phase === 'error'
+    })
+  }
+  return out
+})
+
+const hasBackupTask = computed(() => backupTasks.value.some((t) => !BACKUP_TERMINAL[t.phase]))
 
 onMounted(() => {
   document.documentElement.dataset.theme = window.ztools.isDarkColors() ? 'dark' : 'light'
@@ -83,9 +119,31 @@ onMounted(() => {
       }
     })
   })
+
+  // 备份/恢复任务同样常驻订阅:备份可以跨页面继续,完成后统一通知
+  const notifiedBackup = new Set<string>()
+  unwatchBackupTasks = window.services.watchBackupTasks((snap) => {
+    backupTasks.value = snap
+    const finished = snap.filter((t) => BACKUP_TERMINAL[t.phase])
+    if (!finished.length) return
+    queueMicrotask(() => {
+      for (const t of finished) {
+        if (t.phase === 'done' && !notifiedBackup.has(t.id)) {
+          notifiedBackup.add(t.id)
+          notify(t.kind === 'restore'
+            ? `「${t.projectName}」恢复完成`
+            : `「${t.projectName}」备份完成`)
+        }
+        window.services.dismissBackupTask(t.id)
+      }
+    })
+  })
 })
 
-onBeforeUnmount(() => unwatchTasks && unwatchTasks())
+onBeforeUnmount(() => {
+  if (unwatchTasks) unwatchTasks()
+  if (unwatchBackupTasks) unwatchBackupTasks()
+})
 
 function gotoCreate() {
   pendingCreate.value = true
@@ -149,18 +207,21 @@ function gotoCreateBackup(id: string) {
     </main>
 
     <!-- 全局任务栏:版本页有详细任务卡,其余页面显示紧凑进度条 -->
-    <div v-if="tab !== 'versions' && activeTasks.length" class="taskbar">
+    <div v-if="tab !== 'versions' && barTasks.length" class="taskbar">
       <span class="spin"></span>
-      <template v-for="(t, i) in activeTasks.slice(0, 2)" :key="t.id">
+      <template v-for="(t, i) in barTasks.slice(0, 2)" :key="t.id">
         <span v-if="i > 0" class="tb-sep"></span>
-        <span class="tb-item" :class="t.status">
-          <span class="tb-name mono">{{ t.tag }}</span>
-          <span class="tb-status">{{ taskBrief(t) }}</span>
+        <span class="tb-item" :class="{ error: t.error }">
+          <span class="tb-name mono">{{ t.label }}</span>
+          <span class="tb-status">{{ t.brief }}</span>
         </span>
       </template>
-      <span v-if="activeTasks.length > 2" class="tb-more">+{{ activeTasks.length - 2 }}</span>
+      <span v-if="barTasks.length > 2" class="tb-more">+{{ barTasks.length - 2 }}</span>
       <span class="grow"></span>
-      <button class="btn small ghost" @click="tab = 'versions'">
+      <button v-if="hasBackupTask" class="btn small ghost" @click="tab = 'backups'">
+        备份任务 <Icon name="chevron-right" :size="11" />
+      </button>
+      <button v-else class="btn small ghost" @click="tab = 'versions'">
         引擎任务 <Icon name="chevron-right" :size="11" />
       </button>
     </div>
