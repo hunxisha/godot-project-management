@@ -11,6 +11,11 @@ const TTL = 24 * 60 * 60 * 1000
 /** 英文日期 → ISO 字符串,如 '18 August 2026' → '2026-08-18T00:00:00Z' */
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
 
+/**
+ * 归档页里的英文日期 → ISO 字符串。
+ * @param {string} s 形如 '18 August 2026'
+ * @returns {string} ISO 字符串;无法解析时返回空串
+ */
 function parseArchiveDate(s) {
   const m = s.match(/(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/)
   if (!m) return ''
@@ -25,6 +30,8 @@ function parseArchiveDate(s) {
  *   https://downloads.godotengine.org/?version={ver}&flavor={flavor}&slug={slug}&platform={pf}
  * tag = {version}-{flavor},flavor 为完整后缀(stable/dev6/beta3/rc2…)。
  * 3.x 与 4.x 的 Linux/macOS slug 命名不同,按 major 区分。
+ * @param {string} tag 形如 '4.7.2-stable'
+ * @returns {{name: string, url: string, size: number}[]} 当前平台的标准/mono 两种变体;不支持的版本返回空数组
  */
 function buildAssets(tag) {
   const idx = tag.indexOf('-')
@@ -72,6 +79,8 @@ function buildAssets(tag) {
  * 获取版本列表(缓存 24h)。
  * 解析官方归档页,返回 [{ tag, name, publishedAt, prerelease, assets: [{ name, url, size }] }],
  * 含稳定版与 dev/beta/rc 预发布版,assets 为当前平台的标准/mono 两种变体直链。
+ * @param {boolean} [force] 为真时忽略缓存强制重新拉取
+ * @returns {Promise<Array<{tag: string, name: string, publishedAt: string, prerelease: boolean, assets: {name: string, url: string, size: number}[]}>>}
  */
 async function fetchReleases(force) {
   const cache = getDoc(CACHE_ID)

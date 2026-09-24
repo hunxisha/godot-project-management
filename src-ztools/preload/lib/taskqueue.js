@@ -22,15 +22,29 @@
 const TERMINAL_PHASES = { done: true, error: true, canceled: true }
 
 /**
+ * 任务对象。字段由调用方自由扩展(backup 用 phase/done/total,install 用 status/received),
+ * 因此带索引签名 —— 同时这也让 `task[phaseField]` / `t[sortBy]` 这类动态取值可通过类型检查。
+ * @typedef {Record<string, any>} Task
+ */
+
+/**
+ * 取消令牌 / 取消句柄:只需实现 cancel()。
+ * @typedef {{ cancel: () => boolean }} Cancelable
+ */
+
+/**
+ * @typedef {object} TaskQueueOptions
+ * @property {string} [idPrefix] 生成 id 的前缀,默认 'task'
+ * @property {() => string} [makeId] 自定义 id 生成器(默认 `${idPrefix}-${base36 时间}-${序号}`)
+ * @property {string} [sortBy] 快照排序字段(默认不排序)
+ * @property {Record<string, boolean>} [terminalPhases] 终态集合;给了才启用「仅终态可 dismiss」
+ * @property {string} [phaseField] 阶段字段**名**(写入与终态判断都用它),默认 'phase'
+ * @property {boolean} [serial] 是否串行执行 enqueue 的作业,默认 false
+ */
+
+/**
  * 创建一个任务队列。
- *
- * @param {object} [opts]
- * @param {string} [opts.idPrefix='task'] 生成 id 的前缀
- * @param {() => string} [opts.makeId] 自定义 id 生成器(默认 `${idPrefix}-${base36 时间}-${序号}`)
- * @param {string} [opts.sortBy] 快照排序字段(默认不排序)
- * @param {object} [opts.terminalPhases] 终态集合;给了才启用「仅终态可 dismiss」
- * @param {string} [opts.phaseField='phase'] 阶段字段**名**(写入与终态判断都用它)
- * @param {boolean} [opts.serial=false] 是否串行执行 enqueue 的作业
+ * @param {TaskQueueOptions} [opts]
  */
 function createTaskQueue(opts) {
   const o = opts || {}
@@ -40,20 +54,25 @@ function createTaskQueue(opts) {
   const phaseField = o.phaseField || 'phase'
   const serial = !!o.serial
 
-  /** @type {Map<string, object>} */
+  /** @type {Map<string, Task>} */
   const tasks = new Map()
-  /** @type {Map<string, { cancel: () => boolean }>} 取消令牌 / 取消句柄 */
+  /** @type {Map<string, Cancelable>} 取消令牌 / 取消句柄 */
   const tokens = new Map()
+  /** @type {Set<(tasks: Task[]) => void>} */
   const listeners = new Set()
   let seq = 0
 
   const makeId = o.makeId || (() => `${idPrefix}-${Date.now().toString(36)}-${++seq}`)
 
+  /** @param {string} phase @returns {boolean} */
   function isTerminal(phase) {
     return terminalPhases ? !!terminalPhases[phase] : false
   }
 
-  /** 任务快照:浅拷贝,避免订阅者改到内部状态 */
+  /**
+   * 任务快照:浅拷贝,避免订阅者改到内部状态。
+   * @returns {Task[]}
+   */
   function list() {
     const arr = [...tasks.values()].map((t) => ({ ...t }))
     if (sortBy) arr.sort((a, b) => (a[sortBy] || 0) - (b[sortBy] || 0))
@@ -69,7 +88,11 @@ function createTaskQueue(opts) {
     }
   }
 
-  /** 订阅任务快照,立即回调一次当前状态,返回取消订阅函数 */
+  /**
+   * 订阅任务快照,立即回调一次当前状态。
+   * @param {(tasks: Task[]) => void} fn
+   * @returns {() => void} 取消订阅
+   */
   function watch(fn) {
     listeners.add(fn)
     try {
@@ -78,7 +101,11 @@ function createTaskQueue(opts) {
     return () => listeners.delete(fn)
   }
 
-  /** 新建任务。**不广播** —— 需要让订阅者立刻看到时显式调用 emit()。 */
+  /**
+   * 新建任务。**不广播** —— 需要让订阅者立刻看到时显式调用 emit()。
+   * @param {Task} [fields] 初始字段(可覆盖 startedAt)
+   * @returns {Task}
+   */
   function create(fields) {
     const id = makeId()
     const task = { id, startedAt: Date.now(), ...fields }
@@ -86,16 +113,23 @@ function createTaskQueue(opts) {
     return task
   }
 
+  /** @param {string} id @returns {Task | undefined} */
   function get(id) {
     return tasks.get(id)
   }
 
+  /** @param {Task} task @param {Task} fields */
   function patch(task, fields) {
     if (!task) return
     Object.assign(task, fields)
     emit()
   }
 
+  /**
+   * @param {Task} task
+   * @param {string} phase
+   * @param {string} [error]
+   */
   function finish(task, phase, error) {
     if (!task) return
     task[phaseField] = phase
@@ -106,15 +140,21 @@ function createTaskQueue(opts) {
 
   // ---------- 取消 ----------
 
-  /** 登记取消令牌/句柄(download 句柄与 cancel token 都只需实现 cancel()) */
+  /**
+   * 登记取消令牌/句柄(download 句柄与 cancel token 都只需实现 cancel())。
+   * @param {string} id
+   * @param {Cancelable} token
+   */
   function setToken(id, token) {
     tokens.set(id, token)
   }
 
+  /** @param {string} id */
   function clearToken(id) {
     tokens.delete(id)
   }
 
+  /** @param {string} id @returns {Cancelable | undefined} */
   function tokenOf(id) {
     return tokens.get(id)
   }
@@ -124,6 +164,8 @@ function createTaskQueue(opts) {
   /**
    * 移除任务记录。配置了 terminalPhases 时**仅终态可移除**,返回是否移除成功;
    * 未配置时任何状态都可移除。
+   * @param {string} id
+   * @returns {boolean}
    */
   function dismiss(id) {
     const task = tasks.get(id)
@@ -137,6 +179,7 @@ function createTaskQueue(opts) {
 
   // ---------- 串行执行(仅 serial 时有意义) ----------
 
+  /** @type {Array<() => unknown>} */
   const queue = []
   let running = false
 
@@ -156,6 +199,8 @@ function createTaskQueue(opts) {
   /**
    * 提交一个作业。serial=true 时逐个执行(等上一个 await 完再跑下一个),
    * 否则立即执行并返回其 Promise。
+   * @param {() => unknown} job
+   * @returns {unknown}
    */
   function enqueue(job) {
     if (!serial) return job()

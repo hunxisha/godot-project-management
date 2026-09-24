@@ -553,3 +553,27 @@ finally 推进）。若 `await dl.promise` 永不返回，`running` 标志就永
 **仍未开工：P0-1 类型闸门。** 起点已量化在 `tsconfig.preload.json`（390 个错误，
 分类见该文件注释与本节上方的表）。它需要逐模块补 JSDoc，且**不能**用引入 `@types/node` 的
 方式走捷径 —— 理由见该文件里那条关于 `setImmediate` 的说明。计划中把它列为「持续」项。
+
+### 阶段 4 实施记录 · 第二批（P0-1 类型闸门第一步）
+
+开工后修正了一个判断：**边界声明（`node:*` / `process`，46 项）不是瓶颈，288 项 JSDoc 才是**，
+而 JSDoc 工作与边界决策相互独立 —— 所以先做 JSDoc，把边界决策留给后面单独拍板。
+
+| 文件 | 错误数 | 结果 |
+|---|---:|---|
+| `taskqueue.js` | 21 → **0** | 完全干净（本会话新写的模块，41 项护栏） |
+| `releases.js` | 3 → **0** | 完全干净 |
+| `godotExe.js` | 25 → **11** | 其余全部卡在 node 类型边界（TS2307/TS2580） |
+| **总计** | **400 → 357** | 护栏测试（taskqueue 41 / godotExe 25）全部仍绿 |
+
+具体做法：给任务对象加 `@typedef {Record<string, any>} Task`（带索引签名，使
+`task[phaseField]` / `t[sortBy]` 这类**动态取字段**能通过检查），给取消令牌加 `Cancelable`，
+其余按参数逐个补类型。`godotExe.js` 里对 `child.stdout` / `child.stderr` 补了存在性判断 ——
+这是 node 类型落地后必然产生的 `Readable | null` 所要求的，提前写上可少一次返工。
+
+**边界声明的决策已写进 `tsconfig.preload.json` 的注释**，两条路线各有取舍：
+A. 引入 `@types/node`（准确、省事）+ 一个「只允许 `fsutil.js` 提及 `setImmediate`」的源码扫描断言；
+B. 手写精简的沙箱声明，刻意不声明 `setImmediate`。
+两条都需要那个扫描断言，因为引入 node 类型后类型系统不再会为 `setImmediate` 报警，
+而 `--no-immediate` 沙箱测试只覆盖 backup 路径，新模块误用不会被它抓到。
+**本批未安装任何新依赖**（registry 可达，但换依赖属于需要明确拍板的决定）。

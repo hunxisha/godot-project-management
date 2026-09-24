@@ -3,10 +3,18 @@ const { spawn } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
 
-/** 递归收集目录下的文件(限制深度) */
+/**
+ * 递归收集目录下的文件(限制深度)。
+ * @param {string} dir
+ * @param {number} [depth]
+ * @param {number} [maxDepth]
+ * @returns {string[]} 绝对路径列表;目录不可读时返回已收集到的部分
+ */
 function walkFiles(dir, depth = 0, maxDepth = 3) {
+  /** @type {string[]} */
   const out = []
   if (depth > maxDepth) return out
+  /** @type {import('node:fs').Dirent[]} */
   let entries = []
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true })
@@ -26,6 +34,8 @@ function walkFiles(dir, depth = 0, maxDepth = 3) {
  * - Windows: 排除 _console 的 .exe
  * - macOS: 优先 Godot.app/Contents/MacOS/*,并清除 quarantine 标记
  * - Linux: 名称含 godot 的文件,chmod 755
+ * @param {string} installDir
+ * @returns {string | null} 可执行文件绝对路径;未找到返回 null
  */
 function findExecutable(installDir) {
   const files = walkFiles(installDir)
@@ -60,10 +70,16 @@ function findExecutable(installDir) {
 /**
  * 执行 <exe> --version,超时 15s。
  * 返回 { ok, output }——ok=false 表示未能确认,不阻断安装。
+ * @param {string} exePath
+ * @returns {Promise<{ok: boolean, output: string}>}
  */
 function verifyExecutable(exePath) {
   return new Promise((resolve) => {
     let done = false
+    /**
+     * @param {boolean} ok
+     * @param {string} output
+     */
     const finish = (ok, output) => {
       if (done) return
       done = true
@@ -71,6 +87,7 @@ function verifyExecutable(exePath) {
       resolve({ ok, output })
     }
     let out = ''
+    /** @type {import('node:child_process').ChildProcess} */
     let child
     try {
       child = spawn(exePath, ['--version'], { stdio: ['ignore', 'pipe', 'pipe'] })
@@ -83,8 +100,8 @@ function verifyExecutable(exePath) {
       } catch (e) { /* ignore */ }
       finish(false, out)
     }, 15000)
-    child.stdout.on('data', (d) => (out += d.toString()))
-    child.stderr.on('data', (d) => (out += d.toString()))
+    child.stdout && child.stdout.on('data', (d) => (out += d.toString()))
+    child.stderr && child.stderr.on('data', (d) => (out += d.toString()))
     child.on('error', () => finish(false, out))
     child.on('close', (code) => finish(code === 0 && out.trim().length > 0, out.trim()))
   })
@@ -100,6 +117,8 @@ function currentPlatform() {
 /**
  * 版本 tag 的展示名:4.7.2-stable → 4.7.2 Stable;无频道后缀时原样返回。
  * 原实现分别存在于 lib/install.js 与 lib/releases.js(函数体逐字相同),此处为唯一实现。
+ * @param {string} tag
+ * @returns {string}
  */
 function displayName(tag) {
   const idx = tag.indexOf('-')
@@ -109,14 +128,22 @@ function displayName(tag) {
   return `${ver} ${channel.charAt(0).toUpperCase()}${channel.slice(1)}`
 }
 
-/** 从 --version 输出解析版本号:如 "4.3.stable.official.xxx" → "4.3-stable" */
+/**
+ * 从 --version 输出解析版本号:如 "4.3.stable.official.xxx" → "4.3-stable"
+ * @param {string} output
+ * @returns {string | null}
+ */
 function parseVersionOutput(output) {
   const m = /^(\d+\.\d+(?:\.\d+)?)\.(stable|beta\d*|rc\d*|alpha\d*|dev\d*)/i.exec(output.trim())
   if (!m) return null
   return `${m[1]}-${m[2].toLowerCase()}`
 }
 
-/** 从文件名解析版本 tag:如 Godot_v4.3-stable_win64.exe → 4.3-stable */
+/**
+ * 从文件名解析版本 tag:如 Godot_v4.3-stable_win64.exe → 4.3-stable
+ * @param {string} fileName
+ * @returns {string | null}
+ */
 function parseTagFromFileName(fileName) {
   const m = /_v(\d[\w.\-]*?)-((?:stable|beta\d*|rc\d*|alpha\d*|dev\d*))/i.exec(fileName)
   return m ? `${m[1]}-${m[2].toLowerCase()}` : null
