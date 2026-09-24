@@ -46,6 +46,7 @@ await build({
         useprojectcreate: path.join(root, 'src', 'composables', 'useProjectCreate.ts'),
         useprojectdelete: path.join(root, 'src', 'composables', 'useProjectDelete.ts'),
         useinstallprogress: path.join(root, 'src', 'composables', 'useInstallProgress.ts'),
+        usemarketfavorites: path.join(root, 'src', 'composables', 'useMarketFavorites.ts'),
         useaddonselection: path.join(root, 'src', 'composables', 'useAddonSelection.ts'),
         useaddonactions: path.join(root, 'src', 'composables', 'useAddonActions.ts'),
         usebackuppageactions: path.join(root, 'src', 'composables', 'useBackupPageActions.ts'),
@@ -64,6 +65,6 @@ await build({
   }
 })
 
-for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'format', 'godotversion', 'markettags', 'avatar', 'vueshim']) {
+for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'format', 'godotversion', 'markettags', 'avatar', 'vueshim']) {
   console.log(`bundle built: ${path.join(root, OUT_DIR, `${name}.mjs`)}`)
 }

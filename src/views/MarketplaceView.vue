@@ -8,6 +8,7 @@ import { useAssetHydration } from '../composables/useAssetHydration'
 import { useMarketSearch } from '../composables/useMarketSearch'
 import { useMarketBrowse, MODE_META, type BrowseMode } from '../composables/useMarketBrowse'
 import { useMarketInstall } from '../composables/useMarketInstall'
+import { useMarketFavorites } from '../composables/useMarketFavorites'
 import { compatOf as assetCompat, godotRange, projectGodotVersion } from '../utils/godotVersion'
 import { MARKET_TAG_GROUPS } from '../utils/marketTags'
 import { normVersion } from '../utils/format'
@@ -96,41 +97,15 @@ const {
 })
 
 /**
- * 收藏状态的唯一真相是浏览层那份 `favorites` 列表。
- * 原先每个卡片的三处绑定各自调一次 `window.services.isFavorite()`,有两个问题:
- *   1. 那是普通函数调用,不是响应式依赖 —— 收藏后星标能不能重绘,取决于组件恰好因别的原因重渲染;
- *   2. 一屏 18 张卡片 × 3 处 = 每次渲染 54 次跨层同步调用。
- * 现在改成从 `favorites` 派生的集合:收藏列表一变,星标必然跟着变。
+ * 收藏:星标状态与收藏/取消收藏动作都在 useMarketFavorites 里。
+ * 那里有一条硬约束 —— 跨层传参必须经 toBridgeData() 拍平成纯数据,
+ * 否则 contextBridge 克隆响应式对象时会抛「An object could not be cloned」。
  */
-const favIds = computed(() => new Set(favorites.value.map((f) => String(f.assetId))))
-
-function isFav(id: string): boolean {
-  return favIds.value.has(String(id))
-}
-
-/** 收藏失败时的诊断信息(仅失败时显示):把宿主的原因摆到界面上,而不是让点击静默无效 */
-const favDiag = ref('')
-
-function toggleFav(a: MarketAsset) {
-  const before = isFav(a.assetId)
-  favDiag.value = ''
-  try {
-    window.services.toggleFavorite(a)
-  } catch (e) {
-    favDiag.value = `收藏失败:${(e as any)?.message || String(e)}`
-    notify(favDiag.value)
-    return
-  }
-  reloadFavorites()
-  const after = isFav(a.assetId)
-  if (after === before) {
-    // 没抛错但状态没变:说明写入既没报错也没生效
-    favDiag.value = `收藏未生效:assetId=${a.assetId} 前=${before} 后=${after} 收藏数=${favorites.value.length}`
-    notify('收藏失败,请重试')
-  } else {
-    notify(after ? '已收藏 ' + a.title : '已取消收藏')
-  }
-}
+const { isFav, toggleFav, favDiag } = useMarketFavorites({
+  favorites,
+  reloadFavorites: () => reloadFavorites(),
+  notify
+})
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
