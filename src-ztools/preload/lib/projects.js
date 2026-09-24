@@ -253,6 +253,36 @@ function removeProject(id, deleteFiles) {
   }
 }
 
+/**
+ * 把某个 addon 目录在「市场来源」上的记录过户到目标项目。
+ *
+ * 为什么需要:插件目录本身不携带来源信息,来源记录在 `godot/asset/{projectId}/{assetId}`。
+ * 只复制目录会让目标项目把它当成手动放置的插件 —— 显示「未知来源」,并失去商店链接与
+ * 版本管理入口。目标已有同 assetId 记录时只补 dirNames,不覆盖目标自己的版本信息。
+ *
+ * @returns {boolean} 是否新建/补充了记录
+ */
+function adoptMarketRecord(srcRecords, dirName, targetProjectId) {
+  const src = srcRecords.find((r) => (r.dirNames || []).includes(dirName))
+  if (!src || !src.assetId) return false
+  const id = `godot/asset/${targetProjectId}/${src.assetId}`
+  const existing = getDoc(id)
+  if (existing) {
+    if ((existing.dirNames || []).includes(dirName)) return false
+    const { _id, _rev, ...data } = existing
+    putDoc(id, { ...data, dirNames: [...(data.dirNames || []), dirName] })
+    return true
+  }
+  const { _id, _rev, ...data } = src
+  putDoc(id, {
+    ...data,
+    projectId: targetProjectId,
+    dirNames: [dirName],
+    copiedFrom: src.projectId
+  })
+  return true
+}
+
 /** 复制插件目录到另一个项目(不自动启用) */
 function copyAddonsToProject({ sourceProjectId, dirNames, targetProjectId }) {
   try {
@@ -267,8 +297,12 @@ function copyAddonsToProject({ sourceProjectId, dirNames, targetProjectId }) {
     const dstAddons = path.join(dst.path, 'addons')
     fs.mkdirSync(dstAddons, { recursive: true })
 
+    /** 源项目里由市场安装的插件记录 */
+    const srcRecords = listDocs(`godot/asset/${sourceProjectId}/`)
+
     const copied = []
     const skipped = []
+    const adopted = []
     for (const d of dirNames || []) {
       const s = path.join(srcAddons, d)
       const t = path.join(dstAddons, d)
@@ -278,12 +312,15 @@ function copyAddonsToProject({ sourceProjectId, dirNames, targetProjectId }) {
       }
       if (fs.existsSync(t)) {
         skipped.push(`${d}(目标已存在)`)
-        continue
+      } else {
+        fs.cpSync(s, t, { recursive: true })
+        copied.push(d)
       }
-      fs.cpSync(s, t, { recursive: true })
-      copied.push(d)
+      // 目录已在目标里也照样过户来源记录:这次操作本身就表达了「它是同一个插件」的意图,
+      // 也让「早先复制过去、当时还没有来源信息」的插件可以靠再复制一次补回来源。
+      if (adoptMarketRecord(srcRecords, d, targetProjectId)) adopted.push(d)
     }
-    return { ok: true, copied: copied.length, skipped, targetName: dst.name }
+    return { ok: true, copied: copied.length, skipped, adopted: adopted.length, targetName: dst.name }
   } catch (e) {
     return { ok: false, error: (e && e.message) || '复制失败' }
   }

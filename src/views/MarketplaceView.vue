@@ -3,6 +3,7 @@ import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'v
 import { notify } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
+import VersionPickerDialog from '../components/dialogs/VersionPickerDialog.vue'
 import { fmtSize } from '../utils/format'
 import type { AddonInfo, FavoriteAsset, GodotProject, GodotVersion, MarketAsset } from '../types/godot'
 
@@ -390,7 +391,7 @@ onActivated(() => {
 })
 
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape' && relPicker.value) relPicker.value = null
+  if (e.key === 'Escape' && picker.value) picker.value = null
 }
 
 function onTargetChange() {
@@ -491,32 +492,20 @@ async function install(asset: MarketAsset, version?: string) {
 
 // ---------- 版本选择器 ----------
 
-/** size 单位为字节(由 preload 从 Asset Store 的 MB 浮点数换算) */
-type ReleaseRow = { version: string, created: string, stable: boolean, minGodot: string, maxGodot: string, size: number }
+/** 只保留「要选哪个资产」;release 列表与加载态由对话框自己管 */
+const picker = ref<{ asset: MarketAsset } | null>(null)
 
-const relPicker = ref<{ asset: MarketAsset, list: ReleaseRow[], loading: boolean, error: string } | null>(null)
-
-async function openPicker(a: MarketAsset) {
+function openPicker(a: MarketAsset) {
   if (installing.value) return
-  relPicker.value = { asset: a, list: [], loading: true, error: '' }
-  try {
-    const list = await window.services.listAssetReleases(a.assetId)
-    if (relPicker.value?.asset.assetId !== a.assetId) return
-    relPicker.value.list = list
-  } catch (e: any) {
-    if (relPicker.value?.asset.assetId !== a.assetId) return
-    relPicker.value.error = e?.message || String(e)
-  } finally {
-    if (relPicker.value?.asset.assetId === a.assetId) relPicker.value.loading = false
-  }
+  picker.value = { asset: a }
 }
 
 /** 从版本选择器安装指定版本 */
-function installFromPicker(r: ReleaseRow) {
-  const a = relPicker.value?.asset
+function installFromPicker(version: string) {
+  const a = picker.value?.asset
   if (!a || installing.value) return
-  relPicker.value = null
-  install(a, r.version)
+  picker.value = null
+  install(a, version)
 }
 </script>
 
@@ -714,38 +703,13 @@ function installFromPicker(r: ReleaseRow) {
       </div>
 
       <!-- 版本选择器模态框 -->
-      <Teleport to="body">
-        <div v-if="relPicker" class="modal-mask" @click.self="relPicker = null">
-          <div class="card modal">
-            <div class="modal-head">
-              <div class="modal-title"><Icon name="puzzle" :size="15" /> 选择版本 · {{ relPicker.asset.title }}</div>
-              <span class="grow"></span>
-              <button class="btn small ghost icon-x" title="关闭" @click="relPicker = null">
-                <Icon name="x" :size="14" />
-              </button>
-            </div>
-            <p class="picker-tip">选择要安装的 release 版本,安装会覆盖目标项目中已存在的同名插件。</p>
-            <div v-if="relPicker.loading" class="hint-line"><span class="spin"></span> 加载版本列表…</div>
-            <div v-else-if="relPicker.error" class="card error-box">
-              <Icon name="alert" :size="14" />
-              <span>加载失败:{{ relPicker.error }}</span>
-            </div>
-            <div v-else-if="!relPicker.list.length" class="hint-line">该资产没有可用版本</div>
-            <div v-else class="rel-list">
-              <button v-for="r in relPicker.list" :key="r.version" class="rel-row" @click="installFromPicker(r)">
-                <span class="rel-ver mono">v{{ fmtVer(r.version) }}</span>
-                <span v-if="!r.stable" class="tag warn">测试版</span>
-                <span class="rel-date">{{ r.created.slice(0, 10) }}</span>
-                <span class="rel-godot">
-                  {{ r.minGodot || r.maxGodot ? `Godot ${r.minGodot}${r.maxGodot ? ` ~ ${r.maxGodot}` : '+'}` : '无版本要求' }}
-                </span>
-                <span v-if="r.size" class="rel-size mono">{{ fmtSize(r.size) }}</span>
-                <Icon name="download" :size="13" class="rel-dl" />
-              </button>
-            </div>
-          </div>
-        </div>
-      </Teleport>
+      <VersionPickerDialog
+        :open="!!picker"
+        :asset-id="picker?.asset.assetId || ''"
+        :title="picker?.asset.title || ''"
+        @pick="installFromPicker"
+        @close="picker = null"
+      />
     </template>
   </div>
 </template>
@@ -1178,72 +1142,6 @@ function installFromPicker(r: ReleaseRow) {
   width: 26px;
   padding: 3px 0;
   color: var(--text-3);
-  flex-shrink: 0;
-}
-
-.picker-tip {
-  margin: 0 0 10px;
-  font-size: 12.5px;
-  color: var(--text-3);
-}
-
-.rel-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: 320px;
-  overflow-y: auto;
-}
-
-.rel-row {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 9px 11px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-  font-size: 12.5px;
-}
-
-.rel-row:hover {
-  border-color: var(--brand);
-  background: var(--brand-weak);
-}
-
-.rel-ver {
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--text);
-  min-width: 74px;
-  text-align: left;
-}
-
-.rel-date {
-  font-size: 11.5px;
-  color: var(--text-3);
-  font-variant-numeric: tabular-nums;
-}
-
-.rel-godot {
-  flex: 1;
-  font-size: 11.5px;
-  color: var(--text-2);
-  text-align: right;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rel-size {
-  font-size: 11.5px;
-  color: var(--text-3);
-}
-
-.rel-dl {
-  color: var(--brand);
   flex-shrink: 0;
 }
 </style>

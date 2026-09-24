@@ -9,6 +9,8 @@ const { extractZip, ensureDir } = require('./extract')
 const { getDoc, putDoc, removeDoc, listDocs } = require('./store')
 
 const API_BASE = 'https://store.godotengine.org/api/v1'
+/** 商店页面地址前缀(格式与 API 返回的 store_url 一致:/asset/{publisher}/{slug}/) */
+const STORE_BASE = 'https://store.godotengine.org'
 
 /** 拆 assetId 为 [publisherSlug, assetSlug] */
 function splitAssetId(assetId) {
@@ -274,7 +276,12 @@ function listAddons(projectId) {
       fromMarket: !!market,
       assetId: market?.assetId,
       versionString: market?.versionString,
-      installedAt: market?.installedAt
+      installedAt: market?.installedAt,
+      // 商店页面:优先用安装时记下的原址,否则按 assetId 拼装
+      storeUrl: market
+        ? (market.meta && market.meta.storeUrl) ||
+          (market.assetId ? `${STORE_BASE}/asset/${market.assetId}/` : undefined)
+        : undefined
     })
   }
   out.sort((a, b) => a.name.localeCompare(b.name))

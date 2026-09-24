@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { notify } from '../services/bridge'
+import { notify, openExternal } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
+import VersionPickerDialog from '../components/dialogs/VersionPickerDialog.vue'
 import { fmtSize } from '../utils/format'
 import type { AddonInfo, GodotProject } from '../types/godot'
 
@@ -169,7 +170,57 @@ function confirmCopy() {
   }
   showCopy.value = false
   const skipped = r.skipped?.length ? `,跳过:${r.skipped.join('、')}` : ''
-  notify(`已复制 ${r.copied} 个插件到「${r.targetName}」${skipped}`)
+  const adopted = r.adopted ? `,其中 ${r.adopted} 个已补回市场来源` : ''
+  notify(`已复制 ${r.copied} 个插件到「${r.targetName}」${skipped}${adopted}`)
+}
+
+// ---------- 商店链接 / 版本管理 ----------
+
+/** 在浏览器中打开该插件的资产库页面 */
+function openStore(a: AddonInfo) {
+  if (!a.storeUrl) return
+  openExternal(a.storeUrl)
+}
+
+/** 版本管理:选中要切换到的历史版本 */
+const versionTarget = ref<AddonInfo | null>(null)
+
+function openVersions(a: AddonInfo) {
+  if (!a.assetId || updating.value) return
+  versionTarget.value = a
+}
+
+/** 把插件替换为指定 release 版本(覆盖安装) */
+async function installVersion(version: string) {
+  const a = versionTarget.value
+  versionTarget.value = null
+  if (!targetId.value || !a?.assetId || updating.value) return
+  updating.value = { assetId: a.assetId, percent: 0, stage: '下载中' }
+  const r = await window.services.installAsset(
+    {
+      projectId: targetId.value,
+      assetId: a.assetId,
+      version,
+      assetMeta: { title: a.name, storeUrl: a.storeUrl }
+    },
+    (p) => {
+      if (!updating.value || updating.value.assetId !== a.assetId) return
+      if (p.stage === 'downloading') {
+        updating.value = { assetId: a.assetId!, percent: percent(p), stage: `下载中 ${fmtSize(p.received)}` }
+      } else {
+        updating.value = { assetId: a.assetId!, percent: 100, stage: '解压中' }
+      }
+    }
+  )
+  updating.value = null
+  if (r.ok) {
+    notify(`${a.name} 已切换到 ${r.addon?.versionString || version}`)
+    // 版本变了,之前的「可更新」判断作废
+    updateInfo.value = {}
+    reload()
+  } else {
+    notify(r.error || '版本切换失败')
+  }
 }
 
 // ---------- 检查更新 / 更新 ----------
@@ -317,7 +368,13 @@ function uninstall(a: AddonInfo) {
             <div class="ad-ico" :class="{ off: !a.enabled }"><Icon name="puzzle" :size="17" /></div>
             <div class="addon-main">
               <div class="addon-name">
-                <span class="name">{{ a.name }}</span>
+                <span
+                  class="name"
+                  :class="{ link: !!a.storeUrl }"
+                  :title="a.storeUrl ? `${a.name} · 在资产库中查看` : a.name"
+                  @click="openStore(a)"
+                >{{ a.name }}</span>
+                <Icon v-if="a.storeUrl" name="external" :size="10" class="name-ext" />
                 <span v-if="a.version" class="tag">v{{ a.version }}</span>
                 <span class="state" :class="a.enabled ? 'ok' : 'idle'">
                   <span class="dot"></span>{{ a.enabled ? '已启用' : '未启用' }}
@@ -341,6 +398,13 @@ function uninstall(a: AddonInfo) {
                 :disabled="!!updating"
                 @click="update(a)"
               ><Icon name="download" :size="12" /> 更新</button>
+              <button
+                v-if="a.assetId"
+                class="btn small ghost"
+                :disabled="!!updating"
+                title="从历史版本中替换当前插件"
+                @click="openVersions(a)"
+              ><Icon name="package" :size="12" /> 版本</button>
               <button v-if="a.hasCfg" class="btn small ghost" @click="toggleEnabled(a)">
                 {{ a.enabled ? '禁用' : '启用' }}
               </button>
@@ -411,6 +475,16 @@ function uninstall(a: AddonInfo) {
         </div>
       </Teleport>
     </template>
+
+    <VersionPickerDialog
+      :open="!!versionTarget"
+      :asset-id="versionTarget?.assetId || ''"
+      :title="versionTarget?.name || ''"
+      :current-version="versionTarget?.version"
+      action="switch"
+      @pick="installVersion"
+      @close="versionTarget = null"
+    />
   </div>
 </template>
 
@@ -567,6 +641,23 @@ function uninstall(a: AddonInfo) {
 .name {
   font-weight: 600;
   font-size: 13.5px;
+}
+
+/* 有商店来源时插件名可点击跳转资产库 */
+.name.link {
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.name.link:hover {
+  color: var(--brand);
+  text-decoration: underline;
+}
+
+.name-ext {
+  color: var(--text-3);
+  flex-shrink: 0;
+  margin-left: -3px;
 }
 
 /* 启用状态:彩色圆点 + 文字 */

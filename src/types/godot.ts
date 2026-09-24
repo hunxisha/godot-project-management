@@ -267,6 +267,8 @@ export interface AddonInfo {
   assetId?: string
   versionString?: string
   installedAt?: number
+  /** 商店页面地址(来自市场安装记录;无来源信息时为空) */
+  storeUrl?: string
 }
 
 /** project.godot 解析结果 */

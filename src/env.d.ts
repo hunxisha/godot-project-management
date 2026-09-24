@@ -65,12 +65,12 @@ interface Services {
   }
   /** 删除项目记录(deleteFiles=true 同时删除项目文件夹,Windows 移入回收站) */
   removeProject(id: string, deleteFiles?: boolean): { ok: boolean, error?: string, filesDeleted?: boolean }
-  /** 复制插件目录到另一个项目(不自动启用) */
+  /** 复制插件目录到另一个项目(不自动启用);同时把市场来源记录一并过户 */
   copyAddonsToProject(opts: {
     sourceProjectId: string
     dirNames: string[]
     targetProjectId: string
-  }): { ok: boolean, error?: string, copied?: number, skipped?: string[], targetName?: string }
+  }): { ok: boolean, error?: string, copied?: number, skipped?: string[], adopted?: number, targetName?: string }
   /** 备份项目:先写临时产物,成功后原子改名并落库;失败/取消不留痕迹 */
   backupProject(
     projectId: string,

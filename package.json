@@ -6,10 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc && vite build",
-    "test": "npm run test:theme && npm run test:preload && npm run test:preload:sandbox && npm run test:composable",
+    "test": "npm run test:theme && npm run test:preload && npm run test:preload:sandbox && npm run test:addons && npm run test:composable",
     "test:theme": "node src/__tests__/theme.test.mjs",
     "test:preload": "node src-ztools/preload/lib/__tests__/backup.test.js",
     "test:preload:sandbox": "node src-ztools/preload/lib/__tests__/backup.test.js --no-immediate",
+    "test:addons": "node src-ztools/preload/lib/__tests__/addons.test.js && node src-ztools/preload/lib/__tests__/addons.test.js --no-immediate",
     "test:composable": "node src/composables/__tests__/build-bundle.mjs && node src/composables/__tests__/useBackups.test.mjs"
   },
   "dependencies": {
