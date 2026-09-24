@@ -2,6 +2,47 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.1.0
+
+本版没有新增页面，重点是把既有功能做扎实：修掉两个真实缺陷、把类型检查从「关闭」变成两道闸门、
+并把重复实现收敛到一处。用户可见的变化如下。
+
+### 修复
+
+- **插件市场收藏点了没反应**：传参把响应式对象交给了宿主桥接层，Electron 无法克隆，点击在进入
+  preload 之前就失败了。现已改为跨层前拍平成纯数据；同时修掉收藏记录 assetId 数字/字符串混用
+  导致的重复收藏，以及写库失败被静默忽略的问题
+- **取消引擎下载后队列卡死**：`downloadFile().cancel()` 只销毁了请求与写入流，没有让 Promise 了结，
+  于是串行下载队列永远停在第一个任务上；现以「已取消」显式拒绝并加断言锁住
+- 收藏等跨层调用失败时不再静默：界面会给出失败原因（写库被拒 / 未生效 / 传参问题）
+
+### 界面
+
+- 插件图标更新为「齿轮冠机器人 + 等距项目立方体」
+
+### 工程
+
+- **类型检查从关闭变为两道闸门**（`npm run verify` 会跑）：
+  - preload 层新增 `tsconfig.preload.json`，`checkJs` + `noImplicitAny`，错误从 400 降到 **0**
+  - 渲染层从 `strict: false` 直接开到 **`strict: true`**（实测只差 1 个类型契约）
+  - 新增 `src-ztools/preload/sandbox.d.ts`：手写精简沙箱声明（路线 B），**刻意不声明 `setImmediate`**
+    —— 沙箱里没有这个全局，让它始终是编译错误而不是「合法」，另配源码扫描护栏测试
+- **收敛重复实现**：`displayName` / 版本归一化 / 平台判断三处重复统一到一处并加去重断言；
+  `install.js` 与 `backup.js` 的任务生命周期合入 `taskqueue.js`；三个对话框共用任务骨架
+  `useTaskDialog`；安装进度映射、项目头像渐变等重复也各归一处
+- **拆分过肥的视图**：`MarketplaceView` 脚本 506 → 172 行，`ProjectsView` / `AddonsView` /
+  `BackupsView` 同步拆分，七个视图脚本合计 1,714 → 1,076 行（−37%），逻辑进入 14 个组合式函数
+- **测试**：断言数 508 → 1,320 项（另 2 项默认跳过），覆盖此前完全没被测到的模块
+  （`godotExe` / `taskqueue` / `fsutil` / `http` / `install` / `services` 契约 / 市场收藏）
+- **CI**：新增 GitHub Actions，跑的就是本地同一套 `npm run verify` + `npm run build`
+- 文档：新增 [docs/optimization-plan.md](docs/optimization-plan.md)（问题清单与分阶段实施记录）、
+  [docs/glossary.md](docs/glossary.md)（术语正名）
+
+### 说明
+
+- 本版的重构都要求「零行为变更 + 有断言守着」，因此断言数的增长本身就是交付物的一部分
+- CI 已就位但**尚未在 GitHub 上真实运行过一次**
+
 ## 1.0.0
 
 首个正式版本。
