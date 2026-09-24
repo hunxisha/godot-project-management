@@ -272,6 +272,8 @@ function fmtVer(v?: string): string { return (v || '').replace(/^v+/i, '') }
 
 - P0-3(a) 统一 `displayName()` 到 `godotExe.js`
 - P0-3(b) 统一版本归一化到 `utils/format.ts`，先补行为断言再改调用点
+- 同类缺陷一并收敛：`currentPlatform()`（`releases.js`）与 `platformOfProcess()`（`install.js`）
+  是同一段平台映射的两份实现，同时统一到 `godotExe.js`
 - P0-2 第一步：新增 services 键比对断言测试
 - P2-4(b) 给回收站断言加开关，恢复测试幂等
 - P2-2 第二步：`package.json` 加 `verify` 脚本
@@ -302,13 +304,13 @@ function fmtVer(v?: string): string { return (v || '').replace(/^v+/i, '') }
 
 ## 4. 验收清单
 
-- [ ] `npm run verify` 一条命令跑通 typecheck + test
-- [ ] services 键比对断言就位：**故意从 `services.js` 删一个键会失败**
-- [ ] `displayName` 全仓只剩一份定义；版本归一化只剩一份且行为有断言锁定
+- [x] `npm run verify` 一条命令跑通 typecheck + test
+- [x] services 键比对断言就位：**故意从 `services.js` 删一个键会失败**（已用探针验证）
+- [x] `displayName` 全仓只剩一份定义；版本归一化只剩一份且行为有断言锁定
 - [ ] `tsconfig.json` 的 `strict: false` 至少推进到 `noImplicitAny: true`，且 preload 纳入检查
 - [ ] `install.js` 与 `backup.js` 的「取消 / 关闭 / 订阅」由同一模块提供
 - [ ] `MarketplaceView.vue` < 450 行；无生产文件超过 700 行
-- [ ] `npm test` 不再写用户回收站
+- [x] `npm test` 不再写用户回收站（默认跳过，`GPM_TEST_TRASH=1` 可显式开启）
 - [ ] CI 在每次提交上跑 `build` + `test`
 - [ ] 5 组术语各只有一个正名
 
@@ -354,7 +356,31 @@ _（每完成一项在阶段小节内标注 commit，与 `docs/backup-redesign-p
 
 | 阶段 | 状态 |
 |---|---|
-| 阶段 1 · 收敛与护栏 | ⬜ 未开始 |
+| 阶段 1 · 收敛与护栏 | ✅ 已完成（commit `dfb1af1`） |
 | 阶段 2 · 结构性抽取 | ⬜ 未开始 |
 | 阶段 3 · 视图拆分 | ⬜ 未开始 |
 | 阶段 4 · 类型闸门 / 测试 / CI | ⬜ 未开始 |
+
+### 阶段 1 实施记录（commit `dfb1af1`）
+
+| 计划项 | 实际做法 |
+|---|---|
+| P0-3(a) 统一 `displayName()` | 移入 `lib/godotExe.js`；`install.js` 与 `releases.js` 改为 require。`install.js` 保留对外导出（作为再导出），模块对外 API 未变 |
+| P0-3(b) 统一版本归一化 | 新增 `normVersion()` 于 `src/utils/format.ts`，语义取**两者行为的并集**（trim + 去掉连续多个前缀 `v`）；`VersionPickerDialog.vue` 与 `MarketplaceView.vue` 改为引用共享实现 |
+| 额外收敛（同类缺陷） | `currentPlatform()` / `platformOfProcess()` —— 同一段 3 分支平台映射的两份实现 —— 一并统一到 `godotExe.js`；`releases.js` 保留再导出以维持 `services.js` 不变 |
+| P0-2 第一步 | 新增 `lib/__tests__/services.test.js`：解析 `env.d.ts` 的 `interface Services`，与 `window.services` 做**双向**集合比对。未采用「手写第三份清单」的方案，因此不需要额外维护 |
+| P2-4(b) 测试幂等 | `backup.test.js` 的批量删除改走 `keepRecordOnly`（只移除记录）；「删除 → 移入回收站」这一条默认跳过并打印 `SKIP`，用 `GPM_TEST_TRASH=1` 显式开启 |
+| P2-2 第二步 | `package.json` 新增 `typecheck` 与 `verify`（`verify = typecheck && test`） |
+| 顺带补口 | 新增 `lib/__tests__/godotExe.test.js`：该模块此前零测试，而本次正是往它里面搬东西 —— 补上版本串解析的行为断言后搬运才可验证（原计划排在阶段 4） |
+
+**验收结果**
+
+| 指标 | 阶段 1 前 | 阶段 1 后 |
+|---|---|---|
+| `npm run verify` | 不存在 | ✅ exit 0 |
+| 断言总数 | 508 PASS | **557 PASS** + 2 SKIP |
+| `src/views` / `install.js` / `releases.js` 中的重复实现 | `displayName` ×2、版本归一化 ×2、平台映射 ×2 | 各 1 处，且有测试守卫 |
+| `npm test` 是否写用户回收站 | 是（每次 1 个临时文件） | 否（默认跳过） |
+
+- 2 项 SKIP = `test:preload` 与 `test:preload:sandbox` 各跳过 1 项回收站断言；已用 `GPM_TEST_TRASH=1` 验证该链路仍能通过（102 PASS / 0 SKIP），覆盖度没有丢失。
+- 去重护栏已验证会**真的失败**：探针 1 从 `services.js` 删一个键 → 2 项 FAIL；探针 2 往 `env.d.ts` 加一个未实现的方法 → 2 项 FAIL（两次均从备份还原，无残留）。
