@@ -189,7 +189,6 @@ interface Services {
         title?: string,
         author?: string,
         category?: string,
-        rating?: number,
         iconUrl?: string,
         description?: string,
         storeUrl?: string

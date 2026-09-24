@@ -34,7 +34,6 @@ function mapAsset(a) {
     tagSlugs: (a.tags || []).map((t) => t.slug),
     versionString: '',
     godotVersion: '',
-    rating: a.reviews_score,
     iconUrl: a.thumbnail || undefined,
     description: a.description,
     storeUrl: a.store_url

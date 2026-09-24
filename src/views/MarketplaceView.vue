@@ -417,12 +417,6 @@ function fmtVer(v?: string): string {
   return (v || '').replace(/^v+/i, '')
 }
 
-/** 商店评分为百分制,换算为 5 星制显示 */
-function starsOf(rating?: number): string {
-  if (!rating) return ''
-  return (rating / 20).toFixed(1)
-}
-
 async function search() {
   searching.value = true
   searchError.value = ''
@@ -470,7 +464,6 @@ async function install(asset: MarketAsset, version?: string) {
         title: asset.title,
         author: asset.author,
         category: asset.category,
-        rating: asset.rating,
         iconUrl: asset.iconUrl,
         description: asset.description,
         storeUrl: asset.storeUrl
@@ -662,9 +655,6 @@ function installFromPicker(r: ReleaseRow) {
           </div>
           <div class="asset-tags">
             <span class="tag">{{ a.category }}</span>
-            <span v-if="a.rating && a.rating >= 20" class="rating" :title="`商店评分 ${starsOf(a.rating)} / 5`">
-              <Icon name="star" :size="10" :stroke-width="2.2" /> {{ starsOf(a.rating) }}
-            </span>
             <span
               v-if="godotRange(a)"
               class="gver"
@@ -935,21 +925,6 @@ function installFromPicker(r: ReleaseRow) {
 .rl-text {
   font-size: 12.5px;
   color: var(--text-2);
-}
-
-/* ---------- 商店评分(5 星制) ---------- */
-.rating {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 20px;
-  background: var(--gold-weak);
-  color: var(--gold);
-  white-space: nowrap;
 }
 
 .error-box {

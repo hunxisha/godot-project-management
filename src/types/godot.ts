@@ -232,8 +232,6 @@ export interface MarketAsset {
   maxGodot?: string
   /** 最新 release 发布日期(ISO 日期串,判断新品用) */
   releaseCreated?: string
-  /** 商店评分(0-50,除以 10 得星级) */
-  rating: number
   iconUrl?: string
   description?: string
   /** 商店页面链接 */
