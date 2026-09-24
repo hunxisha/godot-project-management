@@ -5,8 +5,9 @@
 // 不需要引入测试框架,也不需要依赖 Node 24 的类型剥离(README 声明支持 Node ≥ 18)。
 //
 // 产物(.gpm-test/ 已被 .gitignore 忽略):
-//   .gpm-test/out/usebackups.mjs  ← src/composables/useBackups.ts  (useBackups.test.mjs)
-//   .gpm-test/out/format.mjs      ← src/utils/format.ts            (src/__tests__/format.test.mjs)
+//   .gpm-test/out/usebackups.mjs   ← src/composables/useBackups.ts    (useBackups.test.mjs)
+//   .gpm-test/out/usetaskdialog.mjs← src/composables/useTaskDialog.ts (useTaskDialog.test.mjs)
+//   .gpm-test/out/format.mjs       ← src/utils/format.ts              (src/__tests__/format.test.mjs)
 //
 // 用法:node src/composables/__tests__/build-bundle.mjs
 import { build } from 'vite'
@@ -30,6 +31,7 @@ await build({
     lib: {
       entry: {
         usebackups: path.join(root, 'src', 'composables', 'useBackups.ts'),
+        usetaskdialog: path.join(root, 'src', 'composables', 'useTaskDialog.ts'),
         format: path.join(root, 'src', 'utils', 'format.ts')
       },
       formats: ['es'],
@@ -40,6 +42,6 @@ await build({
   }
 })
 
-for (const name of ['usebackups', 'format']) {
+for (const name of ['usebackups', 'usetaskdialog', 'format']) {
   console.log(`bundle built: ${path.join(root, OUT_DIR, `${name}.mjs`)}`)
 }

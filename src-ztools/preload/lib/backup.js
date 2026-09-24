@@ -25,6 +25,7 @@ const {
   estimateTree
 } = require('./fsutil')
 const { addProject } = require('./projects')
+const { createTaskQueue, TERMINAL_PHASES } = require('./taskqueue')
 
 const BACKUP_PREFIX = 'godot/backup/'
 const PROJECT_PREFIX = 'godot/project/'
@@ -32,33 +33,18 @@ const PROJECT_PREFIX = 'godot/project/'
 const SCHEMA = 2
 /** 备份文件存在性探测缓存时长 */
 const EXISTS_TTL = 5000
-const TERMINAL = { done: true, error: true, canceled: true }
 
 // ---------- 任务表(进度 + 取消 + 跨页面订阅) ----------
+// 通用机制在 taskqueue.js;这里只保留备份语义(默认字段、终态规则、取消语义)。
+const queue = createTaskQueue({
+  idPrefix: 'bt',
+  sortBy: 'startedAt',
+  terminalPhases: TERMINAL_PHASES
+})
 
-/** @type {Map<string, object>} */
-const tasks = new Map()
-/** @type {Map<string, object>} */
-const cancelTokens = new Map()
-const listeners = new Set()
-let taskSeq = 0
-
-function isTerminal(phase) {
-  return !!TERMINAL[phase]
-}
-
-/** 任务快照(浅拷贝,避免订阅者改到内部状态) */
+/** 任务快照(按 startedAt 升序,浅拷贝) */
 function listBackupTasks() {
-  return [...tasks.values()].map((t) => ({ ...t })).sort((a, b) => a.startedAt - b.startedAt)
-}
-
-function emit() {
-  const snap = listBackupTasks()
-  for (const fn of listeners) {
-    try {
-      fn(snap)
-    } catch (e) { /* 单个订阅者异常不影响任务本身 */ }
-  }
+  return queue.list()
 }
 
 /**
@@ -66,40 +52,28 @@ function emit() {
  * @param {(tasks: object[]) => void} fn
  */
 function watchBackupTasks(fn) {
-  listeners.add(fn)
-  try {
-    fn(listBackupTasks())
-  } catch (e) { /* ignore */ }
-  return () => listeners.delete(fn)
+  return queue.watch(fn)
 }
 
+/** 新建任务:补齐备份任务的默认字段(phase/done/total/bytes/current) */
 function newTask(fields) {
-  const id = `bt-${Date.now().toString(36)}-${++taskSeq}`
-  const task = {
-    id,
+  return queue.create({
     kind: 'backup',
     phase: 'scanning',
     done: 0,
     total: 0,
     bytes: 0,
     current: '',
-    startedAt: Date.now(),
     ...fields
-  }
-  tasks.set(id, task)
-  return task
+  })
 }
 
 function patchTask(task, patch) {
-  Object.assign(task, patch)
-  emit()
+  queue.patch(task, patch)
 }
 
 function finishTask(task, phase, error) {
-  task.phase = phase
-  if (error) task.error = error
-  task.finishedAt = Date.now()
-  emit()
+  queue.finish(task, phase, error)
 }
 
 /**
@@ -107,25 +81,20 @@ function finishTask(task, phase, error) {
  * 已进入不可回滚阶段(覆盖恢复替换原目录)后 token 已 lock,返回 false。
  */
 function cancelBackupTask(id) {
-  const token = cancelTokens.get(id)
+  const token = queue.tokenOf(id)
   if (!token) return false
   const ok = token.cancel()
-  const task = tasks.get(id)
+  const task = queue.get(id)
   if (ok && task) {
     task.cancelRequested = true
-    emit()
+    queue.emit()
   }
   return ok
 }
 
 /** 移除已结束的任务记录(进行中的任务不可移除) */
 function dismissBackupTask(id) {
-  const task = tasks.get(id)
-  if (!task) return false
-  if (!isTerminal(task.phase)) return false
-  tasks.delete(id)
-  emit()
-  return true
+  return queue.dismiss(id)
 }
 
 // ---------- 备份文件存在性(带缓存) ----------
@@ -194,7 +163,7 @@ async function backupProject(projectId, opts, onProgress) {
     destDir: o.destDir
   })
   const token = createCancelToken()
-  cancelTokens.set(task.id, token)
+  queue.setToken(task.id, token)
 
   const report = (p) => {
     patchTask(task, {
@@ -275,7 +244,7 @@ async function backupProject(projectId, opts, onProgress) {
     finishTask(task, 'error', (e && e.message) || '备份失败')
     throw e
   } finally {
-    cancelTokens.delete(task.id)
+    queue.clearToken(task.id)
   }
 }
 
@@ -528,7 +497,7 @@ async function restoreBackup(backupId, opts, onProgress) {
     destDir: record.destPath
   })
   const token = createCancelToken()
-  cancelTokens.set(task.id, token)
+  queue.setToken(task.id, token)
 
   const report = (p) => {
     patchTask(task, {
@@ -620,7 +589,7 @@ async function restoreBackup(backupId, opts, onProgress) {
     return { ok: false, error: (e && e.message) || '恢复失败' }
   } finally {
     rmQuiet(tmpDir)
-    cancelTokens.delete(task.id)
+    queue.clearToken(task.id)
   }
 }
 

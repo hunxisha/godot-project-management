@@ -1,13 +1,23 @@
 <script setup lang="ts">
 // 恢复向导:① 选择方式 → ② 确认影响 → ③ 执行。
 // 覆盖原项目是破坏性操作,必须输入项目名确认;进入替换阶段后禁止取消。
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import Icon from '../Icon.vue'
 import { getDoc, notify, openPath, pickDirectory } from '../../services/bridge'
+import { useTaskDialog } from '../../composables/useTaskDialog'
 import { fmtSize, formatTime } from '../../utils/format'
-import type { BackupRecord, BackupTask, GodotProject } from '../../types/godot'
+import type { BackupRecord, GodotProject } from '../../types/godot'
 
 type ProjectRow = GodotProject & { _id: string }
+
+/** 恢复结果(由向导第三步渲染) */
+type RestoreResult = {
+  ok: boolean
+  canceled?: boolean
+  error?: string
+  newProjectName?: string
+  newProjectId?: string
+}
 
 const props = withDefaults(defineProps<{
   open: boolean
@@ -22,61 +32,34 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{ (e: 'close'): void, (e: 'done'): void }>()
 
-const PHASE_LABEL: Record<string, string> = {
-  unpacking: '解压备份',
-  copying: '写入目标目录',
-  replacing: '替换原项目目录',
-  registering: '注册项目',
-  scanning: '扫描',
-  packing: '打包',
-  finalizing: '收尾'
-}
+// 任务订阅 / 进度百分比 / 可取消判断 / 取消失败提示都走共享组合式函数
+const {
+  progress,
+  result,
+  running,
+  activeTask,
+  canCancel,
+  phrase,
+  percent,
+  begin,
+  end,
+  report,
+  cancel
+} = useTaskDialog<RestoreResult>({
+  kind: 'restore',
+  initialPhase: 'unpacking',
+  cancelFailedMessage: '已进入替换阶段,无法取消'
+})
 
 const step = ref<1 | 2 | 3>(1)
 const mode = ref<'new' | 'overwrite'>('new')
 const newName = ref('')
 const destDir = ref('')
 const typed = ref('')
-const busy = ref(false)
-const progress = ref<{ phase: string, done: number, total: number, current: string } | null>(null)
-const result = ref<{ ok: boolean, canceled?: boolean, error?: string, newProjectName?: string, newProjectId?: string } | null>(null)
-
-// ---------- 任务订阅(用于取消与 cancelable 判断) ----------
-const tasks = ref<BackupTask[]>([])
-let unwatch: (() => void) | null = null
-
-function startWatching() {
-  if (unwatch) return
-  unwatch = window.services.watchBackupTasks((snap) => {
-    tasks.value = snap
-  })
-}
-
-function stopWatching() {
-  if (unwatch) {
-    unwatch()
-    unwatch = null
-  }
-  tasks.value = []
-}
-
-onBeforeUnmount(stopWatching)
-
-const activeTask = computed(() => tasks.value.find((t) => t.kind === 'restore'))
-const canCancel = computed(
-  () => !result.value && !!activeTask.value && activeTask.value.cancelable !== false
-)
 
 /** 覆盖恢复的目标项目名(用于输入确认) */
 const expectName = computed(() => props.project?.name || props.record?.projectName || '')
 const typedOk = computed(() => !expectName.value || typed.value.trim() === expectName.value)
-
-const phrase = computed(() => (progress.value ? PHASE_LABEL[progress.value.phase] || progress.value.phase : '准备中'))
-const percent = computed(() => {
-  const p = progress.value
-  if (!p || !p.total) return 0
-  return Math.min(100, Math.round((p.done / p.total) * 100))
-})
 
 /** 目标路径预览 */
 const targetPath = computed(() => {
@@ -103,7 +86,7 @@ watch(
   () => props.open,
   (open) => {
     if (!open) {
-      stopWatching()
+      end()
       return
     }
     step.value = 1
@@ -111,7 +94,7 @@ watch(
     newName.value = `${props.record?.projectName || 'project'}_restore_${stamp()}`
     destDir.value = props.project ? parentDir(props.project.path) : parentDir(props.record?.destPath)
     typed.value = ''
-    busy.value = false
+    running.value = false
     progress.value = null
     result.value = null
   }
@@ -132,14 +115,11 @@ function toStep2() {
 
 async function start() {
   const rec = props.record
-  if (!rec || busy.value) return
+  if (!rec || running.value) return
   if (mode.value === 'overwrite' && !typedOk.value) return
 
-  busy.value = true
-  result.value = null
-  progress.value = { phase: 'unpacking', done: 0, total: 0, current: '' }
+  begin()
   step.value = 3
-  startWatching()
 
   try {
     const r = await window.services.restoreBackup(
@@ -147,25 +127,14 @@ async function start() {
       mode.value === 'new'
         ? { mode: 'new', destDir: destDir.value.trim(), newName: newName.value.trim() }
         : { mode: 'overwrite' },
-      (p) => {
-        progress.value = { phase: p.phase, done: p.done, total: p.total, current: p.current }
-      }
+      report
     )
     result.value = r
     if (r.ok) emit('done')
   } catch (e: any) {
     result.value = { ok: false, error: e?.message || '恢复失败' }
   } finally {
-    busy.value = false
-    stopWatching()
-  }
-}
-
-function cancel() {
-  const t = activeTask.value
-  if (!t) return
-  if (!window.services.cancelBackupTask(t.id)) {
-    notify('已进入替换阶段,无法取消')
+    end()
   }
 }
 
@@ -182,7 +151,7 @@ function openTarget() {
 }
 
 function close() {
-  if (busy.value) return
+  if (running.value) return
   emit('close')
 }
 </script>
@@ -194,15 +163,15 @@ function close() {
         <div class="modal-head">
           <div class="modal-title"><Icon name="upload" :size="15" /> 恢复备份</div>
           <span class="grow"></span>
-          <button type="button" class="btn small ghost icon-x" title="关闭" :disabled="busy" @click="close">
+          <button type="button" class="btn small ghost icon-x" title="关闭" :disabled="running" @click="close">
             <Icon name="x" :size="14" />
           </button>
         </div>
 
         <!-- 步骤指示 -->
         <div class="seg rd-steps">
-          <button :class="{ on: step === 1 }" :disabled="busy || step === 3" @click="step = 1">1 选择方式</button>
-          <button :class="{ on: step === 2 }" :disabled="busy || step === 3" @click="step = 2">2 确认影响</button>
+          <button :class="{ on: step === 1 }" :disabled="running || step === 3" @click="step = 1">1 选择方式</button>
+          <button :class="{ on: step === 2 }" :disabled="running || step === 3" @click="step = 2">2 确认影响</button>
           <button :class="{ on: step === 3 }" disabled>3 执行</button>
         </div>
 
@@ -213,7 +182,7 @@ function close() {
               type="button"
               class="rd-mode"
               :class="{ on: mode === 'new' }"
-              :disabled="busy"
+              :disabled="running"
               @click="mode = 'new'"
             >
               <Icon name="copy" :size="16" />
@@ -224,7 +193,7 @@ function close() {
               type="button"
               class="rd-mode"
               :class="{ on: mode === 'overwrite', danger: true }"
-              :disabled="busy || orphan"
+              :disabled="running || orphan"
               :title="orphan ? '原项目记录已不存在,只能恢复为新项目' : '用备份内容替换原项目目录'"
               @click="mode = 'overwrite'"
             >
@@ -245,7 +214,7 @@ function close() {
                 class="input"
                 autocomplete="off"
                 spellcheck="false"
-                :disabled="busy"
+                :disabled="running"
               />
               <div class="f-hint wrap">
                 这只是目录名;在项目列表里显示的名称仍取自 <code>project.godot</code> 的 config/name。
@@ -261,9 +230,9 @@ function close() {
                   placeholder="选择恢复到的父目录"
                   autocomplete="off"
                   spellcheck="false"
-                  :disabled="busy"
+                  :disabled="running"
                 />
-                <button type="button" class="btn ghost" :disabled="busy" @click="chooseDestDir">
+                <button type="button" class="btn ghost" :disabled="running" @click="chooseDestDir">
                   <Icon name="folder" :size="14" /> 浏览
                 </button>
               </div>
@@ -310,7 +279,7 @@ function close() {
               autocomplete="off"
               spellcheck="false"
               :placeholder="expectName"
-              :disabled="busy"
+              :disabled="running"
             />
             <div v-if="typed && !typedOk" class="f-hint wrap rd-err">输入内容与项目名不一致</div>
           </div>
@@ -383,21 +352,21 @@ function close() {
         <div class="modal-foot">
           <template v-if="step === 1">
             <span class="grow"></span>
-            <button type="button" class="btn ghost" :disabled="busy" @click="close">取消</button>
-            <button type="button" class="btn primary" :disabled="busy" @click="toStep2">
+            <button type="button" class="btn ghost" :disabled="running" @click="close">取消</button>
+            <button type="button" class="btn primary" :disabled="running" @click="toStep2">
               下一步 <Icon name="chevron-right" :size="13" />
             </button>
           </template>
           <template v-else-if="step === 2">
             <span class="grow"></span>
-            <button type="button" class="btn ghost" :disabled="busy" @click="step = 1">
+            <button type="button" class="btn ghost" :disabled="running" @click="step = 1">
               <Icon name="chevron-left" :size="13" /> 上一步
             </button>
             <button
               type="button"
               class="btn"
               :class="mode === 'overwrite' ? 'del-confirm' : 'primary'"
-              :disabled="busy || (mode === 'overwrite' && !typedOk)"
+              :disabled="running || (mode === 'overwrite' && !typedOk)"
               @click="start"
             >
               <Icon name="upload" :size="13" />

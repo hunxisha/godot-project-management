@@ -4,10 +4,22 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from '../Icon.vue'
 import { getSettings, notify, openPath, pickDirectory, saveSettings } from '../../services/bridge'
+import { useTaskDialog } from '../../composables/useTaskDialog'
 import { fmtDuration, fmtSize } from '../../utils/format'
-import type { BackupTask, GodotProject } from '../../types/godot'
+import type { GodotProject } from '../../types/godot'
 
 type ProjectRow = GodotProject & { _id: string }
+
+/** 本次备份的结果(由对话框自己渲染) */
+type BackupResult = {
+  ok: boolean
+  canceled?: boolean
+  error?: string
+  size?: number
+  fileCount?: number
+  durationMs?: number
+  destPath?: string
+}
 
 const props = withDefaults(defineProps<{
   open: boolean
@@ -21,12 +33,23 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{ (e: 'close'): void, (e: 'done'): void }>()
 
-const PHASE_LABEL: Record<string, string> = {
-  scanning: '扫描文件',
-  packing: '压缩打包',
-  copying: '复制快照',
-  finalizing: '收尾'
-}
+// 任务订阅 / 进度百分比 / 可取消判断 / 取消失败提示都走共享组合式函数
+const {
+  progress,
+  result,
+  running,
+  canCancel,
+  phrase,
+  percent,
+  begin,
+  end,
+  report,
+  cancel
+} = useTaskDialog<BackupResult>({
+  kind: 'backup',
+  initialPhase: 'scanning',
+  cancelFailedMessage: '该阶段无法取消'
+})
 
 const targetId = ref('')
 const label = ref('')
@@ -39,34 +62,13 @@ const excludeBuild = ref(false)
 const makeDefault = ref(false)
 
 const advancedOpen = ref(false)
-const running = ref(false)
-const progress = ref<{ phase: string, done: number, total: number, current: string } | null>(null)
-const result = ref<{ ok: boolean, canceled?: boolean, error?: string, size?: number, fileCount?: number, durationMs?: number, destPath?: string } | null>(null)
 
 const estimate = ref<{ fileCount: number, bytes: number } | null>(null)
 const estimating = ref(false)
 const estimateError = ref('')
 
-// ---------- 任务订阅(取消) ----------
-const tasks = ref<BackupTask[]>([])
-let unwatch: (() => void) | null = null
-
-function startWatching() {
-  if (unwatch) return
-  unwatch = window.services.watchBackupTasks((snap) => { tasks.value = snap })
-}
-
-function stopWatching() {
-  if (unwatch) {
-    unwatch()
-    unwatch = null
-  }
-  tasks.value = []
-}
-
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeyDown)
-  stopWatching()
 })
 
 function onKeyDown(e: KeyboardEvent) {
@@ -74,9 +76,6 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 onMounted(() => window.addEventListener('keydown', onKeyDown))
-
-const activeTask = computed(() => tasks.value.find((t) => t.kind === 'backup'))
-const canCancel = computed(() => !result.value && !!activeTask.value && activeTask.value.cancelable !== false)
 
 const locked = computed(() => !!props.projectId)
 const targetProject = computed(() => props.projects.find((p) => p._id === targetId.value) || null)
@@ -86,15 +85,6 @@ const excludeList = computed(() => {
   if (excludeGit.value) list.push('.git')
   if (excludeBuild.value) list.push('build', 'export')
   return list
-})
-
-const phrase = computed(() =>
-  progress.value ? PHASE_LABEL[progress.value.phase] || progress.value.phase : '准备中'
-)
-const percent = computed(() => {
-  const p = progress.value
-  if (!p || !p.total) return 0
-  return Math.min(100, Math.round((p.done / p.total) * 100))
 })
 
 const canStart = computed(() =>
@@ -141,7 +131,7 @@ watch(
   () => props.open,
   (open) => {
     if (!open) {
-      stopWatching()
+      end()
       return
     }
     // 每次打开都重新读取设置,避免用到组件挂载时的过期快照
@@ -185,10 +175,7 @@ function chooseDir() {
 async function start() {
   const p = targetProject.value
   if (!p || !canStart.value) return
-  running.value = true
-  result.value = null
-  progress.value = { phase: 'scanning', done: 0, total: 0, current: '' }
-  startWatching()
+  begin()
   try {
     const rec = await window.services.backupProject(
       p._id,
@@ -200,9 +187,7 @@ async function start() {
         label: label.value.trim() || undefined,
         exclude: excludeList.value
       },
-      (pr) => {
-        progress.value = { phase: pr.phase, done: pr.done, total: pr.total, current: pr.current }
-      }
+      report
     )
     if (makeDefault.value) saveSettings({ backupRoot: destDir.value.trim() })
     result.value = {
@@ -218,15 +203,8 @@ async function start() {
     if (e?.canceled) result.value = { ok: false, canceled: true }
     else result.value = { ok: false, error: e?.message || '备份失败' }
   } finally {
-    running.value = false
-    stopWatching()
+    end()
   }
-}
-
-function cancel() {
-  const t = activeTask.value
-  if (!t) return
-  if (!window.services.cancelBackupTask(t.id)) notify('该阶段无法取消')
 }
 
 function reveal() {

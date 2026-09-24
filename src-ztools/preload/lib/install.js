@@ -5,39 +5,20 @@ const { downloadFile } = require('./http')
 const { extractZip, ensureDir, dirSize } = require('./extract')
 const { findExecutable, verifyExecutable, parseVersionOutput, parseTagFromFileName, currentPlatform, displayName } = require('./godotExe')
 const { putDoc, removeDoc } = require('./store')
+const { createTaskQueue } = require('./taskqueue')
 
-// ---------- 任务注册表 ----------
-// id → { pub(对外快照), handle(取消句柄) }
-const registry = new Map()
-const listeners = new Set()
+// ---------- 任务表(串行队列 + 进度订阅 + 取消) ----------
+// 通用机制在 taskqueue.js;这里只保留下载语义(id 形状、status 字段、取消句柄)。
+// 注:本模块的任务没有终态集合,因此任何状态都可被 dismiss(与原实现一致)。
+const tasks = createTaskQueue({
+  serial: true,
+  // 保留原有 id 形状:dl-<毫秒时间戳>-<5 位随机>
+  makeId: () => `dl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+})
 
-function emit() {
-  const snapshot = [...registry.values()].map((v) => v.pub)
-  for (const l of listeners) l(snapshot)
-}
-
+/** 更新任务字段(任务已被移除时静默跳过) */
 function setTask(id, patch) {
-  const cur = registry.get(id)
-  if (!cur) return
-  registry.set(id, { ...cur, pub: { ...cur.pub, ...patch } })
-  emit()
-}
-
-// ---------- 串行队列 ----------
-const queue = []
-let running = false
-
-async function pump() {
-  if (running) return
-  const job = queue.shift()
-  if (!job) return
-  running = true
-  try {
-    await job()
-  } finally {
-    running = false
-    pump()
-  }
+  tasks.patch(tasks.get(id), patch)
 }
 
 /**
@@ -46,28 +27,25 @@ async function pump() {
  * @param {{ versionsRoot: string }} opts
  */
 function downloadAndInstall(params, opts) {
-  const id = `dl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
   const finalUrl = params.url
-  registry.set(id, {
-    pub: {
-      id,
-      tag: params.tag,
-      variant: params.variant,
-      platform: params.platform,
-      url: finalUrl,
-      fileName: params.fileName,
-      totalSize: params.totalSize,
-      status: 'queued',
-      received: 0,
-      speed: 0
-    },
-    handle: null
+  const task = tasks.create({
+    tag: params.tag,
+    variant: params.variant,
+    platform: params.platform,
+    url: finalUrl,
+    fileName: params.fileName,
+    totalSize: params.totalSize,
+    status: 'queued',
+    received: 0,
+    speed: 0
   })
-  emit()
+  const id = task.id
+  // 创建后广播一次,让订阅者立刻看到排队中的任务
+  tasks.emit()
 
   const job = async () => {
-    const task = registry.get(id)
-    if (!task || task.pub.status === 'canceled') return
+    const queued = tasks.get(id)
+    if (!queued || queued.status === 'canceled') return
     const installDir = path.join(opts.versionsRoot, `Godot_${params.tag}_${params.variant}_${params.platform}`)
     const downloadsDir = path.join(opts.versionsRoot, 'downloads')
     const zipPath = path.join(downloadsDir, params.fileName + '.part')
@@ -87,23 +65,27 @@ function downloadAndInstall(params, opts) {
           setTask(id, { received, totalSize: total || params.totalSize, speed })
         }
       })
-      registry.set(id, { ...registry.get(id), handle: dl })
-      if (registry.get(id).pub.status === 'canceled') {
+      tasks.setToken(id, dl)
+      const cur = tasks.get(id)
+      if (!cur || cur.status === 'canceled') {
         dl.cancel()
         return
       }
       await dl.promise
-      if (registry.get(id).pub.status === 'canceled') return
+      const afterDownload = tasks.get(id)
+      if (!afterDownload || afterDownload.status === 'canceled') return
 
       setTask(id, { status: 'extracting' })
       await extractZip(zipPath, installDir)
-      if (registry.get(id).pub.status === 'canceled') return
+      const afterExtract = tasks.get(id)
+      if (!afterExtract || afterExtract.status === 'canceled') return
 
       setTask(id, { status: 'verifying' })
       const exePath = findExecutable(installDir)
       if (!exePath) throw new Error('解压后未找到 Godot 可执行文件')
       const { ok } = await verifyExecutable(exePath)
-      if (registry.get(id).pub.status === 'canceled') return
+      const afterVerify = tasks.get(id)
+      if (!afterVerify || afterVerify.status === 'canceled') return
 
       const versionId = `godot/version/${params.tag}-${params.variant}-${params.platform}`
       const version = {
@@ -136,34 +118,27 @@ function downloadAndInstall(params, opts) {
     }
   }
 
-  queue.push(job)
-  pump()
+  tasks.enqueue(job)
   return id
 }
 
 /** 取消任务(排队中直接取消;下载中销毁请求) */
 function cancelTask(id) {
-  const cur = registry.get(id)
-  if (!cur) return
-  if (cur.handle) {
-    cur.handle.cancel()
-    setTask(id, { status: 'canceled' })
-  } else {
-    setTask(id, { status: 'canceled' })
-  }
+  const task = tasks.get(id)
+  if (!task) return
+  const handle = tasks.tokenOf(id)
+  if (handle) handle.cancel()
+  setTask(id, { status: 'canceled' })
 }
 
 /** 移除任务记录(完成/取消/错误后由渲染层调用) */
 function dismissTask(id) {
-  registry.delete(id)
-  emit()
+  tasks.dismiss(id)
 }
 
 /** 订阅任务快照变化,返回取消订阅函数 */
 function watchTasks(fn) {
-  listeners.add(fn)
-  fn([...registry.values()].map((v) => v.pub))
-  return () => listeners.delete(fn)
+  return tasks.watch(fn)
 }
 
 // ---------- 导入本地引擎 ----------

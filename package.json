@@ -8,13 +8,14 @@
     "typecheck": "vue-tsc --noEmit",
     "build": "vue-tsc && vite build",
     "verify": "npm run typecheck && npm test",
-    "test": "npm run test:theme && npm run test:format && npm run test:preload && npm run test:preload:sandbox && npm run test:preload:unit && npm run test:addons && npm run test:composable",
+    "test": "npm run test:theme && npm run test:format && npm run test:preload && npm run test:preload:sandbox && npm run test:preload:unit && npm run test:addons && npm run test:taskdialog && npm run test:composable",
     "test:theme": "node src/__tests__/theme.test.mjs",
     "test:format": "node src/composables/__tests__/build-bundle.mjs && node src/__tests__/format.test.mjs",
     "test:preload": "node src-ztools/preload/lib/__tests__/backup.test.js",
     "test:preload:sandbox": "node src-ztools/preload/lib/__tests__/backup.test.js --no-immediate",
-    "test:preload:unit": "node src-ztools/preload/lib/__tests__/godotExe.test.js && node src-ztools/preload/lib/__tests__/services.test.js",
+    "test:preload:unit": "node src-ztools/preload/lib/__tests__/godotExe.test.js && node src-ztools/preload/lib/__tests__/taskqueue.test.js && node src-ztools/preload/lib/__tests__/install.test.js && node src-ztools/preload/lib/__tests__/services.test.js",
     "test:addons": "node src-ztools/preload/lib/__tests__/addons.test.js && node src-ztools/preload/lib/__tests__/addons.test.js --no-immediate",
+    "test:taskdialog": "node src/composables/__tests__/build-bundle.mjs && node src/composables/__tests__/useTaskDialog.test.mjs",
     "test:composable": "node src/composables/__tests__/build-bundle.mjs && node src/composables/__tests__/useBackups.test.mjs"
   },
   "dependencies": {
