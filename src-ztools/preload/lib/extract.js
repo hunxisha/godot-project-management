@@ -1,16 +1,20 @@
-// 零依赖 ZIP 解压:纯 Node 实现(zlib + 缓冲区解析),不依赖 PowerShell/unzip 等外部命令,
+// 零依赖 ZIP 解压/打包:纯 Node 实现(zlib + 缓冲区解析),不依赖 PowerShell/unzip 等外部命令,
 // 从根上规避执行策略、源文件扩展名检查、杀软误报等环境问题。
 // 支持 stored(0)/deflate(8)条目、目录条目、UTF-8 文件名、路径穿越防护、zip64 检测。
+//
+// 重要:preload 与渲染层同线程,长循环会冻结界面。本模块所有遍历循环都通过
+// fsutil.forEachSliced 周期性让出事件循环,并支持取消令牌。
 const fs = require('node:fs')
 const path = require('node:path')
 const zlib = require('node:zlib')
+const { forEachSliced, yieldToLoop, checkCancel } = require('./fsutil')
 
 /** 确保目录存在 */
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true })
 }
 
-/** 定位 EOCD(End Of Central Directory)记录:从文件尾向前扫描签名 */
+/** 定位 EOCD(End Of Central Directory)记录:从缓冲区尾部向前扫描签名 */
 function findEOCD(buf) {
   const min = Math.max(0, buf.length - 65557) // EOCD + 最大注释长度 65535
   for (let i = buf.length - 22; i >= min; i--) {
@@ -19,77 +23,185 @@ function findEOCD(buf) {
   throw new Error('ZIP 解析失败:未找到目录结束记录(文件可能下载不完整)')
 }
 
+/** EOCD + 最大注释长度的读取窗口 */
+const EOCD_WINDOW = 65557
+
 /**
- * 解压 zip 到 destDir(同步,引擎包 ≤100MB,内存可承受)
+ * 从文件句柄读取并解析中央目录。
+ * 只读文件尾部窗口 + 中央目录区,不把整个 zip 载入内存(项目备份可能达数 GB)。
+ * @returns {{fd:number, size:number, count:number, cd:Buffer}}
+ */
+function openCentralDirectory(zipPath) {
+  const fd = fs.openSync(zipPath, 'r')
+  try {
+    const size = fs.fstatSync(fd).size
+    if (size < 22) throw new Error('ZIP 文件过小,可能下载不完整')
+    const tailLen = Math.min(size, EOCD_WINDOW)
+    const tail = Buffer.alloc(tailLen)
+    fs.readSync(fd, tail, 0, tailLen, size - tailLen)
+    const eocd = findEOCD(tail)
+    const count = tail.readUInt16LE(eocd + 10)
+    const cdSize = tail.readUInt32LE(eocd + 12)
+    const cdOff = tail.readUInt32LE(eocd + 16)
+    if (cdOff === 0xFFFFFFFF || count === 0xFFFF) {
+      throw new Error('ZIP64 格式暂不支持')
+    }
+    if (cdOff + cdSize > size) {
+      throw new Error('ZIP 解析失败:中央目录越界(文件可能损坏)')
+    }
+    const cd = Buffer.alloc(cdSize)
+    fs.readSync(fd, cd, 0, cdSize, cdOff)
+    return { fd, size, count, cd }
+  } catch (e) {
+    fs.closeSync(fd)
+    throw e
+  }
+}
+
+/**
+ * 解析中央目录条目。
+ * @returns {{name:string, method:number, compSize:number, rawSize:number, dataOff:number}[]}
+ */
+function parseEntries(zipPath) {
+  const { fd, size, count, cd } = openCentralDirectory(zipPath)
+  try {
+    const entries = []
+    let ptr = 0
+    for (let n = 0; n < count; n++) {
+      if (ptr + 46 > cd.length || cd.readUInt32LE(ptr) !== 0x02014b50) {
+        throw new Error('ZIP 解析失败:目录记录签名错误(文件可能损坏)')
+      }
+      const flags = cd.readUInt16LE(ptr + 8)
+      const method = cd.readUInt16LE(ptr + 10)
+      const compSize = cd.readUInt32LE(ptr + 20)
+      const rawSize = cd.readUInt32LE(ptr + 24)
+      const nameLen = cd.readUInt16LE(ptr + 28)
+      const extraLen = cd.readUInt16LE(ptr + 30)
+      const commentLen = cd.readUInt16LE(ptr + 32)
+      const localOff = cd.readUInt32LE(ptr + 42)
+
+      const nameRaw = cd.slice(ptr + 46, ptr + 46 + nameLen)
+      const name = flags & 0x800 ? nameRaw.toString('utf8') : nameRaw.toString('latin1')
+      ptr += 46 + nameLen + extraLen + commentLen
+
+      // 定位本地文件头与其后的数据区
+      if (localOff + 30 > size) {
+        throw new Error('ZIP 解析失败:本地文件头越界: ' + name)
+      }
+      const lh = Buffer.alloc(30)
+      fs.readSync(fd, lh, 0, 30, localOff)
+      if (lh.readUInt32LE(0) !== 0x04034b50) {
+        throw new Error('ZIP 解析失败:本地文件头签名错误: ' + name)
+      }
+      const lhNameLen = lh.readUInt16LE(26)
+      const lhExtraLen = lh.readUInt16LE(28)
+      const dataOff = localOff + 30 + lhNameLen + lhExtraLen
+      if (dataOff + compSize > size) {
+        throw new Error('ZIP 解析失败:条目数据越界(文件可能被截断): ' + name)
+      }
+      entries.push({ name, method, compSize, rawSize, dataOff })
+    }
+    return { entries, fd, size }
+  } catch (e) {
+    fs.closeSync(fd)
+    throw e
+  }
+}
+
+/**
+ * 列出 zip 内的条目名(用于校验备份内容是否完整)。
+ * @returns {{entries:string[], count:number}}
+ */
+function readZipEntries(zipPath) {
+  const { entries, fd } = parseEntries(zipPath)
+  fs.closeSync(fd)
+  return { entries: entries.map((e) => e.name), count: entries.length }
+}
+
+/**
+ * 解压 zip 到 destDir。
+ * 逐个条目随机读取(峰值内存 = 单个最大文件),分片让出事件循环,支持取消与进度。
  * @param {string} zipPath zip 文件路径(任意扩展名)
  * @param {string} destDir 目标目录(自动创建)
+ * @param {{onProgress?:Function, token?:object}} [opts]
  */
-function extractZip(zipPath, destDir) {
-  const buf = fs.readFileSync(zipPath)
-  if (buf.length < 22) throw new Error('ZIP 文件过小,可能下载不完整')
+async function extractZip(zipPath, destDir, opts) {
+  const o = opts || {}
+  const { entries, fd, size } = parseEntries(zipPath)
+  try {
+    ensureDir(destDir)
+    const destRoot = path.resolve(destDir)
+    let written = 0
+    let sliceStart = Date.now()
+    const sliceMs = (o.sliceMs || 30)
+    const sliceFiles = (o.sliceFiles || 24)
 
-  const eocd = findEOCD(buf)
-  const cdOff = buf.readUInt32LE(eocd + 16)
-  const count = buf.readUInt16LE(eocd + 10)
-  if (cdOff === 0xFFFFFFFF || count === 0xFFFF) {
-    throw new Error('ZIP64 格式暂不支持')
+    for (let n = 0; n < entries.length; n++) {
+      const e = entries[n]
+
+      // 防路径穿越(zip slip)
+      const target = path.join(destRoot, e.name)
+      const resolved = path.resolve(target)
+      if (resolved !== destRoot && !resolved.startsWith(destRoot + path.sep)) {
+        throw new Error('ZIP 条目路径非法: ' + e.name)
+      }
+
+      if (e.name.endsWith('/') || e.name.endsWith('\\')) {
+        fs.mkdirSync(target, { recursive: true })
+      } else {
+        fs.mkdirSync(path.dirname(target), { recursive: true })
+        const comp = Buffer.alloc(e.compSize)
+        if (e.compSize) fs.readSync(fd, comp, 0, e.compSize, e.dataOff)
+        let data
+        if (e.method === 0) {
+          data = comp
+        } else if (e.method === 8) {
+          data = zlib.inflateRawSync(comp) // 内置 adler32 校验,损坏数据会抛错
+        } else {
+          throw new Error('ZIP 条目使用了不支持的压缩方式(' + e.method + '): ' + e.name)
+        }
+        if (data.length !== e.rawSize) {
+          throw new Error('ZIP 条目大小校验失败: ' + e.name)
+        }
+        fs.writeFileSync(target, data)
+        written += data.length
+      }
+
+      if (o.onProgress) {
+        o.onProgress({
+          phase: o.phase || 'unpacking',
+          done: n + 1,
+          total: entries.length,
+          current: e.name,
+          bytes: written
+        })
+      }
+      const last = n === entries.length - 1
+      if (!last && (n % sliceFiles === sliceFiles - 1 || Date.now() - sliceStart > sliceMs)) {
+        await yieldToLoop()
+        checkCancel(o.token)
+        sliceStart = Date.now()
+      }
+    }
+  } finally {
+    fs.closeSync(fd)
   }
+}
 
-  ensureDir(destDir)
-  const destRoot = path.resolve(destDir)
-  let ptr = cdOff
-
-  for (let n = 0; n < count; n++) {
-    if (buf.readUInt32LE(ptr) !== 0x02014b50) {
-      throw new Error('ZIP 解析失败:目录记录签名错误(文件可能损坏)')
+/**
+ * 校验 zip 是否可解析且包含指定条目(如 project.godot)。
+ * @returns {{ok:boolean, entries:string[], error?:string}}
+ */
+function inspectZip(zipPath, requiredEntry) {
+  try {
+    const { entries } = readZipEntries(zipPath)
+    if (!entries.length) return { ok: false, entries, error: '压缩包内没有任何条目' }
+    if (requiredEntry && !entries.includes(requiredEntry)) {
+      return { ok: false, entries, error: `压缩包内未找到 ${requiredEntry}` }
     }
-    const flags = buf.readUInt16LE(ptr + 8)
-    const method = buf.readUInt16LE(ptr + 10)
-    const compSize = buf.readUInt32LE(ptr + 20)
-    const rawSize = buf.readUInt32LE(ptr + 24)
-    const nameLen = buf.readUInt16LE(ptr + 28)
-    const extraLen = buf.readUInt16LE(ptr + 30)
-    const commentLen = buf.readUInt16LE(ptr + 32)
-    const localOff = buf.readUInt32LE(ptr + 42)
-
-    const nameRaw = buf.slice(ptr + 46, ptr + 46 + nameLen)
-    const name = flags & 0x800 ? nameRaw.toString('utf8') : nameRaw.toString('latin1')
-    ptr += 46 + nameLen + extraLen + commentLen
-
-    // 定位本地文件头与其后的数据区
-    if (buf.readUInt32LE(localOff) !== 0x04034b50) {
-      throw new Error('ZIP 解析失败:本地文件头签名错误: ' + name)
-    }
-    const lhNameLen = buf.readUInt16LE(localOff + 26)
-    const lhExtraLen = buf.readUInt16LE(localOff + 28)
-    const dataOff = localOff + 30 + lhNameLen + lhExtraLen
-
-    // 防路径穿越(zip slip)
-    const entry = path.join(destRoot, name)
-    const resolved = path.resolve(entry)
-    if (resolved !== destRoot && !resolved.startsWith(destRoot + path.sep)) {
-      throw new Error('ZIP 条目路径非法: ' + name)
-    }
-
-    if (name.endsWith('/') || name.endsWith('\\')) {
-      fs.mkdirSync(entry, { recursive: true })
-      continue
-    }
-
-    fs.mkdirSync(path.dirname(entry), { recursive: true })
-    const comp = buf.slice(dataOff, dataOff + compSize)
-    let data
-    if (method === 0) {
-      data = comp
-    } else if (method === 8) {
-      data = zlib.inflateRawSync(comp) // 内置 adler32 校验,损坏数据会抛错
-    } else {
-      throw new Error('ZIP 条目使用了不支持的压缩方式(' + method + '): ' + name)
-    }
-    if (data.length !== rawSize) {
-      throw new Error('ZIP 条目大小校验失败: ' + name)
-    }
-    fs.writeFileSync(entry, data)
+    return { ok: true, entries }
+  } catch (e) {
+    return { ok: false, entries: [], error: (e && e.message) || '压缩包无法解析' }
   }
 }
 
@@ -143,20 +255,34 @@ function dosDateTime(d) {
 }
 
 /**
- * 把 srcDir 目录打包为 zip(异步逐文件,deflate 压缩,保留 mtime)。
+ * 把 srcDir 目录打包为 zip(分片让出事件循环,可取消)。
+ * 调用方负责写临时路径并在成功后 rename,失败时清理 —— 本函数不保证失败后 zip 可用。
+ *
  * @param {string} srcDir 源目录
- * @param {string} zipPath 目标 zip 文件
- * @param {(p: {done:number,total:number,current:string,bytes:number}) => void} [onProgress] 每文件回调
- * @param {(absPath:string,name:string,isDir:boolean) => boolean} [exclude] 返回 true 跳过
- * @returns {Promise<{fileCount:number,bytes:number}>}
+ * @param {string} zipPath 目标 zip 文件(应为临时路径)
+ * @param {{
+ *   onProgress?: (p:{phase:string,done:number,total:number,current:string,bytes:number}) => void,
+ *   includeCache?: boolean,
+ *   exclude?: (name:string,isDir:boolean) => boolean,
+ *   level?: 1|6|9,
+ *   token?: object,
+ *   phase?: string
+ * }} [opts] includeCache=false 时跳过 .godot;exclude 命中则跳过该目录
+ * @returns {Promise<{fileCount:number, bytes:number}>}
  */
-async function createZip(srcDir, zipPath, onProgress, exclude) {
+async function createZip(srcDir, zipPath, opts) {
+  const o = opts || {}
+  const includeCache = o.includeCache !== false
+  const exclude = o.exclude
+  const level = o.level === 1 || o.level === 9 ? o.level : 6
+
   const files = []
   const walk = (dir, rel) => {
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (exclude && exclude(ent.name, ent.isDirectory())) continue
+      if (!includeCache && ent.isDirectory() && ent.name === '.godot') continue
       const abs = path.join(dir, ent.name)
       const relPath = rel ? rel + '/' + ent.name : ent.name
-      if (exclude && exclude(abs, ent.name, ent.isDirectory())) continue
       if (ent.isDirectory()) walk(abs, relPath)
       else if (ent.isFile()) files.push({ abs, rel: relPath })
     }
@@ -168,10 +294,9 @@ async function createZip(srcDir, zipPath, onProgress, exclude) {
   const central = []
   let offset = 0
   try {
-    for (let i = 0; i < files.length; i++) {
-      const f = files[i]
+    await forEachSliced(files, (f, i) => {
       const data = fs.readFileSync(f.abs)
-      const deflated = zlib.deflateRawSync(data, { level: 6 })
+      const deflated = zlib.deflateRawSync(data, { level })
       const useDeflate = deflated.length < data.length
       const payload = useDeflate ? deflated : data
       const method = useDeflate ? 8 : 0
@@ -197,8 +322,16 @@ async function createZip(srcDir, zipPath, onProgress, exclude) {
 
       central.push({ nameBuf, crc, method, time, date, compSize: payload.length, rawSize: data.length, offset })
       offset += 30 + nameBuf.length + payload.length
-      if (onProgress) onProgress({ done: i + 1, total, current: f.rel, bytes: offset })
-    }
+      if (o.onProgress) {
+        o.onProgress({
+          phase: o.phase || 'packing',
+          done: i + 1,
+          total,
+          current: f.rel,
+          bytes: offset
+        })
+      }
+    }, { token: o.token, sliceFiles: o.sliceFiles, sliceMs: o.sliceMs })
 
     // central directory(cdSize 必须按实际写入字节累加,标准解压工具按该长度读取)
     const cdStart = offset
@@ -237,4 +370,11 @@ async function createZip(srcDir, zipPath, onProgress, exclude) {
   }
 }
 
-module.exports = { extractZip, ensureDir, dirSize, createZip }
+module.exports = {
+  ensureDir,
+  dirSize,
+  extractZip,
+  inspectZip,
+  readZipEntries,
+  createZip
+}

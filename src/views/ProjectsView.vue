@@ -4,6 +4,7 @@ import { getSettings, isWindows, notify, pickDirectory, putDoc } from '../servic
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import { openProjectAction } from '../composables/useProjectActions'
+import { fmtSize, formatRelative, formatTime } from '../utils/format'
 import type { BackupRecord, GodotProject, GodotVersion, OpenAction } from '../types/godot'
 
 type Row = GodotProject & { _id: string }
@@ -344,24 +345,6 @@ function doDeleteBackup(b: BackupRecord) {
   notify('已删除备份(移入回收站)')
 }
 
-function fmtSize(n?: number): string {
-  if (!n) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
-  let v = n
-  let i = 0
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i++
-  }
-  return `${v.toFixed(v >= 100 || i === 0 ? 0 : 1)} ${units[i]}`
-}
-
-function formatTime(ts: number): string {
-  const d = new Date(ts)
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
-}
-
 function openProject(p: Row, action?: OpenAction) {
   openProjectAction(p, action)
 }
@@ -374,16 +357,6 @@ function mismatch(p: Row): boolean {
   if (!v) return false
   const minor = p.engineVersion.split('.').slice(0, 2).join('.')
   return !v.tag.startsWith(minor + '.') && !v.tag.startsWith(minor + '-')
-}
-
-function formatLastOpened(ts?: number): string {
-  if (!ts) return '从未打开'
-  const diff = Date.now() - ts
-  if (diff < 60 * 1000) return '刚刚'
-  if (diff < 3600 * 1000) return `${Math.floor(diff / 60000)} 分钟前`
-  if (diff < 24 * 3600 * 1000) return `${Math.floor(diff / 3600000)} 小时前`
-  const d = new Date(ts)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 /** 项目名 → 头像渐变组 */
@@ -491,12 +464,12 @@ function onKeyDown(e: KeyboardEvent) {
                   {{ v.variant === 'mono' ? `${v.name} (C#)` : v.name }}
                 </option>
               </select>
-              <span class="opened"><Icon name="clock" :size="11" /> {{ formatLastOpened(p.lastOpenedAt) }}</span>
+              <span class="opened"><Icon name="clock" :size="11" /> {{ formatRelative(p.lastOpenedAt, '从未打开') }}</span>
               <span
                 v-if="lastBackups[p._id]"
                 class="opened"
                 :title="`最近备份:${lastBackups[p._id].destPath}(${lastBackups[p._id].mode === 'zip' ? 'zip 打包' : '完整快照'})`"
-              ><Icon name="box" :size="11" /> 备份于 {{ formatLastOpened(lastBackups[p._id].createdAt) }}</span>
+              ><Icon name="box" :size="11" /> 备份于 {{ formatRelative(lastBackups[p._id].createdAt) }}</span>
             </div>
           </div>
           <div class="row-actions">

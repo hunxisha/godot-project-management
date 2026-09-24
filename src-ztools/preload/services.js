@@ -3,6 +3,7 @@
 const { currentPlatform, fetchReleases } = require('./lib/releases')
 const install = require('./lib/install')
 const projects = require('./lib/projects')
+const backup = require('./lib/backup')
 const { launchProject } = require('./lib/launcher')
 const assets = require('./lib/assets')
 
@@ -33,14 +34,38 @@ window.services = {
   removeProject: (id, deleteFiles) => projects.removeProject(id, deleteFiles),
   /** 复制插件目录到另一个项目 */
   copyAddonsToProject: (opts) => projects.copyAddonsToProject(opts),
-  /** 备份项目(mode: 'zip' 打包 | 'copy' 快照复制;onProgress 每文件回调) */
-  backupProject: (projectId, opts, onProgress) => projects.backupProject(projectId, opts, onProgress),
-  /** 备份记录列表(按时间倒序,projectId 为空返回全部) */
-  listBackups: (projectId) => projects.listBackups(projectId),
+  /** 备份项目:先写临时产物,成功后原子改名并落库;失败/取消不留痕迹 */
+  backupProject: (projectId, opts, onProgress) => backup.backupProject(projectId, opts, onProgress),
+  /** 预估备份规模(文件数 + 字节) */
+  estimateBackup: (projectId, opts) => backup.estimateBackup(projectId, opts),
+  /** 备份记录列表(按时间倒序);兼容 listBackups(projectId) 与 listBackups({projectId, withStatus}) */
+  listBackups: (arg) => backup.listBackups(arg),
+  /** 每个项目最近一份备份(preload 侧聚合,避免渲染层拉全量) */
+  listLatestBackups: () => backup.listLatestBackups(),
+  /** 单条备份记录 */
+  getBackup: (backupId) => backup.getBackup(backupId),
+  /** 备份汇总统计(份数 / 占用 / 缺失 / 覆盖项目数) */
+  backupStats: () => backup.backupStats(),
+  /** 更新备份备注名(label 传空串清除) */
+  updateBackup: (backupId, patch) => backup.updateBackup(backupId, patch),
+  /** 校验备份内容是否可用(是否含 project.godot) */
+  verifyBackup: (backupId) => backup.verifyBackup(backupId),
+  /** 删除备份(记录 + 文件移入回收站;keepRecordOnly=true 仅移除记录) */
+  deleteBackup: (backupId, opts) => backup.deleteBackup(backupId, opts),
+  /** 批量删除备份 */
+  deleteBackups: (backupIds, opts) => backup.deleteBackups(backupIds, opts),
+  /** 清理备份(默认 dryRun:true 只返回预览,需显式传 dryRun:false 才执行) */
+  pruneBackups: (opts) => backup.pruneBackups(opts),
   /** 从备份恢复(mode: 'overwrite' 覆盖原项目 | 'new' 恢复为新项目) */
-  restoreBackup: (backupId, opts) => projects.restoreBackup(backupId, opts),
-  /** 删除备份(记录 + 文件移入回收站) */
-  deleteBackup: (backupId) => projects.deleteBackup(backupId),
+  restoreBackup: (backupId, opts, onProgress) => backup.restoreBackup(backupId, opts, onProgress),
+  /** 进行中的备份/恢复任务快照 */
+  listBackupTasks: () => backup.listBackupTasks(),
+  /** 订阅备份任务快照,返回取消订阅函数 */
+  watchBackupTasks: (fn) => backup.watchBackupTasks(fn),
+  /** 取消备份/恢复任务(进入不可回滚阶段后返回 false) */
+  cancelBackupTask: (taskId) => backup.cancelBackupTask(taskId),
+  /** 移除已结束的任务记录 */
+  dismissBackupTask: (taskId) => backup.dismissBackupTask(taskId),
   /** 启动项目(editor=打开编辑器带 -e,run=直接运行) */
   launchProject: (opts) => launchProject(opts),
   /** 搜索 Asset Store */

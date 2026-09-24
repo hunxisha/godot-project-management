@@ -67,6 +67,18 @@ export interface GodotSettings {
   deleteProjectFiles: 'ask' | 'always' | 'never'
   /** 项目备份默认目录 */
   backupRoot?: string
+  /** 默认备份方式:zip 打包 | copy 完整快照 */
+  backupMode?: 'zip' | 'copy'
+  /** 默认是否包含 .godot 编辑器缓存 */
+  backupIncludeCache?: boolean
+  /** zip 默认压缩级别:1 快速 | 6 标准 | 9 最大 */
+  backupLevel?: 1 | 6 | 9
+  /** 默认排除的目录名(如 .git / build) */
+  backupExclude?: string[]
+  /** 保留策略:每个项目最多保留份数(不设则不自动清理) */
+  backupKeepPerProject?: number
+  /** 保留策略:删除早于 N 天的备份 */
+  backupKeepDays?: number
 }
 
 /** 项目备份记录 */
@@ -82,8 +94,69 @@ export interface BackupRecord {
   size: number
   fileCount: number
   createdAt: number
-  /** 备份文件已被外部删除 */
+  /** 备份文件已被外部删除(派生字段,由 listBackups 计算) */
   missing?: boolean
+
+  // ---------- 以下为 schema 2 新增,全部可选以保证旧记录可读 ----------
+  /** 用户备注名,如「发布前」;空则由 UI 以「项目名 + 时间」兜底 */
+  label?: string
+  /** 是否包含 .godot 缓存 */
+  includeCache?: boolean
+  /** zip 压缩级别 */
+  level?: 1 | 6 | 9
+  /** 备份时项目绑定的引擎版本 tag */
+  engineVersion?: string
+  /** 备份时 project.godot 的 config_version */
+  configVersion?: number
+  /** 本次备份实际排除的目录名 */
+  excluded?: string[]
+  /** 完整性校验结果(verifyBackup 写入) */
+  verified?: boolean
+  verifiedAt?: number
+  verifyError?: string
+  /** 备份耗时(毫秒) */
+  durationMs?: number
+  /** 记录结构版本:1=旧记录,2=当前 */
+  schema?: number
+}
+
+/** 备份汇总统计(备份页统计头) */
+export interface BackupStats {
+  count: number
+  totalSize: number
+  missingCount: number
+  /** 有备份且项目仍存在的项目数 */
+  coveredProjects: number
+  totalProjects: number
+  byMode: { zip: number, copy: number }
+}
+
+/** 备份/恢复任务阶段 */
+export type BackupPhase =
+  | 'scanning' | 'packing' | 'copying' | 'finalizing'
+  | 'unpacking' | 'replacing' | 'registering'
+  | 'done' | 'error' | 'canceled'
+
+/** 进行中的备份/恢复任务快照 */
+export interface BackupTask {
+  id: string
+  kind: 'backup' | 'restore'
+  projectId: string
+  projectName: string
+  label?: string
+  mode: 'zip' | 'copy' | 'overwrite' | 'new'
+  phase: BackupPhase
+  done: number
+  total: number
+  bytes: number
+  current: string
+  startedAt: number
+  finishedAt?: number
+  error?: string
+  /** 已请求取消(尚未落到终态) */
+  cancelRequested?: boolean
+  /** false 表示已进入不可回滚阶段,取消不再生效 */
+  cancelable?: boolean
 }
 
 export const DEFAULT_SETTINGS: GodotSettings = {
@@ -203,5 +276,13 @@ export const DOC_ID = {
   version: (tag: string, variant: Variant, platform: Platform) =>
     `godot/version/${tag}-${variant}-${platform}`,
   project: (id: string) => `godot/project/${id}`,
+  backup: (id: string) => `godot/backup/${id}`,
   addon: (projectId: string, assetId: number) => `godot/asset/${projectId}/${assetId}`
+} as const
+
+export const DOC_PREFIX = {
+  project: 'godot/project/',
+  version: 'godot/version/',
+  backup: 'godot/backup/',
+  asset: 'godot/asset/'
 } as const

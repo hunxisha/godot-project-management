@@ -3,6 +3,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const crypto = require('node:crypto')
 const { getDoc, putDoc, removeDoc, listDocs } = require('./store')
+const { trashPath } = require('./fsutil')
 
 const IGNORE_DIRS = new Set(['.git', '.godot', 'node_modules', '.import', 'build', 'dist', 'addons'])
 
@@ -242,18 +243,8 @@ function removeProject(id, deleteFiles) {
       if (!fs.existsSync(path.join(project.path, 'project.godot'))) {
         return { ok: false, error: '目录校验失败(未找到 project.godot),已取消删除文件,仅移除记录请重试' }
       }
-      if (process.platform === 'win32') {
-        // PowerShell 调用 VB FileSystem 将目录移入回收站
-        const ps =
-          "Add-Type -AssemblyName Microsoft.VisualBasic; " +
-          `[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory(${JSON.stringify(project.path)}, 'OnlyErrorDialogs', 'SendToRecycleBin')`
-        require('node:child_process').execSync(
-          `powershell.exe -NoProfile -Command ${JSON.stringify(ps)}`,
-          { stdio: 'ignore' }
-        )
-      } else {
-        fs.rmSync(project.path, { recursive: true, force: true })
-      }
+      // Windows 移入回收站,其他平台永久删除
+      trashPath(project.path, true)
     }
     removeDoc(id)
     return { ok: true, filesDeleted: !!deleteFiles }
@@ -298,205 +289,11 @@ function copyAddonsToProject({ sourceProjectId, dirNames, targetProjectId }) {
   }
 }
 
-// ---------- 项目备份(zip 打包 / 完整快照 / 恢复) ----------
-
-const { createZip, ensureDir, extractZip } = require('./extract')
-
-/** Windows 非法文件名字符过滤 */
-function sanitizeName(s) {
-  return String(s || '').replace(/[\\/:*?"<>|]/g, '_').trim() || 'project'
-}
-
-/** 时间戳文件名片段 YYYYMMDD_HHmm */
-function stamp() {
-  const d = new Date()
-  const p = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`
-}
-
-/** 移入回收站(Windows)/永久删除(其他平台) */
-function trashPath(p, isDir) {
-  if (process.platform === 'win32') {
-    const method = isDir ? 'DeleteDirectory' : 'DeleteFile'
-    const ps =
-      "Add-Type -AssemblyName Microsoft.VisualBasic; " +
-      `[Microsoft.VisualBasic.FileIO.FileSystem]::${method}(${JSON.stringify(p)}, 'OnlyErrorDialogs', 'SendToRecycleBin')`
-    require('node:child_process').execSync(
-      `powershell.exe -NoProfile -Command ${JSON.stringify(ps)}`,
-      { stdio: 'ignore' }
-    )
-  } else if (isDir) {
-    fs.rmSync(p, { recursive: true, force: true })
-  } else {
-    fs.unlinkSync(p)
-  }
-}
-
-/** 递归复制目录(可跳过 .godot 缓存),返回 {fileCount, bytes} */
-async function copyTree(src, dest, includeCache, onProgress) {
-  const files = []
-  const walk = (dir, rel) => {
-    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (!includeCache && ent.isDirectory() && ent.name === '.godot') continue
-      const abs = path.join(dir, ent.name)
-      const relPath = rel ? rel + '/' + ent.name : ent.name
-      if (ent.isDirectory()) walk(abs, relPath)
-      else if (ent.isFile()) files.push({ abs, rel: relPath })
-    }
-  }
-  walk(src, '')
-  // 注意:preload 环境的 fs.promises 不完整(无 write),统一用同步 API 保持可靠
-  fs.mkdirSync(dest, { recursive: true })
-  let bytes = 0
-  for (let i = 0; i < files.length; i++) {
-    const f = files[i]
-    const target = path.join(dest, ...f.rel.split('/'))
-    fs.mkdirSync(path.dirname(target), { recursive: true })
-    fs.copyFileSync(f.abs, target)
-    bytes += fs.statSync(f.abs).size
-    if (onProgress) onProgress({ done: i + 1, total: files.length, current: f.rel, bytes })
-  }
-  return { fileCount: files.length, bytes }
-}
-
-/**
- * 备份项目。
- * mode: 'zip'(打包为单个 zip) | 'copy'(复制为完整快照目录)
- * includeCache: 是否包含 .godot 编辑器缓存(默认排除,体积小且可再生成)
- */
-async function backupProject(projectId, { mode, destDir, includeCache }, onProgress) {
-  const project = getDoc(projectId)
-  if (!project) throw new Error('项目不存在')
-  if (!fs.existsSync(path.join(project.path, 'project.godot'))) {
-    throw new Error('项目目录校验失败(未找到 project.godot)')
-  }
-  ensureDir(destDir)
-  const name = sanitizeName(project.name || path.basename(project.path))
-  const ts = stamp()
-  let destPath
-  let stat
-  if (mode === 'zip') {
-    destPath = path.join(destDir, `${name}_${ts}.zip`)
-    stat = await createZip(
-      project.path,
-      destPath,
-      onProgress,
-      (abs, entryName, isDir) => !includeCache && isDir && entryName === '.godot'
-    )
-  } else {
-    destPath = path.join(destDir, `${name}_${ts}`)
-    stat = await copyTree(project.path, destPath, includeCache, onProgress)
-  }
-  const record = {
-    _id: `godot/backup/${crypto.randomUUID()}`,
-    projectId,
-    projectName: project.name,
-    mode,
-    destPath,
-    size: stat.bytes,
-    fileCount: stat.fileCount,
-    createdAt: Date.now()
-  }
-  putDoc(record)
-  return record
-}
-
-/** 列出备份记录(按时间倒序),校验备份文件是否还存在 */
-function listBackups(projectId) {
-  const list = listDocs('godot/backup/')
-    .filter((d) => !projectId || d.projectId === projectId)
-    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-  return list.map((d) => ({ ...d, missing: !fs.existsSync(d.destPath) }))
-}
-
-/**
- * 从备份恢复。
- * mode 'overwrite': 覆盖原项目目录(原目录先改名,成功后移入回收站,失败自动回滚)
- * mode 'new': 恢复为新项目(默认放原项目同级,目录名带 _restore 时间戳)
- */
-async function restoreBackup(backupId, { mode, destDir }) {
-  const record = getDoc(backupId)
-  if (!record) return { ok: false, error: '备份记录不存在' }
-  if (!fs.existsSync(record.destPath)) return { ok: false, error: '备份文件已不存在: ' + record.destPath }
-
-  // 准备源目录:zip 先解压到备份同级的临时目录;copy 快照直接使用
-  let srcDir = record.destPath
-  let tmpDir = ''
-  if (record.mode === 'zip') {
-    tmpDir = path.join(path.dirname(record.destPath), `.godot-restore-${Date.now()}`)
-    extractZip(record.destPath, tmpDir)
-    srcDir = tmpDir
-  }
-  const cleanup = () => {
-    if (tmpDir && fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true })
-  }
-  if (!fs.existsSync(path.join(srcDir, 'project.godot'))) {
-    cleanup()
-    return { ok: false, error: '备份内容无效(未找到 project.godot)' }
-  }
-
-  try {
-    const project = getDoc(record.projectId)
-    if (mode === 'new') {
-      const base = destDir || (project ? path.dirname(project.path) : path.dirname(record.destPath))
-      const name = sanitizeName(record.projectName || path.basename(srcDir))
-      const target = path.join(base, `${name}_restore_${stamp()}`)
-      await copyTree(srcDir, target, true)
-      const r = addProject(target)
-      cleanup()
-      if (!r || !r.ok) return { ok: false, error: (r && r.error) || '新项目注册失败' }
-      return { ok: true, newProjectName: r.project ? r.project.name : name }
-    }
-
-    if (!project) return { ok: false, error: '原项目记录不存在,请选择「恢复为新项目」' }
-    if (!fs.existsSync(path.join(project.path, 'project.godot'))) {
-      return { ok: false, error: '原项目目录无效(未找到 project.godot)' }
-    }
-    // 覆盖:原目录改名保留 → 复制备份内容 → 成功后旧目录移入回收站
-    const oldDir = `${project.path}_old_${Date.now()}`
-    fs.renameSync(project.path, oldDir)
-    try {
-      await copyTree(srcDir, project.path, true)
-      try {
-        trashPath(oldDir, true)
-      } catch (e) { /* 旧目录清理失败不影响恢复结果 */ }
-    } catch (e) {
-      fs.rmSync(project.path, { recursive: true, force: true })
-      fs.renameSync(oldDir, project.path)
-      throw e
-    }
-    cleanup()
-    return { ok: true }
-  } catch (e) {
-    cleanup()
-    return { ok: false, error: (e && e.message) || '恢复失败' }
-  }
-}
-
-/** 删除备份(记录 + 备份文件;文件移入回收站) */
-function deleteBackup(backupId) {
-  try {
-    const record = getDoc(backupId)
-    if (!record) return { ok: false, error: '备份记录不存在' }
-    if (fs.existsSync(record.destPath)) {
-      trashPath(record.destPath, record.mode !== 'zip')
-    }
-    removeDoc(backupId)
-    return { ok: true }
-  } catch (e) {
-    return { ok: false, error: (e && e.message) || '删除失败' }
-  }
-}
-
 module.exports = {
   parseProjectGodot,
   addProject,
   scanProjects,
   removeProject,
-  backupProject,
-  listBackups,
-  restoreBackup,
-  deleteBackup,
   copyAddonsToProject,
   projectDocId,
   matchVersion,

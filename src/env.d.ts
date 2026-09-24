@@ -17,6 +17,15 @@ interface DownloadParams {
   totalSize: number
 }
 
+/** 备份/恢复进度回调载荷 */
+interface BackupProgress {
+  phase: import('./types/godot').BackupPhase
+  done: number
+  total: number
+  current: string
+  bytes: number
+}
+
 interface Services {
   currentPlatform(): import('./types/godot').Platform
   fetchReleases(force?: boolean): Promise<import('./types/godot').GodotRelease[]>
@@ -62,21 +71,76 @@ interface Services {
     dirNames: string[]
     targetProjectId: string
   }): { ok: boolean, error?: string, copied?: number, skipped?: string[], targetName?: string }
-  /** 备份项目(mode: 'zip' 打包 | 'copy' 快照复制;includeCache 包含 .godot 缓存;onProgress 每文件回调) */
+  /** 备份项目:先写临时产物,成功后原子改名并落库;失败/取消不留痕迹 */
   backupProject(
     projectId: string,
-    opts: { mode: 'zip' | 'copy', destDir: string, includeCache?: boolean },
-    onProgress?: (p: { done: number, total: number, current: string, bytes: number }) => void
+    opts: {
+      mode: 'zip' | 'copy'
+      destDir: string
+      includeCache?: boolean
+      level?: 1 | 6 | 9
+      label?: string
+      exclude?: string[]
+    },
+    onProgress?: (p: BackupProgress) => void
   ): Promise<import('./types/godot').BackupRecord>
-  /** 备份记录列表(按时间倒序,projectId 为空返回全部) */
-  listBackups(projectId?: string): import('./types/godot').BackupRecord[]
+  /** 预估备份规模(文件数 + 字节),分片让出避免卡界面 */
+  estimateBackup(
+    projectId: string,
+    opts?: { includeCache?: boolean, exclude?: string[] }
+  ): Promise<{ fileCount: number, bytes: number }>
+  /** 备份记录列表(按时间倒序);兼容 listBackups(projectId) 与 listBackups({projectId, withStatus}) */
+  listBackups(
+    arg?: string | { projectId?: string, withStatus?: boolean }
+  ): import('./types/godot').BackupRecord[]
+  /** 每个项目最近一份备份 */
+  listLatestBackups(): Record<string, import('./types/godot').BackupRecord>
+  /** 单条备份记录 */
+  getBackup(backupId: string): import('./types/godot').BackupRecord | null
+  /** 备份汇总统计 */
+  backupStats(): import('./types/godot').BackupStats
+  /** 更新备份备注名(label 传空串清除) */
+  updateBackup(backupId: string, patch: { label?: string }): { ok: boolean, error?: string }
+  /** 校验备份内容是否可用(是否含 project.godot) */
+  verifyBackup(backupId: string): { ok: boolean, valid: boolean, error?: string, entryCount?: number }
+  /** 删除备份(keepRecordOnly=true 仅移除记录,保留磁盘文件) */
+  deleteBackup(backupId: string, opts?: { keepRecordOnly?: boolean }): { ok: boolean, error?: string }
+  /** 批量删除备份 */
+  deleteBackups(backupIds: string[], opts?: { keepRecordOnly?: boolean }): {
+    ok: boolean
+    removed: number
+    failed: { id: string, error: string }[]
+  }
+  /** 清理备份(默认 dryRun:true 只返回预览,需显式传 dryRun:false 才执行) */
+  pruneBackups(opts: { keepPerProject?: number, olderThanDays?: number, dryRun?: boolean }): {
+    ok: boolean
+    dryRun: boolean
+    targets: import('./types/godot').BackupRecord[]
+    totalSize: number
+    removed?: number
+    failed?: { id: string, error: string }[]
+    error?: string
+  }
   /** 从备份恢复(mode: 'overwrite' 覆盖原项目 | 'new' 恢复为新项目) */
   restoreBackup(
     backupId: string,
-    opts: { mode: 'overwrite' | 'new', destDir?: string }
-  ): Promise<{ ok: boolean, error?: string, newProjectName?: string }>
-  /** 删除备份(记录 + 文件移入回收站) */
-  deleteBackup(backupId: string): { ok: boolean, error?: string }
+    opts: { mode: 'overwrite' | 'new', destDir?: string, newName?: string },
+    onProgress?: (p: BackupProgress) => void
+  ): Promise<{
+    ok: boolean
+    error?: string
+    canceled?: boolean
+    newProjectName?: string
+    newProjectId?: string
+  }>
+  /** 进行中的备份/恢复任务快照 */
+  listBackupTasks(): import('./types/godot').BackupTask[]
+  /** 订阅备份任务快照,返回取消订阅函数 */
+  watchBackupTasks(fn: (tasks: import('./types/godot').BackupTask[]) => void): () => void
+  /** 取消备份/恢复任务(进入不可回滚阶段后返回 false) */
+  cancelBackupTask(taskId: string): boolean
+  /** 移除已结束的任务记录 */
+  dismissBackupTask(taskId: string): boolean
   /** 启动项目(editor=编辑器,run=运行) */
   launchProject(opts: { projectId: string, action: 'editor' | 'run' }): {
     ok: boolean
