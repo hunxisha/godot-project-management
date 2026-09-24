@@ -7,6 +7,12 @@ export type Platform = 'win64' | 'macos' | 'linux64'
 /** 引擎变体:标准版 / C#(mono) 版 */
 export type Variant = 'standard' | 'mono'
 
+/** 界面主题色板 id(与 main.css 的 [data-theme='X'] 一一对应) */
+export type ThemeId = 'steel' | 'graphite' | 'forest' | 'violet' | 'amber'
+
+/** 明暗模式:auto = 跟随宿主/系统 */
+export type ThemeMode = 'auto' | 'light' | 'dark'
+
 /** 已安装的 Godot 引擎版本 */
 export interface GodotVersion {
   id: string
@@ -79,6 +85,10 @@ export interface GodotSettings {
   backupKeepPerProject?: number
   /** 保留策略:删除早于 N 天的备份 */
   backupKeepDays?: number
+  /** 界面主题色板 */
+  theme?: ThemeId
+  /** 明暗模式:auto 跟随宿主 */
+  themeMode?: ThemeMode
 }
 
 /** 项目备份记录 */

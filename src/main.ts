@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import './main.css'
 import App from './App.vue'
+import { useTheme } from './composables/useTheme'
 
 /**
  * 环境守卫:ZTools 插件依赖 window.ztools(host 注入)与 window.services(preload 注入)。
@@ -36,5 +37,7 @@ if (typeof window.ztools === 'undefined') {
       '3. 打开插件页控制台查看 preload 的具体报错信息。'
   )
 } else {
+  // 挂载前先应用主题:避免首帧闪一下默认色板。useTheme 不依赖组件生命周期,可在此调用。
+  useTheme()
   createApp(App).mount('#app')
 }

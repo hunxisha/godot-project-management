@@ -2,6 +2,7 @@
 import { reactive, ref } from 'vue'
 import { getSettings, notify, openPath, pickDirectory, saveSettings } from '../services/bridge'
 import Icon from '../components/Icon.vue'
+import ThemeSwitcher from '../components/ThemeSwitcher.vue'
 import type { OpenAction } from '../types/godot'
 
 const state = reactive({ ...getSettings() })
@@ -98,6 +99,20 @@ function openStoreSite() {
   <div class="settings view">
     <div class="view-head">
       <h2><Icon name="gear" :size="16" /> 设置</h2>
+    </div>
+
+    <div class="card section">
+      <div class="sec-head">
+        <span class="sec-ico"><Icon name="palette" :size="15" /></span>
+        <span class="sec-title">外观主题</span>
+      </div>
+      <div class="sec-body">
+        <ThemeSwitcher inline />
+      </div>
+      <div class="hint">
+        主题由「色板 × 明暗」组合:5 套色板各有浅色与深色两版,共 10 种外观。
+        「跟随宿主」会随 ZTools 的深色模式自动切换;色板与明暗都会记住。
+      </div>
     </div>
 
     <div class="card section">

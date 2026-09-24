@@ -91,7 +91,7 @@ const barTasks = computed<BarTask[]>(() => {
 const hasBackupTask = computed(() => backupTasks.value.some((t) => !BACKUP_TERMINAL[t.phase]))
 
 onMounted(() => {
-  document.documentElement.dataset.theme = window.ztools.isDarkColors() ? 'dark' : 'light'
+  // 主题(色板 × 明暗)已在 main.ts 挂载前应用,见 composables/useTheme.ts
   window.ztools.setExpendHeight(600)
   window.ztools.onPluginEnter(({ code, payload }) => {
     if (code === 'projects') tab.value = 'projects'

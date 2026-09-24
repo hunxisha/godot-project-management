@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import Icon from './Icon.vue'
+import ThemeSwitcher from './ThemeSwitcher.vue'
 
 const tabs = [
   { key: 'dashboard', label: '概览', icon: 'grid' },
@@ -51,6 +52,9 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>()
         <span>{{ t.label }}</span>
       </button>
     </div>
+
+    <span class="grow"></span>
+    <ThemeSwitcher />
   </nav>
 </template>
 
@@ -63,6 +67,9 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>()
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  /* 让主题浮层盖在内容区之上 */
+  position: relative;
+  z-index: 30;
 }
 
 .brand {
