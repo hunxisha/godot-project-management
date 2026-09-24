@@ -28,6 +28,27 @@ function chooseBackupRoot() {
   }
 }
 
+// ---------- 备份默认项 ----------
+
+/** build/ 与 export/ 视作一组,勾选任一项即代表这组 */
+const BUILD_GROUP = ['build', 'export']
+
+function hasExclude(name: string) {
+  const list = state.backupExclude || []
+  if (name === 'build') return BUILD_GROUP.some((n) => list.includes(n))
+  return list.includes(name)
+}
+
+function toggleExclude(name: string, on: boolean) {
+  const set = new Set(state.backupExclude || [])
+  for (const n of name === 'build' ? BUILD_GROUP : [name]) {
+    if (on) set.add(n)
+    else set.delete(n)
+  }
+  state.backupExclude = [...set]
+  patchNow()
+}
+
 const openActions: { value: OpenAction, label: string, icon: string }[] = [
   { value: 'editor', label: '在编辑器中打开', icon: 'pencil' },
   { value: 'run', label: '运行项目', icon: 'play' },
@@ -175,12 +196,14 @@ function openStoreSite() {
     <div class="card section">
       <div class="sec-head">
         <span class="sec-ico"><Icon name="box" :size="15" /></span>
-        <span class="sec-title">项目备份目录</span>
+        <span class="sec-title">备份与恢复</span>
       </div>
-      <div class="sec-body">
+
+      <div class="bk-field">
+        <span class="f-label">默认备份目录</span>
         <div class="root-row">
           <span class="mono root-value" :class="{ unset: !state.backupRoot }">
-            {{ state.backupRoot ?? '未设置(每次备份时选择)' }}
+            {{ state.backupRoot ?? '未设置(新建备份时选择)' }}
           </span>
           <div class="grow"></div>
           <button class="btn small" @click="chooseBackupRoot">选择目录</button>
@@ -192,7 +215,74 @@ function openStoreSite() {
           ><Icon name="external" :size="12" /></button>
         </div>
       </div>
-      <div class="hint">备份项目时默认保存到该目录;备份弹窗中可临时改选其他位置。</div>
+
+      <div class="bk-field">
+        <span class="f-label">默认备份方式</span>
+        <div class="seg">
+          <button
+            :class="{ on: (state.backupMode ?? 'zip') === 'zip' }"
+            @click="state.backupMode = 'zip'; patchNow()"
+          >zip 打包</button>
+          <button
+            :class="{ on: state.backupMode === 'copy' }"
+            @click="state.backupMode = 'copy'; patchNow()"
+          >完整快照</button>
+        </div>
+        <div class="hint">新建备份时预选该方式,仍可在对话框里临时切换。</div>
+      </div>
+
+      <div class="bk-field">
+        <span class="f-label">zip 压缩级别</span>
+        <div class="seg">
+          <button
+            v-for="lv in ([{ v: 1, t: '快速' }, { v: 6, t: '标准' }, { v: 9, t: '最大' }] as const)"
+            :key="lv.v"
+            :class="{ on: (state.backupLevel ?? 6) === lv.v }"
+            :disabled="(state.backupMode ?? 'zip') === 'copy'"
+            @click="state.backupLevel = lv.v; patchNow()"
+          >{{ lv.t }}</button>
+        </div>
+        <div class="hint">
+          {{ (state.backupMode ?? 'zip') === 'copy'
+            ? '当前默认方式为完整快照,压缩级别不生效。'
+            : '快速=最快但体积最大;最大=体积最小但耗时最长。仅对 zip 打包生效。' }}
+        </div>
+      </div>
+
+      <div class="bk-field">
+        <label class="switch-row">
+          <div class="switch-text">
+            <span class="switch-label">默认包含 .godot 编辑器缓存</span>
+            <span class="switch-desc">默认排除:缓存可再生成,排除后备份更小更快</span>
+          </div>
+          <input v-model="state.backupIncludeCache" type="checkbox" class="switch" @change="patchNow" />
+        </label>
+      </div>
+
+      <div class="bk-field">
+        <span class="f-label">默认排除目录</span>
+        <label class="chk-row">
+          <input
+            type="checkbox"
+            class="chk"
+            :checked="hasExclude('.git')"
+            @change="toggleExclude('.git', ($event.target as HTMLInputElement).checked)"
+          />
+          <span><code>.git</code></span>
+        </label>
+        <label class="chk-row">
+          <input
+            type="checkbox"
+            class="chk"
+            :checked="hasExclude('build')"
+            @change="toggleExclude('build', ($event.target as HTMLInputElement).checked)"
+          />
+          <span><code>build/</code> 与 <code>export/</code> 产物目录</span>
+        </label>
+        <div class="hint">
+          默认不排除任何内容,保证备份保真。排除项按目录名匹配,会记入备份记录,也可在新建备份时单独调整。
+        </div>
+      </div>
     </div>
 
     <div class="card section">
@@ -305,6 +395,42 @@ function openStoreSite() {
 .root-row .input {
   flex: 1;
   min-width: 0;
+}
+
+/* 备份设置:同一切区内多个子项 */
+.bk-field {
+  margin-bottom: 16px;
+}
+
+.bk-field:last-child {
+  margin-bottom: 0;
+}
+
+.bk-field .f-label {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.chk-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.bk-field code {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--surface-3);
+  font-family: var(--mono);
+  font-size: 11.5px;
 }
 
 .hint {

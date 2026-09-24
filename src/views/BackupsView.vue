@@ -6,8 +6,10 @@ import Icon from '../components/Icon.vue'
 import EmptyState from '../components/EmptyState.vue'
 import BackupListItem from '../components/BackupListItem.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import BackupCreateDialog from '../components/dialogs/BackupCreateDialog.vue'
 import RestoreDialog from '../components/dialogs/RestoreDialog.vue'
 import { useBackups } from '../composables/useBackups'
+import { notify } from '../services/bridge'
 import { fmtSize, formatTime } from '../utils/format'
 import type { BackupRecord } from '../types/godot'
 
@@ -136,6 +138,18 @@ const restoreProject = computed(() =>
 )
 const restoreOrphan = computed(() => !!restoreTarget.value && !restoreProject.value)
 
+// ---------- 新建备份 ----------
+
+const createOpen = ref(false)
+
+function openCreate() {
+  if (!projects.value.length) {
+    notify('还没有可备份的项目,请先到「项目」页添加')
+    return
+  }
+  createOpen.value = true
+}
+
 // ---------- 展示辅助 ----------
 
 const removeDetails = computed(() =>
@@ -177,6 +191,9 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
         @click="batchMode ? exitBatch() : enterBatch()"
       >
         <Icon name="check" :size="12" /> {{ batchMode ? '退出批量' : '批量管理' }}
+      </button>
+      <button class="btn small primary" title="为某个项目创建一份新备份" @click="openCreate">
+        <Icon name="plus" :size="12" /> 新建备份
       </button>
     </div>
 
@@ -465,6 +482,13 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
       :busy="removeBusy"
       @confirm="doRemove"
       @cancel="removeOpen = false"
+    />
+
+    <BackupCreateDialog
+      :open="createOpen"
+      :projects="projects"
+      @close="createOpen = false"
+      @done="refresh"
     />
 
     <RestoreDialog

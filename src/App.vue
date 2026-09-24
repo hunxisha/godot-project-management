@@ -127,6 +127,7 @@ function gotoCreateBackup(id: string) {
           @backup-consumed="backupRequest = null"
           @manage-addons="gotoAddons"
           @open-backups="gotoBackups"
+          @backup-project="gotoCreateBackup"
         />
         <VersionsView v-else-if="tab === 'versions'" />
         <MarketplaceView v-else-if="tab === 'marketplace'" @navigate="tab = $event" />
