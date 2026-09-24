@@ -171,7 +171,7 @@ interface Services {
   getReleaseInfos(assetIds: string[]): Promise<
     Record<string, { version: string, minGodot: string, maxGodot: string, created: string }>
   >
-  /** 列出资产全部 release(版本选择用) */
+  /** 列出资产全部 release(版本选择用;size 已由 preload 从 API 的 MB 换算为字节) */
   listAssetReleases(assetId: string): Promise<
     { version: string, created: string, stable: boolean, minGodot: string, maxGodot: string, size: number }[]
   >

@@ -1,8 +1,9 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { notify } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
+import { fmtSize } from '../utils/format'
 import type { AddonInfo, FavoriteAsset, GodotProject, GodotVersion, MarketAsset } from '../types/godot'
 
 // 被 App 的 KeepAlive 缓存:切走再切回不重新加载浏览数据(直到插件重启)
@@ -451,12 +452,6 @@ function onIconError(id: string) {
 
 // ---------- 安装 ----------
 
-function fmtSize(n?: number): string {
-  if (!n) return ''
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`
-  return `${(n / 1024 / 1024).toFixed(1)} MB`
-}
-
 function percent(p: { received?: number, total?: number }): number {
   if (!p.total) return 0
   return Math.min(100, ((p.received || 0) / p.total) * 100)
@@ -503,6 +498,7 @@ async function install(asset: MarketAsset, version?: string) {
 
 // ---------- 版本选择器 ----------
 
+/** size 单位为字节(由 preload 从 Asset Store 的 MB 浮点数换算) */
 type ReleaseRow = { version: string, created: string, stable: boolean, minGodot: string, maxGodot: string, size: number }
 
 const relPicker = ref<{ asset: MarketAsset, list: ReleaseRow[], loading: boolean, error: string } | null>(null)

@@ -510,7 +510,14 @@ async function getReleaseInfos(assetIds) {
   return out
 }
 
-/** 列出资产全部 release(版本选择用),按发布时间倒序 */
+/**
+ * 列出资产全部 release(版本选择用),按发布时间倒序。
+ *
+ * 注意单位:Asset Store 返回的 `size` 是**十进制 MB 的浮点数**(已实测核对:
+ * 某个 release 返回 0.118271,实际下载到的 zip 为 118,271 字节,即 size × 10^6)。
+ * 这里统一换算成字节,与下载进度(Content-Length)以及全项目其它 size 字段保持一致,
+ * 否则界面会把它当字节渲染成「0 KB」。
+ */
 async function listAssetReleases(assetId) {
   const [pub, slug] = splitAssetId(assetId)
   const releases = await getJson(`${API_BASE}/releases/${pub}/${slug}/`)
@@ -523,7 +530,8 @@ async function listAssetReleases(assetId) {
     stable: !!r.stable,
     minGodot: r.min_godot_version != null ? String(r.min_godot_version) : '',
     maxGodot: r.max_godot_version != null ? String(r.max_godot_version) : '',
-    size: r.size || 0
+    /** 字节。API 给的是 MB 浮点数,已在此换算 */
+    size: r.size ? Math.round(Number(r.size) * 1e6) : 0
   }))
 }
 
