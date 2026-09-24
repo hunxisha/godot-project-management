@@ -12,9 +12,48 @@ const SLICE_FILES = 24
 /** 或每 N 毫秒让出一次(取先到者),避免单个超大文件长时间不让出 */
 const SLICE_MS = 30
 
-/** 让出事件循环:使渲染层得以重绘并处理取消请求 */
+/**
+ * 让出事件循环:使渲染层得以重绘并处理取消请求。
+ *
+ * 环境差异(踩过坑):preload 运行在渲染进程的沙箱里,**没有 setImmediate**
+ * (它是 Node 特有全局,浏览器侧不存在)。因此按可用性依次降级:
+ *   1. setImmediate —— 纯 Node 环境最快;
+ *   2. MessageChannel —— 浏览器/沙箱里不受 setTimeout 的 4ms 嵌套钳制;
+ *   3. setTimeout(0) —— 兜底,任何环境都有。
+ * 直接写 setImmediate 会在 ZTools 里抛 "setImmediate is not defined"。
+ */
+let channel = null
+const pendingYields = []
+
+/** 惰性创建 MessageChannel:Node 下走 setImmediate 分支时不必创建 */
+function getChannel() {
+  if (channel) return channel
+  if (typeof MessageChannel !== 'function') return null
+  channel = new MessageChannel()
+  channel.port1.onmessage = () => {
+    const resolve = pendingYields.shift()
+    if (resolve) resolve()
+  }
+  channel.port1.start()
+  // 刻意不调用 unref():这个端口在需要它的环境里正是维持调度的句柄。
+  // 渲染进程的事件循环不会「因为没有待处理任务而退出」,所以不存在泄漏问题;
+  // 反过来 unref 会让纯 Node 宿主在等待让出时提前退出。
+  return channel
+}
+
 function yieldToLoop() {
-  return new Promise((resolve) => setImmediate(resolve))
+  if (typeof setImmediate === 'function') {
+    return new Promise((resolve) => setImmediate(resolve))
+  }
+  const ch = getChannel()
+  if (ch) {
+    return new Promise((resolve) => {
+      // 用队列而非单个变量:并发任务同时让出时不会互相覆盖回调
+      pendingYields.push(resolve)
+      ch.port2.postMessage(0)
+    })
+  }
+  return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
 /** 取消信号(被取消时抛出,由调用方转为 canceled 终态) */
