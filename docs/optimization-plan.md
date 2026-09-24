@@ -286,6 +286,18 @@ function fmtVer(v?: string): string { return (v || '').replace(/^v+/i, '') }
 - P1-3 抽 `useTaskDialog.ts` + `ProjectTargetPicker.vue`
 - 验收：`npm test` 全绿，`services.js` 对外 API 不变
 
+> **实施时对计划的两处更正**（读代码后发现原判断不准确，已按代码实际结构调整）：
+>
+> 1. **`ProjectTargetPicker.vue` 不抽**。原判断来自图谱里 `ProjectRow` 同名类型出现在 3 个文件中，
+>    但读代码后确认：项目 `<select>` 只存在于 `BackupCreateDialog.vue:257`，
+>    `RestoreDialog.vue` 只声明了 `ProjectRow` 类型、并没有实现选择器（它通过 `project` / `record`
+>    prop 拿到目标）。**只有一个消费者**，抽组件属于过度设计，故不做。
+> 2. **`PruneDialog.vue` 不参与抽取**。它**没有任务订阅**（无 `watchBackupTasks` / `activeTask` /
+>    `canCancel`），只共用 `emit('close')` / `emit('done')` 两行样板，抽出来收益为负。
+>    实际参与骨架抽取的是 `BackupCreateDialog.vue` 与 `RestoreDialog.vue` 两个对话框。
+>
+> 这两条也说明：图谱的「同名类型 / 同社区」信号适合**定位**重复，但落手前必须回代码确认消费者数量。
+
 ### 阶段 3 · 2–3 天，视图拆分
 
 - P1-1 先拆 `MarketplaceView.vue`（1,147 → 目标 < 450）
@@ -308,7 +320,7 @@ function fmtVer(v?: string): string { return (v || '').replace(/^v+/i, '') }
 - [x] services 键比对断言就位：**故意从 `services.js` 删一个键会失败**（已用探针验证）
 - [x] `displayName` 全仓只剩一份定义；版本归一化只剩一份且行为有断言锁定
 - [ ] `tsconfig.json` 的 `strict: false` 至少推进到 `noImplicitAny: true`，且 preload 纳入检查
-- [ ] `install.js` 与 `backup.js` 的「取消 / 关闭 / 订阅」由同一模块提供
+- [x] `install.js` 与 `backup.js` 的「取消 / 关闭 / 订阅」由同一模块提供（`taskqueue.js`）
 - [ ] `MarketplaceView.vue` < 450 行；无生产文件超过 700 行
 - [x] `npm test` 不再写用户回收站（默认跳过，`GPM_TEST_TRASH=1` 可显式开启）
 - [ ] CI 在每次提交上跑 `build` + `test`
@@ -356,8 +368,8 @@ _（每完成一项在阶段小节内标注 commit，与 `docs/backup-redesign-p
 
 | 阶段 | 状态 |
 |---|---|
-| 阶段 1 · 收敛与护栏 | ✅ 已完成（commit `dfb1af1`） |
-| 阶段 2 · 结构性抽取 | ⬜ 未开始 |
+| 阶段 1 · 收敛与护栏 | ✅ 已完成（commit `dfb1af1`，记录 `e04335d`） |
+| 阶段 2 · 结构性抽取 | ✅ 已完成（commit `0a0d6ce`） |
 | 阶段 3 · 视图拆分 | ⬜ 未开始 |
 | 阶段 4 · 类型闸门 / 测试 / CI | ⬜ 未开始 |
 
@@ -384,3 +396,26 @@ _（每完成一项在阶段小节内标注 commit，与 `docs/backup-redesign-p
 
 - 2 项 SKIP = `test:preload` 与 `test:preload:sandbox` 各跳过 1 项回收站断言；已用 `GPM_TEST_TRASH=1` 验证该链路仍能通过（102 PASS / 0 SKIP），覆盖度没有丢失。
 - 去重护栏已验证会**真的失败**：探针 1 从 `services.js` 删一个键 → 2 项 FAIL；探针 2 往 `env.d.ts` 加一个未实现的方法 → 2 项 FAIL（两次均从备份还原，无残留）。
+
+### 阶段 2 实施记录（commit `0a0d6ce`）
+
+| 计划项 | 实际做法 |
+|---|---|
+| P1-2 抽 `taskqueue.js` | 新增 189 行的 `createTaskQueue(opts)`。两套实现的行为差异被显式化成选项，而不是靠复制粘贴保持：`idPrefix` / `makeId`（install 保留 `dl-<毫秒>-<随机>` 形状）、`sortBy`、`terminalPhases`（backup 有终态、install 无）、`phaseField`、`serial`（install 串行、backup 并发）。`backup.js` 644 → 613 行，`install.js` 227 → 202 行 |
+| 统一掉的隐性差异 | 合并时顺带修正三处「两份实现各写各的」：① 快照改为**一律浅拷贝**（install 原先直接暴露内部对象，订阅者能改到内部状态）；② 监听器异常**逐個隔离**（install 原先一个监听器抛错会中断其余监听器）；③ `dismiss` 一并清理取消令牌（原先会留悬挂引用） |
+| P1-3 抽 `useTaskDialog.ts` | 150 行组合式函数，覆盖任务订阅、`activeTask`/`canCancel`、`phrase`/`percent`、`begin`/`end`/`report` 生命周期、取消失败提示。阶段文案表合并为一张（两个对话框各自只用其中一部分）。`BackupCreateDialog.vue` 621 → 599 行，`RestoreDialog.vue` 654 → 623 行，`busy` 统一改名 `running` |
+| 组件卸载清理 | `onBeforeUnmount(stopWatching)` 移入组合式函数（用 `getCurrentInstance()` 守卫，组件外调用跳过），避免调用方漏写导致订阅泄漏 |
+| 补测试（原计划排在阶段 4） | `taskqueue.test.js`（41 项）、`install.test.js`（34 项，`http`/`extract`/`store` 打桩，此前该模块零覆盖）、`useTaskDialog.test.mjs`（51 项，沿用 `build-bundle.mjs` + Node 断言，不引入测试框架） |
+
+**验收结果**
+
+| 指标 | 阶段 2 前 | 阶段 2 后 |
+|---|---|---|
+| `npm run verify` | ✅ exit 0 | ✅ exit 0 |
+| 断言总数 | 557 PASS + 2 SKIP | **683 PASS** + 2 SKIP |
+| 任务生命周期实现份数 | 2 套（`install.js` / `backup.js`） | 1 套（`taskqueue.js`） |
+| 对话框骨架实现份数 | 2 套（各约 27 行） | 1 套（`useTaskDialog.ts`） |
+| `services.js` 对外 API | 47 个方法 | 47 个方法（契约测试通过） |
+
+- 抽取过程被备份测试当场抓住一个真 bug：`finish()` 最初把阶段**值**当成字段**名**写入（`phaseField` 与取值混用同一个访问器），表现为 11 项取消/终态断言失败。这正是 `backup.test.js` 作为重构护栏的价值 —— 若没有它，这个 bug 只会在用户点「取消备份」时暴露。已在 `taskqueue.test.js` 第 5 节加断言锁住该类错误。
+- 两个对话框属于**渲染层改动**：`test:taskdialog` 覆盖了抽出去的那部分逻辑，但模板绑定（`:disabled="running"` 等）只有 `vue-tsc` 把关，仍需人工过一遍「新建备份」「恢复向导」两个流程（见「阶段 3 的人工验收」）。
