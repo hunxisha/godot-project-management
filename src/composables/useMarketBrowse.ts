@@ -1,7 +1,7 @@
 // 市场浏览:模式切换、分页、标签聚合池、展示列表。
 //
 // 从 MarketplaceView.vue 抽出。这一块原本占视图脚本近一半,而且它内部同时压着三层逻辑:
-//   1. 五个浏览模式(全部/推荐/新品/最近更新/收藏)各自的取数方式
+//   1. 六个浏览模式(全部/模板/推荐/新品/最近更新/收藏)各自的取数方式
 //   2. 服务端分页 vs 客户端聚合池(商店 API 不支持服务端标签过滤,标签筛选要自己攒池)
 //   3. 展示层的二次过滤(标签分组 + 兼容性)
 // 第 3 层需要视图的搜索状态,所以通过参数注入,而不是把搜索也塞进这里 —— 保持接缝清晰。
@@ -9,14 +9,15 @@ import { computed, ref, watch, type Ref } from 'vue'
 import { MARKET_TAG_GROUPS, tagSlugsOf, inGroup } from '../utils/marketTags'
 import type { FavoriteAsset, MarketAsset } from '../types/godot'
 
-/** 浏览模式:全部 / 推荐 / 新品 / 最近更新 / 收藏 */
-export type BrowseMode = 'all' | 'featured' | 'new' | 'recent' | 'favorites'
+/** 浏览模式:全部 / 模板(完整项目) / 推荐 / 新品 / 最近更新 / 收藏 */
+export type BrowseMode = 'all' | 'projects' | 'featured' | 'new' | 'recent' | 'favorites'
 
 /** 聚合模式下每屏固定展示的匹配项数量 */
 export const POOL_PAGE = 20
 
 export const MODE_META: Record<BrowseMode, { label: string, icon: string }> = {
   all: { label: '全部', icon: 'grid' },
+  projects: { label: '模板', icon: 'package' },
   featured: { label: '推荐', icon: 'sparkle' },
   new: { label: '新品', icon: 'zap' },
   recent: { label: '最近更新', icon: 'clock' },
@@ -24,7 +25,7 @@ export const MODE_META: Record<BrowseMode, { label: string, icon: string }> = {
 }
 
 /** 分页模式(需要服务端分页 + 聚合池) */
-const PAGED_MODES: BrowseMode[] = ['all', 'new', 'recent']
+const PAGED_MODES: BrowseMode[] = ['all', 'projects', 'new', 'recent']
 
 export interface UseMarketBrowseOptions {
   /** 已选标签分组名(视图持有,模板 v-model) */
@@ -44,6 +45,7 @@ export interface UseMarketBrowseOptions {
 export function useMarketBrowse(opts: UseMarketBrowseOptions) {
   const mode = ref<BrowseMode>('featured')
   const all = ref<MarketAsset[]>([])
+  const projectList = ref<MarketAsset[]>([])
   const featured = ref<MarketAsset[]>([])
   const fresh = ref<MarketAsset[]>([])
   const recent = ref<MarketAsset[]>([])
@@ -86,6 +88,7 @@ export function useMarketBrowse(opts: UseMarketBrowseOptions) {
     let list: MarketAsset[]
     if (opts.query.value.trim()) list = opts.results.value
     else if (mode.value === 'all') list = all.value
+    else if (mode.value === 'projects') list = projectList.value
     else if (mode.value === 'new') list = fresh.value
     else if (mode.value === 'recent') list = recent.value
     else if (mode.value === 'favorites') list = favorites.value
@@ -96,9 +99,10 @@ export function useMarketBrowse(opts: UseMarketBrowseOptions) {
     return list
   })
 
-  /** 按当前模式拉取服务端指定页(全部/新品/最近更新共用) */
+  /** 按当前模式拉取服务端指定页(全部/模板/新品/最近更新共用) */
   function fetchPage(page: number) {
     if (mode.value === 'all') return window.services.listAllAssets(page)
+    if (mode.value === 'projects') return window.services.listProjectAssets(page)
     if (mode.value === 'new') return window.services.listNewAssets(page)
     return window.services.listRecentlyUpdated(page)
   }
@@ -161,7 +165,7 @@ export function useMarketBrowse(opts: UseMarketBrowseOptions) {
     opts.hydrate(favorites.value)
   }
 
-  /** 加载当前模式的数据(推荐只拉一次;全部/新品/最近更新按页;收藏读本地) */
+  /** 加载当前模式的数据(推荐只拉一次;全部/模板/新品/最近更新按页;收藏读本地) */
   async function loadBrowse(): Promise<void> {
     if (mode.value === 'favorites') {
       reloadFavorites()
@@ -186,6 +190,11 @@ export function useMarketBrowse(opts: UseMarketBrowseOptions) {
         all.value = r.result
         pageTotal.value = r.pages
         opts.hydrate(all.value)
+      } else if (mode.value === 'projects') {
+        const r = await window.services.listProjectAssets(pageNum.value)
+        projectList.value = r.result
+        pageTotal.value = r.pages
+        opts.hydrate(projectList.value)
       } else if (mode.value === 'new') {
         const r = await window.services.listNewAssets(pageNum.value)
         fresh.value = r.result

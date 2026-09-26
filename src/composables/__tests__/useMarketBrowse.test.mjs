@@ -1,7 +1,7 @@
 // useMarketBrowse 回归测试:市场浏览的模式、分页与标签聚合池。
 //
 // 这块从 MarketplaceView.vue 抽出(原本占视图脚本近一半),里面同时压着三层逻辑:
-// 五种模式各自的取数方式、服务端分页 vs 客户端聚合池、展示层二次过滤。
+// 六种模式各自的取数方式、服务端分页 vs 客户端聚合池、展示层二次过滤。
 // 其中**聚合池**是最容易出错的部分(商店不支持服务端标签过滤,要自己批量拉页攒池),
 // 这里用可控的服务端桩把它逐条锁住。
 //
@@ -29,7 +29,7 @@ const { useMarketBrowse, MODE_META, POOL_PAGE } = await import(
 
 // ---------- 桩:window.services ----------
 const calls = []
-const pages = { all: 1, new: 1, recent: 1 }
+const pages = { all: 1, projects: 1, new: 1, recent: 1 }
 /** 每页返回的资产工厂:可按页定制 */
 let pageFactory = (kind, p) => ({ result: [{ assetId: `a/${kind}${p}`, title: `${kind}${p}` }], pages: pages[kind] })
 let failOn = null
@@ -40,6 +40,7 @@ let hydrateCalls = []
 global.window = {
   services: {
     listAllAssets(p) { return serve('all', p) },
+    listProjectAssets(p) { return serve('projects', p) },
     listNewAssets(p) { return serve('new', p) },
     listRecentlyUpdated(p) { return serve('recent', p) },
     listFeatured() { calls.push('featured'); return Promise.resolve(featuredList) },
@@ -59,7 +60,7 @@ function serve(kind, p) {
 function reset() {
   calls.length = 0
   hydrateCalls.length = 0
-  pages.all = 1; pages.new = 1; pages.recent = 1
+  pages.all = 1; pages.projects = 1; pages.new = 1; pages.recent = 1
   pageFactory = (kind, p) => ({ result: [{ assetId: `a/${kind}${p}`, title: `${kind}${p}` }], pages: pages[kind] })
   failOn = null
   favoritesList = []
@@ -305,6 +306,43 @@ async function main() {
     await s.b.switchMode('all')
     ok(!!s.b.browseError.value, '取数失败写入 browseError', s.b.browseError.value)
     ok(s.b.browsing.value === false, '失败后加载态复位')
+  }
+
+  // ---------- 9. 模板模式(type=1) ----------
+  section('9. 模板模式:取数、分页与标签聚合都走 listProjectAssets')
+  {
+    reset()
+    pageFactory = (kind, p) => ({ result: [asset(`${kind}/${p}`)], pages: 3 })
+    const { b } = make()
+    await b.switchMode('projects')
+    ok(b.mode.value === 'projects', '切到模板模式')
+    ok(calls[0] === 'projects:1', '取数走 listProjectAssets', calls.join(','))
+    ok(b.pageTotal.value === 3, '写入服务端总页数', String(b.pageTotal.value))
+    ok(b.displayAssets.value.length === 1 && b.displayAssets.value[0].assetId === 'projects/1', '展示模板列表')
+    ok(hydrateCalls.length === 1, '拉取后补齐 release 信息')
+
+    await b.changePage(1)
+    ok(calls.includes('projects:2'), '翻页继续拉模板列表', calls.join(','))
+
+    // 标签聚合在模板模式下同样生效,且只请求模板端点
+    reset()
+    pages.projects = 2
+    pageFactory = (kind, p) => ({
+      result: p <= 2 ? [{ assetId: `a/2d-${p}`, title: 'm', tagSlugs: ['2d'] }] : [],
+      pages: 2
+    })
+    const t = make({ tagFilter: ref('2D') })
+    await t.b.switchMode('projects')
+    await sleep()
+    ok(t.b.aggregating.value === true, '模板模式 + 标签 → 聚合')
+    ok(t.b.matchPool.value.length === 2 && t.b.matchPool.value.every((a) => a.tagSlugs.includes('2d')),
+      '聚合池只收匹配标签的模板')
+    ok(calls.every((c) => c.startsWith('projects:')), `聚合期间只请求模板端点(${calls.join(',')})`)
+
+    // 切回其他模式后,取数端点跟着切走
+    reset()
+    await t.b.switchMode('all')
+    ok(calls.some((c) => c === 'all:1') && !calls.some((c) => c.startsWith('projects:')), '切回全部模式走 listAllAssets', calls.join(','))
   }
 
   // ---------- 结果 ----------

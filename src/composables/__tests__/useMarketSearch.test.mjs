@@ -26,6 +26,7 @@ let releaseCalls = []
 let releaseMap = {}
 let releaseShouldThrow = false
 let searchCalls = []
+let searchArgList = []
 let searchResult = { result: [], page: 1, pages: 1 }
 let searchShouldThrow = null
 
@@ -36,8 +37,9 @@ global.window = {
       if (releaseShouldThrow) throw new Error('网络断了')
       return Promise.resolve(releaseMap)
     },
-    searchAssets(kw) {
-      searchCalls.push(kw)
+    searchAssets(...args) {
+      searchCalls.push(args[0])
+      searchArgList.push(args)
       if (searchShouldThrow) return Promise.reject(new Error(searchShouldThrow))
       return Promise.resolve(searchResult)
     }
@@ -49,6 +51,7 @@ function reset() {
   releaseMap = {}
   releaseShouldThrow = false
   searchCalls = []
+  searchArgList = []
   searchResult = { result: [], page: 1, pages: 1 }
   searchShouldThrow = null
 }
@@ -230,6 +233,28 @@ section('8. useMarketSearch:hydrate 被调用')
   s.query.value = 'x'
   await s.search()
   ok(hydrated.length === 1 && hydrated[0] === 1, '搜索结果交给注入的 hydrate 处理', hydrated.join(','))
+}
+
+section('9. useMarketSearch:getAssetType 注入搜索类型')
+{
+  reset()
+  const s = useMarketSearch({ hydrate: () => {}, debounceMs: 60000 })
+  s.query.value = 'shader'
+  await s.search()
+  ok(searchArgList[0][3] === 0, '未注入时按插件/素材类型(type=0)搜索', JSON.stringify(searchArgList[0]))
+
+  reset()
+  let typeNow = 1
+  const s2 = useMarketSearch({ hydrate: () => {}, debounceMs: 60000, getAssetType: () => typeNow })
+  s2.query.value = 'city'
+  await s2.search()
+  ok(searchArgList[0][3] === 1, '注入后按完整项目类型(type=1)搜索', JSON.stringify(searchArgList[0]))
+  ok(searchArgList[0][0] === 'city', '关键词不变')
+
+  typeNow = 0
+  await s2.search()
+  ok(searchArgList[1][3] === 0, '动态 getter 在下一次搜索时生效')
+  s2.cancelPending()
 }
 
 // ---------- 结果 ----------

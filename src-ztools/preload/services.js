@@ -73,8 +73,8 @@ window.services = {
   dismissBackupTask: (taskId) => backup.dismissBackupTask(taskId),
   /** 启动项目(editor=打开编辑器带 -e,run=直接运行) */
   launchProject: (opts) => launchProject(opts),
-  /** 搜索 Asset Store */
-  searchAssets: (filter, godotVersion, page) => assets.searchAssets(filter, godotVersion, page),
+  /** 搜索 Asset Store(assetType:0=插件/素材,1=完整项目) */
+  searchAssets: (filter, godotVersion, page, assetType) => assets.searchAssets(filter, godotVersion, page, assetType),
   /** 官方精选(推荐)Addon */
   listFeatured: () => assets.listFeatured(),
   /** 全部资产(默认热度排序,分页) */
@@ -83,6 +83,8 @@ window.services = {
   listNewAssets: (page) => assets.listNewAssets(page),
   /** 最近更新的 Addon */
   listRecentlyUpdated: (page) => assets.listRecentlyUpdated(page),
+  /** 完整项目/模板(type=1,按更新时间倒序,分页) */
+  listProjectAssets: (page) => assets.listProjectAssets(page),
   /** 本地收藏列表 */
   listFavorites: () => assets.listFavorites(),
   /** 收藏/取消收藏 */

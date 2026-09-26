@@ -167,11 +167,12 @@ export interface Services {
     error?: string
     project?: GodotProject & { _id: string }
   }
-  /** 搜索 Asset Store */
+  /** 搜索市场资产(assetType:0=插件/素材,1=完整项目) */
   searchAssets(
     filter: string,
     godotVersion?: string,
-    page?: number
+    page?: number,
+    assetType?: number
   ): Promise<{ result: MarketAsset[], page: number, pages: number }>
   /** 官方精选(推荐)Addon */
   listFeatured(): Promise<MarketAsset[]>
@@ -181,6 +182,8 @@ export interface Services {
   listNewAssets(page?: number): Promise<{ result: MarketAsset[], page: number, pages: number }>
   /** 最近更新的 Addon */
   listRecentlyUpdated(page?: number): Promise<{ result: MarketAsset[], page: number, pages: number }>
+  /** 完整项目/模板(type=1,按更新时间倒序,分页) */
+  listProjectAssets(page?: number): Promise<{ result: MarketAsset[], page: number, pages: number }>
   /** 本地收藏列表 */
   listFavorites(): FavoriteAsset[]
   /** 收藏/取消收藏 */

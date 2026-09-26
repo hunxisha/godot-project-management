@@ -167,16 +167,17 @@ async function listRecentlyUpdated(page = 1) {
 }
 
 /**
- * 搜索市场资产(Addon)。
+ * 搜索市场资产。
  * @param {string} filter 搜索词
  * @param {string} [godotVersion] 兼容版本过滤
  * @param {number} [page]
+ * @param {number} [assetType] 商店资产类型:0=插件/素材(默认),1=完整项目(模板/演示)
  * @returns {Promise<{result: MarketAsset[], page: number, pages: number}>}
  */
-async function searchAssets(filter, godotVersion, page = 1) {
+async function searchAssets(filter, godotVersion, page = 1, assetType = 0) {
   const params = new URLSearchParams({
     query: filter || '',
-    type: '0', // 0 = Addon(工具/脚本),1 = 完整项目
+    type: String(assetType || 0), // 0 = Addon(工具/脚本/素材),1 = 完整项目
     require_release: 'true',
     // 有搜索词时按相关性排序,否则按更新时间排序
     sort: filter ? 'relevance' : 'updated_desc',
@@ -184,6 +185,30 @@ async function searchAssets(filter, godotVersion, page = 1) {
     batch_size: '20'
   })
   if (godotVersion) params.set('compatibility', godotVersion)
+  const data = await getJson(`${API_BASE}/search/query/?${params}`)
+  const count = Number(data.count) || 0
+  return {
+    result: asArray(data.hits).map((h) => mapAsset(h.asset || {})),
+    page,
+    pages: Math.max(1, Math.ceil(count / 20))
+  }
+}
+
+/**
+ * 完整项目/模板(type=1):按更新时间倒序,分页。
+ * 走 search 端点而不是 /assets/ —— 前者直接返回 count,省一次总数补查。
+ * @param {number} [page]
+ * @returns {Promise<{result: MarketAsset[], page: number, pages: number}>}
+ */
+async function listProjectAssets(page = 1) {
+  const params = new URLSearchParams({
+    query: '',
+    type: '1',
+    require_release: 'true',
+    sort: 'updated_desc',
+    page: String(page),
+    batch_size: '20'
+  })
   const data = await getJson(`${API_BASE}/search/query/?${params}`)
   const count = Number(data.count) || 0
   return {
@@ -1182,6 +1207,7 @@ module.exports = {
   listAllAssets,
   listNewAssets,
   listRecentlyUpdated,
+  listProjectAssets,
   listFavorites,
   toggleFavorite,
   isFavorite,

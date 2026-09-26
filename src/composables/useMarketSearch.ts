@@ -11,6 +11,8 @@ export interface UseMarketSearchOptions {
   hydrate: (list: MarketAsset[]) => void | Promise<void>
   /** 输入防抖时长,默认 400ms */
   debounceMs?: number
+  /** 当前商店资产类型(0=插件/素材,1=完整项目);模板模式下搜索应查 type=1 */
+  getAssetType?: () => number
 }
 
 export function useMarketSearch(opts: UseMarketSearchOptions) {
@@ -36,7 +38,8 @@ export function useMarketSearch(opts: UseMarketSearchOptions) {
     searching.value = true
     searchError.value = ''
     try {
-      const r = await window.services.searchAssets(query.value.trim())
+      const assetType = opts.getAssetType?.() ?? 0
+      const r = await window.services.searchAssets(query.value.trim(), undefined, 1, assetType)
       results.value = r.result
       await opts.hydrate(results.value)
     } catch (e: any) {

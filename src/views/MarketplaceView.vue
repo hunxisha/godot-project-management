@@ -41,7 +41,11 @@ const {
   results,
   hasSearched,
   onSearchEnter
-} = useMarketSearch({ hydrate: hydrateVersions })
+} = useMarketSearch({
+  hydrate: hydrateVersions,
+  // 模板模式下搜索查 type=1;mode 在下方 useMarketBrowse 里声明,闭包到搜索时才求值
+  getAssetType: () => (mode.value === 'projects' ? 1 : 0)
+})
 
 // ---------- Godot 版本兼容(安装目标) ----------
 // 换算逻辑在 src/utils/godotVersion.ts(纯函数、可独立测试);这里只把当前目标项目接上去。
@@ -364,9 +368,9 @@ function onIconError(id: string) {
               v-else
               class="btn small primary asset-install"
               :disabled="!!installing"
-              :title="target ? `安装最新版到「${target.name}」` : '安装'"
+              :title="mode === 'projects' ? '另存为新项目' : target ? `安装最新版到「${target.name}」` : '安装'"
               @click="install(a)"
-            ><Icon name="download" :size="12" /> 安装</button>
+            ><Icon name="download" :size="12" /> {{ mode === 'projects' ? '另存' : '安装' }}</button>
             <button
               class="btn small ghost pick-ver"
               :disabled="!!installing"
