@@ -255,7 +255,7 @@ export interface InstalledAddon {
   installedAt: number
 }
 
-/** 扫描项目 addons/ 得到的插件信息 */
+/** 扫描项目 addons/ 得到的插件信息(纯素材条目由市场安装记录生成) */
 export interface AddonInfo {
   dirName: string
   name: string
@@ -267,6 +267,10 @@ export interface AddonInfo {
   assetId?: string
   versionString?: string
   installedAt?: number
+  /** 安装形态:插件(addons/)或纯素材(项目根);旧记录缺省按插件处理 */
+  kind?: 'addon' | 'asset'
+  /** 素材:相对项目根的安装文件清单(正斜杠),仅 kind=asset 时有值 */
+  assetPaths?: string[]
   /** 商店页面地址(来自市场安装记录;无来源信息时为空) */
   storeUrl?: string
 }

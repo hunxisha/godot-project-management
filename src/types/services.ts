@@ -198,7 +198,7 @@ export interface Services {
   verifyApiKey(key: string): Promise<{ authenticated: boolean, name?: string }>
   /** 列出项目已安装插件 */
   listAddons(projectId: string): AddonInfo[]
-  /** 安装市场插件(version 指定 release 版本,缺省为最新) */
+  /** 安装市场资产(version 指定 release 版本,缺省为最新;含 plugin.cfg 走插件链路,否则按纯素材落项目根) */
   installAsset(
     opts: {
       projectId: string
@@ -214,16 +214,16 @@ export interface Services {
       }
     },
     onProgress?: (p: { stage: 'downloading' | 'extracting', received?: number, total?: number }) => void
-  ): Promise<{ ok: boolean, error?: string, addon?: { title: string, versionString: string, dirNames: string[], enabled: boolean } }>
-  /** 更新插件(覆盖安装) */
+  ): Promise<{ ok: boolean, error?: string, addon?: { title: string, versionString: string, dirNames: string[], enabled: boolean, kind: 'addon' | 'asset' } }>
+  /** 更新资产(覆盖安装;素材先按旧清单清理再安装) */
   updateAsset(
     opts: { projectId: string, assetId: string },
     onProgress?: (p: { stage: 'downloading' | 'extracting', received?: number, total?: number }) => void
-  ): Promise<{ ok: boolean, error?: string, addon?: { title: string, versionString: string, dirNames: string[], enabled: boolean } }>
+  ): Promise<{ ok: boolean, error?: string, addon?: { title: string, versionString: string, dirNames: string[], enabled: boolean, kind: 'addon' | 'asset' } }>
   /** 检查插件更新 */
   checkAddonUpdate(opts: { projectId: string, assetId: string }): Promise<{ hasUpdate: boolean, latest?: string, error?: string }>
-  /** 卸载插件 */
-  uninstallAddon(opts: { projectId: string, dirName: string }): { ok: boolean, error?: string }
+  /** 卸载插件或素材(市场素材传 assetId 按安装清单删除) */
+  uninstallAddon(opts: { projectId: string, dirName: string, assetId?: string }): { ok: boolean, error?: string }
   /** 启用/禁用插件 */
   setAddonEnabled(opts: { projectId: string, dirName: string, enabled: boolean }): { ok: boolean, error?: string }
 }

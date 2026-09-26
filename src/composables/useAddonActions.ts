@@ -63,7 +63,12 @@ export function useAddonActions(opts: UseAddonActionsOptions) {
     let n = 0
     const failed: string[] = []
     for (const d of dirs) {
-      const r = window.services.uninstallAddon({ projectId: projectId(), dirName: d })
+      const r = window.services.uninstallAddon({
+        projectId: projectId(),
+        dirName: d,
+        // 素材条目凭 assetId 走安装清单删除;插件条目 assetId 缺省不影响原逻辑
+        assetId: selAddons.value.find((a) => a.dirName === d)?.assetId
+      })
       if (r.ok) n++
       else failed.push(d)
     }
@@ -96,7 +101,7 @@ export function useAddonActions(opts: UseAddonActionsOptions) {
         dirTimer = null
       }
       confirmingDir.value = null
-      const r = window.services.uninstallAddon({ projectId: projectId(), dirName: a.dirName })
+      const r = window.services.uninstallAddon({ projectId: projectId(), dirName: a.dirName, assetId: a.assetId })
       if (r.ok) opts.reload()
       else opts.notify(r.error || '卸载失败')
       return

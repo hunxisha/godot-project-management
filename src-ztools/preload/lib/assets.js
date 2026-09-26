@@ -1,6 +1,11 @@
 // Godot Asset Store(store.godotengine.org/api/v1,2026 起官方编辑器使用的新 API):
-// 搜索、安装、启用、更新、卸载插件(Addon)
+// 搜索、安装、启用、更新、卸载插件(Addon)与纯素材(模型/精灵等)
 // assetId 格式为 "{publisherSlug}/{assetSlug}",如 "maran23/script-ide"
+//
+// 安装按 zip 内容嗅探分流:含 plugin.cfg 走插件链路(进 addons/ 并启用),
+// 否则视为纯素材按原结构落到项目根并记录文件清单(卸载/更新按清单执行)。
+// 商店 API 的 type 字段把素材也归在 Addon 类型下(type=0 "Addon (tools, assets, etc...)"),
+// 不能作为判据。
 const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
@@ -29,8 +34,8 @@ function asArray(v) {
 /** 列表页展示用的最新 release 摘要 */
 /** @typedef {{version: string, minGodot: string, maxGodot: string, created: string}} ReleaseInfo */
 
-/** 安装/更新成功后回给渲染层的插件摘要(只含即时可展示的字段) */
-/** @typedef {{title: string, versionString: string, dirNames: string[], enabled: boolean}} AddonBrief */
+/** 安装/更新成功后回给渲染层的摘要(只含即时可展示的字段) */
+/** @typedef {{title: string, versionString: string, dirNames: string[], enabled: boolean, kind: 'addon'|'asset'}} AddonBrief */
 
 /**
  * 收藏入参:市场资产若来自收藏列表会带 addedAt(取消收藏时需先剥掉再重加),
@@ -230,7 +235,7 @@ function moveSync(src, dest) {
 }
 
 // node:fs Dirent 的最小结构子集(类型闸门下 node 模块不可解析,故按实际用到的成员声明)
-/** @typedef {{ name: string, isDirectory(): boolean }} DirEntry */
+/** @typedef {{ name: string, isDirectory(): boolean, isFile(): boolean }} DirEntry */
 
 /**
  * 递归收集 plugin.cfg 路径(限深 5,跳过隐藏目录)。
@@ -331,6 +336,86 @@ function setPluginEnabled(projectPath, dirNames, enable) {
   fs.writeFileSync(file, text + trailing + '[editor_plugins]\n\n' + newline + '\n')
 }
 
+// ---------- 纯素材(非插件)的文件落盘与清单清理 ----------
+
+/**
+ * 递归收集目录下全部文件的相对路径(正斜杠)。
+ * 只跳过 macOS 打包垃圾 __MACOSX;点开头文件(如 .gdignore)按作者意图原样保留。
+ * @param {string} dir 当前遍历目录(绝对路径)
+ * @param {string} [rel] 相对根的路径
+ * @param {string[]} [out]
+ * @returns {string[]}
+ */
+function collectFiles(dir, rel = '', out = []) {
+  /** @type {DirEntry[]} */
+  let entries
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch (e) {
+    return out
+  }
+  for (const ent of entries) {
+    if (ent.name === '__MACOSX') continue
+    const r = rel ? `${rel}/${ent.name}` : ent.name
+    if (ent.isDirectory()) collectFiles(path.join(dir, ent.name), r, out)
+    else if (ent.isFile()) out.push(r)
+  }
+  return out
+}
+
+/**
+ * 把相对路径解析到 root 之下;越界(清单里混入 ../ 等)返回 null。
+ * 安装清单存于本地数据库,属于可被改写的数据,删除前必须确认不逃出项目根。
+ * @param {string} root
+ * @param {string} rel
+ * @returns {string|null}
+ */
+function resolveUnder(root, rel) {
+  const dest = path.resolve(root, ...String(rel).split('/'))
+  if (dest !== root && !dest.startsWith(root + path.sep)) return null
+  return dest
+}
+
+/**
+ * 按安装清单删除素材文件,然后自底向上清掉因此变空的父目录(到项目根为止)。
+ * @param {string} projectPath
+ * @param {string[]} [relPaths]
+ */
+function removeInstalledFiles(projectPath, relPaths) {
+  /** @type {Set<string>} */
+  const parentDirs = new Set()
+  for (const rel of relPaths || []) {
+    const dest = resolveUnder(projectPath, rel)
+    if (!dest) continue
+    try {
+      const st = fs.statSync(dest)
+      if (st.isFile()) fs.rmSync(dest, { force: true })
+    } catch (e) { /* 不存在或删不掉:跳过,不阻断其余清理 */ }
+    const parent = path.dirname(dest)
+    if (parent !== projectPath) parentDirs.add(parent)
+  }
+  // 深的先清:父目录要等子目录腾空后才可能变空
+  const dirs = [...parentDirs].sort((a, b) => b.length - a.length)
+  for (const d of dirs) {
+    let cur = d
+    while (cur !== projectPath && cur.startsWith(projectPath + path.sep)) {
+      let entries
+      try {
+        entries = fs.readdirSync(cur)
+      } catch (e) {
+        break
+      }
+      if (entries.length) break
+      try {
+        fs.rmdirSync(cur)
+      } catch (e) {
+        break
+      }
+      cur = path.dirname(cur)
+    }
+  }
+}
+
 /**
  * 扫描项目已安装插件。
  * @param {string} projectId
@@ -339,8 +424,6 @@ function setPluginEnabled(projectPath, dirNames, enable) {
 function listAddons(projectId) {
   const project = getDoc(projectId)
   if (!project) return []
-  const addonsDir = path.join(project.path, 'addons')
-  if (!fs.existsSync(addonsDir)) return []
   /** @type {Record<string, any>} */
   const marketDocs = {}
   for (const doc of listDocs(`godot/asset/${projectId}/`)) {
@@ -357,28 +440,57 @@ function listAddons(projectId) {
   })()
   const enabledPaths = [...enabledText.matchAll(/"([^"]*addons\/[^"\\]+\/plugin\.cfg)"/g)].map((m) => m[1])
 
-  for (const ent of fs.readdirSync(addonsDir, { withFileTypes: true })) {
-    if (!ent.isDirectory()) continue
-    const cfgPath = path.join(addonsDir, ent.name, 'plugin.cfg')
-    const hasCfg = fs.existsSync(cfgPath)
-    const cfg = hasCfg ? parsePluginCfg(cfgPath) : {}
-    const market = Object.values(marketDocs).find((d) => (d.dirNames || []).includes(ent.name))
+  // addons/ 可能不存在(项目只装过纯素材),此时跳过目录扫描、仍输出素材条目
+  const addonsDir = path.join(project.path, 'addons')
+  if (fs.existsSync(addonsDir)) {
+    for (const ent of fs.readdirSync(addonsDir, { withFileTypes: true })) {
+      if (!ent.isDirectory()) continue
+      const cfgPath = path.join(addonsDir, ent.name, 'plugin.cfg')
+      const hasCfg = fs.existsSync(cfgPath)
+      const cfg = hasCfg ? parsePluginCfg(cfgPath) : {}
+      const market = Object.values(marketDocs).find(
+        (d) => d.kind !== 'asset' && (d.dirNames || []).includes(ent.name)
+      )
+      out.push({
+        dirName: ent.name,
+        name: cfg.name || market?.title || ent.name,
+        version: cfg.version || market?.versionString,
+        author: cfg.author,
+        hasCfg,
+        enabled: enabledPaths.includes(`res://addons/${ent.name}/plugin.cfg`),
+        fromMarket: !!market,
+        assetId: market?.assetId,
+        versionString: market?.versionString,
+        installedAt: market?.installedAt,
+        kind: 'addon',
+        // 商店页面:优先用安装时记下的原址,否则按 assetId 拼装
+        storeUrl: market
+          ? (market.meta && market.meta.storeUrl) ||
+            (market.assetId ? `${STORE_BASE}/asset/${market.assetId}/` : undefined)
+          : undefined
+      })
+    }
+  }
+  // 市场安装的纯素材不落 addons/,从安装记录直接生成条目(卸载/更新走 assetId)
+  for (const doc of Object.values(marketDocs)) {
+    if (doc.kind !== 'asset') continue
+    const slug = String(doc.assetId || '').split('/')[1] || doc._id
     out.push({
-      dirName: ent.name,
-      name: cfg.name || market?.title || ent.name,
-      version: cfg.version || market?.versionString,
-      author: cfg.author,
-      hasCfg,
-      enabled: enabledPaths.includes(`res://addons/${ent.name}/plugin.cfg`),
-      fromMarket: !!market,
-      assetId: market?.assetId,
-      versionString: market?.versionString,
-      installedAt: market?.installedAt,
-      // 商店页面:优先用安装时记下的原址,否则按 assetId 拼装
-      storeUrl: market
-        ? (market.meta && market.meta.storeUrl) ||
-          (market.assetId ? `${STORE_BASE}/asset/${market.assetId}/` : undefined)
-        : undefined
+      dirName: slug,
+      name: doc.title || slug,
+      version: doc.versionString,
+      hasCfg: false,
+      enabled: false,
+      fromMarket: true,
+      assetId: doc.assetId,
+      versionString: doc.versionString,
+      installedAt: doc.installedAt,
+      kind: 'asset',
+      /** 相对项目根的安装清单(正斜杠),展示与校验用;卸载以库里的记录为准 */
+      assetPaths: asArray(doc.installedPaths),
+      storeUrl:
+        (doc.meta && doc.meta.storeUrl) ||
+        (doc.assetId ? `${STORE_BASE}/asset/${doc.assetId}/` : undefined)
     })
   }
   out.sort((a, b) => a.name.localeCompare(b.name))
@@ -386,7 +498,9 @@ function listAddons(projectId) {
 }
 
 /**
- * 下载安装市场插件到项目 addons/。
+ * 下载安装市场资产。按 zip 内容分流:
+ *  · 含 plugin.cfg → 插件(Addon):进项目 addons/,可自动启用;
+ *  · 否则 → 纯素材(模型/精灵等):按 zip 原结构落到项目根,记录文件清单供卸载/更新。
  * opts: { projectId, assetId, assetMeta, version? } version 指定安装的 release 版本。
  * @param {{projectId: string, assetId: string, assetMeta?: object, version?: string}} opts
  * @param {(p: {stage: 'downloading'|'extracting', received?: number, total?: number}) => void} [onProgress]
@@ -400,9 +514,6 @@ async function installAsset({ projectId, assetId, assetMeta, version }, onProgre
     const detail = await getAssetDetail(assetId, version)
     if (!detail.downloadUrl) return { ok: false, error: '资产没有下载地址' }
 
-    const addonsDir = path.join(project.path, 'addons')
-    ensureDir(addonsDir)
-
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ztools-godot-'))
     const zipPath = path.join(tmpDir, 'asset.zip')
     const dl = downloadFile(detail.downloadUrl, zipPath, {
@@ -414,51 +525,10 @@ async function installAsset({ projectId, assetId, assetMeta, version }, onProgre
     const extractDir = path.join(tmpDir, 'x')
     await extractZip(zipPath, extractDir)
 
-    // 定位插件源目录:zip 打包结构多样(addons/x、x/addons/x、wrapper/x 等),
-    // 以 plugin.cfg 所在目录的父目录为准,无 plugin.cfg 时回退旧逻辑
-    const sources = locateSources(extractDir)
-
-    const dirNames = []
-    for (const srcDir of sources) {
-      for (const ent of fs.readdirSync(srcDir, { withFileTypes: true })) {
-        const dest = path.join(addonsDir, ent.name)
-        const src = path.join(srcDir, ent.name)
-        if (ent.isDirectory()) {
-          fs.rmSync(dest, { recursive: true, force: true })
-          moveSync(src, dest)
-          dirNames.push(ent.name)
-        } else if (ent.name === '.import' || ent.name.endsWith('.gdignore')) {
-          // 单文件资产不移动
-        } else {
-          fs.rmSync(dest, { force: true })
-          moveSync(src, dest)
-        }
-      }
-    }
-    if (!dirNames.length) return { ok: false, error: '压缩包中未找到插件目录' }
-
-    // 自动启用
-    let enabled = false
-    const settings = getDoc('godot/settings') || {}
-    if (settings.autoEnablePlugin !== false) {
-      const cfgDirs = dirNames.filter((d) => fs.existsSync(path.join(addonsDir, d, 'plugin.cfg')))
-      if (cfgDirs.length) {
-        setPluginEnabled(project.path, cfgDirs, true)
-        enabled = true
-      }
-    }
-
-    const docId = `godot/asset/${projectId}/${assetId}`
-    putDoc(docId, {
-      projectId,
-      assetId,
-      title: detail.title,
-      versionString: detail.versionString,
-      dirNames,
-      meta: assetMeta || undefined,
-      installedAt: Date.now()
-    })
-    return { ok: true, addon: { title: detail.title, versionString: detail.versionString, dirNames, enabled } }
+    // 内容嗅探:zip 里有没有 plugin.cfg 是插件与素材的唯一可靠判据(见文件头注释)
+    const ctx = { project, projectId, assetId, assetMeta, detail, extractDir }
+    if (findPluginCfgs(extractDir).length) return installAsAddon(ctx)
+    return installAsAssetFiles(ctx)
   } catch (e) {
     return { ok: false, error: (e && e.message) || '安装失败' }
   } finally {
@@ -468,8 +538,126 @@ async function installAsset({ projectId, assetId, assetMeta, version }, onProgre
   }
 }
 
+/** 安装链路的公共上下文(下载解压完成后传入) */
+/** @typedef {{project: any, projectId: string, assetId: string, assetMeta?: object, detail: any, extractDir: string}} InstallCtx */
+
 /**
- * 更新:重新安装覆盖。
+ * 插件链路:定位插件目录 → 挪进 addons/ → 按设置自动启用 → 写记录。
+ * @param {InstallCtx} ctx
+ * @returns {{ok: boolean, error?: string, addon?: AddonBrief}}
+ */
+function installAsAddon({ project, projectId, assetId, assetMeta, detail, extractDir }) {
+  const addonsDir = path.join(project.path, 'addons')
+  ensureDir(addonsDir)
+
+  // 定位插件源目录:zip 打包结构多样(addons/x、x/addons/x、wrapper/x 等),
+  // 以 plugin.cfg 所在目录的父目录为准
+  const sources = locateSources(extractDir)
+
+  const dirNames = []
+  for (const srcDir of sources) {
+    for (const ent of fs.readdirSync(srcDir, { withFileTypes: true })) {
+      const dest = path.join(addonsDir, ent.name)
+      const src = path.join(srcDir, ent.name)
+      if (ent.isDirectory()) {
+        fs.rmSync(dest, { recursive: true, force: true })
+        moveSync(src, dest)
+        dirNames.push(ent.name)
+      } else if (ent.name === '.import' || ent.name.endsWith('.gdignore')) {
+        // 单文件资产不移动
+      } else {
+        fs.rmSync(dest, { force: true })
+        moveSync(src, dest)
+      }
+    }
+  }
+  if (!dirNames.length) return { ok: false, error: '压缩包中未找到插件目录' }
+
+  // 自动启用
+  let enabled = false
+  const settings = getDoc('godot/settings') || {}
+  if (settings.autoEnablePlugin !== false) {
+    const cfgDirs = dirNames.filter((d) => fs.existsSync(path.join(addonsDir, d, 'plugin.cfg')))
+    if (cfgDirs.length) {
+      setPluginEnabled(project.path, cfgDirs, true)
+      enabled = true
+    }
+  }
+
+  putDoc(`godot/asset/${projectId}/${assetId}`, {
+    projectId,
+    assetId,
+    title: detail.title,
+    versionString: detail.versionString,
+    kind: 'addon',
+    dirNames,
+    meta: assetMeta || undefined,
+    installedAt: Date.now()
+  })
+  return { ok: true, addon: { kind: 'addon', title: detail.title, versionString: detail.versionString, dirNames, enabled } }
+}
+
+/**
+ * 素材链路:按 zip 原结构落到项目根 —— 作者按 res:// 路径打包,收进统一目录会断引用。
+ * 更新语义是先清后装:先按旧清单删掉本资产上次写入的文件,再做整包冲突检测。
+ * @param {InstallCtx} ctx
+ * @returns {{ok: boolean, error?: string, addon?: AddonBrief}}
+ */
+function installAsAssetFiles({ project, projectId, assetId, assetMeta, detail, extractDir }) {
+  const root = project.path
+
+  // 根下带 project.godot 的是完整项目/模板,混进现有项目会覆盖用户工程文件
+  if (fs.existsSync(path.join(extractDir, 'project.godot'))) {
+    return { ok: false, error: '这是完整项目或模板,不能安装到现有项目目录' }
+  }
+
+  const files = collectFiles(extractDir)
+  if (!files.length) return { ok: false, error: '压缩包中没有可安装的文件' }
+
+  const docId = `godot/asset/${projectId}/${assetId}`
+  const prev = getDoc(docId)
+  if (prev && prev.kind === 'asset') removeInstalledFiles(root, prev.installedPaths)
+
+  // 冲突检测:项目里已有同名文件时整包拒绝,不做部分覆盖
+  const conflicts = files.filter((rel) => {
+    const dest = resolveUnder(root, rel)
+    return dest && fs.existsSync(dest)
+  })
+  if (conflicts.length) {
+    return {
+      ok: false,
+      error: `项目内已有同名文件(${conflicts.length} 个,如 ${conflicts.slice(0, 3).join('、')}),已取消安装。可先卸载旧内容后重试`
+    }
+  }
+
+  for (const rel of files) {
+    const dest = resolveUnder(root, rel)
+    if (!dest) continue
+    ensureDir(path.dirname(dest))
+    fs.copyFileSync(path.join(extractDir, rel), dest)
+  }
+
+  // dirNames 仅存顶层条目供展示;卸载/更新一律以 installedPaths 文件清单为准
+  const topEntries = [...new Set(files.map((f) => f.split('/')[0]))]
+  putDoc(docId, {
+    projectId,
+    assetId,
+    title: detail.title,
+    versionString: detail.versionString,
+    kind: 'asset',
+    dirNames: topEntries,
+    installedPaths: files,
+    meta: assetMeta || undefined,
+    installedAt: Date.now()
+  })
+  return {
+    ok: true,
+    addon: { kind: 'asset', title: detail.title, versionString: detail.versionString, dirNames: topEntries, enabled: false }
+  }
+}
+
+/**
+ * 更新:重新安装覆盖(素材由 installAsAssetFiles 先清后装)。
  * @param {{projectId: string, assetId: string}} opts
  * @param {(p: {stage: 'downloading'|'extracting', received?: number, total?: number}) => void} [onProgress]
  * @returns {Promise<{ok: boolean, error?: string, addon?: AddonBrief}>}
@@ -502,18 +690,31 @@ async function checkAddonUpdate({ projectId, assetId }) {
 
 /**
  * 卸载:删除目录 + 移除启用 + 删除记录。
- * @param {{projectId: string, dirName: string}} opts
+ * 素材(kind=asset)按安装清单删文件并清空父目录,不动 project.godot。
+ * @param {{projectId: string, dirName: string, assetId?: string}} opts
  * @returns {{ok: boolean, error?: string}}
  */
-function uninstallAddon({ projectId, dirName }) {
+function uninstallAddon({ projectId, dirName, assetId }) {
   try {
     const project = getDoc(projectId)
     if (!project) return { ok: false, error: '项目不存在' }
+
+    // 素材:按清单精确删除(渲染层对市场条目会带上 assetId)
+    if (assetId) {
+      const doc = getDoc(`godot/asset/${projectId}/${assetId}`)
+      if (doc && doc.kind === 'asset') {
+        removeInstalledFiles(project.path, doc.installedPaths)
+        removeDoc(doc._id)
+        return { ok: true }
+      }
+    }
+
     const addonDir = path.join(project.path, 'addons', dirName)
     if (fs.existsSync(addonDir)) fs.rmSync(addonDir, { recursive: true, force: true })
     setPluginEnabled(project.path, [dirName], false)
     for (const doc of listDocs(`godot/asset/${projectId}/`)) {
-      if ((doc.dirNames || []).includes(dirName)) removeDoc(doc._id)
+      // 素材记录的 dirNames 是项目根顶层条目,不能按目录名匹配到插件卸载
+      if (doc.kind !== 'asset' && (doc.dirNames || []).includes(dirName)) removeDoc(doc._id)
     }
     return { ok: true }
   } catch (e) {

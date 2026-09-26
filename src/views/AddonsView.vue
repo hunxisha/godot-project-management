@@ -65,7 +65,19 @@ const {
 })
 
 const target = computed(() => projects.value.find((p) => p._id === targetId.value))
-const enabledCount = computed(() => addons.value.filter((a) => a.enabled).length)
+// 素材没有启用概念,统计口径只算插件
+const addonCount = computed(() => addons.value.filter((a) => a.kind !== 'asset').length)
+const enabledCount = computed(() => addons.value.filter((a) => a.kind !== 'asset' && a.enabled).length)
+
+/** 素材条目安装到项目根的顶层条目(展示用) */
+function assetTops(a: AddonInfo): string[] {
+  return [...new Set((a.assetPaths || []).map((p) => p.split('/')[0]))]
+}
+
+/** 素材完整安装清单(悬浮提示用) */
+function assetPathsTitle(a: AddonInfo): string {
+  return (a.assetPaths || []).slice(0, 8).join('\n')
+}
 
 onMounted(() => {
   projects.value = window.ztools.db.allDocs('godot/project/') as any[]
@@ -162,8 +174,8 @@ function openStore(a: AddonInfo) {
 
       <!-- 标题行 -->
       <div class="view-head">
-        <h2><Icon name="check" :size="16" /> 已安装插件 <span class="count-pill">{{ addons.length }}</span></h2>
-        <span v-if="addons.length" class="head-stat">已启用 {{ enabledCount }} · 未启用 {{ addons.length - enabledCount }}</span>
+        <h2><Icon name="check" :size="16" /> 已安装插件与素材 <span class="count-pill">{{ addons.length }}</span></h2>
+        <span v-if="addons.length" class="head-stat">插件 {{ addonCount }} · 已启用 {{ enabledCount }} · 素材 {{ addons.length - addonCount }}</span>
       </div>
 
       <EmptyState
@@ -192,7 +204,7 @@ function openStore(a: AddonInfo) {
         </div>
 
         <div class="addon-list">
-          <div v-for="a in addons" :key="a.dirName" class="card addon" :class="{ picked: checked.includes(a.dirName) }">
+          <div v-for="a in addons" :key="a.assetId || a.dirName" class="card addon" :class="{ picked: checked.includes(a.dirName) }">
             <input
               type="checkbox"
               class="chk ad-chk"
@@ -200,7 +212,7 @@ function openStore(a: AddonInfo) {
               :title="checked.includes(a.dirName) ? '取消选择' : '选择'"
               @change="toggleCheck(a.dirName)"
             />
-            <div class="ad-ico" :class="{ off: !a.enabled }"><Icon name="puzzle" :size="17" /></div>
+            <div class="ad-ico" :class="{ off: a.kind !== 'asset' && !a.enabled }"><Icon name="puzzle" :size="17" /></div>
             <div class="addon-main">
               <div class="addon-name">
                 <span
@@ -211,14 +223,18 @@ function openStore(a: AddonInfo) {
                 >{{ a.name }}</span>
                 <Icon v-if="a.storeUrl" name="external" :size="10" class="name-ext" />
                 <span v-if="a.version" class="tag">v{{ a.version }}</span>
-                <span class="state" :class="a.enabled ? 'ok' : 'idle'">
+                <span v-if="a.kind === 'asset'" class="tag brand" title="纯素材:安装到项目根,无启用概念">素材</span>
+                <span v-else class="state" :class="a.enabled ? 'ok' : 'idle'">
                   <span class="dot"></span>{{ a.enabled ? '已启用' : '未启用' }}
                 </span>
                 <span v-if="a.fromMarket" class="tag brand">市场</span>
                 <span v-else class="tag" title="手动放置或未通过市场安装">未知来源</span>
                 <span v-if="updateInfo[a.dirName]" class="tag warn">可更新到 v{{ updateInfo[a.dirName].latest }}</span>
               </div>
-              <div class="addon-meta mono" :title="`addons/${a.dirName}`">addons/{{ a.dirName }}</div>
+              <div v-if="a.kind === 'asset'" class="addon-meta mono" :title="assetPathsTitle(a)">
+                res://{{ assetTops(a).join('、') }} · {{ (a.assetPaths || []).length }} 个文件
+              </div>
+              <div v-else class="addon-meta mono" :title="`addons/${a.dirName}`">addons/{{ a.dirName }}</div>
               <!-- 更新进度 -->
               <div v-if="updating && a.assetId === updating.assetId" class="upd">
                 <span class="spin"></span>

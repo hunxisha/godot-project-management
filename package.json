@@ -16,7 +16,7 @@
     "test:preload": "node src-ztools/preload/lib/__tests__/backup.test.js",
     "test:preload:sandbox": "node src-ztools/preload/lib/__tests__/backup.test.js --no-immediate",
     "test:preload:unit": "node src-ztools/preload/lib/__tests__/sandbox.test.js && node src-ztools/preload/lib/__tests__/godotExe.test.js && node src-ztools/preload/lib/__tests__/taskqueue.test.js && node src-ztools/preload/lib/__tests__/fsutil.test.js && node src-ztools/preload/lib/__tests__/http.test.js && node src-ztools/preload/lib/__tests__/install.test.js && node src-ztools/preload/lib/__tests__/favorites.test.js && node src-ztools/preload/lib/__tests__/services.test.js",
-    "test:addons": "node src-ztools/preload/lib/__tests__/addons.test.js && node src-ztools/preload/lib/__tests__/addons.test.js --no-immediate",
+    "test:addons": "node src-ztools/preload/lib/__tests__/addons.test.js && node src-ztools/preload/lib/__tests__/assets-files.test.js && node src-ztools/preload/lib/__tests__/addons.test.js --no-immediate && node src-ztools/preload/lib/__tests__/assets-files.test.js --no-immediate",
     "test:taskdialog": "node src/composables/__tests__/build-bundle.mjs && node src/composables/__tests__/useTaskDialog.test.mjs",
     "test:composable": "node src/composables/__tests__/build-bundle.mjs && node src/composables/__tests__/useBackups.test.mjs"
   },
