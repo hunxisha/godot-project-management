@@ -32,3 +32,18 @@ export function inGroup(
   if (a.tagSlugs?.length) return a.tagSlugs.some((s) => slugs.includes(s))
   return slugs.includes((a.category || '').toLowerCase())
 }
+
+/** 这些标签强烈暗示是纯素材(模型/精灵/贴图等),而非可启用的插件(刻意不含 2d/3d 这类泛化标签) */
+export const ASSET_HINT_SLUGS = [
+  'model', 'models', '3dmodel', '3dmodels', 'sprite', 'sprites', 'spritepack',
+  'spritesheet', 'spritesheets', 'texture', 'textures', 'tileset', 'tilesets',
+  'tilemap', 'art', 'pixelart', 'asset', 'assets', 'assetpack', 'assetspack',
+  'props', 'prop', 'environment', 'environments', 'lowpoly', 'icon', 'icons',
+  'iconpack', 'font', 'fonts', 'music', 'sound', 'sounds', 'sfx', 'audio', 'voice'
+]
+
+/** 按标签推测是否为纯素材;仅作卡片提示,实际安装行为由 zip 内容嗅探决定 */
+export function isLikelyAsset(a: Pick<MarketAsset, 'tagSlugs' | 'category'>): boolean {
+  const slugs = a.tagSlugs?.length ? a.tagSlugs : [String(a.category || '').toLowerCase()]
+  return slugs.some((s) => ASSET_HINT_SLUGS.includes(s))
+}

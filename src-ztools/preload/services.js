@@ -103,6 +103,10 @@ window.services = {
   cancelStagedAsset: (stageId) => assets.cancelStagedAsset(stageId),
   /** 安装市场资产(version 指定 release 版本,缺省为最新;含 plugin.cfg 走插件链路,否则按纯素材落项目根) */
   installAsset: (opts, onProgress) => assets.installAsset(opts, onProgress),
+  /** 把完整项目/模板另存为独立项目(解压到 destRoot 下的 slug 子目录并登记) */
+  saveAssetAsProject: (opts, onProgress) => assets.saveAssetAsProject(opts, onProgress),
+  /** 仅下载资产 zip 到指定目录(不安装、不写记录;重名自动加序号) */
+  downloadAssetZip: (opts, onProgress) => assets.downloadAssetZip(opts, onProgress),
   /** 更新资产(覆盖安装;素材先按旧清单清理再安装) */
   updateAsset: (opts, onProgress) => assets.updateAsset(opts, onProgress),
   /** 检查插件更新 */

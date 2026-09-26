@@ -384,6 +384,57 @@ async function main() {
   ok(r14.ok === true, '无效 stageId 回退为正常下载安装', r14.error)
   ok(fs.existsSync(path.join(rootA, 'c.dat')), '回退安装正常落盘')
 
+  // ---------- 15 ----------
+  section('15. 完整项目另存为新项目')
+  serveAsset('pub/tpl-save', { name: 'Tpl Save', version: '1.0.0' })
+  state.fixtureZip = await buildZip({
+    'TplSave/project.godot': 'config_version=5\n[application]\nconfig/name="Tpl Save"\n',
+    'TplSave/icon.svg': '<svg/>',
+    'TplSave/main.tscn': 'scene'
+  })
+  const destRoot = path.join(WORK, 'dest')
+  ensureDir(destRoot)
+  const r15 = await assets.saveAssetAsProject({ assetId: 'pub/tpl-save', destRoot })
+  ok(r15.ok === true, '另存成功', r15.error)
+  ok(fs.existsSync(path.join(destRoot, 'tpl-save', 'project.godot')), 'wrapper 剥离后项目落在 slug 子目录')
+  ok(fs.existsSync(path.join(destRoot, 'tpl-save', 'main.tscn')), '项目文件完整')
+  ok(r15.projectName === 'Tpl Save', `项目名取自 project.godot(${r15.projectName})`)
+  ok(!!r15.projectId && !!docs.get(r15.projectId), '已登记进项目列表')
+
+  // 复用暂存包:不再下载
+  const pv7 = await assets.previewAssetInstall({ projectId: pidA, assetId: 'pub/tpl-save' })
+  ok(pv7.plan && pv7.plan.kind === 'project', '预览判为完整项目')
+  const downloadsBefore15 = state.downloads
+  const destRoot2 = path.join(WORK, 'dest2')
+  ensureDir(destRoot2)
+  const r15b = await assets.saveAssetAsProject({ assetId: 'pub/tpl-save', stageId: pv7.stageId, destRoot: destRoot2 })
+  ok(r15b.ok === true, '凭暂存包另存成功', r15b.error)
+  ok(state.downloads === downloadsBefore15, '未发生新的下载(复用暂存包)')
+
+  // 边界:子目录已存在、非完整项目、目标根不存在
+  const r15c = await assets.saveAssetAsProject({ assetId: 'pub/tpl-save', destRoot })
+  ok(r15c.ok === false && /已存在/.test(r15c.error || ''), `子目录已存在时报错(${r15c.error})`)
+  serveAsset('pub/notproject', { name: 'NotProject', version: '1.0.0' })
+  state.fixtureZip = await buildZip({ 'readme.txt': 'not a project' })
+  const r15d = await assets.saveAssetAsProject({ assetId: 'pub/notproject', destRoot })
+  ok(r15d.ok === false && /project\.godot/.test(r15d.error || ''), `没有 project.godot 时报错(${r15d.error})`)
+  const r15e = await assets.saveAssetAsProject({ assetId: 'pub/tpl-save', destRoot: path.join(WORK, 'no-such-dir') })
+  ok(r15e.ok === false && /目标目录/.test(r15e.error || ''), '目标根不存在时报错')
+
+  // ---------- 16 ----------
+  section('16. 仅下载 zip:命名、重名序号与目录校验')
+  serveAsset('pub/dl', { name: 'DL', version: '3.1.4' })
+  state.fixtureZip = await buildZip({ 'a.txt': 'a' })
+  const dlDir = path.join(WORK, 'dl')
+  ensureDir(dlDir)
+  const r16 = await assets.downloadAssetZip({ assetId: 'pub/dl', destDir: dlDir })
+  ok(r16.ok === true && r16.file === 'dl-3.1.4.zip', `按 slug-版本命名(${r16.file})`)
+  ok(fs.existsSync(path.join(dlDir, 'dl-3.1.4.zip')), 'zip 落盘')
+  const r16b = await assets.downloadAssetZip({ assetId: 'pub/dl', destDir: dlDir })
+  ok(r16b.ok === true && r16b.file === 'dl-3.1.4-2.zip', `重名自动加序号(${r16b.file})`)
+  const r16c = await assets.downloadAssetZip({ assetId: 'pub/dl', destDir: path.join(WORK, 'nope') })
+  ok(r16c.ok === false && /目标目录/.test(r16c.error || ''), '目录不存在时报错')
+
   console.log(`\n${'='.repeat(56)}`)
   console.log(`PASS ${pass}  FAIL ${failures.length}`)
   if (failures.length) {

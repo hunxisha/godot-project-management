@@ -12,6 +12,7 @@ const os = require('node:os')
 const { getJson, downloadFile } = require('./http')
 const { extractZip, ensureDir, readZipEntries } = require('./extract')
 const { getDoc, putDoc, putDocVerbose, removeDoc, listDocs } = require('./store')
+const { addProject } = require('./projects')
 
 const API_BASE = 'https://store.godotengine.org/api/v1'
 /** 商店页面地址前缀(格式与 API 返回的 store_url 一致:/asset/{publisher}/{slug}/) */
@@ -852,6 +853,94 @@ function installAsAssetFiles({ project, projectId, assetId, assetMeta, detail, e
 }
 
 /**
+ * 把完整项目/模板另存为独立项目:解压到 destRoot 下的 slug 子目录并登记进项目列表。
+ * 与 installAsset 互斥 —— 完整项目绝不能混进现有项目,这里只走「新项目」通道。
+ * 唯一顶层目录一律剥离(新目录本身就是项目根)。
+ * @param {{assetId: string, version?: string, stageId?: string, destRoot: string}} opts
+ * @param {(p: {stage: 'downloading'|'extracting', received?: number, total?: number}) => void} [onProgress]
+ * @returns {Promise<{ok: boolean, error?: string, projectName?: string, projectId?: string, path?: string}>}
+ */
+async function saveAssetAsProject({ assetId, version, stageId, destRoot }, onProgress) {
+  let tmpDir = ''
+  try {
+    if (!destRoot || !fs.existsSync(destRoot) || !fs.statSync(destRoot).isDirectory()) {
+      return { ok: false, error: '目标目录不存在' }
+    }
+    const detail = await getAssetDetail(assetId, version)
+    if (!detail.downloadUrl) return { ok: false, error: '资产没有下载地址' }
+
+    let zipPath = takeStaged(stageId, assetId)
+    if (zipPath) {
+      tmpDir = path.dirname(zipPath)
+    } else {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ztools-godot-'))
+      zipPath = path.join(tmpDir, 'asset.zip')
+      const dl = downloadFile(detail.downloadUrl, zipPath, {
+        onProgress: (received, total) => onProgress && onProgress({ stage: 'downloading', received, total })
+      })
+      await dl.promise
+    }
+
+    onProgress && onProgress({ stage: 'extracting' })
+    const extractDir = path.join(tmpDir, 'x')
+    await extractZip(zipPath, extractDir)
+
+    const tops = fs.readdirSync(extractDir, { withFileTypes: true }).filter((e) => e.name !== '__MACOSX')
+    const sourceRoot = tops.length === 1 && tops[0].isDirectory() ? path.join(extractDir, tops[0].name) : extractDir
+    if (!fs.existsSync(path.join(sourceRoot, 'project.godot'))) {
+      return { ok: false, error: '压缩包中没有 project.godot,不是完整项目' }
+    }
+
+    const slug = String(assetId).split('/')[1] || 'asset'
+    const target = path.join(destRoot, slug)
+    if (fs.existsSync(target)) return { ok: false, error: `目标目录已存在:${target}` }
+    moveSync(sourceRoot, target)
+
+    const added = addProject(target)
+    if (!added || added.ok === false) {
+      return { ok: false, error: (added && added.error) || '项目登记失败' }
+    }
+    return { ok: true, projectName: added.project && added.project.name, projectId: added.project && added.project.id, path: target }
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || '另存失败' }
+  } finally {
+    try {
+      tmpDir && fs.rmSync(tmpDir, { recursive: true, force: true })
+    } catch (e) { /* ignore */ }
+  }
+}
+
+/**
+ * 仅下载资产 zip 到指定目录(不安装、不写记录)。重名自动加序号。
+ * @param {{assetId: string, version?: string, destDir: string}} opts
+ * @param {(p: {stage: 'downloading'|'extracting', received?: number, total?: number}) => void} [onProgress]
+ * @returns {Promise<{ok: boolean, error?: string, file?: string}>}
+ */
+async function downloadAssetZip({ assetId, version, destDir }, onProgress) {
+  try {
+    if (!destDir || !fs.existsSync(destDir) || !fs.statSync(destDir).isDirectory()) {
+      return { ok: false, error: '目标目录不存在' }
+    }
+    const detail = await getAssetDetail(assetId, version)
+    if (!detail.downloadUrl) return { ok: false, error: '资产没有下载地址' }
+    /** 文件名安全化:slug/版本串来自远端,防路径非法字符 */
+    /** @param {string} s */
+    const safe = (s) => String(s).replace(/[\\/:*?"<>|]+/g, '_') || 'asset'
+    const base = `${safe(String(assetId).split('/')[1])}-${safe(detail.versionString || 'latest')}`
+    let name = `${base}.zip`
+    let n = 2
+    while (fs.existsSync(path.join(destDir, name))) name = `${base}-${n++}.zip`
+    const dl = downloadFile(detail.downloadUrl, path.join(destDir, name), {
+      onProgress: (received, total) => onProgress && onProgress({ stage: 'downloading', received, total })
+    })
+    await dl.promise
+    return { ok: true, file: name }
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || '下载失败' }
+  }
+}
+
+/**
  * 更新:重新安装覆盖(素材由 installAsAssetFiles 先清后装)。
  * @param {{projectId: string, assetId: string}} opts
  * @param {(p: {stage: 'downloading'|'extracting', received?: number, total?: number}) => void} [onProgress]
@@ -1104,6 +1193,8 @@ module.exports = {
   previewAssetInstall,
   cancelStagedAsset,
   installAsset,
+  saveAssetAsProject,
+  downloadAssetZip,
   updateAsset,
   checkAddonUpdate,
   uninstallAddon,

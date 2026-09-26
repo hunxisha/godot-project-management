@@ -11,7 +11,7 @@ import { useMarketBrowse, MODE_META, type BrowseMode } from '../composables/useM
 import { useMarketInstall } from '../composables/useMarketInstall'
 import { useMarketFavorites } from '../composables/useMarketFavorites'
 import { compatOf as assetCompat, godotRange, projectGodotVersion } from '../utils/godotVersion'
-import { MARKET_TAG_GROUPS } from '../utils/marketTags'
+import { MARKET_TAG_GROUPS, isLikelyAsset } from '../utils/marketTags'
 import { normVersion } from '../utils/format'
 import type { AddonInfo, GodotProject, GodotVersion, MarketAsset } from '../types/godot'
 
@@ -93,6 +93,8 @@ const {
   installFromPicker,
   confirmPreview,
   cancelPreview,
+  saveAsProject,
+  saveZip,
   defaultStripOf
 } = useMarketInstall({
   targetId,
@@ -330,6 +332,11 @@ function onIconError(id: string) {
           <div class="asset-tags">
             <span class="tag">{{ a.category }}</span>
             <span
+              v-if="isLikelyAsset(a)"
+              class="tag brand"
+              title="根据标签推测为纯素材(模型/精灵等),将安装到项目根而非 addons/,以确认页为准"
+            >素材</span>
+            <span
               v-if="godotRange(a)"
               class="gver"
               :class="{ bad: compatOf(a) === false }"
@@ -366,6 +373,12 @@ function onIconError(id: string) {
               :title="`选择版本安装${installedIds.has(a.assetId) ? '(覆盖已装版本)' : ''}`"
               @click="openPicker(a)"
             ><Icon name="chevron-down" :size="12" /></button>
+            <button
+              class="btn small ghost"
+              :disabled="!!installing"
+              title="仅下载 zip 包到本地,不安装"
+              @click="saveZip(a)"
+            ><Icon name="hard-drive" :size="12" /></button>
           </div>
         </div>
       </div>
@@ -406,6 +419,7 @@ function onIconError(id: string) {
         :default-strip="preview ? defaultStripOf(preview.asset.assetId) : false"
         @confirm="confirmPreview"
         @close="cancelPreview"
+        @save-as-project="saveAsProject"
       />
     </template>
   </div>

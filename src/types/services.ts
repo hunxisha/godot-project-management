@@ -226,6 +226,16 @@ export interface Services {
     },
     onProgress?: (p: { stage: 'downloading' | 'extracting', received?: number, total?: number }) => void
   ): Promise<{ ok: boolean, error?: string, addon?: { title: string, versionString: string, dirNames: string[], enabled: boolean, kind: 'addon' | 'asset' } }>
+  /** 把完整项目/模板另存为独立项目(解压到 destRoot 下的 slug 子目录并登记进项目列表) */
+  saveAssetAsProject(
+    opts: { assetId: string, version?: string, stageId?: string, destRoot: string },
+    onProgress?: (p: { stage: 'downloading' | 'extracting', received?: number, total?: number }) => void
+  ): Promise<{ ok: boolean, error?: string, projectName?: string, projectId?: string, path?: string }>
+  /** 仅下载资产 zip 到指定目录(不安装、不写记录;重名自动加序号) */
+  downloadAssetZip(
+    opts: { assetId: string, version?: string, destDir: string },
+    onProgress?: (p: { stage: 'downloading' | 'extracting', received?: number, total?: number }) => void
+  ): Promise<{ ok: boolean, error?: string, file?: string }>
   /** 更新资产(覆盖安装;素材先按旧清单清理再安装) */
   updateAsset(
     opts: { projectId: string, assetId: string },

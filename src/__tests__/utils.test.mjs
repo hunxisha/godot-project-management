@@ -142,6 +142,20 @@ section('7. gradOf:项目名 → 头像渐变组')
   ok(spread.size >= 3, '多个不同项目能分散到多个组(不是全挤一组)', [...spread].join(','))
 }
 
+// ---------- 8. isLikelyAsset ----------
+section('8. isLikelyAsset:按标签推测纯素材(仅提示,安装以内容嗅探为准)')
+{
+  ok(T.isLikelyAsset({ tagSlugs: ['3d', 'model', 'lowpoly'], category: '' }), '模型类标签命中')
+  ok(T.isLikelyAsset({ tagSlugs: ['2d', 'spritesheet'], category: '' }), '精灵表标签命中')
+  ok(T.isLikelyAsset({ tagSlugs: ['pixelart', 'art'], category: '' }), '美术资源标签命中')
+  ok(T.isLikelyAsset({ tagSlugs: ['font'], category: '' }), '字体标签命中')
+  ok(T.isLikelyAsset({ tagSlugs: [], category: 'Sprite' }), '无标签时按分类名兜底(大小写不敏感)')
+  ok(!T.isLikelyAsset({ tagSlugs: ['3d', 'tool', 'gdscript'], category: '' }), '泛化标签(3d)不算素材')
+  ok(!T.isLikelyAsset({ tagSlugs: ['tool', 'editortool'], category: '' }), '工具类标签不算素材')
+  ok(!T.isLikelyAsset({ tagSlugs: ['ai', 'behaviour'], category: '' }), '行为逻辑标签不算素材')
+  ok(!T.isLikelyAsset({ tagSlugs: [], category: '' }), '空标签不误报')
+}
+
 // ---------- 结果 ----------
 console.log(`\n${'='.repeat(56)}`)
 console.log(`PASS ${pass}  FAIL ${failures.length}`)

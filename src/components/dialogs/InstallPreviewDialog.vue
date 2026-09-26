@@ -28,6 +28,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: 'confirm', stripTopDir: boolean): void
   (e: 'close'): void
+  (e: 'saveAsProject'): void
 }>()
 
 const strip = ref(props.defaultStrip)
@@ -46,7 +47,7 @@ const activeConflicts = computed(() => {
   return (strip.value && c.stripped) ? c.stripped : c.asIs
 })
 
-/** 主按钮是否可用 */
+/** 主按钮是否可用(仅安装语义;完整项目走另存,不受此限) */
 const canConfirm = computed(() => {
   const p = props.plan
   if (!p || p.kind === 'project') return false
@@ -79,13 +80,13 @@ function confirm() {
           <span v-if="plan && plan.fileCount" class="ip-meta mono">{{ plan.fileCount }} 个文件<template v-if="plan.zipSize"> · {{ fmtSize(plan.zipSize) }}</template></span>
         </p>
 
-        <!-- 完整项目/模板:不可装 -->
+        <!-- 完整项目/模板:不可装入现有项目,引导另存为新项目 -->
         <template v-if="plan && plan.kind === 'project'">
           <div class="card ip-warn">
             <Icon name="alert" :size="14" />
             <span>
-              这是<b>完整项目或模板</b>(包内自带 project.godot),不能安装到现有项目目录。
-              后续版本将支持一键另存为新项目。
+              这是<b>完整项目或模板</b>(包内自带 project.godot),不能安装到现有项目目录,
+              可以另存为独立项目后再打开。
             </span>
           </div>
         </template>
@@ -133,9 +134,14 @@ function confirm() {
         <div class="ip-foot">
           <span class="grow"></span>
           <button class="btn ghost" @click="emit('close')">取消</button>
-          <button class="btn primary" :disabled="!canConfirm" @click="confirm">
-            <Icon name="download" :size="12" />
-            {{ plan && plan.kind === 'project' ? '暂不支持' : '确认安装' }}
+          <button
+            v-if="plan && plan.kind === 'project'"
+            class="btn primary"
+            title="解压到选定的位置并登记为新项目"
+            @click="emit('saveAsProject')"
+          ><Icon name="folder-plus" :size="12" /> 另存为新项目</button>
+          <button v-else class="btn primary" :disabled="!canConfirm" @click="confirm">
+            <Icon name="download" :size="12" /> 确认安装
           </button>
         </div>
       </div>

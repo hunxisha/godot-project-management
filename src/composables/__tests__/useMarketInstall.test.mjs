@@ -33,6 +33,12 @@ let installImpl = null
 let previewCalls = []
 let previewImpl = null
 let cancelCalls = []
+let saveProjectCalls = []
+let saveProjectImpl = null
+let downloadZipCalls = []
+let downloadZipImpl = null
+/** showOpenDialog 的返回:undefined=取消,字符串=选中的目录 */
+let pickedDir = 'C:/picked'
 const notifications = []
 let reloadCount = 0
 
@@ -53,7 +59,8 @@ global.window = {
         return { ok: true }
       },
       allDocs: (prefix) => [...docs.values()].filter((d) => d._id.startsWith(prefix))
-    }
+    },
+    showOpenDialog: () => (pickedDir === undefined ? undefined : [pickedDir])
   },
   services: {
     installAsset(opts, onProgress) {
@@ -67,6 +74,14 @@ global.window = {
     cancelStagedAsset(stageId) {
       cancelCalls.push(stageId)
       return { ok: true }
+    },
+    saveAssetAsProject(opts, onProgress) {
+      saveProjectCalls.push({ opts, onProgress })
+      return saveProjectImpl(opts, onProgress)
+    },
+    downloadAssetZip(opts, onProgress) {
+      downloadZipCalls.push({ opts, onProgress })
+      return downloadZipImpl(opts, onProgress)
     }
   }
 }
@@ -96,11 +111,16 @@ function reset() {
   installCalls = []
   previewCalls = []
   cancelCalls = []
+  saveProjectCalls = []
+  downloadZipCalls = []
   notifications.length = 0
   reloadCount = 0
   docs.delete('godot/settings')
+  pickedDir = 'C:/picked'
   installImpl = () => Promise.resolve({ ok: true, addon: { title: 'Demo', versionString: '1.0.0', enabled: true } })
   previewImpl = () => Promise.resolve(previewOk('stage-1', ADDON_PLAN))
+  saveProjectImpl = () => Promise.resolve({ ok: true, projectName: 'Tpl', projectId: 'godot/project/p9' })
+  downloadZipImpl = () => Promise.resolve({ ok: true, file: 'b-1.0.0.zip' })
 }
 
 const asset = (id, over = {}) => ({ assetId: id, title: `T-${id}`, author: 'A', category: 'C', ...over })
@@ -345,6 +365,56 @@ async function main() {
     inst.cancelPreview()
     inst.openPicker(asset('c/d'))
     ok(inst.picker.value !== null, '取消后可正常打开')
+  }
+
+  // ---------- 12. 完整项目另存为新项目 ----------
+  section('12. 另存为新项目:选目录后解压登记,取消选择则不动')
+  {
+    reset()
+    previewImpl = () => Promise.resolve(previewOk('stage-12', assetPlan({ kind: 'project' })))
+    const { inst } = make()
+    await inst.install(asset('a/b'))
+    ok(inst.preview.value !== null && inst.preview.value.plan.kind === 'project', '完整项目弹确认层')
+
+    pickedDir = undefined
+    await inst.saveAsProject()
+    ok(saveProjectCalls.length === 0, '取消选择目录时不另存')
+    ok(inst.preview.value !== null, '确认层保持打开,暂存包可继续使用')
+
+    pickedDir = 'C:/godot-projects'
+    await inst.saveAsProject()
+    ok(inst.preview.value === null, '另存后关闭确认层')
+    ok(saveProjectCalls.length === 1, '发起另存')
+    ok(saveProjectCalls[0].opts.stageId === 'stage-12', '复用暂存包')
+    ok(saveProjectCalls[0].opts.destRoot === 'C:/godot-projects', '目标目录透传')
+    ok(notifications.some((m) => /已添加项目/.test(m)), '提示项目已添加', notifications.join('|'))
+
+    await inst.saveAsProject()
+    ok(saveProjectCalls.length === 1, '确认层已关闭,重复调用无副作用')
+  }
+
+  // ---------- 13. 仅下载 zip ----------
+  section('13. 仅下载 zip:选目录后下载,不需要安装目标')
+  {
+    reset()
+    const { inst } = make()
+    await inst.saveZip(asset('a/b'))
+    ok(downloadZipCalls.length === 1, '发起下载')
+    ok(downloadZipCalls[0].opts.destDir === 'C:/picked', '目标目录来自目录选择')
+    ok(downloadZipCalls[0].opts.assetId === 'a/b', '带上 assetId')
+    ok(notifications.some((m) => /已下载/.test(m)), '提示下载完成', notifications.join('|'))
+
+    reset()
+    pickedDir = undefined
+    const { inst: inst2 } = make()
+    await inst2.saveZip(asset('a/b'))
+    ok(downloadZipCalls.length === 0, '取消选择目录时不下载')
+
+    reset()
+    downloadZipImpl = () => Promise.resolve({ ok: false, error: '磁盘满了' })
+    const { inst: inst3 } = make()
+    await inst3.saveZip(asset('a/b'))
+    ok(notifications[0] === '磁盘满了', '失败提示服务端原因')
   }
 
   // ---------- 结果 ----------

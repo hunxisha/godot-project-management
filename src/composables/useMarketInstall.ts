@@ -12,7 +12,7 @@
 // 确认或取消都要释放暂存包(stageId):确认后复用,取消后删除。
 import { computed, ref, type Ref } from 'vue'
 import { useInstallProgress } from './useInstallProgress'
-import { getSettings, saveSettings } from '../services/bridge'
+import { getSettings, saveSettings, pickDirectory } from '../services/bridge'
 import type { AddonInfo, InstallPlan, MarketAsset } from '../types/godot'
 
 /** 确认层状态(非空时弹窗) */
@@ -159,6 +159,50 @@ export function useMarketInstall(opts: UseMarketInstallOptions) {
     window.services.cancelStagedAsset(p.stageId)
   }
 
+  /** 确认层「另存为新项目」:选个父目录,把完整项目解压登记为新项目 */
+  async function saveAsProject() {
+    const p = preview.value
+    if (!p || p.plan.kind !== 'project') return
+    const dir = pickDirectory(`选择「${p.title}」要保存到的位置`)
+    if (!dir) return // 取消选择:确认层保持打开,暂存包留着可重试
+    preview.value = null
+    begin(p.asset.assetId)
+    let r
+    try {
+      r = await window.services.saveAssetAsProject(
+        { assetId: p.asset.assetId, version: p.version, stageId: p.stageId, destRoot: dir },
+        (prog) => onProgress(p.asset.assetId, prog)
+      )
+    } catch (e: any) {
+      r = { ok: false, error: e?.message || String(e) }
+    } finally {
+      end()
+    }
+    if (r.ok) opts.notify(`已添加项目「${r.projectName || p.title}」`)
+    else opts.notify(r.error || '另存失败')
+  }
+
+  /** 仅下载 zip 到本地(不安装、不写记录);不需要安装目标,只是复用卡片进度显示 */
+  async function saveZip(asset: MarketAsset, version?: string) {
+    if (busy() || preview.value) return
+    const dir = pickDirectory(`选择「${asset.title}」的保存位置`)
+    if (!dir) return
+    begin(asset.assetId)
+    let r
+    try {
+      r = await window.services.downloadAssetZip(
+        { assetId: asset.assetId, version, destDir: dir },
+        (p) => onProgress(asset.assetId, p)
+      )
+    } catch (e: any) {
+      r = { ok: false, error: e?.message || String(e) }
+    } finally {
+      end()
+    }
+    if (r.ok) opts.notify(`已下载 ${r.file} 到 ${dir}`)
+    else opts.notify(r.error || '下载失败')
+  }
+
   // ---------- 版本选择器 ----------
 
   /** 只保留「要选哪个资产」;release 列表与加载态由对话框自己管 */
@@ -187,6 +231,8 @@ export function useMarketInstall(opts: UseMarketInstallOptions) {
     installFromPicker,
     confirmPreview,
     cancelPreview,
+    saveAsProject,
+    saveZip,
     defaultStripOf,
     percent
   }
