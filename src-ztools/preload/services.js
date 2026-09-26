@@ -10,6 +10,7 @@ const projects = require('./lib/projects')
 const backup = require('./lib/backup')
 const { launchProject } = require('./lib/launcher')
 const assets = require('./lib/assets')
+const templates = require('./lib/templates')
 
 /** @type {import('../../src/types/services').Services} */
 window.services = {
@@ -19,7 +20,6 @@ window.services = {
   fetchReleases: (force) => fetchReleases(force),
   /** 下载并安装版本(入队),返回任务 id */
   downloadAndInstall: (params, opts) => install.downloadAndInstall(params, opts),
-  /** 取消下载任务 */
   cancelTask: (id) => install.cancelTask(id),
   /** 移除任务记录 */
   dismissTask: (id) => install.dismissTask(id),
@@ -29,6 +29,12 @@ window.services = {
   importLocalExe: (exePath) => install.importLocalExe(exePath),
   /** 删除已装版本 */
   deleteVersion: (v) => install.deleteVersion(v),
+  /** 查询已装引擎的导出模板状态 */
+  exportTemplateStatus: (versionId) => templates.exportTemplateStatus({ versionId }),
+  /** 下载安装导出模板(入队,进度走 watchTasks,任务 kind='templates') */
+  installExportTemplates: (versionId) => templates.downloadAndInstallTemplates({ versionId }),
+  /** 卸载导出模板(删除模板目录与记录) */
+  uninstallExportTemplates: (versionId) => templates.uninstallExportTemplates({ versionId }),
   /** 添加项目(目录或 project.godot 文件) */
   addProject: (inputPath) => projects.addProject(inputPath),
   /** 新建项目(生成 project.godot 与默认图标并加入列表) */

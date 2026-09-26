@@ -60,6 +60,12 @@ export interface Services {
   watchTasks(fn: (tasks: DownloadTask[]) => void): () => void
   importLocalExe(exePath: string): Promise<{ ok: boolean, error?: string, version?: GodotVersion }>
   deleteVersion(v: { id: string, installDir?: string, managed: boolean }): { ok: boolean, error?: string }
+  /** 查询已装引擎的导出模板状态(versionDir 形如 4.3.stable;目录存在即视为已安装) */
+  exportTemplateStatus(versionId: string): { versionDir: string, installed: boolean, tracked: boolean, path: string }
+  /** 下载安装导出模板(入队,进度走 watchTasks,任务 kind='templates') */
+  installExportTemplates(versionId: string): { ok: boolean, error?: string, taskId?: string }
+  /** 卸载导出模板(删除模板目录与记录) */
+  uninstallExportTemplates(versionId: string): { ok: boolean, error?: string }
   /** 添加项目(目录或 project.godot 文件路径) */
   addProject(inputPath: string): {
     ok: boolean

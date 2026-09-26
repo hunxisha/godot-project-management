@@ -113,7 +113,7 @@ onMounted(() => {
       for (const t of finished) {
         if (t.status === 'done' && !notified.has(t.id)) {
           notified.add(t.id)
-          notify(`${t.version?.name ?? t.tag} 安装完成`)
+          notify(t.kind === 'templates' ? `${t.tag} 导出模板安装完成` : `${t.version?.name ?? t.tag} 安装完成`)
         }
         window.services.dismissTask(t.id)
       }

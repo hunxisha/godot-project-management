@@ -206,6 +206,8 @@ export interface DownloadTask {
   fileName: string
   totalSize: number
   status: DownloadStatus
+  /** 任务类别:缺省为引擎安装;templates=导出模板下载安装 */
+  kind?: 'templates'
   /** 已接收字节 */
   received: number
   /** B/s */

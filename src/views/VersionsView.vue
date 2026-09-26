@@ -33,8 +33,13 @@ onMounted(() => {
         installed.value.unshift({ ...t.version, _id: t.version.id })
       }
     }
+    // 导出模板任务进入终态后刷新各引擎的模板状态
+    if (snap.some((t) => t.kind === 'templates' && ['done', 'error', 'canceled'].includes(t.status))) {
+      refreshTplStatuses()
+    }
   })
   loadReleases(false)
+  refreshTplStatuses()
 })
 
 onBeforeUnmount(() => unwatchTasks && unwatchTasks())
@@ -91,10 +96,11 @@ function isDownloading(release: GodotRelease): boolean {
   return !!taskFor(release)
 }
 
-/** 该版本对应的活动下载任务(含排队/下载/解压/校验) */
+/** 该版本对应的活动下载任务(含排队/下载/解压/校验;不含导出模板任务) */
 function taskFor(release: GodotRelease): DownloadTask | undefined {
   return tasks.value.find(
     (t) =>
+      t.kind !== 'templates' &&
       t.tag === release.tag &&
       t.variant === variant.value &&
       t.status !== 'error' &&
@@ -140,6 +146,10 @@ function dismissTask(t: DownloadTask) {
 
 function retryTask(t: DownloadTask) {
   window.services.dismissTask(t.id)
+  if (t.kind === 'templates') {
+    if (t.versionId) window.services.installExportTemplates(t.versionId)
+    return
+  }
   window.services.downloadAndInstall(
     { tag: t.tag, variant: t.variant, platform: t.platform, url: t.url, fileName: t.fileName, totalSize: t.totalSize },
     { versionsRoot: settings.versionsRoot! }
@@ -191,6 +201,43 @@ function askDelete(v: GodotVersion & { _id: string }) {
   }
 }
 
+// ---------- 导出模板 ----------
+
+const tplStatuses = ref<Record<string, { installed: boolean, versionDir: string, path: string }>>({})
+const confirmingTplId = ref<string | null>(null)
+
+/** 该引擎是否有进行中的模板任务(排队/下载/解压/校验) */
+function tplTaskFor(versionId: string): DownloadTask | undefined {
+  return tasks.value.find(
+    (t) => t.kind === 'templates' && t.versionId === versionId && !['error', 'canceled', 'done'].includes(t.status)
+  )
+}
+
+function refreshTplStatuses() {
+  const next: Record<string, { installed: boolean, versionDir: string, path: string }> = {}
+  for (const v of installed.value) next[v._id] = window.services.exportTemplateStatus(v._id)
+  tplStatuses.value = next
+}
+
+function installTemplates(v: GodotVersion & { _id: string }) {
+  const r = window.services.installExportTemplates(v._id)
+  if (!r.ok) notify(r.error || '下载失败')
+}
+
+function askUninstallTemplates(v: GodotVersion & { _id: string }) {
+  if (confirmingTplId.value === v._id) {
+    confirmingTplId.value = null
+    const r = window.services.uninstallExportTemplates(v._id)
+    if (r.ok) refreshTplStatuses()
+    else notify(r.error || '卸载失败')
+  } else {
+    confirmingTplId.value = v._id
+    setTimeout(() => {
+      if (confirmingTplId.value === v._id) confirmingTplId.value = null
+    }, 2500)
+  }
+}
+
 // ---------- 展示 ----------
 
 function formatSize(n?: number): string {
@@ -235,6 +282,7 @@ function progressOf(t: DownloadTask): number {
         <span class="task-ico"><Icon name="package" :size="15" /></span>
         <span class="task-name">{{ t.tag }}</span>
         <span class="tag">{{ t.variant === 'mono' ? 'C#' : '标准' }}</span>
+        <span v-if="t.kind === 'templates'" class="tag brand">导出模板</span>
         <span class="grow"></span>
         <span class="task-status" :class="t.status">
           <span v-if="['queued', 'downloading', 'extracting', 'verifying'].includes(t.status)" class="spin"></span>
@@ -280,6 +328,7 @@ function progressOf(t: DownloadTask): number {
             <span v-if="settings.defaultVersionId === v._id" class="tag brand">默认</span>
             <span v-if="v.verified === false" class="tag warn">未通过校验</span>
             <span v-if="!v.managed" class="tag">导入</span>
+            <span v-if="tplStatuses[v._id]?.installed" class="tag ok" :title="`导出模板已就绪:${tplStatuses[v._id]?.path}`">模板已装</span>
           </div>
           <div class="ver-path mono" :title="v.exePath">{{ v.exePath }}</div>
           <div class="ver-meta">
@@ -289,6 +338,19 @@ function progressOf(t: DownloadTask): number {
         </div>
         <div class="ver-actions">
           <button v-if="settings.defaultVersionId !== v._id" class="btn small ghost" @click="setDefault(v)">设为默认</button>
+          <button
+            v-if="!tplStatuses[v._id]?.installed"
+            class="btn small ghost"
+            :disabled="!!tplTaskFor(v._id)"
+            :title="tplTaskFor(v._id) ? '导出模板下载中' : '下载并安装该版本的导出模板(约 1GB),导出游戏必需'"
+            @click="installTemplates(v)"
+          ><Icon name="download" :size="13" /> {{ tplTaskFor(v._id) ? '模板任务中' : '获取模板' }}</button>
+          <button
+            v-else
+            class="btn small ghost"
+            :title="`卸载导出模板(${tplStatuses[v._id]?.versionDir})`"
+            @click="askUninstallTemplates(v)"
+          >{{ confirmingTplId === v._id ? '确认卸载?' : '卸载模板' }}</button>
           <button class="btn small ghost" title="打开所在目录" @click="showInFolder(v.exePath)">
             <Icon name="folder" :size="13" /> 目录
           </button>

@@ -215,6 +215,7 @@ function deleteVersion({ id, installDir, managed }) {
 }
 
 module.exports = {
+  taskQueue: tasks,
   downloadAndInstall,
   cancelTask,
   dismissTask,
