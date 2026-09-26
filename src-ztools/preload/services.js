@@ -11,6 +11,7 @@ const backup = require('./lib/backup')
 const { launchProject } = require('./lib/launcher')
 const assets = require('./lib/assets')
 const templates = require('./lib/templates')
+const exporter = require('./lib/exporter')
 
 /** @type {import('../../src/types/services').Services} */
 window.services = {
@@ -45,6 +46,22 @@ window.services = {
   removeProject: (id, deleteFiles) => projects.removeProject(id, deleteFiles),
   /** 复制插件目录到另一个项目 */
   copyAddonsToProject: (opts) => projects.copyAddonsToProject(opts),
+  /** 复制已装纯素材到另一个项目(按安装清单逐文件复制,目标已有同名文件跳过) */
+  copyAssetToProject: (opts) => assets.copyAssetToProject(opts),
+  /** 查询项目的 .godot 编辑器缓存大小 */
+  getProjectCacheInfo: (projectId) => projects.getProjectCacheInfo(projectId),
+  /** 清理项目的 .godot 编辑器缓存(下次打开编辑器时自动重建) */
+  cleanProjectCache: (projectId) => projects.cleanProjectCache(projectId),
+  /** 列出项目的导出预设(解析 export_presets.cfg) */
+  listExportPresets: (projectId) => exporter.listExportPresets(projectId),
+  /** 发起导出(入队,进度走 watchExportTasks,任务 kind='export') */
+  runExport: (params) => exporter.runExport(params),
+  /** 订阅导出任务快照,返回取消订阅函数 */
+  watchExportTasks: (fn) => exporter.watchExportTasks(fn),
+  /** 取消导出任务 */
+  cancelExportTask: (id) => exporter.cancelExportTask(id),
+  /** 移除导出任务记录 */
+  dismissExportTask: (id) => exporter.dismissExportTask(id),
   /** 备份项目:先写临时产物,成功后原子改名并落库;失败/取消不留痕迹 */
   backupProject: (projectId, opts, onProgress) => backup.backupProject(projectId, opts, onProgress),
   /** 预估备份规模(文件数 + 字节) */
@@ -105,8 +122,12 @@ window.services = {
   verifyApiKey: (key) => assets.verifyApiKey(key),
   /** 列出项目已安装插件 */
   listAddons: (projectId) => assets.listAddons(projectId),
+  /** 资产详情(含媒体/许可/评分等扩展字段,详情弹层用) */
+  getAssetDetail: (assetId, version) => assets.getAssetDetail(assetId, version),
   /** 安装预览:预下载并归纳安装计划(确认后凭 stageId 安装,复用已下载的包) */
   previewAssetInstall: (opts, onProgress) => assets.previewAssetInstall(opts, onProgress),
+  /** 取消进行中的预览下载(幂等;无在途下载时空操作) */
+  cancelAssetPreview: (assetId) => assets.cancelAssetPreview(assetId),
   /** 释放预览暂存的安装包(取消确认时调用;幂等) */
   cancelStagedAsset: (stageId) => assets.cancelStagedAsset(stageId),
   /** 安装市场资产(version 指定 release 版本,缺省为最新;含 plugin.cfg 走插件链路,否则按纯素材落项目根) */

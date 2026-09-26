@@ -151,10 +151,12 @@ function getJson(url, headers) {
 }
 
 /**
- * 下载文件到 destPath,支持进度回调与取消。
+ * 下载文件到 destPath,支持进度回调、取消与断点续传。
+ * resume=true 时:若 destPath 已有部分内容,带 Range 续传(服务端 206 → 追加,
+ * 200 → 服务端不支持 Range,截断重下);取消/失败保留 .part 供下次续传。
  * @param {string} url 下载地址
  * @param {string} destPath 目标文件路径
- * @param {{ total?: number, onProgress?: (received: number, total: number) => void }} opts
+ * @param {{ total?: number, resume?: boolean, onProgress?: (received: number, total: number) => void }} opts
  * @returns {{ promise: Promise<void>, cancel: () => void }}
  */
 function downloadFile(url, destPath, opts = {}) {
@@ -187,19 +189,31 @@ function downloadFile(url, destPath, opts = {}) {
     const attempt = (currentUrl, depth = 0) => {
       if (aborted) return rejectOnce(new Error('已取消'))
       if (depth > 5) return rejectOnce(new Error('重定向次数过多'))
-      activeReq = httpsGet(currentUrl, {}, (res) => {
+      // 断点续传:已有部分字节数作为本次请求的起点
+      const base = opts.resume && fs.existsSync(destPath) ? fs.statSync(destPath).size : 0
+      const headers = base > 0 ? { Range: `bytes=${base}-` } : {}
+      activeReq = httpsGet(currentUrl, headers, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           res.resume()
           return attempt(res.headers.location, depth + 1)
         }
-        if (res.statusCode !== 200) {
+        // Range 起点已等于完整大小(上次下完后任务仍失败):清掉重来
+        if (res.statusCode === 416 && opts.resume) {
+          res.resume()
+          try { fs.rmSync(destPath, { force: true }) } catch (e) { /* ignore */ }
+          return attempt(currentUrl, depth + 1)
+        }
+        if (res.statusCode !== 200 && res.statusCode !== 206) {
           res.resume()
           return rejectOnce(new Error(`下载失败 HTTP ${res.statusCode}`))
         }
-        const total = parseInt(res.headers['content-length'], 10) || opts.total || 0
-        let received = 0
+        // 206 = 服务端接受 Range → 追加;200 = 服务端忽略 Range → 截断重下
+        const append = !!opts.resume && res.statusCode === 206 && base > 0
+        const len = parseInt(res.headers['content-length'], 10) || 0
+        const total = append ? base + len : len || opts.total || 0
+        let received = append ? base : 0
         let lastEmit = 0
-        activeWs = fs.createWriteStream(destPath)
+        activeWs = fs.createWriteStream(destPath, { flags: append ? 'a' : 'w' })
         res.on('data', (chunk) => {
           received += chunk.length
           const now = Date.now()
@@ -231,9 +245,12 @@ function downloadFile(url, destPath, opts = {}) {
       try {
         activeWs && activeWs.destroy()
       } catch (e) { /* ignore */ }
-      try {
-        fs.existsSync(destPath) && fs.unlinkSync(destPath)
-      } catch (e) { /* ignore */ }
+      // resume 模式保留 .part 供下次续传;普通模式清理
+      if (!opts.resume) {
+        try {
+          fs.existsSync(destPath) && fs.unlinkSync(destPath)
+        } catch (e) { /* ignore */ }
+      }
       // 必须主动了结:销毁请求与写入流只会触发 'close',不会触发 'finish'/'error',
       // 于是 await dl.promise 会永久悬空 —— 下载队列(install.js 的串行 pump)就再也
       // 不会推进到下一个任务。这里显式以「已取消」拒绝。
@@ -242,4 +259,44 @@ function downloadFile(url, destPath, opts = {}) {
   }
 }
 
-module.exports = { getText, getJson, downloadFile }
+/**
+ * 带断点续传与自动重试的下载:网络中断后从 .part 已有字节继续,无需从头再来。
+ * 取消会立即中止(含后续重试);全部重试仍失败时抛出最后一次的错误。
+ * @param {string} url 下载地址
+ * @param {string} destPath 目标文件路径(未完成的内容留在本文件里)
+ * @param {{ attempts?: number, delayMs?: number, total?: number, onProgress?: (received: number, total: number) => void }} opts
+ * @returns {{ promise: Promise<void>, cancel: () => void }}
+ */
+function downloadResumable(url, destPath, opts = {}) {
+  const attempts = opts.attempts || 3
+  const delayMs = opts.delayMs ?? 1500
+  let cancelled = false
+  /** @type {{ promise: Promise<void>, cancel: () => void } | null} 当前尝试的句柄 */
+  let active = null
+  const promise = (async () => {
+    for (let attemptNo = 1; ; attemptNo++) {
+      try {
+        active = downloadFile(url, destPath, {
+          total: opts.total,
+          resume: true,
+          onProgress: opts.onProgress
+        })
+        await active.promise
+        return
+      } catch (e) {
+        // 取消立即上抛;网络错误在还有余量时等待后继续续传
+        if (cancelled || (e && e.message === '已取消') || attemptNo >= attempts) throw e
+        await new Promise((r) => setTimeout(r, delayMs))
+      }
+    }
+  })()
+  return {
+    promise,
+    cancel() {
+      cancelled = true
+      if (active) active.cancel()
+    }
+  }
+}
+
+module.exports = { getText, getJson, downloadFile, downloadResumable }

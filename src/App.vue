@@ -10,7 +10,7 @@ import AddonsView from './views/AddonsView.vue'
 import BackupsView from './views/BackupsView.vue'
 import SettingsView from './views/SettingsView.vue'
 import { notify } from './services/bridge'
-import type { BackupTask, DownloadTask } from './types/godot'
+import type { BackupTask, DownloadTask, ExportTask } from './types/godot'
 
 const tab = ref('dashboard')
 /** addProject 功能(拖入)带入的文件路径 */
@@ -19,17 +19,21 @@ const enterPayload = ref<string[] | null>(null)
 const pendingCreate = ref(false)
 /** 项目页触发「管理插件」:切到已安装页并定位到该项目 */
 const pendingAddonProject = ref<string | null>(null)
+/** 项目页「从市场模板创建」→ 市场页:进入后自动切到模板模式 */
+const pendingMarketMode = ref<string | null>(null)
 /** 项目页 → 备份页:切到备份页并只显示该项目的备份 */
 const backupScope = ref<string | null>(null)
 /** 备份页 → 项目页:切到项目页并直接打开该项目的备份弹窗 */
 const backupRequest = ref<string | null>(null)
 
-// ---------- 全局任务(引擎下载 + 备份/恢复,常驻订阅,切页不断线) ----------
+// ---------- 全局任务(引擎/模板下载 + 备份/恢复 + 一键导出,常驻订阅,切页不断线) ----------
 
 const tasks = ref<DownloadTask[]>([])
 const backupTasks = ref<BackupTask[]>([])
+const exportTasks = ref<ExportTask[]>([])
 let unwatchTasks: (() => void) | null = null
 let unwatchBackupTasks: (() => void) | null = null
+let unwatchExportTasks: (() => void) | null = null
 
 const TASK_STATUS: Record<string, string> = {
   queued: '排队中',
@@ -85,6 +89,15 @@ const barTasks = computed<BarTask[]>(() => {
       error: t.phase === 'error'
     })
   }
+  for (const t of exportTasks.value) {
+    if (t.status === 'done' || t.status === 'canceled') continue
+    out.push({
+      id: `exp-${t.id}`,
+      label: `导出 · ${t.projectName}`,
+      brief: t.status === 'exporting' ? (t.log.split('\n').pop() || '导出中') : '排队中',
+      error: t.status === 'error'
+    })
+  }
   return out
 })
 
@@ -138,16 +151,41 @@ onMounted(() => {
       }
     })
   })
+
+  // 一键导出任务:进度条目显示在任务栏,完成/失败统一通知
+  const notifiedExport = new Set<string>()
+  unwatchExportTasks = window.services.watchExportTasks((snap) => {
+    exportTasks.value = snap
+    const finished = snap.filter((t) => t.status === 'done' || t.status === 'canceled' || t.status === 'error')
+    if (!finished.length) return
+    queueMicrotask(() => {
+      for (const t of finished) {
+        if (!notifiedExport.has(t.id)) {
+          notifiedExport.add(t.id)
+          if (t.status === 'done') notify(`「${t.projectName}」导出完成:${t.outputPath}`)
+          else if (t.status === 'error') notify(`「${t.projectName}」导出失败:${t.error || '未知原因'}`)
+        }
+        window.services.dismissExportTask(t.id)
+      }
+    })
+  })
 })
 
 onBeforeUnmount(() => {
   if (unwatchTasks) unwatchTasks()
   if (unwatchBackupTasks) unwatchBackupTasks()
+  if (unwatchExportTasks) unwatchExportTasks()
 })
 
 function gotoCreate() {
   pendingCreate.value = true
   tab.value = 'projects'
+}
+
+/** 项目页「从市场模板创建」→ 市场页模板模式 */
+function gotoMarketTemplates() {
+  pendingMarketMode.value = 'projects'
+  tab.value = 'marketplace'
 }
 
 function gotoAddons(id: string) {
@@ -186,9 +224,15 @@ function gotoCreateBackup(id: string) {
           @manage-addons="gotoAddons"
           @open-backups="gotoBackups"
           @backup-project="gotoCreateBackup"
+          @template-market="gotoMarketTemplates"
         />
         <VersionsView v-else-if="tab === 'versions'" />
-        <MarketplaceView v-else-if="tab === 'marketplace'" @navigate="tab = $event" />
+        <MarketplaceView
+          v-else-if="tab === 'marketplace'"
+          :enter-mode="pendingMarketMode"
+          @navigate="tab = $event"
+          @consumed="pendingMarketMode = null"
+        />
         <AddonsView
           v-else-if="tab === 'addons'"
           :enter-project-id="pendingAddonProject"

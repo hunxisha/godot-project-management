@@ -49,7 +49,11 @@ function makeHandle(url, destPath, opts) {
   downloads.push(handle)
   return handle
 }
-stub('http.js', { downloadFile: makeHandle })
+stub('http.js', {
+  downloadFile: makeHandle,
+  // install.js 用带续传的封装;桩里复用同一句柄工厂,行为契约一致
+  downloadResumable: (url, destPath, opts) => makeHandle(url, destPath, opts)
+})
 
 let extractShouldFail = false
 const extracted = []

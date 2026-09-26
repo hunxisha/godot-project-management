@@ -18,6 +18,9 @@ import type {
   DownloadTask,
   FavoriteAsset,
   GodotProject,
+  ExportPreset,
+  ExportTask,
+  AssetDetail,
   GodotRelease,
   GodotVersion,
   InstallPlan,
@@ -66,6 +69,25 @@ export interface Services {
   installExportTemplates(versionId: string): { ok: boolean, error?: string, taskId?: string }
   /** 卸载导出模板(删除模板目录与记录) */
   uninstallExportTemplates(versionId: string): { ok: boolean, error?: string }
+  /** 列出项目的导出预设(解析 export_presets.cfg;无该文件时返回空列表) */
+  listExportPresets(projectId: string): { ok: boolean, error?: string, presets?: ExportPreset[] }
+  /** 发起一键导出(入队;缺模板时返回 missingTemplates=true 不入队) */
+  runExport(params: { projectId: string, presetName: string, outputPath?: string }): {
+    ok: boolean
+    error?: string
+    taskId?: string
+    missingTemplates?: boolean
+  }
+  /** 订阅导出任务快照,返回取消订阅函数 */
+  watchExportTasks(fn: (tasks: ExportTask[]) => void): () => void
+  /** 取消导出任务 */
+  cancelExportTask(id: string): void
+  /** 移除导出任务记录 */
+  dismissExportTask(id: string): void
+  /** 查询项目的 .godot 编辑器缓存大小 */
+  getProjectCacheInfo(projectId: string): { ok: boolean, error?: string, exists?: boolean, size?: number }
+  /** 清理项目的 .godot 编辑器缓存 */
+  cleanProjectCache(projectId: string): { ok: boolean, error?: string, freed?: number }
   /** 添加项目(目录或 project.godot 文件路径) */
   addProject(inputPath: string): {
     ok: boolean
@@ -97,6 +119,12 @@ export interface Services {
     dirNames: string[]
     targetProjectId: string
   }): { ok: boolean, error?: string, copied?: number, skipped?: string[], adopted?: number, targetName?: string }
+  /** 复制已装纯素材到另一个项目(按安装清单逐文件复制,目标已有同名文件跳过) */
+  copyAssetToProject(opts: {
+    sourceProjectId: string
+    assetId: string
+    targetProjectId: string
+  }): { ok: boolean, error?: string, copied?: number, skipped?: string[] }
   /** 备份项目:先写临时产物,成功后原子改名并落库;失败/取消不留痕迹 */
   backupProject(
     projectId: string,
@@ -208,11 +236,15 @@ export interface Services {
   verifyApiKey(key: string): Promise<{ authenticated: boolean, name?: string }>
   /** 列出项目已安装插件 */
   listAddons(projectId: string): AddonInfo[]
+  /** 资产详情(含媒体/许可/评分等扩展字段,详情弹层用) */
+  getAssetDetail(assetId: string, version?: string): Promise<AssetDetail>
   /** 安装预览:预下载 zip 并归纳安装计划(kind/顶层条目/冲突);确认后凭 stageId 安装,取消后释放 */
   previewAssetInstall(
     opts: { projectId: string, assetId: string, version?: string },
     onProgress?: (p: { stage: 'downloading' | 'extracting', received?: number, total?: number }) => void
   ): Promise<{ ok: boolean, error?: string, stageId?: string, title?: string, versionString?: string, plan?: InstallPlan }>
+  /** 取消进行中的预览下载(幂等;无在途下载时空操作) */
+  cancelAssetPreview(assetId: string): { ok: boolean }
   /** 释放预览暂存的安装包(取消确认时调用;幂等) */
   cancelStagedAsset(stageId: string): { ok: boolean }
   /** 安装市场资产(version 指定 release 版本,缺省为最新;含 plugin.cfg 走插件链路,否则按纯素材落项目根)

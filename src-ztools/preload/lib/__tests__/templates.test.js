@@ -66,7 +66,15 @@ stub('http.js', {
     if (!state.fixtureZip) return { promise: Promise.reject(new Error('stub http: 没有夹具 zip')) }
     state.downloads++
     fs.copyFileSync(state.fixtureZip, dest)
-    return { promise: Promise.resolve() }
+    return { promise: Promise.resolve(), cancel: () => {} }
+  },
+  // templates.js 用带续传的封装;桩里同款契约(promise + cancel)
+  downloadResumable: (url, dest) => {
+    if (state.failMessage) return { promise: Promise.reject(new Error(state.failMessage)) }
+    if (!state.fixtureZip) return { promise: Promise.reject(new Error('stub http: 没有夹具 zip')) }
+    state.downloads++
+    fs.copyFileSync(state.fixtureZip, dest)
+    return { promise: Promise.resolve(), cancel: () => {} }
   },
   getJson: async () => {
     throw new Error('stub http: getJson unexpected')

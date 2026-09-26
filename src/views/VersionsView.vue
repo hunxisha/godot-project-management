@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getSettings, notify, pickDirectory, pickFile, isWindows, saveSettings, showInFolder } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
+import { useExportTemplates } from '../composables/useExportTemplates'
 import type { DownloadTask, GodotRelease, GodotVersion, ReleaseAsset, Variant } from '../types/godot'
 
 const settings = reactive(getSettings())
@@ -201,42 +202,16 @@ function askDelete(v: GodotVersion & { _id: string }) {
   }
 }
 
-// ---------- 导出模板 ----------
+// ---------- 导出模板(状态与操作在 useExportTemplates 里,本视图只装配) ----------
 
-const tplStatuses = ref<Record<string, { installed: boolean, versionDir: string, path: string }>>({})
-const confirmingTplId = ref<string | null>(null)
-
-/** 该引擎是否有进行中的模板任务(排队/下载/解压/校验) */
-function tplTaskFor(versionId: string): DownloadTask | undefined {
-  return tasks.value.find(
-    (t) => t.kind === 'templates' && t.versionId === versionId && !['error', 'canceled', 'done'].includes(t.status)
-  )
-}
-
-function refreshTplStatuses() {
-  const next: Record<string, { installed: boolean, versionDir: string, path: string }> = {}
-  for (const v of installed.value) next[v._id] = window.services.exportTemplateStatus(v._id)
-  tplStatuses.value = next
-}
-
-function installTemplates(v: GodotVersion & { _id: string }) {
-  const r = window.services.installExportTemplates(v._id)
-  if (!r.ok) notify(r.error || '下载失败')
-}
-
-function askUninstallTemplates(v: GodotVersion & { _id: string }) {
-  if (confirmingTplId.value === v._id) {
-    confirmingTplId.value = null
-    const r = window.services.uninstallExportTemplates(v._id)
-    if (r.ok) refreshTplStatuses()
-    else notify(r.error || '卸载失败')
-  } else {
-    confirmingTplId.value = v._id
-    setTimeout(() => {
-      if (confirmingTplId.value === v._id) confirmingTplId.value = null
-    }, 2500)
-  }
-}
+const {
+  tplStatuses,
+  confirmingTplId,
+  tplTaskFor,
+  refreshTplStatuses,
+  installTemplates,
+  askUninstallTemplates
+} = useExportTemplates({ installed, tasks, notify })
 
 // ---------- 展示 ----------
 

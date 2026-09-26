@@ -1,7 +1,39 @@
-// 启动 Godot:打开项目编辑器 / 运行项目
+// 启动 Godot:打开项目编辑器 / 运行项目(支持项目级自定义启动参数)
 const { spawn } = require('node:child_process')
 const fs = require('node:fs')
 const { getDoc, putDoc } = require('./store')
+
+/**
+ * 拆分启动参数:双引号内的空白属于同一个参数;引号本身不保留。
+ * "a b" c → ['a b', 'c'];空串 → []。
+ * @param {string} [input]
+ * @returns {string[]}
+ */
+function splitLaunchArgs(input) {
+  /** @type {string[]} */
+  const out = []
+  let cur = ''
+  let has = false
+  let quote = false
+  for (const ch of String(input || '')) {
+    if (ch === '"') {
+      has = true
+      quote = !quote
+      continue
+    }
+    if (!quote && /\s/.test(ch)) {
+      if (has || cur) {
+        out.push(cur)
+        cur = ''
+        has = false
+      }
+      continue
+    }
+    cur += ch
+  }
+  if (has || cur) out.push(cur)
+  return out
+}
 
 /**
  * 启动项目。
@@ -20,6 +52,7 @@ function launchProject({ projectId, action }) {
 
     const args = ['--path', project.path]
     if (action === 'editor') args.push('-e')
+    args.push(...splitLaunchArgs(project.launchArgs))
     const child = spawn(version.exePath, args, { detached: true, stdio: 'ignore' })
     child.unref()
 
@@ -35,4 +68,4 @@ function launchProject({ projectId, action }) {
   }
 }
 
-module.exports = { launchProject }
+module.exports = { launchProject, splitLaunchArgs }

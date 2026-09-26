@@ -26,6 +26,8 @@ export function useMarketSearch(opts: UseMarketSearchOptions) {
   const hasSearched = ref(false)
 
   let timer: ReturnType<typeof setTimeout> | null = null
+  /** 搜索序号:回车立即搜索与防抖搜索可能并发,旧请求晚到时不得覆盖新结果 */
+  let seq = 0
 
   function cancelPending() {
     if (timer) {
@@ -35,18 +37,23 @@ export function useMarketSearch(opts: UseMarketSearchOptions) {
   }
 
   async function search() {
+    const mySeq = ++seq
     searching.value = true
     searchError.value = ''
     try {
       const assetType = opts.getAssetType?.() ?? 0
       const r = await window.services.searchAssets(query.value.trim(), undefined, 1, assetType)
+      if (mySeq !== seq) return
       results.value = r.result
       await opts.hydrate(results.value)
     } catch (e: any) {
+      if (mySeq !== seq) return
       searchError.value = e?.message || String(e)
     } finally {
-      searching.value = false
-      hasSearched.value = true
+      if (mySeq === seq) {
+        searching.value = false
+        hasSearched.value = true
+      }
     }
   }
 

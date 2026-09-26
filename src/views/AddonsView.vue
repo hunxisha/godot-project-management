@@ -6,6 +6,7 @@ import Icon from '../components/Icon.vue'
 import VersionPickerDialog from '../components/dialogs/VersionPickerDialog.vue'
 import { useAddonSelection } from '../composables/useAddonSelection'
 import { useAddonActions } from '../composables/useAddonActions'
+import { useUpdateScan } from '../composables/useUpdateScan'
 import type { ProjectRow } from '../composables/useProjectList'
 import type { AddonInfo, GodotProject } from '../types/godot'
 
@@ -71,6 +72,24 @@ const assetRows = computed(() => addons.value.filter((a) => a.kind === 'asset'))
 const firstPlugin = computed(() => pluginRows.value[0])
 const firstAsset = computed(() => assetRows.value[0])
 const enabledCount = computed(() => addons.value.filter((a) => a.kind !== 'asset' && a.enabled).length)
+
+// ---------- 全库更新巡检 ----------
+
+const scan = useUpdateScan()
+const showScan = ref(false)
+
+function startScan() {
+  if (scan.scanning.value) return
+  showScan.value = true
+  scan.scanAll(projects.value.map((p) => ({ id: p._id, name: p.name })))
+}
+
+/** 从巡检结果跳到对应项目管理 */
+function gotoScanRow(projectId: string) {
+  targetId.value = projectId
+  showScan.value = false
+  onTargetChange()
+}
 
 /** 素材条目安装到项目根的顶层条目(展示用) */
 function assetTops(a: AddonInfo): string[] {
@@ -169,6 +188,16 @@ function openStore(a: AddonInfo) {
           <span v-if="checking" class="spin"></span>
           <Icon v-else name="refresh" :size="12" />
           {{ checking ? '检查中…' : '检查更新' }}
+        </button>
+        <button
+          class="btn small"
+          :disabled="scan.scanning.value || !!checking"
+          :title="projects.length > 1 ? '跨项目扫描所有已装内容的新版本' : '扫描本项目的已装内容'"
+          @click="startScan"
+        >
+          <span v-if="scan.scanning.value" class="spin"></span>
+          <Icon v-else name="search" :size="12" />
+          {{ scan.scanning.value ? `扫描中 ${scan.progress.value}` : '全库巡检' }}
         </button>
         <button class="btn small primary" @click="emit('navigate', 'marketplace')">
           <Icon name="puzzle" :size="12" /> 去市场找插件
@@ -336,6 +365,50 @@ function openStore(a: AddonInfo) {
         </div>
       </Teleport>
     </template>
+
+    <!-- 全库巡检结果模态框 -->
+    <Teleport to="body">
+      <div v-if="showScan" class="modal-mask" @click.self="showScan = false">
+        <div class="card modal">
+          <div class="modal-head">
+            <div class="modal-title"><Icon name="search" :size="15" /> 全库更新巡检</div>
+            <span class="grow"></span>
+            <button type="button" class="btn small ghost icon-x" title="关闭" @click="showScan = false">
+              <Icon name="x" :size="14" />
+            </button>
+          </div>
+
+          <p v-if="scan.scanning.value" class="copy-tip">
+            <span class="spin"></span> 正在扫描 {{ scan.progress.value }} 个项目…
+          </p>
+
+          <template v-else>
+            <p v-if="!scan.rows.value.length" class="copy-tip">
+              {{ scan.scanned.value ? '所有项目的已装内容都是最新版本。' : '尚无扫描结果。' }}
+            </p>
+            <div v-else class="copy-list">
+              <div v-for="r in scan.rows.value" :key="`${r.projectId}/${r.dirName}`" class="copy-item scan-row">
+                <Icon :name="r.kind === 'asset' ? 'box' : 'puzzle'" :size="14" />
+                <span class="ci-main">
+                  <span class="ci-name">{{ r.name }} <span class="tag warn">v{{ r.latest }}</span></span>
+                  <span class="ci-path mono" :title="r.projectName">{{ r.projectName }} · 当前 {{ r.current || '未知' }}</span>
+                </span>
+                <button class="btn small" @click="gotoScanRow(r.projectId)">去管理</button>
+              </div>
+            </div>
+          </template>
+
+          <div class="modal-foot">
+            <span class="grow"></span>
+            <button class="btn ghost" @click="showScan = false">关闭</button>
+            <button class="btn primary" :disabled="scan.scanning.value || !projects.length" @click="startScan">
+              <span v-if="scan.scanning.value" class="spin"></span>
+              {{ scan.scanning.value ? `扫描中 ${scan.progress.value}` : '重新扫描' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <VersionPickerDialog
       :open="!!versionTarget"

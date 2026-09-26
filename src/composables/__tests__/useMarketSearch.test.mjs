@@ -257,6 +257,37 @@ section('9. useMarketSearch:getAssetType 注入搜索类型')
   s2.cancelPending()
 }
 
+section('10. useMarketSearch:竞态守卫,旧请求晚到不覆盖新结果')
+{
+  reset()
+  const s = useMarketSearch({ hydrate: () => {} })
+  // 让两次 search 的服务端响应都可手动控制
+  let resolveA
+  let resolveB
+  let callN = 0
+  window.services.searchAssets = () => {
+    callN++
+    const no = callN
+    return new Promise((resolve) => {
+      if (no === 1) resolveA = () => resolve({ result: [{ assetId: 'old/1', title: 'OLD' }], page: 1, pages: 1 })
+      else resolveB = () => resolve({ result: [{ assetId: 'new/1', title: 'NEW' }], page: 1, pages: 1 })
+    })
+  }
+  s.query.value = 'a'
+  const pA = s.search()
+  s.query.value = 'ab'
+  const pB = s.search()
+  await sleep(10)
+  resolveB()
+  await pB
+  resolveA()
+  await pA
+  ok(s.results.value.length === 1 && s.results.value[0].assetId === 'new/1',
+    '旧请求晚到时结果仍是新请求的', JSON.stringify(s.results.value))
+  ok(s.searching.value === false && s.hasSearched.value === true, '状态以最后一次搜索为准')
+  s.cancelPending()
+}
+
 // ---------- 结果 ----------
 console.log(`\n${'='.repeat(56)}`)
 console.log(`PASS ${pass}  FAIL ${failures.length}`)

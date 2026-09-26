@@ -49,6 +49,9 @@ export function useMarketInstall(opts: UseMarketInstallOptions) {
   /** 确认层状态 */
   const preview = ref<PreviewState | null>(null)
 
+  /** 正在预下载(确认层弹出之前)的资产 id:卡片据此显示「取消」按钮 */
+  const previewingId = ref<string | null>(null)
+
   function assetMetaOf(asset: MarketAsset) {
     return {
       title: asset.title,
@@ -113,6 +116,7 @@ export function useMarketInstall(opts: UseMarketInstallOptions) {
     if (!opts.targetId.value || busy() || preview.value) return
     begin(asset.assetId)
     let r
+    previewingId.value = asset.assetId
     try {
       r = await window.services.previewAssetInstall(
         { projectId: opts.targetId.value, assetId: asset.assetId, version },
@@ -121,10 +125,12 @@ export function useMarketInstall(opts: UseMarketInstallOptions) {
     } catch (e: any) {
       r = { ok: false, error: e?.message || String(e) }
     } finally {
+      previewingId.value = null
       end()
     }
     if (!r.ok || !r.plan || !r.stageId) {
-      opts.notify(r.error || '获取资产信息失败')
+      // 用户主动取消预览下载不算失败,静默回到初始状态
+      if (r.error !== '已取消') opts.notify(r.error || '获取资产信息失败')
       return
     }
     // 插件目的地固定为 addons/,没有需要用户裁决的歧义,直接装(保持原有一步到位的体验)
@@ -157,6 +163,11 @@ export function useMarketInstall(opts: UseMarketInstallOptions) {
     if (!p) return
     preview.value = null
     window.services.cancelStagedAsset(p.stageId)
+  }
+
+  /** 取消进行中的预览下载(仅确认层弹出之前有效;幂等) */
+  function cancelPreviewDownload(assetId: string) {
+    window.services.cancelAssetPreview(assetId)
   }
 
   /** 确认层「另存为新项目」:选个父目录,把完整项目解压登记为新项目 */
@@ -226,11 +237,13 @@ export function useMarketInstall(opts: UseMarketInstallOptions) {
     installedIds,
     picker,
     preview,
+    previewingId,
     install,
     openPicker,
     installFromPicker,
     confirmPreview,
     cancelPreview,
+    cancelPreviewDownload,
     saveAsProject,
     saveZip,
     defaultStripOf,

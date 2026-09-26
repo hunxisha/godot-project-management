@@ -53,6 +53,52 @@ export interface GodotProject {
   lastOpenedAt?: number
   openCount: number
   addedAt: number
+  /** 启动时追加的自定义命令行参数(如 --resolution 1280x720);引号内空白属于同一参数 */
+  launchArgs?: string
+}
+
+/** 导出预设(export_presets.cfg 的顶层字段) */
+export interface ExportPreset {
+  index: number
+  name: string
+  platform: string
+  /** 预设配置的导出输出路径(res:// 相对路径,如 builds/windows.exe) */
+  exportPath: string
+}
+
+/** 导出任务(一键导出的生命周期) */
+export interface ExportTask {
+  id: string
+  kind: 'export'
+  projectId: string
+  projectName: string
+  presetName: string
+  outputPath: string
+  /** export-release 或 export-pack */
+  mode: string
+  exePath: string
+  status: 'queued' | 'exporting' | 'done' | 'error' | 'canceled'
+  /** 引擎输出尾部(失败诊断用) */
+  log: string
+  error?: string
+}
+
+/** 资产详情(详情弹层用;扩展字段缺失时为空) */
+export interface AssetDetail {
+  assetId: string
+  title: string
+  author: string
+  versionString: string
+  downloadUrl: string
+  description: string
+  tags: string[]
+  media: string[]
+  videoId: string
+  licenseType: string
+  licenseUrl: string
+  reviewsScore: number
+  storeUrl: string
+  lastUpdated: string
 }
 
 /** 插件设置 */

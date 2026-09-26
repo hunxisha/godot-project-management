@@ -32,6 +32,7 @@ let calls = []
 let setEnabledResult = { ok: true }
 let uninstallResult = { ok: true }
 let copyResult = null
+let copyAssetResult = { ok: true, copied: 3, skipped: [] }
 let checkResult = { hasUpdate: false }
 let updateResult = null
 let installResult = null
@@ -47,6 +48,7 @@ global.window = {
     setAddonEnabled(o) { calls.push(['setEnabled', o]); return setEnabledResult },
     uninstallAddon(o) { calls.push(['uninstall', o]); return uninstallResult },
     copyAddonsToProject(o) { calls.push(['copy', o]); return copyResult },
+    copyAssetToProject(o) { calls.push(['copyAsset', o]); return copyAssetResult },
     checkAddonUpdate(o) { calls.push(['check', o]); return Promise.resolve(checkResult) },
     updateAsset(o, cb) {
       calls.push(['update', o])
@@ -73,6 +75,7 @@ function reset() {
   setEnabledResult = { ok: true }
   uninstallResult = { ok: true }
   copyResult = { ok: true, copied: 2, targetName: 'Beta' }
+  copyAssetResult = { ok: true, copied: 3, skipped: [] }
   checkResult = { hasUpdate: false }
   updateResult = { ok: true, addon: { versionString: '2.0.0' } }
   installResult = { ok: true, addon: { versionString: '1.5.0' } }
@@ -340,6 +343,19 @@ async function main() {
     ok(notifications[0] === '目标不可写', '失败提示原因', String(notifications[0]))
     ok(f.actions.showCopy.value === true, '失败时保持对话框打开')
     ok(f.actions.copying.value === false, '失败后 copying 复位')
+
+    // 素材条目走 copyAssetToProject(按 assetId),与插件分区处理
+    reset()
+    const assetRow = { ...A('asset-pack'), kind: 'asset', assetId: 'pub/pack', fromMarket: true, versionString: '1.0.0' }
+    const s2 = make({ addons: [assetRow] })
+    s2.selection.toggleCheck('asset-pack')
+    s2.actions.openCopy()
+    s2.actions.confirmCopy()
+    ok(nCalls('copyAsset') === 1, '素材条目调用 copyAssetToProject')
+    ok(calls.find((c) => c[0] === 'copyAsset')[1].assetId === 'pub/pack', '带 assetId')
+    ok(calls.find((c) => c[0] === 'copyAsset')[1].targetProjectId === 'godot/project/p2', '带目标项目')
+    ok(nCalls('copy') === 0, '素材条目不触发插件复制')
+    ok(/已复制 3 项到「Beta」/.test(notifications[0] || ''), '素材复制提示按「项」计数', String(notifications[0]))
   }
 
   // ---------- 结果 ----------

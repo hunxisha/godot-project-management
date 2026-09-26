@@ -88,7 +88,7 @@ Module._load = function (request, parent, isMain) {
   return origLoad.apply(this, arguments)
 }
 
-const { getText, getJson, downloadFile } = require(path.join(LIB, 'http.js'))
+const { getText, getJson, downloadFile, downloadResumable } = require(path.join(LIB, 'http.js'))
 
 // ---------- harness ----------
 let pass = 0
@@ -339,6 +339,81 @@ async function main() {
     ok(out === 'rejected:已取消', '取消立即了结', out)
     await sleep(30)
     ok(getCalls.length <= 1, '不会因为重定向再发第二次请求', String(getCalls.length))
+  }
+
+  // ---------- 9. 断点续传(resume) ----------
+  section('9. downloadFile resume:Range 续传 / 200 截断重下 / 416 重来 / 取消保留')
+  {
+    reset()
+    // 预置半截 .part,服务端应收到 Range 头并回 206
+    const file = dest('resume.bin')
+    fs.writeFileSync(file, 'hello')
+    plans = [{
+      statusCode: 206,
+      headers: { 'content-length': '6' },
+      body: ' world'
+    }]
+    const h = downloadFile('https://example.test/resume.zip', file, { resume: true })
+    await h.promise
+    ok(fs.readFileSync(file, 'utf8') === 'hello world', '206 续传拼接出完整文件', fs.readFileSync(file, 'utf8'))
+    ok(getCalls[0].opts.headers.Range === 'bytes=5-', '续传请求带 Range 起点偏移', JSON.stringify(getCalls[0].opts.headers))
+
+    // 服务端忽略 Range 回 200:应截断重下而不是拼接出脏文件
+    reset()
+    const file2 = dest('no-range.bin')
+    fs.writeFileSync(file2, 'stale-data')
+    plans = [{ statusCode: 200, headers: { 'content-length': '3' }, body: 'abc' }]
+    const h2 = downloadFile('https://example.test/nr.zip', file2, { resume: true })
+    await h2.promise
+    ok(fs.readFileSync(file2, 'utf8') === 'abc', '200 响应截断重下', fs.readFileSync(file2, 'utf8'))
+
+    // 416(起点等于文件大小):清空后重下
+    reset()
+    const file3 = dest('full.bin')
+    fs.writeFileSync(file3, 'fully-downloaded')
+    plans = [{ statusCode: 200, headers: { 'content-length': '3' }, body: 'abc' }]
+    const h3 = downloadFile('https://example.test/full.zip', file3, { resume: true })
+    await h3.promise
+    ok(fs.readFileSync(file3, 'utf8') === 'abc', '416 后清空重下', fs.readFileSync(file3, 'utf8'))
+
+    // resume 模式取消:保留 .part 供下次续传
+    reset()
+    const file4 = dest('keep.bin')
+    fs.writeFileSync(file4, 'keepme')
+    plans = [{ hang: true }]
+    const h4 = downloadFile('https://example.test/keep.zip', file4, { resume: true })
+    h4.cancel()
+    const out4 = await outcome(h4.promise)
+    ok(out4 === 'rejected:已取消', '取消仍然了结 promise', out4)
+    ok(fs.existsSync(file4) && fs.readFileSync(file4, 'utf8') === 'keepme', 'resume 模式取消保留已下载内容')
+  }
+
+  // ---------- 10. downloadResumable:自动重试与续传 ----------
+  section('10. downloadResumable:失败后从断点继续,最终完成')
+  {
+    reset()
+    const file = dest('retry.bin')
+    // 第 1 次:服务端网络错误;第 2 次:206 续传(此时 .part 已有首段内容)
+    plans = [
+      { netError: 'connection reset' },
+      { statusCode: 206, headers: { 'content-length': '6' }, body: ' world' }
+    ]
+    // 先手动预置断点内容,模拟第一次尝试写入了 'hello' 后中断
+    fs.writeFileSync(file, 'hello')
+    const h = downloadResumable('https://example.test/retry.zip', file, { attempts: 3, delayMs: 1 })
+    await h.promise
+    ok(fs.readFileSync(file, 'utf8') === 'hello world', '重试后从断点拼出完整文件', fs.readFileSync(file, 'utf8'))
+    ok(getCalls.length === 2, '共发起两次请求(1 次失败 + 1 次续传)', String(getCalls.length))
+
+    // 重试次数耗尽:抛出最后一次错误
+    reset()
+    plans = [
+      { netError: 'e1' },
+      { netError: 'e2' }
+    ]
+    const h2 = downloadResumable('https://example.test/doomed.zip', dest('doomed.bin'), { attempts: 2, delayMs: 1 })
+    const out2 = await outcome(h2.promise)
+    ok(out2 === 'rejected:网络错误: e2', '重试耗尽抛最后一次错误', out2)
   }
 
   // ---------- 结果 ----------

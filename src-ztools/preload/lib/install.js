@@ -1,7 +1,7 @@
 // 版本安装编排:串行下载队列、任务注册表、安装/导入/删除
 const fs = require('node:fs')
 const path = require('node:path')
-const { downloadFile } = require('./http')
+const { downloadResumable } = require('./http')
 const { extractZip, ensureDir, dirSize } = require('./extract')
 const { findExecutable, verifyExecutable, parseVersionOutput, parseTagFromFileName, currentPlatform, displayName } = require('./godotExe')
 const { putDoc, removeDoc } = require('./store')
@@ -54,13 +54,16 @@ function downloadAndInstall(params, opts) {
     const installDir = path.join(opts.versionsRoot, `Godot_${params.tag}_${params.variant}_${params.platform}`)
     const downloadsDir = path.join(opts.versionsRoot, 'downloads')
     const zipPath = path.join(downloadsDir, params.fileName + '.part')
+    // 成功后才清理 .part;失败保留(已下载字节留在盘上,重试从断点继续)
+    let succeeded = false
 
     try {
       ensureDir(downloadsDir)
       setTask(id, { status: 'downloading' })
       let lastTime = Date.now()
       let lastReceived = 0
-      const dl = downloadFile(finalUrl, zipPath, {
+      const dl = downloadResumable(finalUrl, zipPath, {
+        attempts: 3,
         total: params.totalSize,
         onProgress: (received, total) => {
           const now = Date.now()
@@ -108,6 +111,7 @@ function downloadAndInstall(params, opts) {
         verified: ok
       }
       putDoc(versionId, version)
+      succeeded = true
       setTask(id, { status: 'done', versionId, version })
     } catch (e) {
       const message = e && e.message === '已取消' ? '已取消' : (e && e.message) || '安装失败'
@@ -118,7 +122,7 @@ function downloadAndInstall(params, opts) {
       }
     } finally {
       try {
-        fs.existsSync(zipPath) && fs.unlinkSync(zipPath)
+        succeeded && fs.existsSync(zipPath) && fs.unlinkSync(zipPath)
       } catch (e) { /* ignore */ }
     }
   }

@@ -4,6 +4,7 @@ const path = require('node:path')
 const crypto = require('node:crypto')
 const { getDoc, putDoc, removeDoc, listDocs } = require('./store')
 const { trashPath } = require('./fsutil')
+const { dirSize } = require('./extract')
 
 const IGNORE_DIRS = new Set(['.git', '.godot', 'node_modules', '.import', 'build', 'dist', 'addons'])
 
@@ -397,6 +398,38 @@ function copyAddonsToProject({ sourceProjectId, dirNames, targetProjectId }) {
   }
 }
 
+/**
+ * 查询项目的 .godot 编辑器缓存大小(导入卡顿时的自救参考)。
+ * @param {string} projectId
+ * @returns {{ok: boolean, error?: string, exists?: boolean, size?: number}}
+ */
+function getProjectCacheInfo(projectId) {
+  const project = getDoc(projectId)
+  if (!project) return { ok: false, error: '项目不存在' }
+  const dir = path.join(project.path, '.godot')
+  if (!fs.existsSync(dir)) return { ok: true, exists: false, size: 0 }
+  return { ok: true, exists: true, size: dirSize(dir) }
+}
+
+/**
+ * 清理项目的 .godot 编辑器缓存(下次打开编辑器时 Godot 会自动重建)。
+ * @param {string} projectId
+ * @returns {{ok: boolean, error?: string, freed?: number}}
+ */
+function cleanProjectCache(projectId) {
+  try {
+    const project = getDoc(projectId)
+    if (!project) return { ok: false, error: '项目不存在' }
+    const dir = path.join(project.path, '.godot')
+    if (!fs.existsSync(dir)) return { ok: true, freed: 0 }
+    const size = dirSize(dir)
+    fs.rmSync(dir, { recursive: true, force: true })
+    return { ok: true, freed: size }
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || '清理失败' }
+  }
+}
+
 module.exports = {
   parseProjectGodot,
   addProject,
@@ -405,5 +438,7 @@ module.exports = {
   copyAddonsToProject,
   projectDocId,
   matchVersion,
-  createProject
+  createProject,
+  getProjectCacheInfo,
+  cleanProjectCache
 }

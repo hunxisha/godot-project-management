@@ -5,6 +5,7 @@ import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import VersionPickerDialog from '../components/dialogs/VersionPickerDialog.vue'
 import InstallPreviewDialog from '../components/dialogs/InstallPreviewDialog.vue'
+import AssetDetailDialog from '../components/dialogs/AssetDetailDialog.vue'
 import { useAssetHydration } from '../composables/useAssetHydration'
 import { useMarketSearch } from '../composables/useMarketSearch'
 import { useMarketBrowse, MODE_META, type BrowseMode } from '../composables/useMarketBrowse'
@@ -18,7 +19,15 @@ import type { AddonInfo, GodotProject, GodotVersion, MarketAsset } from '../type
 // 被 App 的 KeepAlive 缓存:切走再切回不重新加载浏览数据(直到插件重启)
 defineOptions({ name: 'MarketplaceView' })
 
-const emit = defineEmits<{ (e: 'navigate', tab: string): void }>()
+const props = defineProps<{
+  /** 跨页意图:从项目页「从市场模板创建」跳入时为 'projects',消费后置空 */
+  enterMode?: string | null
+}>()
+
+const emit = defineEmits<{
+  (e: 'navigate', tab: string): void
+  (e: 'consumed'): void
+}>()
 
 // 本视图自己持有的状态:目标项目、标签筛选、兼容开关、图标回退、已装插件
 const projects = ref<(GodotProject & { _id: string })[]>([])
@@ -92,11 +101,13 @@ const {
   installedIds,
   picker,
   preview,
+  previewingId,
   install,
   openPicker,
   installFromPicker,
   confirmPreview,
   cancelPreview,
+  cancelPreviewDownload,
   saveAsProject,
   saveZip,
   defaultStripOf
@@ -160,9 +171,13 @@ onActivated(() => {
 
 function onKeydown(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
-  // 先关安装确认层(取消要释放暂存包),再关版本选择器
+  // 先关安装确认层(取消要释放暂存包),再关详情与版本选择器
   if (preview.value) {
     cancelPreview()
+    return
+  }
+  if (detailTarget.value) {
+    detailTarget.value = null
     return
   }
   if (picker.value) picker.value = null
@@ -187,10 +202,29 @@ function openStore(a: MarketAsset) {
   if (a.storeUrl) window.ztools.shellOpenExternal(a.storeUrl)
 }
 
+/** 资产详情弹层 */
+const detailTarget = ref<MarketAsset | null>(null)
+
+/** 卡片标题点击 → 详情弹层(在商店外链移入弹层内部) */
+function openDetail(a: MarketAsset) {
+  detailTarget.value = a
+}
+
 /** 图标加载失败时回退到占位块 */
 function onIconError(id: string) {
   brokenIcons.value = new Set(brokenIcons.value).add(id)
 }
+
+// 跨页意图:项目页「从市场模板创建」跳入 → 直接切到模板模式
+watch(
+  () => props.enterMode,
+  (m) => {
+    if (m === 'projects') {
+      switchMode('projects')
+      emit('consumed')
+    }
+  }
+)
 </script>
 
 <template>
@@ -326,7 +360,7 @@ function onIconError(id: string) {
             />
             <div v-else class="asset-icon ph"><Icon name="puzzle" :size="22" /></div>
             <div class="asset-title-box">
-              <span class="asset-title link" :title="`${a.title} · 在商店中查看`" @click="openStore(a)">
+              <span class="asset-title link" :title="`${a.title} · 查看详情`" @click="openDetail(a)">
                 {{ a.title }}
                 <Icon name="external" :size="10" />
               </span>
@@ -351,6 +385,12 @@ function onIconError(id: string) {
           <div class="asset-author">{{ a.author }}</div>
           <div class="asset-desc" :title="a.description">{{ a.description }}</div>
           <div class="install-row">
+            <button
+              v-if="installing && installing.assetId === a.assetId && previewingId === a.assetId"
+              class="btn small ghost pick-ver"
+              title="取消预览下载"
+              @click="cancelPreviewDownload(a.assetId)"
+            >取消</button>
             <button
               v-if="installing && installing.assetId === a.assetId"
               class="btn small asset-install busy"
@@ -424,6 +464,13 @@ function onIconError(id: string) {
         @confirm="confirmPreview"
         @close="cancelPreview"
         @save-as-project="saveAsProject"
+      />
+
+      <!-- 资产详情模态框 -->
+      <AssetDetailDialog
+        :open="!!detailTarget"
+        :asset-id="detailTarget?.assetId || ''"
+        @close="detailTarget = null"
       />
     </template>
   </div>

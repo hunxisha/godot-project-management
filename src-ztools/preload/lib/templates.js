@@ -15,7 +15,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
-const { downloadFile } = require('./http')
+const { downloadResumable } = require('./http')
 const { extractZip, ensureDir, dirSize } = require('./extract')
 const { currentPlatform } = require('./godotExe')
 const { getDoc, putDoc, removeDoc } = require('./store')
@@ -173,6 +173,8 @@ function downloadAndInstallTemplates({ versionId }, opts) {
   const job = async () => {
     let tmpDir = ''
     const zipPath = path.join(downloadsDir, fileName + '.part')
+    // 成功后才清理 .part;失败保留(已下载字节留在盘上,重试从断点继续)
+    let succeeded = false
     try {
       const queued = tasks.get(id)
       if (!queued || queued.status === 'canceled') return
@@ -181,7 +183,8 @@ function downloadAndInstallTemplates({ versionId }, opts) {
       setTask(id, { status: 'downloading' })
       let lastTime = Date.now()
       let lastReceived = 0
-      const dl = downloadFile(url, zipPath, {
+      const dl = downloadResumable(url, zipPath, {
+        attempts: 3,
         onProgress: (received, total) => {
           const now = Date.now()
           const speed = Math.max(0, ((received - lastReceived) / Math.max(1, now - lastTime)) * 1000)
@@ -234,6 +237,7 @@ function downloadAndInstallTemplates({ versionId }, opts) {
         size: dirSize(dest),
         installedAt: Date.now()
       })
+      succeeded = true
       setTask(id, { status: 'done', versionId })
     } catch (e) {
       const message = e && e.message === '已取消' ? '已取消' : (e && e.message) || '安装失败'
@@ -244,7 +248,7 @@ function downloadAndInstallTemplates({ versionId }, opts) {
       }
     } finally {
       try {
-        fs.existsSync(zipPath) && fs.unlinkSync(zipPath)
+        succeeded && fs.existsSync(zipPath) && fs.unlinkSync(zipPath)
       } catch (e) { /* ignore */ }
       try {
         tmpDir && fs.rmSync(tmpDir, { recursive: true, force: true })

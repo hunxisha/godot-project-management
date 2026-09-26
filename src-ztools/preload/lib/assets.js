@@ -221,9 +221,10 @@ async function listProjectAssets(page = 1) {
 /**
  * 获取资产详情:含 release 的版本与下载直链(下载链接为带签名的临时直链,安装时实时获取)。
  * version 指定时取该版本(找不到时回退最新),否则取最新 release。
+ * 同时带出详情弹层所需的扩展字段(媒体/许可/评分等;缺失时为空,渲染层需容忍)。
  * @param {string} assetId
  * @param {string} [version]
- * @returns {Promise<{assetId: string, title: string, versionString: string, downloadUrl: string, description: string, tags: string[]}>}
+ * @returns {Promise<{assetId: string, title: string, author: string, versionString: string, downloadUrl: string, description: string, tags: string[], media: string[], videoId: string, licenseType: string, licenseUrl: string, reviewsScore: number, storeUrl: string, lastUpdated: string}>}
  */
 async function getAssetDetail(assetId, version) {
   const [pub, slug] = splitAssetId(assetId)
@@ -238,10 +239,18 @@ async function getAssetDetail(assetId, version) {
   return {
     assetId,
     title: detail.name,
+    author: (detail.publisher && detail.publisher.name) || '',
     versionString: rel.version || '',
     downloadUrl: rel.download_url || '',
     description: detail.description,
-    tags: asArray(detail.tags).map((t) => t.display_name)
+    tags: asArray(detail.tags).map((t) => t.display_name),
+    media: asArray(detail.media),
+    videoId: detail.video_id || '',
+    licenseType: detail.license_type || '',
+    licenseUrl: detail.license_url || '',
+    reviewsScore: Number(detail.reviews_score) || 0,
+    storeUrl: detail.store_url || `${STORE_BASE}/asset/${pub}/${slug}/`,
+    lastUpdated: detail.last_updated || ''
   }
 }
 
@@ -631,9 +640,13 @@ function buildInstallPlan(projectPath, names, zipSize) {
   }
 }
 
+/** assetId → 进行中的预览下载句柄(供取消) */
+const activePreviews = new Map()
+
 /**
  * 安装预览:预下载 zip 并暂存,归纳安装计划(kind/顶层条目/冲突)供确认层展示。
  * 确认后把 stageId 传给 installAsset 复用已下载的包;取消用 cancelStagedAsset 释放。
+ * 下载阶段可用 cancelAssetPreview 中途取消(大包不必干等)。
  * @param {{projectId: string, assetId: string, version?: string}} opts
  * @param {(p: {stage: 'downloading'|'extracting', received?: number, total?: number}) => void} [onProgress]
  * @returns {Promise<{ok: boolean, error?: string, stageId?: string, title?: string, versionString?: string, plan?: InstallPlan}>}
@@ -650,7 +663,12 @@ async function previewAssetInstall({ projectId, assetId, version }, onProgress) 
     const dl = downloadFile(detail.downloadUrl, zipPath, {
       onProgress: (received, total) => onProgress && onProgress({ stage: 'downloading', received, total })
     })
-    await dl.promise
+    activePreviews.set(assetId, dl)
+    try {
+      await dl.promise
+    } finally {
+      activePreviews.delete(assetId)
+    }
     const { entries: names } = readZipEntries(zipPath)
     const plan = buildInstallPlan(project.path, names, fs.statSync(zipPath).size)
     const stageId = path.basename(dir)
@@ -660,6 +678,17 @@ async function previewAssetInstall({ projectId, assetId, version }, onProgress) 
     try { fs.rmSync(dir, { recursive: true, force: true }) } catch (e2) { /* ignore */ }
     return { ok: false, error: (e && e.message) || '获取资产信息失败' }
   }
+}
+
+/**
+ * 取消进行中的预览下载(幂等;无在途下载时为空操作)。
+ * @param {string} assetId
+ * @returns {{ok: boolean}}
+ */
+function cancelAssetPreview(assetId) {
+  const dl = activePreviews.get(assetId)
+  if (dl) dl.cancel()
+  return { ok: true }
 }
 
 /**
@@ -1032,6 +1061,58 @@ function uninstallAddon({ projectId, dirName, assetId }) {
 }
 
 /**
+ * 把已装的纯素材复制到另一个项目:按安装清单逐文件复制,目标已有同名文件跳过。
+ * 复制了内容才写目标记录(合并旧清单);部分失败时如实回报。
+ * @param {{sourceProjectId: string, assetId: string, targetProjectId: string}} opts
+ * @returns {{ok: boolean, error?: string, copied?: number, skipped?: string[]}}
+ */
+function copyAssetToProject({ sourceProjectId, assetId, targetProjectId }) {
+  const source = getDoc(sourceProjectId)
+  const target = getDoc(targetProjectId)
+  if (!source || !target) return { ok: false, error: '项目不存在' }
+  if (sourceProjectId === targetProjectId) return { ok: false, error: '源与目标是同一项目' }
+  const doc = getDoc(`godot/asset/${sourceProjectId}/${assetId}`)
+  if (!doc || doc.kind !== 'asset') return { ok: false, error: '该资产不是纯素材或缺少安装记录' }
+  const paths = asArray(doc.installedPaths)
+  if (!paths.length) return { ok: false, error: '安装清单为空' }
+
+  /** @type {string[]} */
+  const copied = []
+  /** @type {string[]} */
+  const skipped = []
+  for (const rel of paths) {
+    const from = resolveUnder(source.path, rel)
+    const to = resolveUnder(target.path, rel)
+    if (!from || !to) { skipped.push(rel); continue }
+    if (!fs.existsSync(from)) { skipped.push(`${rel}(源文件缺失)`); continue }
+    if (fs.existsSync(to)) { skipped.push(`${rel}(目标已存在)`); continue }
+    ensureDir(path.dirname(to))
+    fs.copyFileSync(from, to)
+    copied.push(rel)
+  }
+
+  if (copied.length) {
+    const targetDocId = `godot/asset/${targetProjectId}/${assetId}`
+    const prev = getDoc(targetDocId)
+    putDoc(targetDocId, {
+      projectId: targetProjectId,
+      assetId,
+      title: doc.title,
+      versionString: doc.versionString,
+      kind: 'asset',
+      dirNames: [...new Set(copied.map((f) => f.split('/')[0]))],
+      installedPaths:
+        prev && prev.kind === 'asset' ? [...new Set([...asArray(prev.installedPaths), ...copied])] : copied,
+      stripTopDir: doc.stripTopDir,
+      meta: doc.meta,
+      installedAt: Date.now(),
+      copiedFrom: sourceProjectId
+    })
+  }
+  return { ok: true, copied: copied.length, skipped }
+}
+
+/**
  * 启用/禁用插件(改写 project.godot)。
  * @param {{projectId: string, dirName: string, enabled: boolean}} opts
  * @returns {{ok: boolean, error?: string}}
@@ -1142,34 +1223,65 @@ function pickRelease(r) {
   }
 }
 
+// release 信息缓存的常量:库文档 id、6 小时 TTL、容量上限(防长期浏览撑爆缓存文档)
+const RELEASE_INFO_DOC = 'godot/cache/release-infos'
+const RELEASE_INFO_TTL = 6 * 60 * 60 * 1000
+const RELEASE_INFO_CAP = 2000
+
 /**
- * 批量获取资产最新 release 信息(并发受限、带内存缓存,失败静默跳过)。
+ * 批量获取资产最新 release 信息(并发受限,两级缓存,失败只进内存缓存不落库)。
+ * L1 = 进程内 Map;L2 = 本地库(6h TTL,容量裁剪),插件重启后翻页/复进市场不再全量重打 API。
  * @param {string[]} assetIds
  * @returns {Promise<Record<string, ReleaseInfo>>}
  */
 async function getReleaseInfos(assetIds) {
-  const ids = [...new Set(assetIds)].filter(
-    (id) => typeof id === 'string' && id.includes('/') && !versionCache.has(id)
-  )
+  const ids = [...new Set(assetIds)].filter((id) => typeof id === 'string' && id.includes('/'))
+  if (!ids.length) return {}
+  const now = Date.now()
+  const stored = (getDoc(RELEASE_INFO_DOC) || {}).items || {}
+  /** @type {Record<string, any>} */
+  const items = { ...stored }
+  /** @type {string[]} */
+  const missing = ids.filter((id) => {
+    if (versionCache.has(id)) return false
+    const hit = items[id]
+    return !(hit && now - (hit.fetchedAt || 0) < RELEASE_INFO_TTL)
+  })
+
   const CONCURRENCY = 6
   let idx = 0
   async function worker() {
-    while (idx < ids.length) {
-      const id = ids[idx++]
+    while (idx < missing.length) {
+      const id = missing[idx++]
       try {
         const [pub, slug] = splitAssetId(id)
         const releases = await getJson(`${API_BASE}/releases/${pub}/${slug}/`)
-        versionCache.set(id, pickRelease(latestRelease(releases)))
+        const info = pickRelease(latestRelease(releases))
+        versionCache.set(id, info)
+        items[id] = { ...info, fetchedAt: Date.now() }
       } catch (e) {
+        // 失败只进内存缓存:暂时性故障不该把「无更新」钉住一整个 TTL
         versionCache.set(id, pickRelease(null))
       }
     }
   }
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, ids.length) }, worker))
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, missing.length) }, worker))
+
+  if (missing.length) {
+    // 容量裁剪:超过上限时丢弃最旧的条目,防止长期浏览把缓存文档撑爆
+    const keys = Object.keys(items)
+    if (keys.length > RELEASE_INFO_CAP) {
+      keys.sort((a, b) => (items[a].fetchedAt || 0) - (items[b].fetchedAt || 0))
+      for (const k of keys.slice(0, keys.length - RELEASE_INFO_CAP)) delete items[k]
+    }
+    putDoc(RELEASE_INFO_DOC, { fetchedAt: now, items })
+  }
+
   /** @type {Record<string, ReleaseInfo>} */
   const out = {}
-  for (const id of new Set(assetIds)) {
-    if (versionCache.has(id)) out[id] = versionCache.get(id)
+  for (const id of ids) {
+    const hit = versionCache.get(id) || items[id]
+    if (hit) out[id] = hit
   }
   return out
 }
@@ -1217,10 +1329,12 @@ module.exports = {
   getAssetDetail,
   listAddons,
   previewAssetInstall,
+  cancelAssetPreview,
   cancelStagedAsset,
   installAsset,
   saveAssetAsProject,
   downloadAssetZip,
+  copyAssetToProject,
   updateAsset,
   checkAddonUpdate,
   uninstallAddon,

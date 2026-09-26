@@ -131,20 +131,51 @@ export function useAddonActions(opts: UseAddonActionsOptions) {
   function confirmCopy() {
     if (!copyTargetId.value || copying.value) return
     copying.value = true
-    const r = window.services.copyAddonsToProject({
-      sourceProjectId: projectId(),
-      dirNames: [...checked.value],
-      targetProjectId: copyTargetId.value
-    })
-    copying.value = false
-    if (!r.ok) {
-      opts.notify(r.error || '复制失败')
-      return
+    // 选中项分区:插件按目录复制,素材按安装清单逐文件复制
+    const rows = selAddons.value.filter((a) => checked.value.includes(a.dirName))
+    const addonDirs = rows.filter((a) => a.kind !== 'asset').map((a) => a.dirName)
+    const assetIds = rows.filter((a) => a.kind === 'asset' && a.assetId).map((a) => a.assetId!)
+    let copied = 0
+    /** @type {string[]} */
+    const skipped: string[] = []
+    let adopted = 0
+    let targetName = ''
+    if (addonDirs.length) {
+      const r = window.services.copyAddonsToProject({
+        sourceProjectId: projectId(),
+        dirNames: addonDirs,
+        targetProjectId: copyTargetId.value
+      })
+      if (!r.ok) {
+        copying.value = false
+        opts.notify(r.error || '复制失败')
+        return
+      }
+      copied += r.copied || 0
+      skipped.push(...(r.skipped || []))
+      adopted += r.adopted || 0
+      targetName = r.targetName || ''
     }
+    for (const assetId of assetIds) {
+      const r = window.services.copyAssetToProject({
+        sourceProjectId: projectId(),
+        assetId,
+        targetProjectId: copyTargetId.value
+      })
+      if (r.ok) {
+        copied += r.copied || 0
+        skipped.push(...(r.skipped || []))
+        if (!targetName) targetName = opts.projects.value.find((p) => p._id === copyTargetId.value)?.name || ''
+      } else {
+        skipped.push(`${assetId}(${r.error})`)
+      }
+    }
+    copying.value = false
     showCopy.value = false
-    const skipped = r.skipped?.length ? `,跳过:${r.skipped.join('、')}` : ''
-    const adopted = r.adopted ? `,其中 ${r.adopted} 个已补回市场来源` : ''
-    opts.notify(`已复制 ${r.copied} 个插件到「${r.targetName}」${skipped}${adopted}`)
+    const noun = assetIds.length ? '项' : '个插件'
+    const skippedNote = skipped.length ? `,跳过:${skipped.join('、')}` : ''
+    const adoptedNote = adopted ? `,其中 ${adopted} 个已补回市场来源` : ''
+    opts.notify(`已复制 ${copied} ${noun}到「${targetName}」${skippedNote}${adoptedNote}`)
   }
 
   // ---------- 检查更新 / 更新 ----------

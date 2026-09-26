@@ -1,16 +1,17 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { getSettings, isWindows, notify, pickDirectory } from '../services/bridge'
+import { getSettings, isWindows, notify, pickDirectory, putDoc } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import BackupCreateDialog from '../components/dialogs/BackupCreateDialog.vue'
+import ExportDialog from '../components/dialogs/ExportDialog.vue'
 import { openProjectAction } from '../composables/useProjectActions'
 import { useProjectList, type ProjectRow } from '../composables/useProjectList'
 import { useProjectCreate } from '../composables/useProjectCreate'
 import { useProjectDelete } from '../composables/useProjectDelete'
 import { gradOf } from '../utils/avatar'
 import { versionMismatch } from '../utils/godotVersion'
-import { formatRelative } from '../utils/format'
+import { formatRelative, fmtSize } from '../utils/format'
 import type { BackupRecord, OpenAction } from '../types/godot'
 
 type Row = ProjectRow
@@ -28,6 +29,8 @@ const emit = defineEmits<{
   (e: 'manage-addons', id: string): void
   /** 跳转备份管理页(id 为空表示显示全部) */
   (e: 'open-backups', id?: string): void
+  /** 跳到市场模板模式(新建对话框的「从市场模板创建」入口) */
+  (e: 'template-market'): void
 }>()
 
 const settings = getSettings()
@@ -206,6 +209,78 @@ function openProject(p: Row, action?: OpenAction) {
   openProjectAction(p, action)
 }
 
+// ---------- 导出 / 启动参数 / 缓存清理 ----------
+// 三个轻量对话框:导出(预设选择 + 任务进度)、启动参数(单行编辑)、缓存(大小 + 清理)。
+
+const showExport = ref(false)
+const exportTarget = ref<Row | null>(null)
+
+function openExport(p: Row) {
+  exportTarget.value = p
+  showExport.value = true
+}
+
+const showArgs = ref(false)
+const argsTarget = ref<Row | null>(null)
+const argsDraft = ref('')
+
+function openArgs(p: Row) {
+  argsTarget.value = p
+  argsDraft.value = p.launchArgs || ''
+  showArgs.value = true
+}
+
+function saveArgs() {
+  const p = argsTarget.value
+  if (!p) return
+  const { _id, launchArgs, ...fields } = p
+  const ok = putDoc(_id, { ...fields, launchArgs: argsDraft.value.trim() })
+  if (ok) {
+    notify('启动参数已保存,下次打开/运行时生效')
+    showArgs.value = false
+    reload()
+  } else {
+    notify('保存失败')
+  }
+}
+
+const showCache = ref(false)
+const cacheTarget = ref<Row | null>(null)
+const cacheLoading = ref(false)
+const cacheExists = ref(false)
+const cacheSize = ref(0)
+const cleaning = ref(false)
+
+function openCache(p: Row) {
+  cacheTarget.value = p
+  showCache.value = true
+  cacheLoading.value = true
+  try {
+    const r = window.services.getProjectCacheInfo(p._id)
+    cacheExists.value = !!r.exists
+    cacheSize.value = r.size || 0
+  } finally {
+    cacheLoading.value = false
+  }
+}
+
+function cleanCache() {
+  const p = cacheTarget.value
+  if (!p || cleaning.value) return
+  cleaning.value = true
+  try {
+    const r = window.services.cleanProjectCache(p._id)
+    if (r.ok) {
+      notify(`已清理 ${fmtSize(r.freed || 0)} 缓存(下次打开编辑器时自动重建)`)
+      showCache.value = false
+    } else {
+      notify(r.error || '清理失败')
+    }
+  } finally {
+    cleaning.value = false
+  }
+}
+
 // ---------- 键盘导航(插件页获得焦点时生效) ----------
 
 function onKeyDown(e: KeyboardEvent) {
@@ -218,11 +293,23 @@ function onKeyDown(e: KeyboardEvent) {
       showDelete.value = false
       return
     }
+    if (showExport.value) {
+      showExport.value = false
+      return
+    }
+    if (showArgs.value) {
+      showArgs.value = false
+      return
+    }
+    if (showCache.value) {
+      showCache.value = false
+      return
+    }
     selected.value = -1
     return
   }
   // 备份对话框自行处理 Escape;这里只阻止列表键盘导航
-  if (showCreate.value || showDelete.value || showBackupCreate.value) return
+  if (showCreate.value || showDelete.value || showBackupCreate.value || showExport.value || showArgs.value || showCache.value) return
   if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(e.key)) return
   const tag = (e.target as HTMLElement)?.tagName
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
@@ -330,6 +417,13 @@ function onKeyDown(e: KeyboardEvent) {
             <span class="act-sep"></span>
             <button
               class="btn small ghost icon-act"
+              title="一键导出(headless)"
+              @click="openExport(p)"
+            >
+              <Icon name="upload" :size="13" />
+            </button>
+            <button
+              class="btn small ghost icon-act"
               title="管理该项目的插件"
               @click="emit('manage-addons', p._id)"
             >
@@ -341,6 +435,20 @@ function onKeyDown(e: KeyboardEvent) {
               @click="openBackupCreate(p._id)"
             >
               <Icon name="archive" :size="13" />
+            </button>
+            <button
+              class="btn small ghost icon-act"
+              title="编辑自定义启动参数"
+              @click="openArgs(p)"
+            >
+              <Icon name="zap" :size="13" />
+            </button>
+            <button
+              class="btn small ghost icon-act"
+              title="查看并清理 .godot 编辑器缓存"
+              @click="openCache(p)"
+            >
+              <Icon name="hard-drive" :size="13" />
             </button>
             <button class="btn small ghost star" :class="{ on: p.favorite }" title="收藏" @click="toggleFavorite(p)">
               <Icon name="star" :size="13" :stroke-width="p.favorite ? 2.4 : 1.7" />
@@ -428,6 +536,9 @@ function onKeyDown(e: KeyboardEvent) {
           </label>
 
           <div class="modal-foot">
+            <button type="button" class="btn ghost" title="从市场的完整项目模板创建项目" @click="emit('template-market')">
+              <Icon name="package" :size="13" /> 从市场模板创建…
+            </button>
             <span class="grow"></span>
             <button type="button" class="btn ghost" @click="showCreate = false">取消</button>
             <button type="submit" class="btn primary" :disabled="!cName.trim() || !cParent.trim() || creating">
@@ -482,6 +593,76 @@ function onKeyDown(e: KeyboardEvent) {
       @close="showBackupCreate = false"
       @done="refreshLastBackups"
     />
+
+    <!-- 一键导出对话框 -->
+    <ExportDialog :open="showExport" :project="exportTarget" @close="showExport = false" />
+
+    <!-- 启动参数对话框 -->
+    <Teleport to="body">
+      <div v-if="showArgs" class="modal-mask" @click.self="showArgs = false">
+        <div class="card modal">
+          <div class="modal-head">
+            <div class="modal-title"><Icon name="zap" :size="15" /> 启动参数 · {{ argsTarget?.name }}</div>
+            <span class="grow"></span>
+            <button type="button" class="btn small ghost icon-x" title="关闭" @click="showArgs = false">
+              <Icon name="x" :size="14" />
+            </button>
+          </div>
+
+          <div class="field">
+            <label class="f-label" for="la-args">自定义命令行参数</label>
+            <input
+              id="la-args"
+              v-model="argsDraft"
+              class="input mono"
+              placeholder="例如:--resolution 1280x720 --debug"
+              autocomplete="off"
+              spellcheck="false"
+              @keyup.enter="saveArgs"
+            />
+            <div class="f-hint">追加在 <code>godot --path 项目 --打开方式</code> 之后;双引号内的空格视为同一参数。</div>
+          </div>
+
+          <div class="modal-foot">
+            <span class="grow"></span>
+            <button type="button" class="btn ghost" @click="showArgs = false">取消</button>
+            <button type="button" class="btn primary" @click="saveArgs"><Icon name="check" :size="13" /> 保存</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 缓存清理对话框 -->
+    <Teleport to="body">
+      <div v-if="showCache" class="modal-mask" @click.self="showCache = false">
+        <div class="card modal">
+          <div class="modal-head">
+            <div class="modal-title"><Icon name="hard-drive" :size="15" /> 编辑器缓存 · {{ cacheTarget?.name }}</div>
+            <span class="grow"></span>
+            <button type="button" class="btn small ghost icon-x" title="关闭" @click="showCache = false">
+              <Icon name="x" :size="14" />
+            </button>
+          </div>
+
+          <p class="del-text">
+            {{ cacheLoading ? '统计中…' : cacheExists ? `.godot 缓存占用 ${fmtSize(cacheSize)}` : '该项目还没有 .godot 缓存' }}
+          </p>
+          <div class="del-hint">
+            导入资源卡住、图标丢失时清缓存是常见的自救手段;清理后下次打开编辑器会自动重建,
+            请先关闭正在运行的编辑器实例。
+          </div>
+
+          <div class="modal-foot">
+            <span class="grow"></span>
+            <button type="button" class="btn ghost" @click="showCache = false">关闭</button>
+            <button type="button" class="btn del-confirm" :disabled="!cacheExists || cleaning" @click="cleanCache">
+              <span v-if="cleaning" class="spin"></span>
+              {{ cleaning ? '清理中…' : '清理缓存' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 

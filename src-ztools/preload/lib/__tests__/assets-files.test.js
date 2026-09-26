@@ -56,8 +56,9 @@ global.window = {
 }
 
 // ---------- http 打桩(必须在 require assets.js 之前) ----------
-// 网络层替换为本地夹具:getJson 路由到预置的 detail/releases,downloadFile 直接复制夹具 zip。
-const state = { fixtureZip: '', downloads: 0 }
+// 网络层替换为本地夹具:getJson 路由到预置的 detail/releases,downloadFile 直接复制夹具 zip;
+// holdDownload 模式让下载挂起(预览取消测试用),cancel 即以「已取消」拒绝。
+const state = { fixtureZip: '', downloads: 0, releaseCalls: 0, holdDownload: false, rejectHold: null }
 const routes = { detail: {}, releases: {} }
 
 function stub(relFile, exports) {
@@ -71,15 +72,29 @@ function idOf(url, seg) {
 
 stub('http.js', {
   getJson: async (url) => {
-    if (url.includes('/releases/')) return routes.releases[idOf(url, '/releases/')]
+    if (url.includes('/releases/')) {
+      state.releaseCalls++
+      return routes.releases[idOf(url, '/releases/')]
+    }
     if (url.includes('/assets/')) return routes.detail[idOf(url, '/assets/')]
     throw new Error('stub http: unexpected url ' + url)
   },
   downloadFile: (url, dest) => {
-    if (!state.fixtureZip) throw new Error('stub http: 没有夹具 zip')
+    if (!state.fixtureZip) return { promise: Promise.reject(new Error('stub http: 没有夹具 zip')) }
     state.downloads++
+    if (state.holdDownload) {
+      return {
+        promise: new Promise((resolve, reject) => {
+          state.rejectHold = reject
+        }),
+        cancel: () => {
+          state.holdDownload = false
+          state.rejectHold(new Error('已取消'))
+        }
+      }
+    }
     fs.copyFileSync(state.fixtureZip, dest)
-    return { promise: Promise.resolve() }
+    return { promise: Promise.resolve(), cancel: () => {} }
   },
   getText: async () => {
     throw new Error('stub http: getText unexpected')
@@ -97,6 +112,7 @@ const ok = (cond, label, extra) => {
   else { failures.push(label); console.log(`  FAIL  ${label}${extra !== undefined ? '  → ' + extra : ''}`) }
 }
 const section = (t) => console.log(`\n=== ${t} ===`)
+const sleep = (ms = 10) => new Promise((r) => setTimeout(r, ms))
 
 // ---------- 夹具 ----------
 
@@ -434,6 +450,66 @@ async function main() {
   ok(r16b.ok === true && r16b.file === 'dl-3.1.4-2.zip', `重名自动加序号(${r16b.file})`)
   const r16c = await assets.downloadAssetZip({ assetId: 'pub/dl', destDir: path.join(WORK, 'nope') })
   ok(r16c.ok === false && /目标目录/.test(r16c.error || ''), '目录不存在时报错')
+
+  // ---------- 17 ----------
+  section('17. 素材复制到其他项目:按清单复制,冲突跳过,记录合并')
+  serveAsset('pub/copy-src', { name: 'Copy Src', version: '1.0.0' })
+  state.fixtureZip = await buildZip({
+    'assets/shared.txt': 'shared',
+    'assets/only-src.txt': 'only-src'
+  })
+  const srcProj = path.join(WORK, 'CopySrc')
+  fs.mkdirSync(srcProj, { recursive: true })
+  fs.writeFileSync(path.join(srcProj, 'project.godot'), 'config_version=5\n')
+  const pidCopy = projects.addProject(srcProj).project.id
+  const r17 = await assets.installAsset({ projectId: pidCopy, assetId: 'pub/copy-src' })
+  ok(r17.ok === true, '源项目安装成功', r17.error)
+  // 目标项目已有一个同名文件 → 冲突跳过
+  const dstProj = path.join(WORK, 'CopyDst')
+  fs.mkdirSync(path.join(dstProj, 'assets'), { recursive: true })
+  fs.writeFileSync(path.join(dstProj, 'project.godot'), 'config_version=5\n')
+  fs.writeFileSync(path.join(dstProj, 'assets', 'shared.txt'), 'mine')
+  const pidDst = projects.addProject(dstProj).project.id
+
+  const r17b = assets.copyAssetToProject({ sourceProjectId: 'godot/project/none', assetId: 'pub/copy-src', targetProjectId: pidDst })
+  ok(r17b.ok === false, '未知源项目拒绝')
+  const r17c = assets.copyAssetToProject({ sourceProjectId: pidCopy, assetId: 'pub/copy-src', targetProjectId: pidCopy })
+  ok(r17c.ok === false && /同一项目/.test(r17c.error || ''), '同一项目拒绝')
+  const r17d = assets.copyAssetToProject({ sourceProjectId: pidCopy, assetId: 'kenney/nature-pack', targetProjectId: pidDst })
+  ok(r17d.ok === false && /安装记录/.test(r17d.error || ''), '无安装清单的 assetId 拒绝')
+
+  const r17e = assets.copyAssetToProject({ sourceProjectId: pidCopy, assetId: 'pub/copy-src', targetProjectId: pidDst })
+  ok(r17e.ok === true && r17e.copied === 1 && r17e.skipped.length === 1,
+    `复制 1 个、跳过 1 个(${r17e.copied}/${r17e.skipped.join(',')})`)
+  ok(fs.readFileSync(path.join(dstProj, 'assets', 'only-src.txt'), 'utf8') === 'only-src', '新文件复制到目标项目')
+  ok(fs.readFileSync(path.join(dstProj, 'assets', 'shared.txt'), 'utf8') === 'mine', '目标已有文件未被覆盖')
+  const dstDoc = docs.get(`godot/asset/${pidDst}/pub/copy-src`)
+  ok(!!dstDoc && dstDoc.kind === 'asset' && dstDoc.installedPaths.length === 1, '目标记录只含实际复制的文件')
+  ok(!!dstDoc && dstDoc.copiedFrom === pidCopy, '记录 copiedFrom 便于追溯')
+
+  // ---------- 18 ----------
+  section('18. release 信息缓存落库:二次免请求,TTL 外重新拉取')
+  serveAsset('pub/cache-a', { name: 'CacheA', version: '1.0.0' })
+  const rc1 = await assets.getReleaseInfos(['pub/cache-a'])
+  ok(!!rc1['pub/cache-a'] && rc1['pub/cache-a'].version === '1.0.0', '拉取并返回版本信息')
+  const wrote = !!docs.get('godot/cache/release-infos')
+  ok(wrote, '缓存写入本地库')
+  const callsAfterFirst = state.releaseCalls
+  ok(callsAfterFirst >= 1, '首次调用发起过 releases 请求', String(callsAfterFirst))
+  const rc2 = await assets.getReleaseInfos(['pub/cache-a'])
+  ok(!!rc2['pub/cache-a'], '二次调用仍返回信息')
+  ok(state.releaseCalls === callsAfterFirst, '二次调用未发网络请求(库缓存命中)', `${callsAfterFirst}→${state.releaseCalls}`)
+
+  // ---------- 19 ----------
+  section('19. 预览下载可取消')
+  serveAsset('pub/cancel-dl', { name: 'CancelDl', version: '1.0.0' })
+  state.holdDownload = true
+  const pvPending = assets.previewAssetInstall({ projectId: pidA, assetId: 'pub/cancel-dl' })
+  await sleep(20)
+  assets.cancelAssetPreview('pub/cancel-dl')
+  const pvRes = await pvPending
+  ok(pvRes.ok === false && pvRes.error === '已取消', `取消后预览以「已取消」了结(${pvRes.error})`)
+  ok(state.holdDownload === false, '句柄已从在途表移除')
 
   console.log(`\n${'='.repeat(56)}`)
   console.log(`PASS ${pass}  FAIL ${failures.length}`)
