@@ -10,7 +10,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
 const { getJson, downloadFile } = require('./http')
-const { extractZip, ensureDir } = require('./extract')
+const { extractZip, ensureDir, readZipEntries } = require('./extract')
 const { getDoc, putDoc, putDocVerbose, removeDoc, listDocs } = require('./store')
 
 const API_BASE = 'https://store.godotengine.org/api/v1'
@@ -497,16 +497,190 @@ function listAddons(projectId) {
   return out
 }
 
+// ---------- 安装预览:预下载暂存 + 安装计划 ----------
+
+const STAGE_PREFIX = 'ztools-godot-stage-'
+/** stageId → { dir, zipPath, assetId, createdAt } */
+const staged = new Map()
+
+/** 暂存最长保留时间:过期的包连同目录一起清掉(含上次会话的孤儿目录) */
+const STAGE_MAX_AGE = 24 * 60 * 60 * 1000
+
+function sweepStaged() {
+  const now = Date.now()
+  try {
+    for (const ent of fs.readdirSync(os.tmpdir(), { withFileTypes: true })) {
+      if (!ent.isDirectory() || !ent.name.startsWith(STAGE_PREFIX)) continue
+      const p = path.join(os.tmpdir(), ent.name)
+      try {
+        if (now - fs.statSync(p).mtimeMs > STAGE_MAX_AGE) fs.rmSync(p, { recursive: true, force: true })
+      } catch (e) { /* ignore */ }
+    }
+  } catch (e) { /* ignore */ }
+  for (const [id, s] of staged) {
+    if (now - s.createdAt > STAGE_MAX_AGE) {
+      try { fs.rmSync(s.dir, { recursive: true, force: true }) } catch (e) { /* ignore */ }
+      staged.delete(id)
+    }
+  }
+}
+
+/** 冲突摘要(目标项目已存在的同路径文件) */
+/** @typedef {{count: number, samples: string[]}} ConflictInfo */
+
+/** 安装计划:确认层渲染所需的全部信息(zip 内容归纳) */
+/** @typedef {{
+ *   kind: 'addon'|'asset'|'project',
+ *   topEntries: {name: string, isDir: boolean, files: number}[],
+ *   fileCount: number,
+ *   zipSize: number,
+ *   singleTopDir: string,
+ *   conflicts: { asIs: ConflictInfo, stripped: ConflictInfo|null }
+ * }} InstallPlan */
+
+/**
+ * 计算文件清单与项目的冲突。
+ * @param {string} projectPath
+ * @param {string[]} relFiles 相对写入根的文件路径(正斜杠)
+ * @returns {ConflictInfo}
+ */
+function conflictInfo(projectPath, relFiles) {
+  /** @type {string[]} */
+  const samples = []
+  let count = 0
+  for (const rel of relFiles) {
+    const dest = resolveUnder(projectPath, rel)
+    if (dest && fs.existsSync(dest)) {
+      count++
+      if (samples.length < 3) samples.push(rel)
+    }
+  }
+  return { count, samples }
+}
+
+/**
+ * 从 zip 条目名列表归纳安装计划。目录条目以 / 结尾;只统计文件条目。
+ * @param {string} projectPath
+ * @param {string[]} names
+ * @param {number} zipSize
+ * @returns {InstallPlan}
+ */
+function buildInstallPlan(projectPath, names, zipSize) {
+  /** @type {Map<string, number>} */
+  const tops = new Map()
+  /** @type {Set<string>} 顶层散文件(没有子路径的条目) */
+  const topLoose = new Set()
+  /** @type {string[]} */
+  const relFiles = []
+  let hasPluginCfg = false
+  for (const raw of names) {
+    const name = raw.replace(/\\/g, '/')
+    if (name.endsWith('/')) continue
+    const top = name.split('/')[0]
+    if (top === '__MACOSX') continue
+    relFiles.push(name)
+    if (name === top) topLoose.add(top)
+    tops.set(top, (tops.get(top) || 0) + 1)
+    if (name.split('/').pop() === 'plugin.cfg') hasPluginCfg = true
+  }
+  const topEntries = [...tops.entries()].map(([name, files]) => ({ name, isDir: !topLoose.has(name), files }))
+  const single = topEntries.length === 1 && topEntries[0].isDir ? topEntries[0].name : ''
+  const hasRootProject = topLoose.has('project.godot')
+  const hasWrapperProject = !!single && relFiles.includes(`${single}/project.godot`)
+  const strippedFiles = single
+    ? relFiles.filter((n) => n.startsWith(single + '/')).map((n) => n.slice(single.length + 1))
+    : []
+  // 嗅探:有 plugin.cfg 走插件;根级(或 wrapper 根级)带 project.godot 的是完整项目
+  const kind = hasPluginCfg ? 'addon' : hasRootProject || hasWrapperProject ? 'project' : 'asset'
+  return {
+    kind,
+    topEntries,
+    fileCount: relFiles.length,
+    zipSize,
+    singleTopDir: single,
+    conflicts:
+      kind === 'asset'
+        ? { asIs: conflictInfo(projectPath, relFiles), stripped: single ? conflictInfo(projectPath, strippedFiles) : null }
+        : { asIs: { count: 0, samples: [] }, stripped: null }
+  }
+}
+
+/**
+ * 安装预览:预下载 zip 并暂存,归纳安装计划(kind/顶层条目/冲突)供确认层展示。
+ * 确认后把 stageId 传给 installAsset 复用已下载的包;取消用 cancelStagedAsset 释放。
+ * @param {{projectId: string, assetId: string, version?: string}} opts
+ * @param {(p: {stage: 'downloading'|'extracting', received?: number, total?: number}) => void} [onProgress]
+ * @returns {Promise<{ok: boolean, error?: string, stageId?: string, title?: string, versionString?: string, plan?: InstallPlan}>}
+ */
+async function previewAssetInstall({ projectId, assetId, version }, onProgress) {
+  const project = getDoc(projectId)
+  if (!project) return { ok: false, error: '项目不存在' }
+  const detail = await getAssetDetail(assetId, version)
+  if (!detail.downloadUrl) return { ok: false, error: '资产没有下载地址' }
+  sweepStaged()
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), STAGE_PREFIX))
+  try {
+    const zipPath = path.join(dir, 'asset.zip')
+    const dl = downloadFile(detail.downloadUrl, zipPath, {
+      onProgress: (received, total) => onProgress && onProgress({ stage: 'downloading', received, total })
+    })
+    await dl.promise
+    const { entries: names } = readZipEntries(zipPath)
+    const plan = buildInstallPlan(project.path, names, fs.statSync(zipPath).size)
+    const stageId = path.basename(dir)
+    staged.set(stageId, { dir, zipPath, assetId, createdAt: Date.now() })
+    return { ok: true, stageId, title: detail.title, versionString: detail.versionString, plan }
+  } catch (e) {
+    try { fs.rmSync(dir, { recursive: true, force: true }) } catch (e2) { /* ignore */ }
+    return { ok: false, error: (e && e.message) || '获取资产信息失败' }
+  }
+}
+
+/**
+ * 取走暂存的 zip(取走即从暂存表删除)。与 assetId 不匹配或包已丢失时返回 '',
+ * 调用方回退为正常下载。
+ * @param {string|undefined} stageId
+ * @param {string} assetId
+ * @returns {string}
+ */
+function takeStaged(stageId, assetId) {
+  if (!stageId) return ''
+  const s = staged.get(stageId)
+  staged.delete(stageId)
+  if (!s) return ''
+  if (s.assetId !== assetId || !fs.existsSync(s.zipPath)) {
+    try { fs.rmSync(s.dir, { recursive: true, force: true }) } catch (e) { /* ignore */ }
+    return ''
+  }
+  return s.zipPath
+}
+
+/**
+ * 释放暂存的安装包(用户取消确认层时调用;幂等)。
+ * @param {string} stageId
+ * @returns {{ok: boolean}}
+ */
+function cancelStagedAsset(stageId) {
+  const s = staged.get(stageId)
+  if (s) {
+    try { fs.rmSync(s.dir, { recursive: true, force: true }) } catch (e) { /* ignore */ }
+    staged.delete(stageId)
+  }
+  return { ok: true }
+}
+
 /**
  * 下载安装市场资产。按 zip 内容分流:
  *  · 含 plugin.cfg → 插件(Addon):进项目 addons/,可自动启用;
- *  · 否则 → 纯素材(模型/精灵等):按 zip 原结构落到项目根,记录文件清单供卸载/更新。
- * opts: { projectId, assetId, assetMeta, version? } version 指定安装的 release 版本。
- * @param {{projectId: string, assetId: string, assetMeta?: object, version?: string}} opts
+ *  · 否则 → 纯素材(模型/精灵等):落到项目根,记录文件清单供卸载/更新。
+ * opts: { projectId, assetId, assetMeta, version?, stageId?, stripTopDir? }
+ *  · stageId:previewAssetInstall 暂存的包,确认安装时复用(缺失时回退为重新下载);
+ *  · stripTopDir:素材唯一顶层目录是否并入项目根;缺省沿用该资产上次安装的选择。
+ * @param {{projectId: string, assetId: string, assetMeta?: object, version?: string, stageId?: string, stripTopDir?: boolean}} opts
  * @param {(p: {stage: 'downloading'|'extracting', received?: number, total?: number}) => void} [onProgress]
  * @returns {Promise<{ok: boolean, error?: string, addon?: AddonBrief}>}
  */
-async function installAsset({ projectId, assetId, assetMeta, version }, onProgress) {
+async function installAsset({ projectId, assetId, assetMeta, version, stageId, stripTopDir }, onProgress) {
   let tmpDir = ''
   try {
     const project = getDoc(projectId)
@@ -514,12 +688,17 @@ async function installAsset({ projectId, assetId, assetMeta, version }, onProgre
     const detail = await getAssetDetail(assetId, version)
     if (!detail.downloadUrl) return { ok: false, error: '资产没有下载地址' }
 
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ztools-godot-'))
-    const zipPath = path.join(tmpDir, 'asset.zip')
-    const dl = downloadFile(detail.downloadUrl, zipPath, {
-      onProgress: (received, total) => onProgress && onProgress({ stage: 'downloading', received, total })
-    })
-    await dl.promise
+    let zipPath = takeStaged(stageId, assetId)
+    if (zipPath) {
+      tmpDir = path.dirname(zipPath) // 借用暂存目录,finally 一并清理
+    } else {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ztools-godot-'))
+      zipPath = path.join(tmpDir, 'asset.zip')
+      const dl = downloadFile(detail.downloadUrl, zipPath, {
+        onProgress: (received, total) => onProgress && onProgress({ stage: 'downloading', received, total })
+      })
+      await dl.promise
+    }
 
     onProgress && onProgress({ stage: 'extracting' })
     const extractDir = path.join(tmpDir, 'x')
@@ -528,7 +707,7 @@ async function installAsset({ projectId, assetId, assetMeta, version }, onProgre
     // 内容嗅探:zip 里有没有 plugin.cfg 是插件与素材的唯一可靠判据(见文件头注释)
     const ctx = { project, projectId, assetId, assetMeta, detail, extractDir }
     if (findPluginCfgs(extractDir).length) return installAsAddon(ctx)
-    return installAsAssetFiles(ctx)
+    return installAsAssetFiles({ ...ctx, stripTopDir })
   } catch (e) {
     return { ok: false, error: (e && e.message) || '安装失败' }
   } finally {
@@ -539,7 +718,7 @@ async function installAsset({ projectId, assetId, assetMeta, version }, onProgre
 }
 
 /** 安装链路的公共上下文(下载解压完成后传入) */
-/** @typedef {{project: any, projectId: string, assetId: string, assetMeta?: object, detail: any, extractDir: string}} InstallCtx */
+/** @typedef {{project: any, projectId: string, assetId: string, assetMeta?: object, detail: any, extractDir: string, stripTopDir?: boolean}} InstallCtx */
 
 /**
  * 插件链路:定位插件目录 → 挪进 addons/ → 按设置自动启用 → 写记录。
@@ -598,24 +777,38 @@ function installAsAddon({ project, projectId, assetId, assetMeta, detail, extrac
 }
 
 /**
- * 素材链路:按 zip 原结构落到项目根 —— 作者按 res:// 路径打包,收进统一目录会断引用。
- * 更新语义是先清后装:先按旧清单删掉本资产上次写入的文件,再做整包冲突检测。
+ * 素材链路:落到项目根 —— 作者按 res:// 路径打包,收进统一目录会断引用。
+ * 唯一顶层目录是否并入项目根由确认层决定(stripTopDir);未显式传入时(已装页的更新/切换
+ * 版本)沿用该资产上次安装的选择。更新语义是先清后装:先按旧清单删掉旧文件再做冲突检测。
  * @param {InstallCtx} ctx
  * @returns {{ok: boolean, error?: string, addon?: AddonBrief}}
  */
-function installAsAssetFiles({ project, projectId, assetId, assetMeta, detail, extractDir }) {
+function installAsAssetFiles({ project, projectId, assetId, assetMeta, detail, extractDir, stripTopDir }) {
   const root = project.path
+  const docId = `godot/asset/${projectId}/${assetId}`
+  const prev = getDoc(docId)
+  const strip = stripTopDir != null ? !!stripTopDir : !!(prev && prev.kind === 'asset' && prev.stripTopDir)
 
-  // 根下带 project.godot 的是完整项目/模板,混进现有项目会覆盖用户工程文件
-  if (fs.existsSync(path.join(extractDir, 'project.godot'))) {
+  // wrapper 判定:唯一顶层目录(且不是 __MACOSX)才存在「并入/保留」的歧义
+  let sourceRoot = extractDir
+  let wrapperName = ''
+  if (strip) {
+    const tops = fs.readdirSync(extractDir, { withFileTypes: true }).filter((e) => e.name !== '__MACOSX')
+    if (tops.length === 1 && tops[0].isDirectory()) {
+      wrapperName = tops[0].name
+      sourceRoot = path.join(extractDir, wrapperName)
+    }
+  }
+
+  // 写入根下带 project.godot 的是完整项目/模板,混进现有项目会覆盖用户工程文件
+  if (fs.existsSync(path.join(sourceRoot, 'project.godot'))) {
     return { ok: false, error: '这是完整项目或模板,不能安装到现有项目目录' }
   }
 
-  const files = collectFiles(extractDir)
+  const files = collectFiles(sourceRoot)
   if (!files.length) return { ok: false, error: '压缩包中没有可安装的文件' }
 
-  const docId = `godot/asset/${projectId}/${assetId}`
-  const prev = getDoc(docId)
+  // 更新:先按旧清单清掉本资产上次写入的文件,再装新版(避免旧版本文件残留)
   if (prev && prev.kind === 'asset') removeInstalledFiles(root, prev.installedPaths)
 
   // 冲突检测:项目里已有同名文件时整包拒绝,不做部分覆盖
@@ -634,7 +827,7 @@ function installAsAssetFiles({ project, projectId, assetId, assetMeta, detail, e
     const dest = resolveUnder(root, rel)
     if (!dest) continue
     ensureDir(path.dirname(dest))
-    fs.copyFileSync(path.join(extractDir, rel), dest)
+    fs.copyFileSync(path.join(sourceRoot, rel), dest)
   }
 
   // dirNames 仅存顶层条目供展示;卸载/更新一律以 installedPaths 文件清单为准
@@ -647,6 +840,8 @@ function installAsAssetFiles({ project, projectId, assetId, assetMeta, detail, e
     kind: 'asset',
     dirNames: topEntries,
     installedPaths: files,
+    // 记录本次的 wrapper 选择,更新/切换版本未显式传入时沿用
+    stripTopDir: strip,
     meta: assetMeta || undefined,
     installedAt: Date.now()
   })
@@ -906,6 +1101,8 @@ module.exports = {
   verifyApiKey,
   getAssetDetail,
   listAddons,
+  previewAssetInstall,
+  cancelStagedAsset,
   installAsset,
   updateAsset,
   checkAddonUpdate,

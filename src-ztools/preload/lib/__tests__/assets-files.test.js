@@ -57,7 +57,7 @@ global.window = {
 
 // ---------- http 打桩(必须在 require assets.js 之前) ----------
 // 网络层替换为本地夹具:getJson 路由到预置的 detail/releases,downloadFile 直接复制夹具 zip。
-const state = { fixtureZip: '' }
+const state = { fixtureZip: '', downloads: 0 }
 const routes = { detail: {}, releases: {} }
 
 function stub(relFile, exports) {
@@ -77,6 +77,7 @@ stub('http.js', {
   },
   downloadFile: (url, dest) => {
     if (!state.fixtureZip) throw new Error('stub http: 没有夹具 zip')
+    state.downloads++
     fs.copyFileSync(state.fixtureZip, dest)
     return { promise: Promise.resolve() }
   },
@@ -297,6 +298,91 @@ async function main() {
   ok(!fs.existsSync(path.join(rootD, 'addons', 'models')), '插件目录已删除')
   ok(!!docs.get(`godot/asset/${pidD}/pub/asset-with-models`), '素材记录未被插件卸载误删')
   ok(fs.existsSync(path.join(rootD, 'models', 'file.glb')), '素材文件未被误删')
+
+  // ---------- 10 ----------
+  section('10. 安装预览:zip 内容归纳为安装计划')
+  serveAsset('pub/preview-pack', { name: 'Preview Pack', version: '1.0.0' })
+  state.fixtureZip = await buildZip({
+    'models/a.glb': 'a',
+    'sprites/b.png': 'b',
+    'README.md': 'r'
+  })
+  const pv = await assets.previewAssetInstall({ projectId: pidA, assetId: 'pub/preview-pack' })
+  ok(pv.ok === true && !!pv.plan, '预览成功', pv.error)
+  ok(pv.plan.kind === 'asset', `kind=asset(${pv.plan && pv.plan.kind})`)
+  ok(pv.plan.fileCount === 3, `文件数 3(实际 ${pv.plan && pv.plan.fileCount})`)
+  ok(pv.plan.singleTopDir === '', '多顶层条目时无 wrapper')
+  ok(pv.plan.conflicts.asIs.count === 0 && pv.plan.conflicts.stripped === null, '无冲突且无剥离布局信息')
+  ok(!!pv.stageId && fs.existsSync(path.join(os.tmpdir(), pv.stageId, 'asset.zip')), '暂存包已就位')
+  ok(pv.versionString === '1.0.0' && pv.title === 'Preview Pack', '预览带出版本与名称')
+
+  // ---------- 11 ----------
+  section('11. 预览识别 wrapper 与完整项目;插件计划照常归纳')
+  serveAsset('pub/wrapped', { name: 'Wrapped', version: '1.0.0' })
+  state.fixtureZip = await buildZip({ 'MyPack/models/x.glb': 'x', 'MyPack/README.md': 'r' })
+  const pv2 = await assets.previewAssetInstall({ projectId: pidA, assetId: 'pub/wrapped' })
+  ok(pv2.plan.singleTopDir === 'MyPack', `识别唯一顶层目录(${pv2.plan.singleTopDir})`)
+  ok(pv2.plan.topEntries.length === 1 && pv2.plan.topEntries[0].name === 'MyPack' && pv2.plan.topEntries[0].isDir, '顶层条目为 wrapper 目录')
+  ok(pv2.plan.conflicts.stripped !== null, '提供剥离布局的冲突信息')
+
+  serveAsset('pub/tpl2', { name: 'Tpl2', version: '1.0.0' })
+  state.fixtureZip = await buildZip({ 'project.godot': 'config_version=5\n', 'icon.svg': '<svg/>' })
+  const pv3 = await assets.previewAssetInstall({ projectId: pidA, assetId: 'pub/tpl2' })
+  ok(pv3.plan.kind === 'project', `根级 project.godot 判为完整项目(${pv3.plan.kind})`)
+
+  serveAsset('pub/tpl3', { name: 'Tpl3', version: '1.0.0' })
+  state.fixtureZip = await buildZip({ 'Tpl/project.godot': 'config_version=5\n', 'Tpl/icon.svg': '<svg/>' })
+  const pv4 = await assets.previewAssetInstall({ projectId: pidA, assetId: 'pub/tpl3' })
+  ok(pv4.plan.kind === 'project', 'wrapper 根级 project.godot 同样判为完整项目')
+
+  serveAsset('pub/addon-x', { name: 'AddonX', version: '1.0.0' })
+  state.fixtureZip = await buildZip({ 'addons/xx/plugin.cfg': '[plugin]\nname="X"\n', 'addons/xx/x.gd': '#x' })
+  const pv5 = await assets.previewAssetInstall({ projectId: pidA, assetId: 'pub/addon-x' })
+  ok(pv5.plan.kind === 'addon', '含 plugin.cfg 判为插件')
+
+  // ---------- 12 ----------
+  section('12. 暂存复用:凭 stageId 安装不再下载,完成后清理')
+  const downloadsBefore = state.downloads
+  const stageDir2 = path.join(os.tmpdir(), pv2.stageId)
+  const r12 = await assets.installAsset({ projectId: pidA, assetId: 'pub/wrapped', stageId: pv2.stageId, stripTopDir: true })
+  ok(r12.ok === true && r12.addon.kind === 'asset', '安装成功(素材)', r12.error)
+  ok(state.downloads === downloadsBefore, '未发生新的下载(复用暂存包)')
+  ok(!fs.existsSync(stageDir2), '暂存目录已清理')
+  ok(fs.existsSync(path.join(rootA, 'models', 'x.glb')), '剥离 wrapper 后内容并入项目根')
+  ok(!fs.existsSync(path.join(rootA, 'MyPack')), 'wrapper 目录未保留')
+  const d12 = docs.get(`godot/asset/${pidA}/pub/wrapped`)
+  ok(!!d12 && d12.stripTopDir === true, '记录剥离选择')
+  const r12b = assets.uninstallAddon({ projectId: pidA, dirName: 'wrapped', assetId: 'pub/wrapped' })
+  ok(r12b.ok === true && !fs.existsSync(path.join(rootA, 'models')), '剥离布局的清单卸载正常')
+
+  // ---------- 13 ----------
+  section('13. wrapper 默认保留,更新沿用上次选择')
+  serveAsset('pub/keep', { name: 'Keep', version: '1.0.0' })
+  state.fixtureZip = await buildZip({ 'KeepDir/models/y.glb': 'y' })
+  const r13 = await assets.installAsset({ projectId: pidA, assetId: 'pub/keep' })
+  ok(r13.ok === true, '安装成功', r13.error)
+  ok(fs.existsSync(path.join(rootA, 'KeepDir', 'models', 'y.glb')), '默认保留顶层目录')
+  serveAsset('pub/keep', { name: 'Keep', version: '1.1.0' })
+  state.fixtureZip = await buildZip({ 'KeepDir/models/y2.glb': 'y2' })
+  const r13b = await assets.updateAsset({ projectId: pidA, assetId: 'pub/keep' })
+  ok(r13b.ok === true, '更新成功', r13b.error)
+  ok(fs.existsSync(path.join(rootA, 'KeepDir', 'models', 'y2.glb')), '更新后仍保留顶层目录(沿用上次选择)')
+  ok(!fs.existsSync(path.join(rootA, 'models')), '未错误并入项目根')
+
+  // ---------- 14 ----------
+  section('14. 取消预览:释放暂存包(幂等)')
+  serveAsset('pub/cancel', { name: 'Cancel', version: '1.0.0' })
+  state.fixtureZip = await buildZip({ 'c.dat': 'c' })
+  const pv6 = await assets.previewAssetInstall({ projectId: pidA, assetId: 'pub/cancel' })
+  const stageDir6 = path.join(os.tmpdir(), pv6.stageId)
+  ok(fs.existsSync(stageDir6), '暂存包在')
+  const c1 = assets.cancelStagedAsset(pv6.stageId)
+  ok(c1.ok === true && !fs.existsSync(stageDir6), '取消后暂存目录被删除')
+  ok(assets.cancelStagedAsset(pv6.stageId).ok === true, '重复取消幂等')
+  // 过期 stageId 传入 installAsset:回退为正常下载安装
+  const r14 = await assets.installAsset({ projectId: pidA, assetId: 'pub/cancel', stageId: pv6.stageId })
+  ok(r14.ok === true, '无效 stageId 回退为正常下载安装', r14.error)
+  ok(fs.existsSync(path.join(rootA, 'c.dat')), '回退安装正常落盘')
 
   console.log(`\n${'='.repeat(56)}`)
   console.log(`PASS ${pass}  FAIL ${failures.length}`)

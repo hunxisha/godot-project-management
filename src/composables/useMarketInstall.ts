@@ -1,11 +1,30 @@
-// 市场插件安装:安装进度、已安装集合、版本选择器。
+// 市场资产安装:安装进度、已安装集合、版本选择器、安装确认层。
 //
 // 从 MarketplaceView.vue 抽出。安装是唯一会写目标项目目录的操作,它的进度回调必须按
 // assetId 配对(否则并发/切换资产时进度会串到别的卡片上),这条约束原本只体现在一个
 // 内联判断里,现在独立成模块并配了断言。
+//
+// 确认层流程(P1):install() 先走 previewAssetInstall 预下载并归纳安装计划——
+//   · 插件(addon):目的地固定为 addons/,无歧义,直接安装(不弹确认);
+//   · 素材(asset):弹确认层展示写入位置/顶层条目/冲突,并让用户决定唯一顶层目录
+//     是「保留」还是「并入项目根」,选择按 slug 记入设置;
+//   · 完整项目(project):确认层说明不可装,主按钮禁用。
+// 确认或取消都要释放暂存包(stageId):确认后复用,取消后删除。
 import { computed, ref, type Ref } from 'vue'
 import { useInstallProgress } from './useInstallProgress'
-import type { AddonInfo, MarketAsset } from '../types/godot'
+import { getSettings, saveSettings } from '../services/bridge'
+import type { AddonInfo, InstallPlan, MarketAsset } from '../types/godot'
+
+/** 确认层状态(非空时弹窗) */
+export interface PreviewState {
+  asset: MarketAsset
+  /** 版本选择器进入时携带的版本 */
+  version?: string
+  stageId: string
+  plan: InstallPlan
+  title: string
+  versionString: string
+}
 
 export interface UseMarketInstallOptions {
   /** 安装目标项目 */
@@ -27,23 +46,56 @@ export function useMarketInstall(opts: UseMarketInstallOptions) {
     () => new Set(opts.addons.value.filter((a) => a.fromMarket && a.assetId).map((a) => a.assetId!))
   )
 
-  /** 安装插件;version 指定 release 版本(版本选择器),缺省为最新 */
-  async function install(asset: MarketAsset, version?: string): Promise<void> {
-    if (!opts.targetId.value || busy()) return
+  /** 确认层状态 */
+  const preview = ref<PreviewState | null>(null)
+
+  function assetMetaOf(asset: MarketAsset) {
+    return {
+      title: asset.title,
+      author: asset.author,
+      category: asset.category,
+      iconUrl: asset.iconUrl,
+      description: asset.description,
+      storeUrl: asset.storeUrl
+    }
+  }
+
+  /** slug 记忆:下次安装同一资产的确认层预填同一选择(读写失败不影响安装) */
+  function rememberStripPref(assetId: string, strip: boolean) {
+    try {
+      const slug = String(assetId).split('/')[1] || assetId
+      const s = getSettings()
+      saveSettings({ assetStripTopDir: { ...(s.assetStripTopDir || {}), [slug]: strip } })
+    } catch (e) { /* ignore */ }
+  }
+
+  /** 确认层预填:上次对该资产的选择;没记过默认保留顶层目录(与官方编辑器行为一致) */
+  function defaultStripOf(assetId: string): boolean {
+    const slug = String(assetId).split('/')[1] || ''
+    if (!slug) return false
+    try {
+      return getSettings().assetStripTopDir?.[slug] === true
+    } catch (e) {
+      return false
+    }
+  }
+
+  /** 第二步:真正的安装(带 stageId 复用暂存包;无 stageId 时 preload 自行下载) */
+  async function doInstall(asset: MarketAsset, version: string | undefined, stageId: string | undefined, stripTopDir: boolean | undefined) {
+    if (!opts.targetId.value || busy()) {
+      // 进不来了就把暂存包释放掉,别留孤儿文件
+      if (stageId) window.services.cancelStagedAsset(stageId)
+      return
+    }
     begin(asset.assetId)
     const r = await window.services.installAsset(
       {
         projectId: opts.targetId.value,
         assetId: asset.assetId,
         version,
-        assetMeta: {
-          title: asset.title,
-          author: asset.author,
-          category: asset.category,
-          iconUrl: asset.iconUrl,
-          description: asset.description,
-          storeUrl: asset.storeUrl
-        }
+        stageId,
+        stripTopDir,
+        assetMeta: assetMetaOf(asset)
       },
       (p) => onProgress(asset.assetId, p)
     )
@@ -56,31 +108,86 @@ export function useMarketInstall(opts: UseMarketInstallOptions) {
     }
   }
 
+  /** 第一步:预下载并归纳安装计划,再按类型分流 */
+  async function install(asset: MarketAsset, version?: string): Promise<void> {
+    if (!opts.targetId.value || busy() || preview.value) return
+    begin(asset.assetId)
+    let r
+    try {
+      r = await window.services.previewAssetInstall(
+        { projectId: opts.targetId.value, assetId: asset.assetId, version },
+        (p) => onProgress(asset.assetId, p)
+      )
+    } catch (e: any) {
+      r = { ok: false, error: e?.message || String(e) }
+    } finally {
+      end()
+    }
+    if (!r.ok || !r.plan || !r.stageId) {
+      opts.notify(r.error || '获取资产信息失败')
+      return
+    }
+    // 插件目的地固定为 addons/,没有需要用户裁决的歧义,直接装(保持原有一步到位的体验)
+    if (r.plan.kind === 'addon') {
+      await doInstall(asset, version, r.stageId, undefined)
+      return
+    }
+    preview.value = {
+      asset,
+      version,
+      stageId: r.stageId,
+      plan: r.plan,
+      title: r.title || asset.title,
+      versionString: r.versionString || ''
+    }
+  }
+
+  /** 确认层点「安装」:记住剥离选择并继续(完整项目在确认层被禁用,这里兜底不再安装) */
+  async function confirmPreview(stripTopDir: boolean) {
+    const p = preview.value
+    if (!p || p.plan.kind === 'project') return
+    preview.value = null
+    if (p.plan.singleTopDir) rememberStripPref(p.asset.assetId, stripTopDir)
+    await doInstall(p.asset, p.version, p.stageId, p.plan.singleTopDir ? stripTopDir : undefined)
+  }
+
+  /** 取消确认层:释放暂存包 */
+  function cancelPreview() {
+    const p = preview.value
+    if (!p) return
+    preview.value = null
+    window.services.cancelStagedAsset(p.stageId)
+  }
+
   // ---------- 版本选择器 ----------
 
   /** 只保留「要选哪个资产」;release 列表与加载态由对话框自己管 */
   const picker = ref<{ asset: MarketAsset } | null>(null)
 
   function openPicker(a: MarketAsset) {
-    if (busy()) return
+    if (busy() || preview.value) return
     picker.value = { asset: a }
   }
 
   /** 从版本选择器安装指定版本 */
   function installFromPicker(version: string) {
     const a = picker.value?.asset
-    if (!a || busy()) return
+    if (!a || busy() || preview.value) return
     picker.value = null
-    install(a, version)
+    return install(a, version)
   }
 
   return {
     installing,
     installedIds,
     picker,
+    preview,
     install,
     openPicker,
     installFromPicker,
+    confirmPreview,
+    cancelPreview,
+    defaultStripOf,
     percent
   }
 }

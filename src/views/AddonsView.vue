@@ -65,8 +65,11 @@ const {
 })
 
 const target = computed(() => projects.value.find((p) => p._id === targetId.value))
-// 素材没有启用概念,统计口径只算插件
-const addonCount = computed(() => addons.value.filter((a) => a.kind !== 'asset').length)
+// 分区展示:插件(有启停概念)与素材(无)各成一段;素材没有启用概念,统计只算插件
+const pluginRows = computed(() => addons.value.filter((a) => a.kind !== 'asset'))
+const assetRows = computed(() => addons.value.filter((a) => a.kind === 'asset'))
+const firstPlugin = computed(() => pluginRows.value[0])
+const firstAsset = computed(() => assetRows.value[0])
 const enabledCount = computed(() => addons.value.filter((a) => a.kind !== 'asset' && a.enabled).length)
 
 /** 素材条目安装到项目根的顶层条目(展示用) */
@@ -175,7 +178,7 @@ function openStore(a: AddonInfo) {
       <!-- 标题行 -->
       <div class="view-head">
         <h2><Icon name="check" :size="16" /> 已安装插件与素材 <span class="count-pill">{{ addons.length }}</span></h2>
-        <span v-if="addons.length" class="head-stat">插件 {{ addonCount }} · 已启用 {{ enabledCount }} · 素材 {{ addons.length - addonCount }}</span>
+        <span v-if="addons.length" class="head-stat">插件 {{ pluginRows.length }} · 已启用 {{ enabledCount }} · 素材 {{ assetRows.length }}</span>
       </div>
 
       <EmptyState
@@ -204,70 +207,77 @@ function openStore(a: AddonInfo) {
         </div>
 
         <div class="addon-list">
-          <div v-for="a in addons" :key="a.assetId || a.dirName" class="card addon" :class="{ picked: checked.includes(a.dirName) }">
-            <input
-              type="checkbox"
-              class="chk ad-chk"
-              :checked="checked.includes(a.dirName)"
-              :title="checked.includes(a.dirName) ? '取消选择' : '选择'"
-              @change="toggleCheck(a.dirName)"
-            />
-            <div class="ad-ico" :class="{ off: a.kind !== 'asset' && !a.enabled }"><Icon name="puzzle" :size="17" /></div>
-            <div class="addon-main">
-              <div class="addon-name">
-                <span
-                  class="name"
-                  :class="{ link: !!a.storeUrl }"
-                  :title="a.storeUrl ? `${a.name} · 在资产库中查看` : a.name"
-                  @click="openStore(a)"
-                >{{ a.name }}</span>
-                <Icon v-if="a.storeUrl" name="external" :size="10" class="name-ext" />
-                <span v-if="a.version" class="tag">v{{ a.version }}</span>
-                <span v-if="a.kind === 'asset'" class="tag brand" title="纯素材:安装到项目根,无启用概念">素材</span>
-                <span v-else class="state" :class="a.enabled ? 'ok' : 'idle'">
-                  <span class="dot"></span>{{ a.enabled ? '已启用' : '未启用' }}
-                </span>
-                <span v-if="a.fromMarket" class="tag brand">市场</span>
-                <span v-else class="tag" title="手动放置或未通过市场安装">未知来源</span>
-                <span v-if="updateInfo[a.dirName]" class="tag warn">可更新到 v{{ updateInfo[a.dirName].latest }}</span>
+          <template v-for="a in addons" :key="a.assetId || a.dirName">
+            <div v-if="a === firstPlugin || a === firstAsset" class="sec-head">
+              <Icon :name="a.kind === 'asset' ? 'box' : 'puzzle'" :size="12" />
+              {{ a.kind === 'asset' ? '素材' : '插件' }}
+              <span>{{ a.kind === 'asset' ? assetRows.length : pluginRows.length }}</span>
+            </div>
+            <div class="card addon" :class="{ picked: checked.includes(a.dirName) }">
+              <input
+                type="checkbox"
+                class="chk ad-chk"
+                :checked="checked.includes(a.dirName)"
+                :title="checked.includes(a.dirName) ? '取消选择' : '选择'"
+                @change="toggleCheck(a.dirName)"
+              />
+              <div class="ad-ico" :class="{ off: a.kind !== 'asset' && !a.enabled }"><Icon name="puzzle" :size="17" /></div>
+              <div class="addon-main">
+                <div class="addon-name">
+                  <span
+                    class="name"
+                    :class="{ link: !!a.storeUrl }"
+                    :title="a.storeUrl ? `${a.name} · 在资产库中查看` : a.name"
+                    @click="openStore(a)"
+                  >{{ a.name }}</span>
+                  <Icon v-if="a.storeUrl" name="external" :size="10" class="name-ext" />
+                  <span v-if="a.version" class="tag">v{{ a.version }}</span>
+                  <span v-if="a.kind === 'asset'" class="tag brand" title="纯素材:安装到项目根,无启用概念">素材</span>
+                  <span v-else class="state" :class="a.enabled ? 'ok' : 'idle'">
+                    <span class="dot"></span>{{ a.enabled ? '已启用' : '未启用' }}
+                  </span>
+                  <span v-if="a.fromMarket" class="tag brand">市场</span>
+                  <span v-else class="tag" title="手动放置或未通过市场安装">未知来源</span>
+                  <span v-if="updateInfo[a.dirName]" class="tag warn">可更新到 v{{ updateInfo[a.dirName].latest }}</span>
+                </div>
+                <div v-if="a.kind === 'asset'" class="addon-meta mono" :title="assetPathsTitle(a)">
+                  res://{{ assetTops(a).join('、') }} · {{ (a.assetPaths || []).length }} 个文件
+                </div>
+                <div v-else class="addon-meta mono" :title="`addons/${a.dirName}`">addons/{{ a.dirName }}</div>
+                <!-- 更新进度 -->
+                <div v-if="updating && a.assetId === updating.assetId" class="upd">
+                  <span class="spin"></span>
+                  <span class="upd-stage">{{ updating.stage }} {{ updating.percent.toFixed(0) }}%</span>
+                  <span class="bar"><span class="fill" :style="{ width: updating.percent + '%' }"></span></span>
+                </div>
               </div>
-              <div v-if="a.kind === 'asset'" class="addon-meta mono" :title="assetPathsTitle(a)">
-                res://{{ assetTops(a).join('、') }} · {{ (a.assetPaths || []).length }} 个文件
-              </div>
-              <div v-else class="addon-meta mono" :title="`addons/${a.dirName}`">addons/{{ a.dirName }}</div>
-              <!-- 更新进度 -->
-              <div v-if="updating && a.assetId === updating.assetId" class="upd">
-                <span class="spin"></span>
-                <span class="upd-stage">{{ updating.stage }} {{ updating.percent.toFixed(0) }}%</span>
-                <span class="bar"><span class="fill" :style="{ width: updating.percent + '%' }"></span></span>
+              <div class="addon-actions">
+                <button
+                  v-if="a.fromMarket && updateInfo[a.dirName]"
+                  class="btn small primary"
+                  :disabled="!!updating"
+                  @click="update(a)"
+                ><Icon name="download" :size="12" /> 更新</button>
+                <button
+                  v-if="a.assetId"
+                  class="btn small ghost"
+                  :disabled="!!updating"
+                  title="从历史版本中替换当前插件"
+                  @click="openVersions(a)"
+                ><Icon name="package" :size="12" /> 版本</button>
+                <button v-if="a.hasCfg" class="btn small ghost" @click="toggleEnabled(a)">
+                  {{ a.enabled ? '禁用' : '启用' }}
+                </button>
+                <button
+                  class="btn small danger-text"
+                  :class="{ confirming: confirmingDir === a.dirName }"
+                  @click="uninstall(a)"
+                >
+                  {{ confirmingDir === a.dirName ? '确认卸载?' : '卸载' }}
+                </button>
               </div>
             </div>
-            <div class="addon-actions">
-              <button
-                v-if="a.fromMarket && updateInfo[a.dirName]"
-                class="btn small primary"
-                :disabled="!!updating"
-                @click="update(a)"
-              ><Icon name="download" :size="12" /> 更新</button>
-              <button
-                v-if="a.assetId"
-                class="btn small ghost"
-                :disabled="!!updating"
-                title="从历史版本中替换当前插件"
-                @click="openVersions(a)"
-              ><Icon name="package" :size="12" /> 版本</button>
-              <button v-if="a.hasCfg" class="btn small ghost" @click="toggleEnabled(a)">
-                {{ a.enabled ? '禁用' : '启用' }}
-              </button>
-              <button
-                class="btn small danger-text"
-                :class="{ confirming: confirmingDir === a.dirName }"
-                @click="uninstall(a)"
-              >
-                {{ confirmingDir === a.dirName ? '确认卸载?' : '卸载' }}
-              </button>
-            </div>
-          </div>
+          </template>
         </div>
       </template>
 
@@ -432,6 +442,22 @@ function openStore(a: AddonInfo) {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* 分区表头:插件 / 素材 */
+.sec-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.4px;
+  color: var(--text-3);
+}
+
+.sec-head span {
+  font-weight: 500;
 }
 
 .addon {

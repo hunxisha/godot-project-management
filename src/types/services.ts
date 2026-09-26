@@ -20,6 +20,7 @@ import type {
   GodotProject,
   GodotRelease,
   GodotVersion,
+  InstallPlan,
   MarketAsset,
   Platform,
   Variant
@@ -198,12 +199,22 @@ export interface Services {
   verifyApiKey(key: string): Promise<{ authenticated: boolean, name?: string }>
   /** 列出项目已安装插件 */
   listAddons(projectId: string): AddonInfo[]
-  /** 安装市场资产(version 指定 release 版本,缺省为最新;含 plugin.cfg 走插件链路,否则按纯素材落项目根) */
+  /** 安装预览:预下载 zip 并归纳安装计划(kind/顶层条目/冲突);确认后凭 stageId 安装,取消后释放 */
+  previewAssetInstall(
+    opts: { projectId: string, assetId: string, version?: string },
+    onProgress?: (p: { stage: 'downloading' | 'extracting', received?: number, total?: number }) => void
+  ): Promise<{ ok: boolean, error?: string, stageId?: string, title?: string, versionString?: string, plan?: InstallPlan }>
+  /** 释放预览暂存的安装包(取消确认时调用;幂等) */
+  cancelStagedAsset(stageId: string): { ok: boolean }
+  /** 安装市场资产(version 指定 release 版本,缺省为最新;含 plugin.cfg 走插件链路,否则按纯素材落项目根)
+   *  stageId=复用预览暂存的包;stripTopDir=素材唯一顶层目录是否并入项目根(缺省沿用上次选择) */
   installAsset(
     opts: {
       projectId: string
       assetId: string
       version?: string
+      stageId?: string
+      stripTopDir?: boolean
       assetMeta?: {
         title?: string,
         author?: string,

@@ -97,13 +97,17 @@ window.services = {
   verifyApiKey: (key) => assets.verifyApiKey(key),
   /** 列出项目已安装插件 */
   listAddons: (projectId) => assets.listAddons(projectId),
-  /** 安装市场插件(version 指定 release 版本,缺省为最新) */
+  /** 安装预览:预下载并归纳安装计划(确认后凭 stageId 安装,复用已下载的包) */
+  previewAssetInstall: (opts, onProgress) => assets.previewAssetInstall(opts, onProgress),
+  /** 释放预览暂存的安装包(取消确认时调用;幂等) */
+  cancelStagedAsset: (stageId) => assets.cancelStagedAsset(stageId),
+  /** 安装市场资产(version 指定 release 版本,缺省为最新;含 plugin.cfg 走插件链路,否则按纯素材落项目根) */
   installAsset: (opts, onProgress) => assets.installAsset(opts, onProgress),
-  /** 更新插件 */
+  /** 更新资产(覆盖安装;素材先按旧清单清理再安装) */
   updateAsset: (opts, onProgress) => assets.updateAsset(opts, onProgress),
   /** 检查插件更新 */
   checkAddonUpdate: (opts) => assets.checkAddonUpdate(opts),
-  /** 卸载插件 */
+  /** 卸载插件或素材(市场素材传 assetId 按安装清单删除) */
   uninstallAddon: (opts) => assets.uninstallAddon(opts),
   /** 启用/禁用插件 */
   setAddonEnabled: (opts) => assets.setAddonEnabled(opts)

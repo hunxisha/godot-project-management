@@ -85,6 +85,8 @@ export interface GodotSettings {
   backupKeepPerProject?: number
   /** 保留策略:删除早于 N 天的备份 */
   backupKeepDays?: number
+  /** 素材安装:按 slug 记忆「顶层目录并入项目根」的选择,确认层预填用 */
+  assetStripTopDir?: Record<string, boolean>
   /** 界面主题色板 */
   theme?: ThemeId
   /** 明暗模式:auto 跟随宿主 */
@@ -241,6 +243,27 @@ export interface MarketAsset {
 /** 本地收藏的市场资产(官方 API 暂未开放收藏,存于本地) */
 export interface FavoriteAsset extends MarketAsset {
   addedAt: number
+}
+
+/** 冲突摘要:目标项目已存在的同路径文件 */
+export interface ConflictInfo {
+  count: number
+  samples: string[]
+}
+
+/** 安装计划:previewAssetInstall 归纳的 zip 内容,确认层据此渲染 */
+export interface InstallPlan {
+  /** 内容嗅探结果:addon=插件,asset=纯素材,project=完整项目(不可装入现有项目) */
+  kind: 'addon' | 'asset' | 'project'
+  /** 顶层条目(素材展示用) */
+  topEntries: { name: string, isDir: boolean, files: number }[]
+  fileCount: number
+  /** zip 包体积(字节,压缩后) */
+  zipSize: number
+  /** 唯一顶层目录名(存在时确认层才提供「并入项目根」选项) */
+  singleTopDir: string
+  /** 冲突:asIs=按原结构写入;stripped=剥离 wrapper 后写入(仅 singleTopDir 存在时提供) */
+  conflicts: { asIs: ConflictInfo, stripped: ConflictInfo | null }
 }
 
 /** 项目已安装的插件(Addon) */

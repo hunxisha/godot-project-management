@@ -4,6 +4,7 @@ import { notify } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import VersionPickerDialog from '../components/dialogs/VersionPickerDialog.vue'
+import InstallPreviewDialog from '../components/dialogs/InstallPreviewDialog.vue'
 import { useAssetHydration } from '../composables/useAssetHydration'
 import { useMarketSearch } from '../composables/useMarketSearch'
 import { useMarketBrowse, MODE_META, type BrowseMode } from '../composables/useMarketBrowse'
@@ -86,9 +87,13 @@ const {
   installing,
   installedIds,
   picker,
+  preview,
   install,
   openPicker,
-  installFromPicker
+  installFromPicker,
+  confirmPreview,
+  cancelPreview,
+  defaultStripOf
 } = useMarketInstall({
   targetId,
   addons,
@@ -148,7 +153,13 @@ onActivated(() => {
 })
 
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape' && picker.value) picker.value = null
+  if (e.key !== 'Escape') return
+  // 先关安装确认层(取消要释放暂存包),再关版本选择器
+  if (preview.value) {
+    cancelPreview()
+    return
+  }
+  if (picker.value) picker.value = null
 }
 
 function onTargetChange() {
@@ -383,6 +394,18 @@ function onIconError(id: string) {
         :title="picker?.asset.title || ''"
         @pick="installFromPicker"
         @close="picker = null"
+      />
+
+      <!-- 安装确认模态框(素材/完整项目;插件直接安装不经过这里) -->
+      <InstallPreviewDialog
+        :open="!!preview"
+        :title="preview?.title || ''"
+        :version="preview?.versionString || ''"
+        :project-name="target?.name || ''"
+        :plan="preview?.plan || null"
+        :default-strip="preview ? defaultStripOf(preview.asset.assetId) : false"
+        @confirm="confirmPreview"
+        @close="cancelPreview"
       />
     </template>
   </div>
