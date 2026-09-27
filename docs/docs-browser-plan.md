@@ -2,8 +2,9 @@
 
 > 目标：在 ZTools 插件「Godot 项目管理」内提供 Godot 引擎类参考（Class Reference）浏览，
 > 对标 Godot 编辑器内置帮助的阅读体验，并增加多版本、全局搜索、收藏等增强。
-> 状态：**策划 + 计划（未开工）**。文中插件侧结论均带 `file:line` 证据；`--doctool` 的实际行为
-> 属**待实测项**，在第 9 节单列，不要当成已知条件。
+> 状态：**实施中（P0）**。文中插件侧结论均带 `file:line` 证据。**M1 实测已于 2026-09-27 完成**：
+> `--doctool` 在官方编辑器二进制上导出的 XML **不含描述文本**（实测证伪），主源切换为
+> `--dump-extension-api-with-docs`（单 JSON、描述完整、无需 XML 解析器），见第 2.1 节与第 9 节。
 
 ---
 
@@ -11,9 +12,10 @@
 
 ## 0. 结论先行
 
-把「引擎类参考」装进插件，**数据从用户已装的引擎里来**：用 `exe --headless --doctool <dir>`
-把编译进引擎二进制的类文档导出为 XML（与编辑器内置帮助同源），解析成结构化 JSON 后建索引。
-零网络依赖、与已装版本逐字节对应；GitHub 源仅作「未装引擎」时的兜底。
+把「引擎类参考」装进插件，**数据从用户已装的引擎里来**：用
+`exe --headless --dump-extension-api-with-docs` 生成带完整描述的 `extension_api.json`
+（单个 JSON、`JSON.parse` 即得结构化数据，**无需 XML 解析器**）。零网络依赖、与已装版本
+逐字节对应；GitHub 源仅作「未装引擎」时的兜底。
 
 MVP 只做四件事：**生成、浏览、搜索、收藏**。分期如下：
 
@@ -27,8 +29,9 @@ MVP 只做四件事：**生成、浏览、搜索、收藏**。分期如下：
 
 | 方案 | 版本精确性 | 网络依赖 | 成本 | 结论 |
 |---|---|---|---|---|
-| A. `--doctool` 从已装引擎导出 | 与引擎二进制**完全一致** | 无 | 复用现有 spawn 引擎模式 | **主源（P0）** |
-| B. GitHub `doc/classes/*.xml` 下载 | 按 tag 对应 | 有（需代理） | 断点续传/重试已有 | 兜底（P1） |
+| A. `--dump-extension-api-with-docs` 从已装引擎导出 JSON | 与引擎二进制**完全一致** | 无 | spawn + `JSON.parse` | **主源（实测通过）** |
+| A'. `--doctool` 导出 XML | 结构一致但**官方二进制描述为空** | 无 | 需手写 XML 解析器 | 实测证伪，弃用 |
+| B. GitHub `doc/classes/*.xml` 下载 | 按 tag 对应 | 有（需代理） | 断点续传/重试已有 | 兜底（P1，并可补 tutorials/theme_items） |
 | C. 抓 docs.godotengine.org HTML | 版本对应但页面会改版 | 有 | 解析脆弱、体积大 | **排除** |
 
 ## 1. 需求背景与用户场景
@@ -44,18 +47,28 @@ MVP 只做四件事：**生成、浏览、搜索、收藏**。分期如下：
 
 ## 2. 数据源决策
 
-### 2.1 方案 A（主源）：`--doctool` 从已装引擎导出
+### 2.1 方案 A（主源）：`--dump-extension-api-with-docs` 从已装引擎导出（M1 实测通过）
 
-- 官方编辑器二进制内置完整类参考，`godot --headless --doctool <dir>` 可将其导出为
-  `doc/classes/*.xml`（Godot 3/4 均支持该 CLI 参数；**具体输出结构、耗时、是否需要
-  `--no-docbase` 见第 9 节实测项**）。
-- 插件侧全部前置能力已就绪：
-  - spawn 引擎 CLI 的完整模式：`src-ztools/preload/lib/exporter.js:17`（独立串行
-    `createTaskQueue`）、`:34`（`LOG_TAIL` 尾部日志留作失败诊断）；`launcher.js:13`
-    `splitLaunchArgs` 处理引号参数。
-  - 引擎可执行文件定位与校验：`godotExe.js:40 findExecutable` / `:76 verifyExecutable`。
-  - 每个已装版本都有 `exePath`：`src/types/godot.ts:17 GodotVersion`，落库于 `godot/version/`。
-- 版本精确性是编辑器抓网页给不了的：文档与引擎二进制同源编译，绝不出现「文档比引擎新」。
+**实测记录（2026-09-27，4.7.2 stable 与 4.8-dev6 两台官方编辑器）**：
+
+- `exe --headless --dump-extension-api-with-docs` 在**当前工作目录**生成单个
+  `extension_api.json`（约 12MB，耗时 ~1s）：`JSON.parse` 直接得到结构化数据。
+- 内容：`classes`（1036/1057 个，含 `inherits / brief_description / description /
+  methods(参数默认值、virtual/const 标记、带文档) / signals(带文档) /
+  properties(成员,带文档) / constants(NOTIFICATION_* 等,带文档) / enums(带文档)`）、
+  `builtin_classes`（Vector2/Color 等 38 个,含 members/methods/operators）、
+  `utility_functions`（GDScript 全局函数,带文档）、`global_constants`。
+- 描述覆盖：1009/1036 类有非空描述（其余为无文档类，属正常）。
+- **BBCode 原样保留**（`[method add_child]`、`[SceneTree]` 等），渲染层直接 token 化。
+- 相比 XML 方案的增益：无需手写 XML 解析器；多覆盖 builtin 类与全局函数。
+- 相比 XML 方案的缺口：**无 `<tutorials>` 教程链接、无 `<theme_items>` 主题属性**——
+  P0 详情面板不放这两节；P1 可从 GitHub XML 兜底补全。
+- 曾实测 `--doctool`：官方二进制导出的 XML **方法/信号/成员结构齐全但描述文本为空**
+  （`Node.xml` 27KB、`brief_description` 空），主源价值不成立，仅留作 P1 补
+  tutorials/theme_items 的候选。
+- 插件侧前置能力全部就绪：spawn 引擎 CLI 模式（`exporter.js:17` 独立串行队列、
+  `:34` LOG_TAIL）、exe 定位校验（`godotExe.js:40/:76`）、每版本 `exePath`
+  （`godot.ts:17 GodotVersion`）。
 
 ### 2.2 方案 B（兜底）：GitHub `doc/classes` 下载
 
@@ -167,18 +180,19 @@ Dashboard 的 `@navigate`（`App.vue:214` 路由已支持跨标签跳转事件�
 ### 5.1 生成流水线与存储分层
 
 ```
-exe --headless --doctool <tmp>
-  → XML 落盘 <versionsRoot>/gpm-docs/<versionId>/xml/*.xml   （原始缓存，可重解析）
-  → 分片解析（forEachSliced + 取消令牌）
-      → classes/<Class>.json     每类结构化正文（描述/信号/成员/方法/枚举/主题属性）
+exe --headless --dump-extension-api-with-docs   （spawn cwd=临时目录）
+  → 临时目录/extension_api.json                    （单 JSON,~12MB）
+  → JSON.parse + 字段映射（分片让出,可取消）
+      → classes/<Class>.json     每类结构化正文（描述/信号/成员/方法/枚举/常量/运算符）
       → index.json               全库索引（见 5.3）
-  → db 记录 godot/docs/<versionId>   生成状态、类数、耗时、版本 tag、生成时间
+  → db 记录 godot/docs/<versionId>   生成状态、类数、tag、生成时间
 ```
 
 - **db 只存索引摘要与元数据，正文不进 db**：类正文 JSON 走文件缓存按需读，
-  db 体积不受 10MB 级正文拖累；db 中的 `godot/docs/favorites`、`godot/docs/history`
+  db 体积不受 12MB 级正文拖累；db 中的 `godot/docs/favorites`、`godot/docs/history`
   存收藏与历史。
-- `xml/` 原始文件保留：换解析器/升级功能时**免重新跑引擎**，只需重解析。
+- `utility_functions + global_constants + global_enums` 合成 `@GlobalScope` 伪类收录，
+  支持查 `clamp / lerp` 等全局函数。
 
 ### 5.2 BBCode 渲染规则
 
@@ -247,16 +261,14 @@ docsCleanCache(versionIds?: string[]): void
 
 ## 6. 风险
 
-1. **`--doctool` 行为未实测**（P0 前置闸门，见第 9 节）：输出目录结构、是否含全部
-   基类文档、耗时、无显示环境下是否稳定。若实测不通过，P0 数据源降级为方案 B
-   （按需单类拉取），功能面不变。
-2. **XML 解析器选型**：preload 是 CommonJS 且受沙箱约束（无 `setImmediate`，
-   `sandbox.d.ts` 有护栏测试）。类文档 XML 结构简单规整，倾向**手写轻量解析**
-   （状态机 + 正则），零依赖、可控分片；不引入 DOM 解析库。
-3. **体积与内存**：单版本磁盘 ~10–15MB、索引内存 ~1MB，量级可控；但用户装 N 个版本
-   就有 N 份——缓存清理入口必须显眼。
-4. **跨库链接悬空**：描述可能链接到编辑器专属类或当前库未收录类，点击给占位提示，
-   不许白屏。
+1. ~~**`--doctool` 行为未实测**~~ → **已实测（2026-09-27）**：`--doctool` 证伪（官方二进制
+   描述为空），主源切换为 `--dump-extension-api-with-docs` 并实测通过（两版本矩阵）。
+   残余风险：极老版本（<4.0）无该参数——只支持 Godot 4.x 引擎的文档库，3.x 不做。
+2. ~~**XML 解析器选型**~~ → **风险消除**：主源是 JSON，无需 XML 解析器；BBCode 渲染层
+   token 化为纯函数。
+3. **体积与内存**：单版本磁盘 ~12MB JSON + 解析后正文（总量相近）、索引内存 ~1MB；
+   用户装 N 个版本就有 N 份——缓存清理入口必须显眼。
+4. **跨库链接悬空**：描述可能链接到当前库未收录类，点击给占位提示，不许白屏。
 5. **第 8 个标签的宽度**：`TabBar.vue:113` 已有三级收缩规则，800px 以下只剩图标，
    影响有限；品牌区副标题 900px 隐藏。
 
@@ -269,8 +281,8 @@ docsCleanCache(versionIds?: string[]): void
 - [ ] `Ctrl+K` 全局呼出搜索：类名/方法/成员/信号/常量分组命中、键盘可完整操作；
       断言覆盖打分函数。
 - [ ] 收藏/历史跨版本生效；最近浏览默认 30 条。
-- [ ] `npm test` 新增断言组全绿：XML 解析（真实样例 fixture）、BBCode token 化
-      （含未知标签降级）、索引搜索打分、生成状态机、缓存清理无残留；
+- [ ] `npm test` 新增断言组全绿：extension_api.json 字段映射（真实样例 fixture）、
+      BBCode token 化（含未知标签降级）、索引搜索打分、生成状态机、缓存清理无残留；
       `npm run verify` 双层类型检查通过（Services 契约 47 → 60 双写一致）。
 
 ---
@@ -305,7 +317,8 @@ docsCleanCache(versionIds?: string[]): void
 
 ## 里程碑
 
-1. **M1 实测闸门**：`--doctool` 实测（多版本矩阵）+ 手写 XML 解析器 PoC → 决定主源是否成立。
+1. **M1 实测闸门**：~~`--doctool` 实测 + XML 解析器 PoC~~ → 已完成，主源切换为
+   `--dump-extension-api-with-docs`（无需解析器）。
 2. **M2 preload 完成**：docs.js + 测试全绿（生成/解析/索引/收藏/缓存）。
 3. **M3 渲染层完成**：DocsView + 详情面板 + Ctrl+K + 收藏历史；`npm run verify` 通过。
 4. **M4 收尾**：设置页清理条目、卸载联动、README/CHANGELOG、发布。
@@ -314,9 +327,10 @@ docsCleanCache(versionIds?: string[]): void
 
 ## 9. 待确认清单（实测/讨论后才能定，不要当成已知条件）
 
-1. **`--doctool` 实测矩阵**（M1）：4.2 / 4.3 / 4.4 / 4.5（stable 与 .NET 变体）各自的
-   输出目录结构、是否含引擎全部基类、耗时、退出码；导出模板二进制是否含文档（预期不含，
-   仅编辑器可用）；`--no-docbase` 之类开关在 4.x 是否仍存在。
+1. ~~**`--doctool` 实测矩阵**（M1）~~ → **已完成（2026-09-27）**，结论见 2.1 节：
+   主源 = `--dump-extension-api-with-docs`（4.7.2 stable / 4.8-dev6 双版本验证,
+   ~12MB JSON、~1s、描述覆盖 1009/1036 类）；`--doctool` 官方二进制描述为空,弃用；
+   缺 tutorials/theme_items 标注为 P1 补全项。
 2. **文档缓存默认目录**：`<versionsRoot>/gpm-docs/`（本方案默认）是否合适，
    还是需要独立设置项（与 backupRoot 平级）。
 3. **db 体积敏感性**：索引摘要进 db（本方案）还是全部留文件缓存、db 只存状态——
