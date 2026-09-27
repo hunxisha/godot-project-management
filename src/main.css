@@ -62,6 +62,13 @@
   --text: #20293a;
   --text-2: #4d5c6e;
   --text-3: #8493a6;
+
+  /* 代码语法着色(亮色):与色板无关,所有色板共用 */
+  --syn-kw: #7c4dbe;
+  --syn-ty: #2e6ca3;
+  --syn-str: #2e8a4f;
+  --syn-num: #b85c1e;
+  --syn-com: #8493a6;
 }
 
 :root[data-mode='light'] {
@@ -80,6 +87,13 @@
   --warn-weak: rgba(227, 179, 65, 0.13);
   --gold: #eebd62;
   --gold-weak: rgba(238, 189, 98, 0.15);
+
+  /* ---------- 深色:代码语法着色 ---------- */
+  --syn-kw: #b18cf0;
+  --syn-ty: #8ac3ee;
+  --syn-str: #57ab5a;
+  --syn-num: #e3b341;
+  --syn-com: #8493a6;
 
   /* ---------- 深色:阴影 ---------- */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);

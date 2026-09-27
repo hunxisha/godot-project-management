@@ -18,7 +18,7 @@ if (!existsSync(BUNDLE)) {
   process.exit(2)
 }
 
-const { tokenizeBBCode, bbToPlainText } = await import(pathToFileURL(BUNDLE).href)
+const { tokenizeBBCode, bbToPlainText, highlightCode } = await import(pathToFileURL(BUNDLE).href)
 
 let pass = 0
 const failures = []
@@ -95,6 +95,21 @@ ok(cbNoLangTok?.segments.length === 1 && cbNoLangTok.segments[0].lang === '' && 
 
 ok(tokenizeBBCode('a [codeblocks] b').some((x) => x.t === 'text' && x.v.includes('[codeblocks]')), '未闭合容器字面降级')
 ok(bbToPlainText(tokenizeBBCode('[codeblocks][gdscript]x=1[/gdscript][csharp]int x=1;[/csharp][/codeblocks]')) === 'x=1\nint x=1;', '纯文本提取合并全部分段')
+
+section('代码语法着色 highlightCode')
+const gdSrc = 'var box = AABB(Vector3(5, 0, 5)) # 注释\nprint("hi")'
+const gdToks = highlightCode(gdSrc)
+ok(gdToks.map((t) => t.v).join('') === gdSrc, 'GDScript:token 拼接 === 原文(内容永不丢失)')
+const gdKinds = gdToks.filter((t) => t.c).map((t) => `${t.c}:${t.v}`)
+ok(gdKinds.includes('kw:var') && gdKinds.includes('ty:AABB') && gdKinds.includes('ty:Vector3'), 'GDScript:关键字与类型着色', gdKinds.join(','))
+ok(gdKinds.includes('com:# 注释') && gdKinds.includes('str:"hi"') && gdToks.some((t) => t.c === 'num'), 'GDScript:注释/字符串/数字着色')
+const csSrc = 'var arr = new Godot.Collections.Array<int>(); // note'
+const csToks = highlightCode(csSrc, 'csharp')
+ok(csToks.map((t) => t.v).join('') === csSrc, 'C#:token 拼接 === 原文')
+const csKinds = csToks.filter((t) => t.c).map((t) => `${t.c}:${t.v}`)
+ok(csKinds.includes('kw:new') && csKinds.includes('ty:Array') && csKinds.includes('com:// note'), 'C#:关键字/类型/注释着色', csKinds.join(','))
+const txtToks = highlightCode('[section]', 'text')
+ok(txtToks.length === 1 && txtToks[0].c === '' && txtToks[0].v === '[section]', 'lang=text 整段原样不着色')
 
 section('lang 属性与 skip-lint 变体')
 const ltTok = first(tokenizeBBCode('[codeblock lang=text]\n[section]\nkey=42\n[/codeblock]'), 'codeblock')

@@ -2,6 +2,7 @@
      单一分段时不显示切换,只显示语言小标签。 -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { highlightCode } from '../../utils/bbcode'
 import type { BBCodeSegment } from '../../utils/bbcode'
 
 const props = defineProps<{ segments: BBCodeSegment[] }>()
@@ -11,6 +12,7 @@ const LANG_LABEL: Record<string, string> = { gdscript: 'GDScript', csharp: 'C#' 
 
 const labels = computed(() => props.segments.map((s) => LANG_LABEL[s.lang] || s.lang || '代码'))
 const current = computed(() => props.segments[Math.min(active.value, props.segments.length - 1)]?.code ?? '')
+const toks = computed(() => highlightCode(current.value, props.segments[Math.min(active.value, props.segments.length - 1)]?.lang))
 </script>
 
 <template>
@@ -26,7 +28,7 @@ const current = computed(() => props.segments[Math.min(active.value, props.segme
       >{{ lb }}</button>
     </div>
     <div v-else-if="labels[0] && labels[0] !== '代码'" class="cb-single-lang">{{ labels[0] }}</div>
-    <pre class="cb-pre"><code>{{ current }}</code></pre>
+    <pre class="cb-pre"><code><span v-for="(t, i) in toks" :key="i" :class="t.c ? 'tok-' + t.c : undefined">{{ t.v }}</span></code></pre>
   </div>
 </template>
 
@@ -89,9 +91,32 @@ const current = computed(() => props.segments[Math.min(active.value, props.segme
 }
 
 .cb-pre code {
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--mono);
   font-size: 12px;
   color: var(--text);
   white-space: pre;
+}
+
+/* 语法着色(令牌在 main.css,亮/暗各自定义) */
+.tok-kw {
+  color: var(--syn-kw);
+  font-weight: 600;
+}
+
+.tok-ty {
+  color: var(--syn-ty);
+}
+
+.tok-str {
+  color: var(--syn-str);
+}
+
+.tok-num {
+  color: var(--syn-num);
+}
+
+.tok-com {
+  color: var(--syn-com);
+  font-style: italic;
 }
 </style>

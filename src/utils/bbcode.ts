@@ -223,3 +223,87 @@ export function bbToPlainText(tokens: BBToken[]): string {
   }
   return out.join('')
 }
+
+// ---------- 代码语法着色(零依赖,主题令牌着色) ----------
+//
+// 只做「词法上色」:关键字/内置类型/字符串/数字/注释五类,Vue 文本插值渲染,
+// 拼接不变量(所有 token 的 v 连起来 === 原文)由测试锁住 —— 内容永不丢失。
+
+/** 语法着色 token:c 为 CSS 类后缀(kw/ty/str/num/com),空串表示原样 */
+export interface HLToken { c: string, v: string }
+
+const GD_KEYWORDS = new Set([
+  'var', 'func', 'if', 'elif', 'else', 'for', 'while', 'return', 'signal', 'enum', 'const',
+  'static', 'class', 'class_name', 'extends', 'is', 'in', 'as', 'self', 'super', 'match',
+  'when', 'break', 'continue', 'pass', 'and', 'or', 'not', 'await', 'breakpoint', 'assert',
+  'true', 'false', 'null', 'void'
+])
+
+const GD_TYPES = new Set([
+  'int', 'float', 'bool', 'String', 'StringName', 'NodePath', 'Variant', 'Array',
+  'Dictionary', 'Callable', 'Signal', 'RID'
+])
+
+const CS_KEYWORDS = new Set([
+  'using', 'namespace', 'class', 'struct', 'var', 'new', 'public', 'private', 'protected',
+  'internal', 'static', 'readonly', 'const', 'void', 'return', 'if', 'else', 'for', 'foreach',
+  'while', 'do', 'switch', 'case', 'break', 'continue', 'this', 'base', 'override', 'virtual',
+  'abstract', 'sealed', 'interface', 'enum', 'true', 'false', 'null', 'in', 'out', 'ref', 'is',
+  'as', 'typeof', 'default', 'get', 'set', 'partial', 'where', 'select'
+])
+
+/** 词法扫描骨架:注释/字符串/数字组先行,标识符交给语言分类器 */
+function scanCode(code: string, re: RegExp, classify: (id: string) => string): HLToken[] {
+  const out: HLToken[] = []
+  let last = 0
+  let m
+  while ((m = re.exec(code)) !== null) {
+    if (m[0].length === 0) { re.lastIndex++; continue }
+    if (m.index > last) out.push({ c: '', v: code.slice(last, m.index) })
+    let c = ''
+    if (m[1]) c = 'com'
+    else if (m[2]) c = 'str'
+    else if (m[3]) c = 'num'
+    else if (m[4]) c = classify(m[4])
+    out.push({ c, v: m[0] })
+    last = m.index + m[0].length
+  }
+  if (last < code.length) out.push({ c: '', v: code.slice(last) })
+  return out
+}
+
+function hlGdscript(code: string): HLToken[] {
+  return scanCode(
+    code,
+    /(#[^\n]*)|("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')|(\b\d+(?:\.\d+)?\b)|([A-Za-z_@][A-Za-z0-9_]*)/g,
+    (id) => {
+      if (id.startsWith('@')) return 'kw'
+      if (GD_KEYWORDS.has(id)) return 'kw'
+      if (GD_TYPES.has(id)) return 'ty'
+      if (/^[A-Z]/.test(id)) return 'ty'
+      return ''
+    }
+  )
+}
+
+function hlCSharp(code: string): HLToken[] {
+  return scanCode(
+    code,
+    /(\/\/[^\n]*)|("(?:[^"\\\n]|\\.)*")|(\b\d+(?:\.\d+)?\b)|([A-Za-z_][A-Za-z0-9_]*)/g,
+    (id) => {
+      if (CS_KEYWORDS.has(id)) return 'kw'
+      if (/^[A-Z]/.test(id)) return 'ty'
+      return ''
+    }
+  )
+}
+
+/**
+ * 代码语法着色。lang='gdscript'/空 → GDScript 规则;'csharp' → C# 规则;
+ * 其他语言(如 lang=text)整段原样。
+ */
+export function highlightCode(code: string, lang?: string): HLToken[] {
+  if (lang === 'csharp') return hlCSharp(code)
+  if (lang && lang !== 'gdscript') return [{ c: '', v: code }]
+  return hlGdscript(code)
+}

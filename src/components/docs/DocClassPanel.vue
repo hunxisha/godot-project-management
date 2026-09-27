@@ -34,6 +34,45 @@ const notifications = computed(() => detail.value?.constants.filter((c) => c.nam
 const plainConstants = computed(() => detail.value?.constants.filter((c) => !c.name.startsWith('NOTIFICATION_')) ?? [])
 const hasEnumSection = computed(() => plainConstants.value.length > 0 || (detail.value?.enums.length ?? 0) > 0)
 
+// ---------- 本页目录(右侧粘性栏) ----------
+
+interface TocItem { anchor: string, label: string }
+interface TocGroup { key: string, label: string, items: TocItem[] }
+
+const toc = computed<TocGroup[]>(() => {
+  const d = detail.value
+  if (!d) return []
+  const g: TocGroup[] = []
+  const add = (key: string, label: string, items: TocItem[]) => { if (items.length) g.push({ key, label, items }) }
+  add('signals', '信号', d.signals.map((s) => ({ anchor: `signal-${s.name}`, label: s.name })))
+  add('members', '成员', d.members.map((x) => ({ anchor: `member-${x.name}`, label: x.name })))
+  add('methods', '方法', d.methods.map((x) => ({ anchor: `method-${x.name}`, label: x.name })))
+  add('enums', '枚举与常量', [
+    ...d.enums.map((e) => ({ anchor: `enum-${e.name}`, label: e.name })),
+    ...plainConstants.value.map((c) => ({ anchor: `constant-${c.name}`, label: c.name }))
+  ])
+  add('notices', '通知', notifications.value.map((c) => ({ anchor: `constant-${c.name}`, label: c.name })))
+  add('ops', '运算符', d.operators.map((op, i) => ({ anchor: `operator-${i}`, label: op.name || `#${i + 1}` })))
+  return g
+})
+
+/** 当前滚动到的分组(组标题进入视口顶部以上时切换),rAF 节流 */
+const activeToc = ref('')
+let tocRaf = 0
+
+function onScroll() {
+  if (tocRaf) return
+  tocRaf = requestAnimationFrame(() => {
+    tocRaf = 0
+    if (!rootEl.value) return
+    let cur = ''
+    rootEl.value.querySelectorAll<HTMLElement>('[data-toc-sec]').forEach((el) => {
+      if (el.getBoundingClientRect().top <= 130) cur = el.dataset.tocSec || ''
+    })
+    activeToc.value = cur
+  })
+}
+
 function load() {
   detail.value = props.className ? window.services.docsGetClass(props.versionId, props.className) : null
   flash.value = ''
@@ -90,8 +129,9 @@ function signature(m: { name: string, returnType: string, params: { name: string
 </script>
 
 <template>
-  <div ref="rootEl" class="panel">
-    <template v-if="detail">
+  <div ref="rootEl" class="panel" @scroll="onScroll">
+    <div v-if="detail" class="panel-grid">
+      <div class="panel-main">
       <header class="head">
         <div class="title-row">
           <h2 class="cls-name mono">{{ detail.name }}</h2>
@@ -126,7 +166,7 @@ function signature(m: { name: string, returnType: string, params: { name: string
       </section>
 
       <section v-if="detail.signals.length" class="sec">
-        <h3>信号 <span class="count">{{ detail.signals.length }}</span></h3>
+        <h3 data-toc-sec="signals">信号 <span class="count">{{ detail.signals.length }}</span></h3>
         <div
           v-for="s in detail.signals"
           :key="s.name"
@@ -142,7 +182,7 @@ function signature(m: { name: string, returnType: string, params: { name: string
       </section>
 
       <section v-if="detail.members.length" class="sec">
-        <h3>成员 <span class="count">{{ detail.members.length }}</span></h3>
+        <h3 data-toc-sec="members">成员 <span class="count">{{ detail.members.length }}</span></h3>
         <div
           v-for="mb in detail.members"
           :key="mb.name"
@@ -160,7 +200,7 @@ function signature(m: { name: string, returnType: string, params: { name: string
       </section>
 
       <section v-if="detail.methods.length" class="sec">
-        <h3>方法 <span class="count">{{ detail.methods.length }}</span></h3>
+        <h3 data-toc-sec="methods">方法 <span class="count">{{ detail.methods.length }}</span></h3>
         <div
           v-for="m in detail.methods"
           :key="m.name + m.params.length"
@@ -177,7 +217,7 @@ function signature(m: { name: string, returnType: string, params: { name: string
       </section>
 
       <section v-if="hasEnumSection" class="sec">
-        <h3>枚举与常量</h3>
+        <h3 data-toc-sec="enums">枚举与常量</h3>
         <div
           v-for="e in detail.enums"
           :key="e.name"
@@ -209,7 +249,7 @@ function signature(m: { name: string, returnType: string, params: { name: string
       </section>
 
       <section v-if="notifications.length" class="sec">
-        <h3>通知 <span class="count">{{ notifications.length }}</span></h3>
+        <h3 data-toc-sec="notices">通知 <span class="count">{{ notifications.length }}</span></h3>
         <div
           v-for="c in notifications"
           :key="c.name"
@@ -225,7 +265,7 @@ function signature(m: { name: string, returnType: string, params: { name: string
       </section>
 
       <section v-if="detail.operators.length" class="sec">
-        <h3>运算符 <span class="count">{{ detail.operators.length }}</span></h3>
+        <h3 data-toc-sec="ops">运算符 <span class="count">{{ detail.operators.length }}</span></h3>
         <div v-for="(op, i) in detail.operators" :key="i" class="item" :data-doc-id="`doc-operator-${i}`">
           <div class="sig mono">
             <span class="name">{{ op.name || 'op' }}({{ op.params.map((p) => `${p.name}: ${p.type}`).join(', ') }}) -> {{ op.returnType }}</span>
@@ -233,7 +273,24 @@ function signature(m: { name: string, returnType: string, params: { name: string
           <div v-if="op.description" class="item-desc"><BBRich :text="op.description" @ref="onRef" @url="openExternal" /></div>
         </div>
       </section>
-    </template>
+
+      </div><!-- /panel-main -->
+
+      <aside v-if="toc.length" class="toc">
+        <div class="toc-title">本页目录</div>
+        <template v-for="g in toc" :key="g.key">
+          <div class="toc-group" :class="{ on: activeToc === g.key }">{{ g.label }}</div>
+          <button
+            v-for="it in g.items"
+            :key="it.anchor"
+            type="button"
+            class="toc-item"
+            :title="it.label"
+            @click="scrollToAnchor(it.anchor)"
+          >{{ it.label }}</button>
+        </template>
+      </aside>
+    </div><!-- /panel-grid -->
 
     <div v-else class="missing">
       <Icon name="alert" :size="20" />
@@ -454,5 +511,78 @@ function signature(m: { name: string, returnType: string, params: { name: string
 .missing .hint {
   font-size: 12px;
   color: var(--text-3);
+}
+
+/* ---------- 本页目录(右侧粘性栏) ---------- */
+.panel-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 176px;
+  gap: 20px;
+  align-items: start;
+}
+
+.panel-main {
+  min-width: 0;
+}
+
+.toc {
+  position: sticky;
+  top: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 2px 0 12px;
+  border-left: 1px solid var(--border);
+  padding-left: 12px;
+}
+
+.toc-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--text-3);
+  margin-bottom: 4px;
+}
+
+.toc-group {
+  margin-top: 9px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-3);
+}
+
+.toc-group.on {
+  color: var(--brand);
+}
+
+.toc-item {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  border: none;
+  border-left: 2px solid transparent;
+  background: none;
+  padding: 2px 0 2px 8px;
+  font-size: 11.5px;
+  font-family: var(--mono);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.toc-item:hover {
+  color: var(--brand);
+  border-left-color: var(--brand-weak);
+}
+
+@media (max-width: 1150px) {
+  .panel-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .toc {
+    display: none;
+  }
 }
 </style>

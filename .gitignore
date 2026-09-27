@@ -4,5 +4,5 @@ src-ztools/dist/
 .DS_Store
 graphify-out/
 .gpm-test/
-docs/
-design/
+/docs/
+/design/
