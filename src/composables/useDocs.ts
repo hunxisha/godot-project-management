@@ -92,6 +92,11 @@ function importLibrary(jsonPath: string): { ok: boolean, error?: string, version
   return window.services.docsImport({ jsonPath })
 }
 
+/** 扫描项目脚本(带 class_name 的 .gd)生成项目文档库 */
+function scanProject(projectId: string): { ok: boolean, error?: string, versionId?: string } {
+  return window.services.docsScanProject(projectId)
+}
+
 function removeLibrary(versionId: string) {
   window.services.docsDeleteLibrary(versionId)
   refreshVersions()
@@ -183,6 +188,7 @@ export function useDocs() {
     selectVersion,
     generate,
     importLibrary,
+    scanProject,
     removeLibrary,
     afterTaskSettled,
     toggleFavorite,

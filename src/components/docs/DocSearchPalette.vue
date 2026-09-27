@@ -18,6 +18,8 @@ const { search, currentStatus, history, favorites } = useDocs()
 const query = ref('')
 const active = ref(0)
 const inputEl = ref<HTMLInputElement | null>(null)
+/** 含正文检索(懒加载整库正文,首次稍慢;开启后在名称结果后追加描述命中) */
+const withBody = ref(false)
 
 const KIND_LABEL: Record<string, string> = {
   class: '类',
@@ -25,13 +27,21 @@ const KIND_LABEL: Record<string, string> = {
   member: '成员',
   signal: '信号',
   enum: '枚举',
-  constant: '常量'
+  constant: '常量',
+  body: '正文'
 }
 
 const results = computed<DocSearchHit[]>(() => {
   const q = query.value.trim()
   if (!q) return []
-  return search(q, 30)
+  const named = search(q, 30)
+  if (!withBody.value) return named
+  // 正文命中追加在名称命中之后(名称命中永远是更精确的意图)
+  const body = currentStatus.value?.versionId
+    ? window.services.docsSearchFullText(currentStatus.value.versionId, q, 15)
+    : []
+  const seen = new Set(named.map((h) => h.className))
+  return [...named, ...body.filter((h) => !seen.has(h.className))]
 })
 
 /** 空查询时给最近浏览/收藏作快速入口 */
@@ -92,6 +102,10 @@ function pick(hit: { className: string, anchor?: string }) {
           >
           <span class="kbd-hint">Esc</span>
         </div>
+        <label class="body-toggle" :title="'在描述正文中检索(首次会读入整库正文,稍慢)'">
+          <input v-model="withBody" type="checkbox" class="switch">
+          <span>含正文</span>
+        </label>
 
         <div class="results">
           <template v-if="currentStatus?.status === 'ready'">
@@ -123,8 +137,10 @@ function pick(hit: { className: string, anchor?: string }) {
                 @click="pick({ className: hit.className, anchor: hit.kind === 'class' ? undefined : `${hit.kind}-${hit.name}` })"
               >
                 <span class="kind">{{ KIND_LABEL[hit.kind] || hit.kind }}</span>
-                <span class="hit-name mono">{{ hit.name }}</span>
-                <span v-if="hit.kind !== 'class'" class="hit-cls mono">{{ hit.className }}</span>
+                <span v-if="hit.kind === 'body'" class="hit-snippet">{{ hit.snippet }}</span>
+                <span v-else class="hit-name mono">{{ hit.name }}</span>
+                <span v-if="hit.kind !== 'class' && hit.kind !== 'body'" class="hit-cls mono">{{ hit.className }}</span>
+                <span v-else-if="hit.kind === 'body'" class="hit-cls mono">{{ hit.className }}</span>
               </button>
               <div v-if="!results.length" class="empty-hint">没有匹配「{{ query }}」的结果。</div>
             </template>
@@ -195,6 +211,28 @@ function pick(hit: { className: string, anchor?: string }) {
   border: 1px solid var(--border);
   border-radius: 5px;
   padding: 1px 6px;
+}
+
+.body-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 11.5px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.hit-snippet {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .results {

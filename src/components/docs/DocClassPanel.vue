@@ -7,7 +7,7 @@ import BBRich from './BBRich.vue'
 import DocTreeNodeView from './DocTreeNode.vue'
 import { useDocs } from '../../composables/useDocs'
 import type { DocTreeNode } from '../../composables/useDocs'
-import { copyText, notify, openExternal } from '../../services/bridge'
+import { copyText, notify, openExternal, showInFolder } from '../../services/bridge'
 import { onlineDocsUrl } from '../../utils/godotDocs'
 import type { DocClassDetail, DocClassExtras } from '../../types/godot'
 
@@ -266,6 +266,13 @@ function signature(m: { name: string, returnType: string, params: { name: string
         <div v-if="derived.length" class="crumbs">
           <span class="crumb-label">派生:</span>
           <button v-for="d in derived" :key="d.name" class="crumb mono" @click="emit('navigate', d.name)">{{ d.name }}</button>
+        </div>
+        <!-- 项目脚本类:显示来源文件,点击在文件管理器中定位 -->
+        <div v-if="detail.sourceFile" class="crumbs">
+          <span class="crumb-label">来源:</span>
+          <button class="crumb mono" :title="detail.sourceFile" @click="showInFolder(detail.sourceFile)">
+            {{ detail.sourceFile.split(/[\\/]/).pop() }}
+          </button>
         </div>
         <div class="crumbs">
           <button class="tree-toggle" :title="treeOpen ? '收起继承树' : '展开可浏览的继承树'" @click="treeOpen = !treeOpen">

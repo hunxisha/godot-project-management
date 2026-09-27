@@ -537,6 +537,141 @@ async function main() {
   ok(lib.importDocsLibrary({ jsonPath: badFile }).ok === false, '非 API 文件被拒绝')
   ok(lib.importDocsLibrary({ jsonPath: path.join(WORK, 'nope.json') }).ok === false, '文件不存在被拒绝')
 
+  // ---------- 跨版本差异对比 ----------
+  section('跨版本差异对比')
+  // 纯函数:diffGroup 的三态与签名判定
+  const gd = lib.diffGroup(
+    [{ name: 'a', type: 'int' }, { name: 'gone', type: 'int' }, { name: 'same', type: 'int' }],
+    [{ name: 'a', type: 'float' }, { name: 'same', type: 'int' }, { name: 'fresh', type: 'int' }],
+    (x) => x.name,
+    (x) => x.type
+  )
+  ok(gd.added.join(',') === 'fresh', '新增项', gd.added.join(','))
+  ok(gd.removed.join(',') === 'gone', '移除项', gd.removed.join(','))
+  ok(gd.changed.length === 1 && gd.changed[0].name === 'a' && gd.changed[0].from === 'int' && gd.changed[0].to === 'float', '签名变化项', JSON.stringify(gd.changed))
+
+  // 同名重载按参数个数区分身份
+  const ov = lib.diffGroup(
+    [{ name: 'f', params: [], returnType: 'void' }, { name: 'f', params: [{ type: 'int' }], returnType: 'void' }],
+    [{ name: 'f', params: [{ type: 'int' }], returnType: 'void' }],
+    (x) => `${x.name}/${x.params.length}`,
+    (x) => `${x.name}(${x.params.map((p) => p.type).join(',')})`
+  )
+  ok(ov.removed.length === 1 && ov.added.length === 0, '重载方法按参数个数区分(移除 0 参重载)', JSON.stringify(ov))
+
+  // 只比类型不比参数名:改参数名不算变化
+  const renamed = lib.diffGroup(
+    [{ name: 'f', params: [{ name: 'old', type: 'int' }], returnType: 'void' }],
+    [{ name: 'f', params: [{ name: 'new', type: 'int' }], returnType: 'void' }],
+    (x) => `${x.name}/${x.params.length}`,
+    (x) => `${x.name}(${x.params.map((p) => p.type).join(',')})`
+  )
+  ok(renamed.changed.length === 0, '参数改名不算 API 变化', JSON.stringify(renamed.changed))
+
+  // 库级差异:把当前库与导入库比(两者类集合不同)
+  state.poText = null
+  const imp2 = lib.importDocsLibrary({ jsonPath: apiFile })
+  await waitTask(imp2.taskId)
+  const dLib = lib.docsDiffLibraries(V1, imp2.versionId)
+  ok(dLib.ok === true, '库级对比成功', dLib.error)
+  ok(dLib.addedClasses.includes('Imported') === true && dLib.removedClasses.includes('Node') === true, '以 A 为基准:Imported 新增、Node 移除', JSON.stringify({ add: dLib.addedClasses.slice(0, 3), rm: dLib.removedClasses.slice(0, 3) }))
+  ok(lib.docsDiffLibraries(V1, 'godot/version/nonexistent').ok === false, '缺库时拒绝对比')
+
+  // 类级差异:构造同类的两版正文
+  const baseCls = lib.mapClass({ name: 'X', inherits: 'Object', brief_description: '', description: '', methods: [{ name: 'f', return_type: 'void', arguments: [] }], properties: [], signals: [], constants: [], enums: [] })
+  const nextCls = lib.mapClass({ name: 'X', inherits: 'RefCounted', brief_description: '', description: '', methods: [{ name: 'f', return_type: 'int', arguments: [] }, { name: 'g', return_type: 'void', arguments: [] }], properties: [], signals: [], constants: [], enums: [] })
+  const cd = lib.diffClassDetail(baseCls, nextCls)
+  ok(cd.inherits && cd.inherits.from === 'Object' && cd.inherits.to === 'RefCounted', '继承变化被识别', JSON.stringify(cd.inherits))
+  ok(cd.methods.added.join(',') === 'g' && cd.methods.changed.length === 1 && cd.methods.changed[0].to.includes('-> int'), '方法新增与返回类型变化', JSON.stringify(cd.methods))
+  ok(lib.diffClassDetail(baseCls, baseCls).inherits === null, '未变化时 inherits 为 null')
+
+  // ---------- 项目脚本扫描 ----------
+  section('GDScript 解析')
+  const GD_SRC = [
+    '@tool',
+    '## 玩家的移动与状态。',
+    '## 第二行说明。',
+    'class_name Player, "res://icon.svg"',
+    'extends CharacterBody2D',
+    '',
+    '## 生命值耗尽时发出。',
+    'signal died(reason: String)',
+    '',
+    '## 最大速度(像素/秒)。',
+    '@export var max_speed: float = 320.0',
+    'var _internal: int',
+    '',
+    '## 状态枚举。',
+    'enum State { IDLE, RUN, JUMP = 5 }',
+    '',
+    '## 重力常数。',
+    'const GRAVITY := 980.0',
+    '',
+    '## 让玩家跳跃。',
+    '## @param height 跳跃高度(像素)。',
+    '## @return 是否成功起跳。',
+    'func jump(height: float = 100.0) -> bool:',
+    '    var local = 1',
+    '    return true',
+    '',
+    'static func helper(a, b: int) -> void:',
+    '    pass'
+  ].join('\n')
+  const gdCls = lib.parseGdScript(GD_SRC, { fileName: 'player.gd', scriptPath: 'F:/proj/player.gd' })
+  ok(gdCls && gdCls.name === 'Player', 'class_name 解析', gdCls && gdCls.name)
+  ok(gdCls.inherits === 'CharacterBody2D', 'extends 解析', gdCls.inherits)
+  ok(gdCls.description.includes('玩家的移动与状态') && gdCls.description.includes('第二行说明'), '多行 ## 文档块')
+  ok(gdCls.brief === '玩家的移动与状态。', 'brief 取首行')
+  ok(gdCls.signals.length === 1 && gdCls.signals[0].name === 'died' && gdCls.signals[0].params[0].type === 'String', '信号含参数类型')
+  ok(gdCls.members.length === 2 && gdCls.members[0].name === 'max_speed' && gdCls.members[0].type === 'float', '成员(含 @export)')
+  ok(gdCls.members[0].defaultValue === '320.0', '成员默认值', gdCls.members[0].defaultValue)
+  ok(gdCls.members[0].description.includes('@export'), '@export 注解写进描述(可检索)')
+  ok(gdCls.enums.length === 1 && gdCls.enums[0].values.length === 3 && gdCls.enums[0].values[2].value === '5', '枚举与显式赋值', JSON.stringify(gdCls.enums[0].values))
+  ok(gdCls.constants.length === 1 && gdCls.constants[0].name === 'GRAVITY', '常量')
+  const jump = gdCls.methods.find((m) => m.name === 'jump')
+  ok(jump && jump.returnType === 'bool' && jump.params[0].type === 'float' && jump.params[0].defaultValue === '100.0', '方法签名与默认值', JSON.stringify(jump && jump.params))
+  ok(jump.description.includes('让玩家跳跃') && jump.description.includes('@param height'), '方法描述含文档标签')
+  ok(!gdCls.methods.some((m) => m.name === 'local'), '函数体内的局部变量不收录')
+  const helper = gdCls.methods.find((m) => m.name === 'helper')
+  ok(helper && helper.qualifiers.includes('static') && helper.params[0].type === 'Variant', 'static 与无类型参数')
+  ok(gdCls.sourceFile === 'F:/proj/player.gd', '记录来源脚本路径')
+
+  ok(lib.parseGdScript('extends Node\nfunc f():\n    pass', { fileName: 'x.gd' }).name === 'x', '无 class_name 时退回文件名')
+  ok(lib.parseGdScript('# 只有注释\nvar a = 1', {}) !== null, '无 class_name 但有成员仍可解析')
+  ok(lib.parseGdScript('', {}) === null, '空文件返回 null')
+
+  section('项目脚本扫描入库')
+  const projDir = path.join(WORK, 'ProjScripts')
+  fs.mkdirSync(path.join(projDir, 'scripts'), { recursive: true })
+  fs.writeFileSync(path.join(projDir, 'scripts', 'player.gd'), GD_SRC)
+  fs.writeFileSync(path.join(projDir, 'scripts', 'plain.gd'), 'extends Node\nfunc f():\n    pass\n')
+  docs.set('godot/project/p1', { _id: 'godot/project/p1', id: 'p1', name: 'Scanned', path: projDir })
+  const sc = lib.scanProjectDocs({ projectId: 'p1' })
+  ok(sc.ok === true && !!sc.taskId, '扫描入队', JSON.stringify(sc))
+  const st1 = await waitTask(sc.taskId)
+  ok(st1.status === 'done', '扫描完成', st1.error || '')
+  ok(sc.versionId === 'godot/version/project-p1', '库 id 由项目推导', sc.versionId)
+  const scRec = docs.get('godot/docs/project-p1')
+  ok(scRec && scRec.kind === 'project' && scRec.classCount === 1 && scRec.sourceProject === 'p1', '项目库落库(kind=project)', JSON.stringify(scRec))
+  ok(lib.docsGetClass(sc.versionId, 'Player')?.methods.length === 2, '项目类可浏览')
+  ok(lib.docsListClasses(sc.versionId).classes[0].name === 'Player', '项目库索引可用(复用搜索/树)')
+  ok(lib.docsSearch(sc.versionId, 'jump').length > 0, '项目库可搜索')
+  ok(lib.docsLibraryStatus(sc.versionId).kind === 'project', '状态接口带 kind')
+  ok(lib.scanProjectDocs({ projectId: 'nope' }).ok === false, '未知项目被拒绝')
+
+  // ---------- 全文搜索(描述正文) ----------
+  section('全文检索')
+  const ft = lib.docsSearchFullText(V1, 'building blocks')
+  ok(ft.length >= 1 && ft[0].className === 'Node', '正文命中描述文本', JSON.stringify(ft[0] && { c: ft[0].className, s: ft[0].score }))
+  ok(ft[0].snippet.includes('building blocks'), '片段包含命中处', ft[0].snippet)
+  ok(ft[0].kind === 'body', '命中类型为 body')
+  ok(lib.docsSearchFullText(V1, 'a').length === 0, '过短查询(1 字符)不检索')
+  ok(lib.docsSearchFullText(V1, 'zzz-not-exist').length === 0, '无命中返回空')
+  // 命中次数排序:多次出现的词应排前
+  const multi = lib.docsSearchFullText(V1, 'the')
+  ok(multi.length >= 2 && multi[0].score >= multi[1].score, '按命中次数排序', JSON.stringify(multi.slice(0, 2).map((h) => `${h.className}:${h.score}`)))
+  ok(lib.docsSearchFullText('godot/version/nonexistent', 'node').length === 0, '无效库返回空')
+
   // ---------- 缓存统计与清理 ----------
   section('缓存统计与清理')
   const info = lib.docsCacheInfo()

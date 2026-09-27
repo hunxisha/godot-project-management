@@ -167,6 +167,8 @@ window.services = {
   docsGenerate: (versionId, opts) => docs.generateDocs(versionId, opts),
   /** 从外部 extension_api.json 导入建库(无引擎可用时的兜底;版本取 header.version_full_name) */
   docsImport: (opts) => docs.importDocsLibrary(opts),
+  /** 扫描项目脚本(带 class_name 的 .gd)生成项目文档库,与引擎库同构 */
+  docsScanProject: (projectId) => docs.scanProjectDocs({ projectId }),
   /** 取消文档库生成任务 */
   docsCancelTask: (id) => docs.cancelDocsTask(id),
   /** 移除已结束的文档库任务记录 */
@@ -185,6 +187,12 @@ window.services = {
   docsGetClassExtras: (versionId, className) => docs.docsGetClassExtras(versionId, className),
   /** 本地搜索:类名/方法/成员/信号/枚举/常量,按分值排序 */
   docsSearch: (versionId, query, limit) => docs.docsSearch(versionId, query, limit),
+  /** 描述正文检索(懒加载整库正文并缓存;返回按命中次数排序的类,附片段) */
+  docsSearchFullText: (versionId, query, limit) => docs.docsSearchFullText(versionId, query, limit),
+  /** 库级差异汇总(新增/移除/有变化的类;两库都需已生成) */
+  docsDiffLibraries: (versionA, versionB) => docs.docsDiffLibraries(versionA, versionB),
+  /** 单类在两库之间的成员级差异 */
+  docsDiffClass: (versionA, versionB, className) => docs.docsDiffClass(versionA, versionB, className),
   /** 收藏/取消收藏(全局,按类名跨版本) */
   docsToggleFavorite: (className, fav) => docs.docsToggleFavorite(className, fav),
   /** 收藏列表 */

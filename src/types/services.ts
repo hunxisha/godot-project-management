@@ -30,8 +30,10 @@ import type {
   Platform,
   Variant,
   DocClassDetail,
+  DocClassDiff,
   DocClassExtras,
   DocClassSummary,
+  DocLibraryDiff,
   DocHistoryItem,
   DocLibraryStatus,
   DocSearchHit,
@@ -329,6 +331,8 @@ export interface Services {
     taskId?: string
     versionId?: string
   }
+  /** 扫描项目脚本(带 class_name 的 .gd)生成项目文档库,与引擎库同构、复用同一套浏览 UI */
+  docsScanProject(projectId: string): { ok: boolean, error?: string, taskId?: string, versionId?: string }
   /** 取消文档库生成任务 */
   docsCancelTask(id: string): void
   /** 移除已结束的文档库任务记录 */
@@ -347,6 +351,12 @@ export interface Services {
   docsGetClassExtras(versionId: string, className: string): Promise<DocClassExtras | null>
   /** 本地搜索:类名/方法/成员/信号/枚举/常量,按分值排序 */
   docsSearch(versionId: string, query: string, limit?: number): DocSearchHit[]
+  /** 描述正文检索(懒加载整库正文并缓存;返回按命中次数排序的类,附片段) */
+  docsSearchFullText(versionId: string, query: string, limit?: number): DocSearchHit[]
+  /** 库级差异汇总(新增/移除/有变化的类;两库都需已生成) */
+  docsDiffLibraries(versionA: string, versionB: string): DocLibraryDiff
+  /** 单类在两库之间的成员级差异 */
+  docsDiffClass(versionA: string, versionB: string, className: string): { ok: boolean, error?: string, diff?: DocClassDiff }
   /** 收藏/取消收藏(全局,按类名跨版本) */
   docsToggleFavorite(className: string, fav: boolean): { ok: boolean }
   /** 收藏列表 */

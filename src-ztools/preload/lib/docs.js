@@ -686,7 +686,20 @@ async function buildLibrary(api, ctx) {
   }
   const gs = mapGlobalScope(api)
   mapped.push(ctx.tr ? applyTranslations(gs, ctx.tr, zhHits) : gs)
+  return writeLibrary(mapped, ctx, zhHits)
+}
 
+/**
+ * 把已映射好的类写入库目录并落 db 记录(原子接管),所有建库入口共用。
+ * @param {DocClassDetail[]} mapped
+ * @param {{versionId: string, tag: string, name?: string, libDir: string, stageDir: string,
+ *          tr: Map<string, string> | null, token: {canceled: boolean}, taskId: string,
+ *          kind?: string, sourceProject?: string}} ctx
+ * @param {{count: number, total: number}} [zhHits]
+ * @returns {Promise<number>} 收录的类数
+ */
+async function writeLibrary(mapped, ctx, zhHits) {
+  const hits = zhHits || { count: 0, total: 0 }
   // 原子接管:先写进暂存目录,全部成功后一次性替换旧库 ——
   // 失败/取消只清暂存,旧库与 db 记录保持完好可浏览。
   const stageClasses = path.join(ctx.stageDir, 'classes')
@@ -725,7 +738,10 @@ async function buildLibrary(api, ctx) {
     lang: ctx.tr ? 'zh-CN' : 'en',
     translatedCount: ctx.tr ? zhHits.count : 0,
     // 可翻译字符串总数:translatedCount/stringCount 即翻译覆盖率
-    stringCount: ctx.tr ? zhHits.total : 0
+    stringCount: ctx.tr ? zhHits.total : 0,
+    // kind: 'engine'(引擎 API) | 'project'(项目脚本扫描)
+    kind: ctx.kind || 'engine',
+    sourceProject: ctx.sourceProject
   })
   indexCache.delete(ctx.versionId)
   return total
@@ -998,7 +1014,9 @@ function docsLibraryStatus(versionId) {
       builtAt: record.builtAt,
       lang: record.lang,
       translatedCount: record.translatedCount,
-      stringCount: record.stringCount
+      stringCount: record.stringCount,
+      kind: record.kind || 'engine',
+      sourceProject: record.sourceProject
     }
   }
   const busy = tasks.list().find((/** @type {any} */ t) => versionKey(t.versionId).key === versionKey(versionId).key && !tasks.isTerminal(t.status))
@@ -1055,6 +1073,538 @@ function docsSearch(versionId, query, limit = 30) {
   const index = loadIndex(versionId)
   if (!index) return []
   return searchIndex(index, query, limit)
+}
+
+// ---------- 跨版本差异对比 ----------
+//
+// 升级引擎前最想知道「哪些 API 变了」。库级给汇总(新增/移除/有变化的类),
+// 类级给成员明细(新增/移除/签名变化)。全部基于已生成的库,零网络。
+
+/**
+ * 方法/信号的签名串(参与变化判定):name(参数类型, ...) -> 返回类型。
+ * 只比类型不比参数名 —— 官方改参数名不算破坏性变更。
+ * @param {any} m
+ */
+function methodSignature(m) {
+  const args = (m.params || []).map((/** @type {any} */ p) => p.type).join(',')
+  return `${m.name}(${args}) -> ${m.returnType}`
+}
+
+/**
+ * 对比两组条目,产出 新增/移除/变化(纯函数)。
+ * @param {any[]} aItems
+ * @param {any[]} bItems
+ * @param {(x: any) => string} keyOf 身份键(同名重载用 name+arity)
+ * @param {(x: any) => string} sigOf 签名(变化判定)
+ * @returns {{added: string[], removed: string[], changed: {name: string, from: string, to: string}[]}}
+ */
+function diffGroup(aItems, bItems, keyOf, sigOf) {
+  const aMap = new Map(aItems.map((x) => [keyOf(x), x]))
+  const bMap = new Map(bItems.map((x) => [keyOf(x), x]))
+  /** @type {string[]} */
+  const added = []
+  /** @type {string[]} */
+  const removed = []
+  /** @type {{name: string, from: string, to: string}[]} */
+  const changed = []
+  for (const [k, b] of bMap) {
+    if (!aMap.has(k)) added.push(b.name)
+  }
+  for (const [k, a] of aMap) {
+    if (!bMap.has(k)) { removed.push(a.name); continue }
+    const from = sigOf(a)
+    const to = sigOf(/** @type {any} */ (bMap.get(k)))
+    if (from !== to) changed.push({ name: a.name, from, to })
+  }
+  return { added, removed, changed }
+}
+
+/** 方法/信号的身份键:同名重载按参数个数区分 */
+function overloadKey(/** @type {any} */ x) {
+  return `${x.name}/${(x.params || []).length}`
+}
+
+/** 成员的签名:类型 + 读写性 */
+function memberSignature(/** @type {any} */ m) {
+  return `${m.type}${m.setter ? '' : ' readonly'}`
+}
+
+/**
+ * 单类的成员级差异。
+ * @param {DocClassDetail} a
+ * @param {DocClassDetail} b
+ * @returns {{className: string, inherits: {from: string|null, to: string|null} | null,
+ *            methods: any, members: any, signals: any, constants: any, enums: any}}
+ */
+function diffClassDetail(a, b) {
+  return {
+    className: b.name,
+    inherits: a.inherits === b.inherits ? null : { from: a.inherits, to: b.inherits },
+    methods: diffGroup(a.methods, b.methods, overloadKey, methodSignature),
+    members: diffGroup(a.members, b.members, (x) => x.name, memberSignature),
+    signals: diffGroup(a.signals, b.signals, overloadKey, (x) => methodSignature(x)),
+    constants: diffGroup(a.constants, b.constants, (x) => x.name, (x) => String(x.value)),
+    enums: diffGroup(a.enums, b.enums, (x) => x.name, (x) => (x.values || []).map((/** @type {any} */ v) => `${v.name}=${v.value}`).join(','))
+  }
+}
+
+/**
+ * 库级差异汇总:新增/移除/有变化的类。
+ * @param {string} versionA 旧库
+ * @param {string} versionB 新库
+ * @returns {{ok: boolean, error?: string, tagA?: string, tagB?: string,
+ *            addedClasses?: string[], removedClasses?: string[],
+ *            changedClasses?: {name: string, changes: number}[]}}
+ */
+function docsDiffLibraries(versionA, versionB) {
+  const idxA = loadIndex(versionA)
+  const idxB = loadIndex(versionB)
+  if (!idxA || !idxB) return { ok: false, error: '两个版本都需要已生成的文档库' }
+  const recA = getDoc(DB_ID(versionA)) || {}
+  const recB = getDoc(DB_ID(versionB)) || {}
+  const mapA = new Map(idxA.map((c) => [c.name, c]))
+  const mapB = new Map(idxB.map((c) => [c.name, c]))
+  /** @type {string[]} */
+  const addedClasses = []
+  /** @type {string[]} */
+  const removedClasses = []
+  /** @type {{name: string, changes: number}[]} */
+  const changedClasses = []
+  for (const name of mapB.keys()) if (!mapA.has(name)) addedClasses.push(name)
+  for (const name of mapA.keys()) if (!mapB.has(name)) removedClasses.push(name)
+  // 同名类:用索引里的名单粗筛(正文级明细在 docsDiffClass 里按需给)
+  for (const [name, a] of mapA) {
+    const b = mapB.get(name)
+    if (!b) continue
+    let changes = 0
+    changes += Math.abs(a.m.length - b.m.length)
+    const setA = new Set([...a.m, ...a.p, ...a.s, ...a.c, ...a.e])
+    const setB = new Set([...b.m, ...b.p, ...b.s, ...b.c, ...b.e])
+    for (const x of setA) if (!setB.has(x)) changes++
+    for (const x of setB) if (!setA.has(x)) changes++
+    if (changes > 0) changedClasses.push({ name, changes })
+  }
+  const collator = new Intl.Collator('en')
+  addedClasses.sort(collator.compare)
+  removedClasses.sort(collator.compare)
+  changedClasses.sort((x, y) => y.changes - x.changes || collator.compare(x.name, y.name))
+  return {
+    ok: true,
+    tagA: recA.tag,
+    tagB: recB.tag,
+    addedClasses,
+    removedClasses,
+    changedClasses
+  }
+}
+
+/**
+ * 单类在两库之间的成员级差异(类在任一库缺失时返回 ok=false)。
+ * @param {string} versionA
+ * @param {string} versionB
+ * @param {string} className
+ */
+function docsDiffClass(versionA, versionB, className) {
+  const a = docsGetClass(versionA, className)
+  const b = docsGetClass(versionB, className)
+  if (!a || !b) return { ok: false, error: '该类在其中一个库中不存在' }
+  return { ok: true, diff: diffClassDetail(a, b) }
+}
+
+// ---------- 项目脚本扫描(生成项目文档库) ----------
+//
+// 把项目里带 class_name 的 GDScript 解析成与引擎库同构的类文档,从而复用整套浏览 UI
+// (列表/搜索/Ctrl+K/目录/继承树/复制/外开)。纯文本解析,不依赖引擎 —— 项目未绑定
+// 引擎也能用。识别 Godot 4 的 ## 文档注释与 @param/@return 标签。
+
+/**
+ * 解析类型标注:`x: int = 5` → {name, type, defaultValue}。
+ * @param {string} raw
+ * @returns {{name: string, type: string, defaultValue?: string}}
+ */
+function parseGdParam(raw) {
+  const s = raw.trim()
+  if (!s) return { name: '', type: 'Variant' }
+  const m = /^(\w+)\s*(?::\s*([\w\[\]\.]+))?\s*(?:=\s*(.+))?$/.exec(s)
+  if (!m) return { name: s, type: 'Variant' }
+  return { name: m[1], type: m[2] || 'Variant', defaultValue: m[3] }
+}
+
+/**
+ * 解析 GDScript 源码为类文档(纯函数)。没有 class_name 时 className 为空,
+ * 调用方决定是否收录(无 class_name 的脚本不能被引用,一般不收)。
+ * @param {string} text 源码
+ * @param {{fileName?: string, scriptPath?: string}} [opts]
+ * @returns {DocClassDetail | null} 解析不出任何结构时返回 null
+ */
+function parseGdScript(text, opts = {}) {
+  const lines = String(text || '').split(/\r?\n/)
+  /** @type {string[]} 最近一段 ## 文档注释(遇空行/声明后清空) */
+  let doc = []
+  /** @type {string[]} 待归属的注解(@export/@onready 等) */
+  let annotations = []
+  let className = ''
+  let inherits = null
+  /** @type {DocClassDetail['methods']} */
+  const methods = []
+  /** @type {DocClassDetail['members']} */
+  const members = []
+  /** @type {DocClassDetail['signals']} */
+  const signals = []
+  /** @type {DocClassDetail['constants']} */
+  const constants = []
+  /** @type {DocClassDetail['enums']} */
+  const enums = []
+  let classDoc = ''
+  let found = false
+
+  /** 把文档块转成描述文本,@param/@return 标签单独成行附在后面 */
+  const docToText = () => {
+    const body = []
+    const tags = []
+    for (const line of doc) {
+      const mt = /^@(param|return|tutorial|deprecated|experimental|since|see)\b\s*(.*)$/.exec(line)
+      if (mt) tags.push(`@${mt[1]} ${mt[2]}`.trim())
+      else body.push(line)
+    }
+    return [body.join('\n').trim(), tags.join('\n')].filter(Boolean).join('\n\n')
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\t/g, '    ')
+    let trimmed = line.trim()
+
+    if (trimmed.startsWith('##')) { doc.push(trimmed.slice(2).trim()); continue }
+    // 空行或普通注释:断开文档块与后续声明的归属(与 Godot 编辑器一致)
+    if (!trimmed) { doc = []; annotations = []; continue }
+    if (trimmed.startsWith('#')) continue
+    // 注解行:既可能是纯注解(@export 单独一行,归属下一个声明),
+    // 也可能注解后直接跟声明(@export var x)。后者要继续解析剩下的部分。
+    if (trimmed.startsWith('@')) {
+      const ann = /^@([\w_]+)(?:\([^)]*\))?\s*([\s\S]*)$/.exec(trimmed)
+      if (ann) {
+        annotations.push(ann[1])
+        const rest = ann[2].trim()
+        if (!rest) continue
+        trimmed = rest
+      }
+    }
+    // 类级成员必须顶格;函数体内的局部声明不收录
+    const indent = line.length - line.trimStart().length
+    if (indent > 0) { doc = []; annotations = []; continue }
+
+    const desc = docToText()
+    const takeDoc = () => { const d = desc; doc = []; annotations = []; return d }
+
+    let m
+    if ((m = /^class_name\s+(\w+)(?:\s*,\s*"[^"]*")?/.exec(trimmed))) {
+      className = m[1]
+      classDoc = takeDoc()
+      found = true
+      // `class_name X extends Y` 的同行 extends
+      const ext = /\bextends\s+([\w\.]+)/.exec(trimmed)
+      if (ext) inherits = ext[1]
+      continue
+    }
+    if ((m = /^extends\s+([\w\.]+)/.exec(trimmed))) {
+      inherits = m[1]
+      if (!classDoc) classDoc = takeDoc()
+      else { doc = []; annotations = [] }
+      continue
+    }
+    if ((m = /^signal\s+(\w+)\s*(?:\(([^)]*)\))?/.exec(trimmed))) {
+      const params = (m[2] || '').split(',').map((p) => p.trim()).filter(Boolean).map(parseGdParam)
+      signals.push({ name: m[1], params, description: takeDoc() })
+      found = true
+      continue
+    }
+    if ((m = /^enum\s+(\w+)?\s*\{(.*)\}\s*$/.exec(trimmed))) {
+      const name = m[1] || 'Values'
+      const values = m[2].split(',').map((v) => v.trim()).filter(Boolean).map((v, i) => {
+        const eq = /^(\w+)\s*=\s*(.+)$/.exec(v)
+        return eq ? { name: eq[1], value: eq[2].trim(), description: '' } : { name: v, value: String(i), description: '' }
+      })
+      enums.push({ name, bitfield: false, values })
+      if (takeDoc()) { /* 枚举整体描述暂不单列(与引擎库保持同构) */ }
+      found = true
+      continue
+    }
+    if ((m = /^const\s+(\w+)\s*(?::\s*([\w\[\]\.]+))?\s*(?::=|=)\s*(.+)$/.exec(trimmed))) {
+      constants.push({ name: m[1], value: m[3].trim(), description: takeDoc() })
+      found = true
+      continue
+    }
+    if ((m = /^(?:static\s+)?func\s+(\w+)\s*\(([^)]*)\)\s*(?:->\s*([\w\[\]\.]+))?\s*:/.exec(trimmed))) {
+      const params = (m[2] || '').split(',').map((p) => p.trim()).filter(Boolean).map(parseGdParam)
+      methods.push({
+        name: m[1],
+        returnType: m[3] || 'Variant',
+        params,
+        qualifiers: /^static\s/.test(trimmed) ? ['static'] : [],
+        description: takeDoc()
+      })
+      found = true
+      continue
+    }
+    // var x: int = 5 / var x := 5 / @export var x: float / var x(无初始值)
+    if ((m = /^var\s+(\w+)\s*(?::\s*([\w\[\]\.]+))?\s*(?:(?::=|=)\s*(.+))?$/.exec(trimmed))) {
+      members.push({
+        name: m[1],
+        type: m[2] || 'Variant',
+        // @export/@onready 等注解体现在描述里(有几个就写几个),便于检索
+        description: [annotations.length ? `注解:${annotations.map((a) => '@' + a).join(' ')}` : '', takeDoc()].filter(Boolean).join('\n\n'),
+        defaultValue: m[3] ? m[3].trim() : undefined
+      })
+      found = true
+      continue
+    }
+    // 其他语句(if/for/print 等):断开文档归属
+    doc = []
+    annotations = []
+  }
+
+  if (!found) return null
+  return {
+    name: className || (opts.fileName || 'Unnamed').replace(/\.gd$/i, ''),
+    inherits,
+    brief: classDoc.split('\n')[0] || '',
+    description: classDoc,
+    builtin: false,
+    isSingleton: false,
+    methods,
+    members,
+    signals,
+    constants,
+    enums,
+    operators: [],
+    // 项目类:标注来源脚本(详情页显示,便于回编辑器)
+    sourceFile: opts.scriptPath
+  }
+}
+
+/**
+ * 递归收集目录下的 .gd 文件(跳过 .godot 缓存与隐藏目录)。
+ * @param {string} dir
+ * @param {number} [depth]
+ * @returns {string[]}
+ */
+function collectGdFiles(dir, depth = 0) {
+  /** @type {string[]} */
+  const out = []
+  if (depth > 12) return out
+  let entries
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch (e) {
+    return out
+  }
+  for (const e of entries) {
+    const name = e.name
+    if (name.startsWith('.')) continue
+    const full = path.join(dir, name)
+    if (e.isDirectory()) out.push(...collectGdFiles(full, depth + 1))
+    else if (/\.gd$/i.test(name)) out.push(full)
+  }
+  return out
+}
+
+/**
+ * 扫描项目脚本生成项目文档库(入队)。只收录带 class_name 的脚本。
+ * @param {{projectId: string}} opts
+ * @returns {{ok: boolean, error?: string, taskId?: string, versionId?: string}}
+ */
+function scanProjectDocs(opts) {
+  // 与 versionId 同一约定:接受完整 db 文档 id(godot/project/<id>)或裸 key
+  const raw = String((opts && opts.projectId) || '')
+  const projectDocId = raw.startsWith('godot/project/') ? raw : `godot/project/${raw}`
+  const project = getDoc(projectDocId)
+  if (!project || !project.path) return { ok: false, error: '项目不存在' }
+  if (!fs.existsSync(project.path)) return { ok: false, error: '项目目录不存在' }
+  const docId = `${VERSION_PREFIX}project-${projectDocId.slice('godot/project/'.length)}`
+  const key = versionKey(docId).key
+  const busy = tasks.list().find((/** @type {any} */ t) => versionKey(t.versionId).key === key && !tasks.isTerminal(t.status))
+  if (busy) return { ok: false, error: '该项目脚本正在扫描中' }
+  const task = tasks.create({
+    kind: 'docs',
+    versionId: docId,
+    tag: project.name || '项目',
+    versionName: (project.name || '项目') + ' 脚本',
+    projectScan: true,
+    status: 'queued',
+    done: 0,
+    total: 0,
+    log: ''
+  })
+  const id = task.id
+  tasks.emit()
+  tasks.enqueue(() => runScanProject(id, project))
+  return { ok: true, taskId: id, versionId: docId }
+}
+
+/**
+ * 扫描流程(scanning → done):读 .gd → 解析 → 入库。
+ * @param {string} taskId
+ * @param {any} project
+ */
+async function runScanProject(taskId, project) {
+  const task = tasks.get(taskId)
+  if (!task) return
+  const versionId = task.versionId
+  const libDir = docsRoot(versionId)
+  const workDir = path.join(docsRoot(), `.work-${taskId}`)
+  const token = createCancelToken()
+  try {
+    setTask(taskId, { status: 'parsing' })
+    const files = collectGdFiles(project.path)
+    /** @type {DocClassDetail[]} */
+    const mapped = []
+    let skipped = 0
+    await forEachSliced(files, async (file) => {
+      checkCancel(token)
+      let text = ''
+      try {
+        text = fs.readFileSync(file, 'utf8')
+      } catch (e) {
+        return
+      }
+      // 没有 class_name 的脚本不构成可引用的类,跳过(计数上报)
+      if (!/^\s*class_name\s+\w+/m.test(text)) {
+        skipped++
+        return
+      }
+      const cls = parseGdScript(text, { fileName: path.basename(file), scriptPath: file })
+      if (cls && cls.name) {
+        // 同名类(多脚本重复 class_name):保留先出现的,后者计入跳过
+        if (mapped.some((c) => c.name === cls.name)) skipped++
+        else mapped.push(cls)
+      } else skipped++
+    })
+    checkCancel(token)
+    if (!mapped.length) {
+      throw new Error(`未找到带 class_name 的脚本(共扫描 ${files.length} 个 .gd 文件)`)
+    }
+    ensureDir(workDir)
+    const total = await writeLibrary(mapped, {
+      versionId,
+      tag: project.name || '项目',
+      name: (project.name || '项目') + ' 脚本',
+      libDir,
+      stageDir: path.join(workDir, 'staging'),
+      tr: null,
+      token,
+      taskId,
+      kind: 'project',
+      sourceProject: project.id
+    })
+    setTask(taskId, { status: 'done', done: total, skipped, fileCount: files.length })
+  } catch (e) {
+    if (e instanceof CanceledError || token.canceled) setTask(taskId, { status: 'canceled' })
+    else setTask(taskId, { status: 'error', error: (e && e.message) || '扫描失败' })
+  } finally {
+    rmQuiet(workDir)
+    tasks.clearToken(taskId)
+  }
+}
+
+// ---------- 全文搜索(描述正文) ----------
+//
+// 名称搜索走索引即可;正文检索需要读每个类的 JSON。库总量约 10-15MB,一次性读进内存后
+// 线性扫描只需几十毫秒,因此不做倒排索引(省掉构建开销与索引体积),首查懒加载 + 常驻缓存,
+// 库重建时按 index.json 的 mtime 自动失效。
+
+/** @type {Map<string, {items: {name: string, text: string, json: DocClassDetail}[], at: number}>} */
+const fullTextCache = new Map()
+
+/**
+ * 载入整库正文(懒加载,按 index.json mtime 失效)。
+ * @param {string} versionId
+ */
+function loadFullText(versionId) {
+  const indexFile = libIndexPath(versionId)
+  let mtime = 0
+  try {
+    mtime = fs.statSync(indexFile).mtimeMs
+  } catch (e) {
+    return null
+  }
+  const hit = fullTextCache.get(versionId)
+  if (hit && hit.at === mtime) return hit.items
+  const dir = libClassesDir(versionId)
+  /** @type {{name: string, text: string, json: DocClassDetail}[]} */
+  const items = []
+  /** @type {string[]} */
+  let names = []
+  try {
+    names = fs.readdirSync(dir)
+  } catch (e) {
+    return null
+  }
+  for (const file of names) {
+    if (!file.endsWith('.json')) continue
+    try {
+      const json = JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8'))
+      // 只保留可检索的描述文本(名称类命中由索引负责,这里专攻正文)
+      const parts = [json.brief || '', json.description || '']
+      for (const m of json.methods || []) parts.push(m.description || '')
+      for (const p of json.members || []) parts.push(p.description || '')
+      for (const s of json.signals || []) parts.push(s.description || '')
+      for (const c of json.constants || []) parts.push(c.description || '')
+      for (const e of json.enums || []) for (const v of e.values || []) parts.push(v.description || '')
+      items.push({ name: json.name, text: parts.join('\n'), json })
+    } catch (e) { /* 单个文件损坏不影响整库检索 */ }
+  }
+  fullTextCache.set(versionId, { items, at: mtime })
+  return items
+}
+
+/**
+ * 从命中位置截一段上下文(前后各留一些字符,压掉换行)。
+ * @param {string} text
+ * @param {number} at
+ */
+function snippetOf(text, at) {
+  const start = Math.max(0, at - 40)
+  const end = Math.min(text.length, at + 60)
+  const raw = text.slice(start, end).replace(/\s+/g, ' ').trim()
+  return `${start > 0 ? '…' : ''}${raw}${end < text.length ? '…' : ''}`
+}
+
+/**
+ * 描述正文检索:返回按命中次数排序的类,附首个片段。
+ * @param {string} versionId
+ * @param {string} query
+ * @param {number} [limit]
+ * @returns {{kind: 'body', className: string, name: string, brief: string, snippet: string, score: number}[]}
+ */
+function docsSearchFullText(versionId, query, limit = 20) {
+  const q = String(query || '').trim().toLowerCase()
+  if (q.length < 2) return []
+  const items = loadFullText(versionId)
+  if (!items) return []
+  /** @type {{kind: 'body', className: string, name: string, brief: string, snippet: string, score: number}[]} */
+  const hits = []
+  for (const it of items) {
+    const hay = it.text.toLowerCase()
+    const at = hay.indexOf(q)
+    if (at < 0) continue
+    // 命中次数作为相关度(封顶,避免长描述刷屏)
+    let count = 0
+    let cursor = at
+    while (cursor >= 0 && count < 50) {
+      count++
+      cursor = hay.indexOf(q, cursor + q.length)
+    }
+    hits.push({
+      kind: 'body',
+      className: it.name,
+      name: it.name,
+      brief: it.json.brief || '',
+      snippet: snippetOf(it.text, at),
+      score: count
+    })
+  }
+  hits.sort((a, b) => b.score - a.score || a.className.localeCompare(b.className))
+  return limit > 0 ? hits.slice(0, limit) : hits
 }
 
 // ---------- 收藏与历史(全局,跨版本) ----------
@@ -1151,15 +1701,23 @@ module.exports = {
   parsePo,
   applyTranslations,
   parseTutorials,
+  parseGdScript,
+  parseGdParam,
+  diffGroup,
+  diffClassDetail,
   // 主流程
   generateDocs,
   importDocsLibrary,
+  scanProjectDocs,
   docsLibraryStatus,
   docsDeleteLibrary,
   docsListClasses,
   docsGetClass,
   docsGetClassExtras,
   docsSearch,
+  docsDiffLibraries,
+  docsDiffClass,
+  docsSearchFullText,
   // 任务三件套
   cancelDocsTask,
   dismissDocsTask,

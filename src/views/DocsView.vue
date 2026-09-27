@@ -4,9 +4,10 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from '../components/Icon.vue'
 import DocClassPanel from '../components/docs/DocClassPanel.vue'
+import DocDiffDialog from '../components/docs/DocDiffDialog.vue'
 import { useDocs } from '../composables/useDocs'
 import { notify, pickFile } from '../services/bridge'
-import type { DocClassSummary, DocsTask } from '../types/godot'
+import type { DocClassSummary, DocsTask, GodotProject } from '../types/godot'
 
 const props = defineProps<{
   /** 来自全局搜索命中的跳转目标,消费后回调 */
@@ -21,7 +22,7 @@ const emit = defineEmits<{
 
 const {
   versions, statuses, currentVersionId, currentStatus, readyVersions, classes,
-  favorites, history, init, selectVersion, generate, importLibrary, removeLibrary, afterTaskSettled
+  favorites, history, init, selectVersion, generate, importLibrary, scanProject, removeLibrary, afterTaskSettled
 } = useDocs()
 
 /** 当前打开的类 */
@@ -40,6 +41,7 @@ let unwatch: (() => void) | null = null
 
 onMounted(() => {
   init()
+  refreshProjects()
   // 默认打开上次浏览或历史里的第一个类(桌面双栏才有意义;窄窗停在列表)
   if (!selected.value) {
     const first = history.value.find((h) => classes.value.some((c) => c.name === h.name))
@@ -193,6 +195,27 @@ function onImport() {
   notify('已开始导入,进度见任务栏')
 }
 
+/** 项目脚本扫描:列出项目让用户选一个 */
+const projects = ref<(GodotProject & { _id: string })[]>([])
+const scanProjectId = ref('')
+
+function refreshProjects() {
+  projects.value = (window.ztools.db.allDocs('godot/project/') || []) as unknown as (GodotProject & { _id: string })[]
+  if (!scanProjectId.value || !projects.value.some((p) => p._id === scanProjectId.value)) {
+    scanProjectId.value = projects.value[0]?._id ?? ''
+  }
+}
+
+function onScanProject() {
+  if (!scanProjectId.value) return
+  const r = scanProject(scanProjectId.value)
+  if (!r.ok) {
+    notify(r.error || '扫描失败')
+    return
+  }
+  notify('已开始扫描项目脚本,完成后出现在库列表')
+}
+
 function applyPending() {
   const t = props.pendingTarget
   if (!t) return
@@ -250,12 +273,25 @@ const classMissing = computed(() => !!selected.value && classes.value.length > 0
 
 /** 发起强刷翻译(带确认语义:会重新下载 9-10MB 翻译) */
 const forceTpl = ref(false)
+/** 跨版本差异对比对话框 */
+const diffOpen = ref(false)
+
+/** 参与对比的库(已生成的) */
+const diffLibs = computed(() =>
+  versions.value
+    .map((v) => ({ versionId: v._id, tag: v.tag, status: statuses.value[v._id] ?? null }))
+    .filter((l) => l.status?.status === 'ready')
+)
 
 /** 状态徽标文案 */
 function statusText(id: string): string {
   const s = statuses.value[id]
   if (!s) return '未生成'
-  if (s.status === 'ready') return `${s.classCount} 类${s.lang === 'en' ? ' · 英文' : ' · 中文'}`
+  if (s.status === 'ready') {
+    // 项目脚本库不涉及官方翻译,单独标注
+    if (s.kind === 'project') return `${s.classCount} 类 · 项目`
+    return `${s.classCount} 类${s.lang === 'en' ? ' · 英文' : ' · 中文'}`
+  }
   return '生成中…'
 }
 
@@ -332,7 +368,7 @@ const PHASE_TEXT: Record<string, string> = {
           >
             <option v-for="v in readyVersions" :key="v._id" :value="v._id">{{ v.name }}</option>
           </select>
-          <button class="icon-btn" title="管理文档库" @click="managing = !managing">
+          <button class="icon-btn" :title="managing ? '收起库管理' : '管理文档库(生成/删除/导入/对比)'" @click="managing = !managing; if (managing) refreshProjects()">
             <Icon name="gear" :size="14" />
           </button>
         </div>
@@ -356,6 +392,23 @@ const PHASE_TEXT: Record<string, string> = {
           <button class="btn small ghost import-btn" @click="onImport">
             <Icon name="upload" :size="12" /> 导入 API 文件建库
           </button>
+          <button
+            class="btn small ghost import-btn"
+            :disabled="readyVersions.length < 2"
+            :title="readyVersions.length < 2 ? '至少需要两个已生成的文档库' : '对比两个版本的 API 差异(升级前评估)'"
+            @click="diffOpen = true"
+          >
+            <Icon name="layers" :size="12" /> 版本差异对比
+          </button>
+          <!-- 项目脚本扫描:把项目里带 class_name 的 .gd 解析成同类文档 -->
+          <div v-if="projects.length" class="scan-row">
+            <select v-model="scanProjectId" class="scan-select">
+              <option v-for="p in projects" :key="p._id" :value="p._id">{{ p.name }}</option>
+            </select>
+            <button class="btn small ghost" title="扫描项目脚本(带 class_name 的 .gd)生成文档库" @click="onScanProject">
+              <Icon name="pen" :size="12" /> 扫描项目脚本
+            </button>
+          </div>
           <div v-for="t in Object.values(activeTaskByVersion)" :key="t.id" class="mg-row">
             <span class="mg-name mono">{{ t.tag }}</span>
             <span class="mg-status">{{ PHASE_TEXT[t.status] || t.status }} {{ t.total ? `${t.done}/${t.total}` : '' }}</span>
@@ -461,6 +514,14 @@ const PHASE_TEXT: Record<string, string> = {
         </div>
       </section>
     </div>
+
+    <!-- 跨版本 API 差异对比 -->
+    <DocDiffDialog
+      :open="diffOpen"
+      :libraries="diffLibs"
+      :initial-a="currentVersionId"
+      @close="diffOpen = false"
+    />
   </div>
 </template>
 
@@ -601,6 +662,24 @@ const PHASE_TEXT: Record<string, string> = {
 
 .import-btn {
   margin: 2px 0 6px;
+}
+
+.scan-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 2px 0 6px;
+}
+
+.scan-select {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11.5px;
 }
 
 /* ---------- 双栏 ---------- */

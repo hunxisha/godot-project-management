@@ -114,6 +114,10 @@ export interface DocLibraryStatus {
   translatedCount?: number
   /** 可翻译字符串总数:translatedCount/stringCount 即覆盖率 */
   stringCount?: number
+  /** 库来源:engine=引擎 API / project=项目脚本扫描 */
+  kind?: 'engine' | 'project'
+  /** project 库对应的项目 id */
+  sourceProject?: string
 }
 
 /** 索引条目:类列表与搜索共用的轻量摘要 */
@@ -195,6 +199,38 @@ export interface DocClassDetail {
   constants: DocConstant[]
   enums: DocEnum[]
   operators: DocOperator[]
+  /** 项目脚本类:来源 .gd 文件绝对路径(引擎类无此字段) */
+  sourceFile?: string
+}
+
+/** 跨版本差异:一组成员的新增/移除/签名变化 */
+export interface DocDiffGroup {
+  added: string[]
+  removed: string[]
+  changed: { name: string, from: string, to: string }[]
+}
+
+/** 单类的成员级差异 */
+export interface DocClassDiff {
+  className: string
+  /** 继承变化(未变时为 null) */
+  inherits: { from: string | null, to: string | null } | null
+  methods: DocDiffGroup
+  members: DocDiffGroup
+  signals: DocDiffGroup
+  constants: DocDiffGroup
+  enums: DocDiffGroup
+}
+
+/** 库级差异汇总 */
+export interface DocLibraryDiff {
+  ok: boolean
+  error?: string
+  tagA?: string
+  tagB?: string
+  addedClasses?: string[]
+  removedClasses?: string[]
+  changedClasses?: { name: string, changes: number }[]
 }
 
 /** 类附加信息(教程链接;按需从官方 XML 补,离线时为 null) */
@@ -205,7 +241,7 @@ export interface DocClassExtras {
   ref?: string
 }
 
-export type DocHitKind = 'class' | 'method' | 'member' | 'signal' | 'enum' | 'constant'
+export type DocHitKind = 'class' | 'method' | 'member' | 'signal' | 'enum' | 'constant' | 'body'
 
 export interface DocSearchHit {
   kind: DocHitKind
@@ -213,6 +249,8 @@ export interface DocSearchHit {
   name: string
   brief: string
   score: number
+  /** 正文命中时的上下文片段 */
+  snippet?: string
 }
 
 export interface DocHistoryItem {
