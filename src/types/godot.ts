@@ -197,6 +197,14 @@ export interface DocClassDetail {
   operators: DocOperator[]
 }
 
+/** 类附加信息(教程链接;按需从官方 XML 补,离线时为 null) */
+export interface DocClassExtras {
+  tutorials: { title: string, url: string }[]
+  fetchedAt?: number
+  /** 命中的来源 ref(诊断用) */
+  ref?: string
+}
+
 export type DocHitKind = 'class' | 'method' | 'member' | 'signal' | 'enum' | 'constant'
 
 export interface DocSearchHit {

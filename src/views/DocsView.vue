@@ -5,7 +5,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from '../components/Icon.vue'
 import DocClassPanel from '../components/docs/DocClassPanel.vue'
 import { useDocs } from '../composables/useDocs'
-import { notify } from '../services/bridge'
+import { notify, pickFile } from '../services/bridge'
 import type { DocClassSummary, DocsTask } from '../types/godot'
 
 const props = defineProps<{
@@ -21,7 +21,7 @@ const emit = defineEmits<{
 
 const {
   versions, statuses, currentVersionId, currentStatus, readyVersions, classes,
-  favorites, history, init, selectVersion, generate, removeLibrary, afterTaskSettled
+  favorites, history, init, selectVersion, generate, importLibrary, removeLibrary, afterTaskSettled
 } = useDocs()
 
 /** 当前打开的类 */
@@ -178,6 +178,21 @@ function onRegenerate(id: string, forceTranslation: boolean) {
   onGenerate(id, forceTranslation)
 }
 
+/**
+ * 导入外部 extension_api.json 建库(无引擎可用的兜底):
+ * 在任意机器跑 `godot --headless --dump-extension-api-with-docs` 得到该文件即可。
+ */
+function onImport() {
+  const file = pickFile('选择 extension_api.json', ['json'])
+  if (!file) return
+  const r = importLibrary(file)
+  if (!r.ok) {
+    notify(r.error || '导入失败')
+    return
+  }
+  notify('已开始导入,进度见任务栏')
+}
+
 function applyPending() {
   const t = props.pendingTarget
   if (!t) return
@@ -291,7 +306,18 @@ const PHASE_TEXT: Record<string, string> = {
             <span class="pct">{{ PHASE_TEXT[activeTaskByVersion[v._id].status] || activeTaskByVersion[v._id].status }}</span>
           </span>
         </div>
-        <div v-if="!versions.length" class="boot-empty">还没有已安装的引擎 —— 先到「版本」页安装一个 Godot。</div>
+        <div v-if="!versions.length" class="boot-empty">
+          <p>还没有已安装的引擎 —— 到「版本」页安装一个 Godot,或导入现成的 API 文件:</p>
+          <button class="btn small" @click="onImport">
+            <Icon name="upload" :size="12" /> 导入 extension_api.json
+          </button>
+        </div>
+      </div>
+      <div v-if="versions.length" class="boot-foot">
+        <button class="btn small ghost" @click="onImport">
+          <Icon name="upload" :size="12" /> 导入 API 文件建库
+        </button>
+        <span class="boot-hint">在任意机器执行 <code>godot --headless --dump-extension-api-with-docs</code> 得到该 JSON</span>
       </div>
     </div>
 
@@ -327,6 +353,9 @@ const PHASE_TEXT: Record<string, string> = {
             <input v-model="forceTpl" type="checkbox" class="switch">
             <span>重新生成时强制刷新中文翻译(忽略本地 po 缓存,重新下载约 10MB)</span>
           </label>
+          <button class="btn small ghost import-btn" @click="onImport">
+            <Icon name="upload" :size="12" /> 导入 API 文件建库
+          </button>
           <div v-for="t in Object.values(activeTaskByVersion)" :key="t.id" class="mg-row">
             <span class="mg-name mono">{{ t.tag }}</span>
             <span class="mg-status">{{ PHASE_TEXT[t.status] || t.status }} {{ t.total ? `${t.done}/${t.total}` : '' }}</span>
@@ -400,6 +429,17 @@ const PHASE_TEXT: Record<string, string> = {
             返回<span v-if="prevClassName" class="prev-name mono">{{ prevClassName }}</span>
             <span class="kbd">Alt+←</span>
           </button>
+          <span class="grow"></span>
+          <!-- 详情页快速切库:保持当前类名,缺失由 classMissing 提示兜底 -->
+          <select
+            v-if="readyVersions.length > 1"
+            class="detail-ver mono"
+            :value="currentVersionId"
+            :title="`当前文档库:${currentStatus?.tag ?? ''}`"
+            @change="selectVersion(($event.target as HTMLSelectElement).value)"
+          >
+            <option v-for="v in readyVersions" :key="v._id" :value="v._id">{{ v.tag }}</option>
+          </select>
         </div>
         <div v-if="classMissing" class="missing-lib">
           <Icon name="alert" :size="16" />
@@ -532,6 +572,35 @@ const PHASE_TEXT: Record<string, string> = {
   color: var(--text-3);
   border: 1px dashed var(--border);
   border-radius: 11px;
+}
+
+.boot-empty p {
+  margin: 0 0 10px;
+}
+
+.boot-foot {
+  margin-top: 16px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.boot-hint {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.boot-hint code {
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-family: var(--mono);
+}
+
+.import-btn {
+  margin: 2px 0 6px;
 }
 
 /* ---------- 双栏 ---------- */
@@ -809,6 +878,16 @@ const PHASE_TEXT: Record<string, string> = {
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--surface-2);
+}
+
+.detail-ver {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 11.5px;
+  max-width: 160px;
 }
 
 .missing-lib {

@@ -4,10 +4,12 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import Icon from '../Icon.vue'
 import BBRich from './BBRich.vue'
+import DocTreeNodeView from './DocTreeNode.vue'
 import { useDocs } from '../../composables/useDocs'
+import type { DocTreeNode } from '../../composables/useDocs'
 import { copyText, notify, openExternal } from '../../services/bridge'
 import { onlineDocsUrl } from '../../utils/godotDocs'
-import type { DocClassDetail } from '../../types/godot'
+import type { DocClassDetail, DocClassExtras } from '../../types/godot'
 
 const props = defineProps<{
   versionId: string
@@ -21,10 +23,12 @@ const emit = defineEmits<{
 }>()
 
 const detail = ref<DocClassDetail | null>(null)
+/** 教程链接(按需从官方 XML 补;离线/未命中为 null,不显示分节) */
+const extras = ref<DocClassExtras | null>(null)
 const flash = ref('')
 const missing = computed(() => !detail.value)
 
-const { favorites, toggleFavorite, pushHistory, derivedOf, inheritsChainOf, currentStatus } = useDocs()
+const { favorites, toggleFavorite, pushHistory, derivedOf, inheritsChainOf, currentStatus, treeNode } = useDocs()
 
 /** 当前库的引擎 tag(拼在线文档链接用) */
 const currentTag = computed(() => currentStatus.value?.tag)
@@ -32,6 +36,53 @@ const currentTag = computed(() => currentStatus.value?.tag)
 const chain = computed(() => inheritsChainOf(props.className))
 const derived = computed(() => derivedOf(props.className))
 const isFav = computed(() => favorites.value.includes(props.className))
+
+// ---------- 继承树(懒加载展开,点击节点跳转) ----------
+
+const treeOpen = ref(false)
+const treeRoot = ref<DocTreeNode | null>(null)
+/** 单个节点的直接派生展开上限(避免 Node 这类大类一次铺开几百行) */
+const TREE_CHILD_CAP = 40
+
+/** 当前类及其祖先链:树里高亮 */
+const treePath = computed(() => new Set([props.className, ...chain.value.map((c) => c.name)]))
+
+/** 建树并沿当前类路径逐级展开(打开即定位到当前类) */
+function buildTree() {
+  const chainNames = [...chain.value].reverse().map((c) => c.name)
+  const root = treeNode(chainNames[0] ?? props.className)
+  expandNode(root)
+  let cur = root
+  for (const name of [...chainNames.slice(1), props.className]) {
+    const next = cur.children.find((c) => c.name === name)
+    if (!next) break
+    expandNode(next)
+    cur = next
+  }
+  treeRoot.value = root
+}
+
+/** 展开节点:填充直接派生(按名排序,超上限截断) */
+function expandNode(node: DocTreeNode) {
+  if (node.expanded) return
+  node.children = derivedOf(node.name)
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .slice(0, TREE_CHILD_CAP)
+    .map((c) => treeNode(c.name))
+  node.expanded = true
+}
+
+watch(treeOpen, (open) => {
+  if (open) buildTree()
+  else treeRoot.value = null
+})
+
+/** 切类时若树开着,重新定位 */
+watch(() => props.className, () => {
+  if (treeOpen.value) buildTree()
+})
+
 
 /** 通知(NOTIFICATION_*)单独成节,其余常量与枚举并列 */
 const notifications = computed(() => detail.value?.constants.filter((c) => c.name.startsWith('NOTIFICATION_')) ?? [])
@@ -48,6 +99,7 @@ const toc = computed<TocGroup[]>(() => {
   if (!d) return []
   const g: TocGroup[] = []
   const add = (key: string, label: string, items: TocItem[]) => { if (items.length) g.push({ key, label, items }) }
+  add('tutorials', '教程', (extras.value?.tutorials ?? []).map((t, i) => ({ anchor: `tut-${i}`, label: t.title })))
   add('signals', '信号', d.signals.map((s) => ({ anchor: `signal-${s.name}`, label: s.name })))
   add('members', '成员', d.members.map((x) => ({ anchor: `member-${x.name}`, label: x.name })))
   add('methods', '方法', d.methods.map((m) => ({ anchor: methodAnchor(m), label: m.name })))
@@ -80,7 +132,18 @@ function onScroll() {
 function load() {
   detail.value = props.className ? window.services.docsGetClass(props.versionId, props.className) : null
   flash.value = ''
-  if (detail.value) pushHistory(detail.value.name)
+  extras.value = null
+  // 教程链接:后台按需拉取(缓存在库目录 extras/),失败静默 —— 离线浏览不受影响
+  if (detail.value) {
+    const want = `${props.versionId}/${detail.value.name}`
+    window.services.docsGetClassExtras(props.versionId, detail.value.name)
+      .then((ex) => {
+        // 期间用户可能已切到别的类:只认当前这次请求的结果
+        if (ex && detail.value && `${props.versionId}/${detail.value.name}` === want) extras.value = ex
+      })
+      .catch(() => { /* 静默 */ })
+    pushHistory(detail.value.name)
+  }
   if (props.anchor) {
     nextTick(() => {
       scrollToAnchor(props.anchor!)
@@ -204,6 +267,15 @@ function signature(m: { name: string, returnType: string, params: { name: string
           <span class="crumb-label">派生:</span>
           <button v-for="d in derived" :key="d.name" class="crumb mono" @click="emit('navigate', d.name)">{{ d.name }}</button>
         </div>
+        <div class="crumbs">
+          <button class="tree-toggle" :title="treeOpen ? '收起继承树' : '展开可浏览的继承树'" @click="treeOpen = !treeOpen">
+            <Icon :name="treeOpen ? 'chevron-down' : 'chevron-right'" :size="11" />
+            继承树
+          </button>
+        </div>
+        <div v-if="treeOpen && treeRoot" class="tree-box">
+          <DocTreeNodeView :node="treeRoot" :path="treePath" :cap="TREE_CHILD_CAP" @navigate="(n) => emit('navigate', n)" />
+        </div>
       </header>
 
       <section v-if="detail.brief" class="sec">
@@ -214,6 +286,22 @@ function signature(m: { name: string, returnType: string, params: { name: string
       <section v-if="detail.description" class="sec">
         <h3>描述</h3>
         <div class="desc"><BBRich :text="detail.description" @ref="onRef" @url="openExternal" /></div>
+      </section>
+
+      <section v-if="extras && extras.tutorials.length" class="sec">
+        <h3>教程 <span class="count">{{ extras.tutorials.length }}</span></h3>
+        <button
+          v-for="t in extras.tutorials"
+          :key="t.url"
+          type="button"
+          class="tut-row"
+          :title="t.url"
+          @click="openExternal(t.url)"
+        >
+          <Icon name="link" :size="13" />
+          <span class="tut-title">{{ t.title }}</span>
+          <Icon name="external" :size="11" class="tut-ext" />
+        </button>
       </section>
 
       <section v-if="detail.signals.length" class="sec">
@@ -455,6 +543,34 @@ function signature(m: { name: string, returnType: string, params: { name: string
   color: var(--text-3);
 }
 
+.tree-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: none;
+  background: none;
+  padding: 1px 5px;
+  font-size: 12px;
+  color: var(--text-3);
+  cursor: pointer;
+  border-radius: 5px;
+}
+
+.tree-toggle:hover {
+  color: var(--brand);
+  background: var(--surface-2);
+}
+
+.tree-box {
+  margin-top: 8px;
+  padding: 9px 12px;
+  max-height: 340px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-2);
+}
+
 .sec {
   margin-top: 18px;
 }
@@ -467,6 +583,40 @@ function signature(m: { name: string, returnType: string, params: { name: string
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.tut-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 11px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tut-row:hover {
+  color: var(--brand);
+  border-color: color-mix(in srgb, var(--brand) 35%, transparent);
+}
+
+.tut-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tut-ext {
+  color: var(--text-3);
+  flex-shrink: 0;
 }
 
 .count {

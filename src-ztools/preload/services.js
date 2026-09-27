@@ -165,6 +165,8 @@ window.services = {
   /** 生成版本文档库(入队,进度走 watchDocsTasks,任务 kind='docs';在途时拒绝重复)。
    *  opts.forceTranslation=true 忽略 po 磁盘缓存重新下载官方翻译 */
   docsGenerate: (versionId, opts) => docs.generateDocs(versionId, opts),
+  /** 从外部 extension_api.json 导入建库(无引擎可用时的兜底;版本取 header.version_full_name) */
+  docsImport: (opts) => docs.importDocsLibrary(opts),
   /** 取消文档库生成任务 */
   docsCancelTask: (id) => docs.cancelDocsTask(id),
   /** 移除已结束的文档库任务记录 */
@@ -179,6 +181,8 @@ window.services = {
   docsListClasses: (versionId) => docs.docsListClasses(versionId),
   /** 类正文(未知类/非法类名返回 null) */
   docsGetClass: (versionId, className) => docs.docsGetClass(versionId, className),
+  /** 类附加信息(教程链接):缓存命中直接返回,否则按需拉官方 XML;离线/失败返回 null */
+  docsGetClassExtras: (versionId, className) => docs.docsGetClassExtras(versionId, className),
   /** 本地搜索:类名/方法/成员/信号/枚举/常量,按分值排序 */
   docsSearch: (versionId, query, limit) => docs.docsSearch(versionId, query, limit),
   /** 收藏/取消收藏(全局,按类名跨版本) */

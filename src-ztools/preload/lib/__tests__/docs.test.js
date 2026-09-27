@@ -151,7 +151,9 @@ const state = {
   hang: false,
   failSpawn: false,
   /** 翻译下载桩:string=返回该 po;null=网络不可用 */
-  poText: null
+  poText: null,
+  /** 类 XML 桩:string=返回该 XML;null=网络不可用 */
+  xmlText: null
 }
 
 function fakeSpawn(exePath, args, opts) {
@@ -191,6 +193,12 @@ Module._load = function (request, parent, isMain) {
     return {
       getText: (url) => new Promise((resolve, reject) => {
         process.nextTick(() => {
+          // 类 XML 与翻译 po 分开打桩
+          if (/\/doc\/classes\//.test(url)) {
+            if (typeof state.xmlText === 'string') resolve(state.xmlText)
+            else reject(new Error('网络不可用'))
+            return
+          }
           if (typeof state.poText === 'string') resolve(state.poText)
           else reject(new Error('网络不可用'))
         })
@@ -472,11 +480,72 @@ async function main() {
   ok(JSON.parse(fs.readFileSync(path.join(libDir, 'classes', 'Node.json'), 'utf8')).brief === '场景对象的基类(新版译文)。', '强刷后应用新译文', JSON.parse(fs.readFileSync(path.join(libDir, 'classes', 'Node.json'), 'utf8')).brief)
   state.poText = null
 
+  // ---------- 教程链接(按需从官方 XML 补) ----------
+  section('教程链接解析与应用')
+  const XML_SAMPLE = [
+    '<?xml version="1.0" encoding="UTF-8" ?>',
+    '<class name="Control" inherits="CanvasItem">',
+    '\t<tutorials>',
+    '\t\t<link title="GUI documentation index">$DOCS_URL/tutorials/ui/index.html</link>',
+    '\t\t<link title="All GUI Demos">https://github.com/godotengine/godot-demo-projects/tree/master/gui</link>',
+    '\t</tutorials>',
+    '</class>'
+  ].join('\n')
+  const tuts = lib.parseTutorials(XML_SAMPLE, '4.7.2-stable')
+  ok(tuts.length === 2, '教程条目数', String(tuts.length))
+  ok(tuts[0].url === 'https://docs.godotengine.org/en/4.7/tutorials/ui/index.html', '$DOCS_URL 替换为版本化前缀', tuts[0].url)
+  ok(tuts[1].url.startsWith('https://github.com/'), '外部链接原样保留')
+  ok(lib.parseTutorials('<class/>', '4.7.2-stable').length === 0, '无 tutorials 节返回空')
+
+  state.xmlText = XML_SAMPLE
+  const ex1 = await lib.docsGetClassExtras(V1, 'Node')
+  ok(ex1 && ex1.tutorials.length === 2, '按需拉取并解析', JSON.stringify(ex1 && ex1.tutorials.length))
+  ok(fs.existsSync(path.join(WORK, 'gpm-docs', '4.7.2-stable-standard-win64', 'extras', 'Node.json')), 'extras 已缓存到库目录')
+  state.xmlText = null
+  const ex2 = await lib.docsGetClassExtras(V1, 'Node')
+  ok(ex2 && ex2.tutorials.length === 2, '缓存命中(离线仍可用)')
+  const ex3 = await lib.docsGetClassExtras(V1, 'NotAClass')
+  ok(ex3 === null, '下载失败/未知类返回 null(静默降级)')
+  ok(await lib.docsGetClassExtras(V1, '../evil') === null, '非法类名直接拒绝')
+
+  // ---------- 导入 extension_api.json 建库(无引擎兜底) ----------
+  section('导入 API 文件建库')
+  const apiFile = path.join(WORK, 'api-import.json')
+  fs.writeFileSync(apiFile, JSON.stringify({
+    header: { version_full_name: '4.6.0.stable.official' },
+    classes: [
+      { name: 'Imported', inherits: 'Object', brief_description: 'From import.', description: '', methods: [], properties: [], signals: [], constants: [], enums: [] }
+    ],
+    builtin_classes: [],
+    utility_functions: [],
+    global_constants: [],
+    global_enums: [],
+    singletons: []
+  }))
+  const imp1 = lib.importDocsLibrary({ jsonPath: apiFile })
+  ok(imp1.ok === true && !!imp1.taskId, '入队导入', JSON.stringify(imp1))
+  const it1 = await waitTask(imp1.taskId)
+  ok(it1.status === 'done', '导入任务完成', it1.error || '')
+  ok(imp1.versionId === 'godot/version/import-4-6-0-stable', '版本 id 由 header 推导', imp1.versionId)
+  const impRec = docs.get('godot/docs/import-4-6-0-stable')
+  ok(impRec && impRec.classCount === 2 && impRec.tag === '4-6-0-stable', '导入库落库(1 类 + @GlobalScope 伪类)', JSON.stringify(impRec))
+  ok(lib.docsLibraryStatus(imp1.versionId).status === 'ready', '导入库可查询状态')
+  ok(lib.docsGetClass(imp1.versionId, 'Imported')?.brief === 'From import.', '导入库可读类正文')
+
+  const badFile = path.join(WORK, 'not-api.json')
+  fs.writeFileSync(badFile, JSON.stringify({ hello: 1 }))
+  ok(lib.importDocsLibrary({ jsonPath: badFile }).ok === false, '非 API 文件被拒绝')
+  ok(lib.importDocsLibrary({ jsonPath: path.join(WORK, 'nope.json') }).ok === false, '文件不存在被拒绝')
+
   // ---------- 缓存统计与清理 ----------
   section('缓存统计与清理')
   const info = lib.docsCacheInfo()
-  ok(info.libraries.length === 1 && info.libraries[0].versionId === V1 && info.sizeBytes > 0, 'docsCacheInfo 统计', JSON.stringify(info))
-  lib.docsCleanCache([V1])
+  ok(
+    info.libraries.some((l) => l.versionId === V1 && l.sizeBytes > 0) && info.libraries.length >= 1,
+    'docsCacheInfo 统计', JSON.stringify(info)
+  )
+  // 导入库一并清掉,避免影响后续断言
+  lib.docsCleanCache([V1, imp1.versionId])
   ok(!fs.existsSync(libDir), '清理后目录删除')
   ok(!docs.get('godot/docs/4.7.2-stable-standard-win64'), '清理后 db 记录删除')
   ok(JSON.stringify(lib.docsListFavorites()) === '["Vector2"]' && lib.docsListHistory().length === 30, '收藏/历史不受清理影响')

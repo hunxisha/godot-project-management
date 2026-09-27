@@ -343,6 +343,9 @@ function loadIndex(versionId) {
 const TRANSLATION_LOCALE = 'zh_Hans'
 /** 翻译下载超时:9-10MB 的 po,慢网络下给足余量 */
 const TRANSLATION_TIMEOUT_MS = 60_000
+/** 单个类 XML 的下载超时(约 20-100KB,快) */
+const EXTRAS_TIMEOUT_MS = 20_000
+/** 单个类 XML 的下载超时(约 20-100KB,快) */
 
 /**
  * @param {string} s po 单段转义还原
@@ -500,6 +503,153 @@ function applyTranslations(cls, tr, hits) {
   }
 }
 
+// ---------- 类的附加信息(教程链接,按需从 GitHub XML 补) ----------
+//
+// 为什么按需:教程链接只在 godot 仓库的 doc/classes/*.xml 里(引擎的
+// --dump-extension-api-with-docs 与 --doctool 都不含);全量拉 1000+ 个 XML 会拖慢生成,
+// 因此改为「打开某个类时才拉那一个 XML」,解析后缓存到库目录 extras/ 下,一次付出长期有效。
+// 注:Godot 4 的 XML 已不再包含 theme_items,主题属性无从获取,不做。
+
+/** $DOCS_URL 占位符 → 官方文档站的实际前缀 */
+function docsUrlBase(/** @type {string} */ tag) {
+  const m = /^(\d+\.\d+)/.exec(String(tag || ''))
+  return `https://docs.godotengine.org/en/${m ? m[1] : 'stable'}/`
+}
+
+/**
+ * 从类 XML 解析教程链接(纯函数)。
+ * @param {string} xml
+ * @param {string} tag
+ * @returns {{title: string, url: string}[]}
+ */
+function parseTutorials(xml, tag) {
+  const block = /<tutorials>([\s\S]*?)<\/tutorials>/.exec(String(xml || ''))
+  if (!block) return []
+  const base = docsUrlBase(tag)
+  /** @type {{title: string, url: string}[]} */
+  const out = []
+  const re = /<link\s+title="([^"]*)"\s*>([^<]*)<\/link>/g
+  let m
+  while ((m = re.exec(block[1])) !== null) {
+    const raw = m[2].trim()
+    // $DOCS_URL 是官方占位符(以 $DOCS_URL/tutorials/... 形式出现,自带分隔斜杠);
+    // 其余(如 GitHub demo 链接)原样保留
+    out.push({ title: m[1], url: raw.startsWith('$DOCS_URL') ? base + raw.slice('$DOCS_URL/'.length) : raw })
+  }
+  return out
+}
+
+/**
+ * 读取类的附加信息(教程链接)。缓存命中直接返回;未命中按需下载 XML 并落缓存。
+ * 网络失败返回 null —— 离线时详情页只是没有教程分节,不影响浏览。
+ * @param {string} versionId
+ * @param {string} className
+ * @returns {Promise<{tutorials: {title: string, url: string}[], fetchedAt: number} | null>}
+ */
+async function docsGetClassExtras(versionId, className) {
+  if (!CLASS_NAME_RE.test(String(className || ''))) return null
+  const cacheFile = path.join(docsRoot(versionId), 'extras', `${className}.json`)
+  try {
+    if (fs.existsSync(cacheFile)) return JSON.parse(fs.readFileSync(cacheFile, 'utf8'))
+  } catch (e) { /* 缓存损坏:走重新下载 */ }
+  const record = getDoc(DB_ID(versionId))
+  const tag = record && record.tag
+  if (!tag) return null
+  for (const ref of translationRefs(tag)) {
+    try {
+      const xml = await Promise.race([
+        getText(`https://raw.githubusercontent.com/godotengine/godot/${ref}/doc/classes/${className}.xml`),
+        /** @type {Promise<never>} */ (new Promise((_resolve, reject) => {
+          setTimeout(() => reject(new Error('超时')), EXTRAS_TIMEOUT_MS)
+        }))
+      ])
+      if (!xml || !xml.includes('<class')) throw new Error('内容异常')
+      const extras = { tutorials: parseTutorials(xml, tag), fetchedAt: Date.now(), ref }
+      ensureDir(path.dirname(cacheFile))
+      const tmp = `${cacheFile}.tmp`
+      fs.writeFileSync(tmp, JSON.stringify(extras))
+      fs.renameSync(tmp, cacheFile)
+      return extras
+    } catch (e) {
+      // 该 ref 没有这个文件(新类在旧分支上不存在):试下一个
+    }
+  }
+  return null
+}
+
+// ---------- 类的附加信息(教程链接,按需从 GitHub XML 补) ----------
+//
+// 为什么按需:教程链接只在 godot 仓库的 doc/classes/*.xml 里(引擎的
+// --dump-extension-api-with-docs 与 --doctool 都不含,实测确认);全量拉 1000+ 个 XML
+// 会拖慢生成,因此改为「打开某个类时才拉那一个 XML」,解析后缓存到库目录 extras/ 下。
+// 注:Godot 4 的 XML 已不再包含 theme_items,主题属性无从获取,不做。
+
+/** $DOCS_URL 占位符 → 官方文档站的实际前缀 */
+function docsUrlBase(/** @type {string} */ tag) {
+  const m = /^(\d+\.\d+)/.exec(String(tag || ''))
+  return `https://docs.godotengine.org/en/${m ? m[1] : 'stable'}/`
+}
+
+/**
+ * 从类 XML 解析教程链接(纯函数)。
+ * @param {string} xml
+ * @param {string} tag
+ * @returns {{title: string, url: string}[]}
+ */
+function parseTutorials(xml, tag) {
+  const block = /<tutorials>([\s\S]*?)<\/tutorials>/.exec(String(xml || ''))
+  if (!block) return []
+  const base = docsUrlBase(tag)
+  /** @type {{title: string, url: string}[]} */
+  const out = []
+  const re = /<link\s+title="([^"]*)"\s*>([^<]*)<\/link>/g
+  let m
+  while ((m = re.exec(block[1])) !== null) {
+    const raw = m[2].trim()
+    // $DOCS_URL 是官方占位符(自带分隔斜杠);其余(如 GitHub demo 链接)原样保留
+    out.push({ title: m[1], url: raw.startsWith('$DOCS_URL') ? base + raw.slice('$DOCS_URL/'.length) : raw })
+  }
+  return out
+}
+
+/**
+ * 读取类的附加信息(教程链接)。缓存命中直接返回;未命中按需下载 XML 并落缓存。
+ * 网络失败返回 null —— 离线时详情页只是没有教程分节,不影响浏览。
+ * @param {string} versionId
+ * @param {string} className
+ * @returns {Promise<{tutorials: {title: string, url: string}[], fetchedAt?: number, ref?: string} | null>}
+ */
+async function docsGetClassExtras(versionId, className) {
+  if (!CLASS_NAME_RE.test(String(className || ''))) return null
+  const cacheFile = path.join(docsRoot(versionId), 'extras', `${className}.json`)
+  try {
+    if (fs.existsSync(cacheFile)) return JSON.parse(fs.readFileSync(cacheFile, 'utf8'))
+  } catch (e) { /* 缓存损坏:走重新下载 */ }
+  const record = getDoc(DB_ID(versionId))
+  const tag = record && record.tag
+  if (!tag) return null
+  for (const ref of translationRefs(tag)) {
+    try {
+      const xml = await Promise.race([
+        getText(`https://raw.githubusercontent.com/godotengine/godot/${ref}/doc/classes/${className}.xml`),
+        /** @type {Promise<never>} */ (new Promise((_resolve, reject) => {
+          setTimeout(() => reject(new Error('超时')), EXTRAS_TIMEOUT_MS)
+        }))
+      ])
+      if (!xml || !xml.includes('<class')) throw new Error('内容异常')
+      const extras = { tutorials: parseTutorials(xml, tag), fetchedAt: Date.now(), ref }
+      ensureDir(path.dirname(cacheFile))
+      const tmp = `${cacheFile}.tmp`
+      fs.writeFileSync(tmp, JSON.stringify(extras))
+      fs.renameSync(tmp, cacheFile)
+      return extras
+    } catch (e) {
+      // 该 ref 没有这个文件(新类在旧分支上不存在):试下一个
+    }
+  }
+  return null
+}
+
 // ---------- 生成流水线 ----------
 
 /**
@@ -509,6 +659,76 @@ function applyTranslations(cls, tr, hits) {
  */
 function setTask(id, patch) {
   tasks.patch(tasks.get(id), patch)
+}
+
+/**
+ * 从已解析的 extension_api 对象建库并落盘(parsing 阶段),多个入口共用:
+ * runGenerate(引擎现 dump)与 runImport(用户提供的 JSON 文件)。
+ * @param {Record<string, any>} api
+ * @param {{versionId: string, tag: string, name?: string, libDir: string, stageDir: string,
+ *          tr: Map<string, string> | null, token: {canceled: boolean}, taskId: string}} ctx
+ * @returns {Promise<number>} 收录的类数
+ */
+async function buildLibrary(api, ctx) {
+  const zhHits = { count: 0, total: 0 }
+  /** @type {{name: string}[]} */
+  const singletons = api.singletons || []
+  const singletonNames = new Set(singletons.map((s) => s.name))
+  /** @type {DocClassDetail[]} */
+  const mapped = []
+  for (const c of api.classes || []) {
+    const cls = mapClass(c, { isSingleton: singletonNames.has(c.name) })
+    mapped.push(ctx.tr ? applyTranslations(cls, ctx.tr, zhHits) : cls)
+  }
+  for (const c of api.builtin_classes || []) {
+    const cls = mapClass(c, { builtin: true })
+    mapped.push(ctx.tr ? applyTranslations(cls, ctx.tr, zhHits) : cls)
+  }
+  const gs = mapGlobalScope(api)
+  mapped.push(ctx.tr ? applyTranslations(gs, ctx.tr, zhHits) : gs)
+
+  // 原子接管:先写进暂存目录,全部成功后一次性替换旧库 ——
+  // 失败/取消只清暂存,旧库与 db 记录保持完好可浏览。
+  const stageClasses = path.join(ctx.stageDir, 'classes')
+  ensureDir(stageClasses)
+  const total = mapped.length
+  setTask(ctx.taskId, { total })
+  let done = 0
+  await forEachSliced(mapped, async (cls) => {
+    checkCancel(ctx.token)
+    fs.writeFileSync(path.join(stageClasses, `${cls.name}.json`), JSON.stringify(cls))
+    done++
+    if (done % PROGRESS_STEP === 0 || done === total) setTask(ctx.taskId, { done })
+  })
+  checkCancel(ctx.token)
+
+  const index = {
+    builtAt: Date.now(),
+    engineTag: ctx.tag,
+    classes: mapped.map(buildIndexEntry)
+  }
+  const tmpIndex = `${path.join(ctx.stageDir, 'index.json')}.tmp`
+  fs.writeFileSync(tmpIndex, JSON.stringify(index))
+  fs.renameSync(tmpIndex, path.join(ctx.stageDir, 'index.json'))
+
+  rmQuiet(ctx.libDir)
+  fs.renameSync(ctx.stageDir, ctx.libDir)
+
+  putDoc(DB_ID(ctx.versionId), {
+    versionId: ctx.versionId,
+    tag: ctx.tag,
+    name: ctx.name || ctx.tag,
+    classCount: total,
+    builtAt: index.builtAt,
+    libDir: ctx.libDir,
+    // 库语言:拿到翻译表(哪怕覆盖不全)即视为中文库;未命中条目保留英文
+    lang: ctx.tr ? 'zh-CN' : 'en',
+    translatedCount: ctx.tr ? zhHits.count : 0,
+    // 可翻译字符串总数:translatedCount/stringCount 即翻译覆盖率
+    stringCount: ctx.tr ? zhHits.total : 0
+  })
+  indexCache.delete(ctx.versionId)
+  return total
 }
 
 /**
@@ -528,8 +748,6 @@ async function runGenerate(taskId) {
   const libDir = docsRoot(versionId)
   const workDir = path.join(docsRoot(), `.work-${taskId}`)
   const token = createCancelToken()
-  /** 翻译命中计数(applyTranslations 回填) */
-  const zhHits = { count: 0, total: 0 }
   try {
     // 中文翻译与引擎导出并行启动:dump ~1s,翻译下载(9-10MB)可能更慢,先发车
     // 失败/超时不影响生成 —— 降级英文;forceTranslation 时先清缓存再下载
@@ -583,64 +801,16 @@ async function runGenerate(taskId) {
     const tr = await zhPromise
     setTask(taskId, { status: 'parsing', done: 0, total: 0 })
     const api = JSON.parse(fs.readFileSync(jsonPath, 'utf8'))
-    /** @type {{name: string}[]} */
-    const singletons = api.singletons || []
-    const singletonNames = new Set(singletons.map((s) => s.name))
-    /** @type {DocClassDetail[]} */
-    const mapped = []
-    for (const c of api.classes || []) {
-      const cls = mapClass(c, { isSingleton: singletonNames.has(c.name) })
-      mapped.push(tr ? applyTranslations(cls, tr, zhHits) : cls)
-    }
-    for (const c of api.builtin_classes || []) {
-      const cls = mapClass(c, { builtin: true })
-      mapped.push(tr ? applyTranslations(cls, tr, zhHits) : cls)
-    }
-    const gs = mapGlobalScope(api)
-    mapped.push(tr ? applyTranslations(gs, tr, zhHits) : gs)
-
-    // 原子接管:先写进 workDir 下的暂存目录,全部成功后一次性替换旧库 ——
-    // 失败/取消只清暂存,旧库与 db 记录保持完好可浏览。
-    const stageDir = path.join(workDir, 'staging')
-    const stageClasses = path.join(stageDir, 'classes')
-    ensureDir(stageClasses)
-    const total = mapped.length
-    setTask(taskId, { total })
-    let done = 0
-    await forEachSliced(mapped, async (cls) => {
-      checkCancel(token)
-      fs.writeFileSync(path.join(stageClasses, `${cls.name}.json`), JSON.stringify(cls))
-      done++
-      if (done % PROGRESS_STEP === 0 || done === total) setTask(taskId, { done })
-    })
-    checkCancel(token)
-
-    const index = {
-      builtAt: Date.now(),
-      engineTag: version.tag,
-      classes: mapped.map(buildIndexEntry)
-    }
-    const tmpIndex = `${path.join(stageDir, 'index.json')}.tmp`
-    fs.writeFileSync(tmpIndex, JSON.stringify(index))
-    fs.renameSync(tmpIndex, path.join(stageDir, 'index.json'))
-
-    rmQuiet(libDir)
-    fs.renameSync(stageDir, libDir)
-
-    putDoc(DB_ID(versionId), {
+    const total = await buildLibrary(api, {
       versionId,
       tag: version.tag,
       name: version.name,
-      classCount: total,
-      builtAt: index.builtAt,
       libDir,
-      // 库语言:拿到翻译表(哪怕覆盖不全)即视为中文库;未命中条目保留英文
-      lang: tr ? 'zh-CN' : 'en',
-      translatedCount: tr ? zhHits.count : 0,
-      // 可翻译字符串总数:translatedCount/stringCount 即翻译覆盖率
-      stringCount: tr ? zhHits.total : 0
+      stageDir: path.join(workDir, 'staging'),
+      tr,
+      token,
+      taskId
     })
-    indexCache.delete(versionId)
     setTask(taskId, { status: 'done', done: total })
   } catch (e) {
     if (e instanceof CanceledError || token.canceled) {
@@ -686,6 +856,95 @@ function generateDocs(versionId, opts) {
   tasks.emit()
   tasks.enqueue(() => runGenerate(id))
   return { ok: true, taskId: id }
+}
+
+// ---------- 导入 extension_api.json 建库(无引擎可用时的兜底) ----------
+//
+// 未装引擎也能用文档页:在任意机器跑一次
+// `godot --headless --dump-extension-api-with-docs` 得到 JSON,导入即可建库。
+// 与引擎生成共用 buildLibrary(映射/翻译/原子接管/落库完全一致)。
+
+/**
+ * 从外部 extension_api.json 导入建库(入队)。版本标识取 api.header.version_full_name,
+ * 库条目落成 godot/version/import-<tag> 形式,保证「库-版本」关系可回溯。
+ * @param {{jsonPath: string, tag?: string, name?: string}} opts
+ * @returns {{ok: boolean, error?: string, taskId?: string, versionId?: string}}
+ */
+function importDocsLibrary(opts) {
+  const jsonPath = opts && opts.jsonPath
+  if (!jsonPath || !fs.existsSync(jsonPath)) return { ok: false, error: '文件不存在' }
+  /** @type {Record<string, any>} */
+  let api
+  try {
+    api = JSON.parse(fs.readFileSync(jsonPath, 'utf8'))
+  } catch (e) {
+    return { ok: false, error: '不是合法的 JSON 文件' }
+  }
+  if (!api || (!Array.isArray(api.classes) && !Array.isArray(api.builtin_classes))) {
+    return { ok: false, error: '不是 --dump-extension-api-with-docs 的输出(缺少 classes)' }
+  }
+  const header = api.header || {}
+  const rawTag = opts.tag || header.version_full_name || header.version || ''
+  const tag = String(rawTag || '').replace(/\.(official|mono)$/i, '').replace(/\./g, '-') || `imported-${Date.now()}`
+  const docId = `${VERSION_PREFIX}import-${tag}`
+  const key = versionKey(docId).key
+  const busy = tasks.list().find((/** @type {any} */ t) => versionKey(t.versionId).key === key && !tasks.isTerminal(t.status))
+  if (busy) return { ok: false, error: '该版本的文档库正在导入中' }
+  const task = tasks.create({
+    kind: 'docs',
+    versionId: docId,
+    tag,
+    versionName: opts.name || `${tag}(导入)`,
+    imported: true,
+    status: 'queued',
+    done: 0,
+    total: 0,
+    log: ''
+  })
+  const id = task.id
+  tasks.emit()
+  tasks.enqueue(() => runImport(id, api, tag))
+  return { ok: true, taskId: id, versionId: docId }
+}
+
+/**
+ * 导入建库流程(translating → parsing → done),与引擎生成同构。
+ * @param {string} taskId
+ * @param {Record<string, any>} api
+ * @param {string} tag
+ */
+async function runImport(taskId, api, tag) {
+  const task = tasks.get(taskId)
+  if (!task) return
+  const versionId = task.versionId
+  const libDir = docsRoot(versionId)
+  const workDir = path.join(docsRoot(), `.work-${taskId}`)
+  const token = createCancelToken()
+  try {
+    ensureDir(workDir)
+    const zhPromise = loadZhTranslations(tag, token, false).catch(/** @type {() => null} */ (() => null))
+    setTask(taskId, { status: 'translating' })
+    const tr = await zhPromise
+    checkCancel(token)
+    setTask(taskId, { status: 'parsing', done: 0, total: 0 })
+    const total = await buildLibrary(api, {
+      versionId,
+      tag,
+      name: task.versionName,
+      libDir,
+      stageDir: path.join(workDir, 'staging'),
+      tr,
+      token,
+      taskId
+    })
+    setTask(taskId, { status: 'done', done: total })
+  } catch (e) {
+    if (e instanceof CanceledError || token.canceled) setTask(taskId, { status: 'canceled' })
+    else setTask(taskId, { status: 'error', error: (e && e.message) || '导入失败' })
+  } finally {
+    rmQuiet(workDir)
+    tasks.clearToken(taskId)
+  }
 }
 
 // ---------- 任务三件套 ----------
@@ -891,12 +1150,15 @@ module.exports = {
   wordScore,
   parsePo,
   applyTranslations,
+  parseTutorials,
   // 主流程
   generateDocs,
+  importDocsLibrary,
   docsLibraryStatus,
   docsDeleteLibrary,
   docsListClasses,
   docsGetClass,
+  docsGetClassExtras,
   docsSearch,
   // 任务三件套
   cancelDocsTask,
