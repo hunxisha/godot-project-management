@@ -79,6 +79,29 @@ ok(u2[0].t === 'url' && u2[0].href === u2[0].label, '[url] 裸地址')
 
 ok(first(tokenizeBBCode('行一[br]行二'), 'br')?.t === 'br', '[br] → 换行 token')
 
+section('多语言代码块 [codeblocks]')
+const CB_SRC = '[codeblocks]\n[gdscript]\nvar array = [1, 2]\nprint(array[0])\n[/gdscript]\n[csharp]\nvar arr = new Godot.Collections.Array<int>();\n[/csharp]\n[/codeblocks]after'
+const cbTok = first(tokenizeBBCode(CB_SRC), 'codeblocks')
+ok(cbTok && cbTok.segments.length === 2 && cbTok.segments[0].lang === 'gdscript' && cbTok.segments[1].lang === 'csharp', 'gdscript/csharp 双分段', JSON.stringify(cbTok?.segments?.map((s) => s.lang)))
+ok(cbTok?.segments[1].code.includes('Array<int>();'), '分段内文原样保留([int] 不再被解析为链接)')
+ok(types(tokenizeBBCode(CB_SRC)) === 'codeblocks,text', '容器后的文本继续解析', types(tokenizeBBCode(CB_SRC)))
+
+const cbSkip = tokenizeBBCode('[codeblocks]\n[gdscript skip-lint]\n# comment\n[/gdscript]\n[/codeblocks]')
+ok(first(cbSkip, 'codeblocks')?.segments[0].lang === 'gdscript', '带 skip-lint 属性的语言分段')
+
+const cbNoLang = tokenizeBBCode('[codeblocks]\nplain code here\n[/codeblocks]')
+const cbNoLangTok = first(cbNoLang, 'codeblocks')
+ok(cbNoLangTok?.segments.length === 1 && cbNoLangTok.segments[0].lang === '' && cbNoLangTok.segments[0].code.includes('plain code'), '无语言标签时整段降级为单一代码块')
+
+ok(tokenizeBBCode('a [codeblocks] b').some((x) => x.t === 'text' && x.v.includes('[codeblocks]')), '未闭合容器字面降级')
+ok(bbToPlainText(tokenizeBBCode('[codeblocks][gdscript]x=1[/gdscript][csharp]int x=1;[/csharp][/codeblocks]')) === 'x=1\nint x=1;', '纯文本提取合并全部分段')
+
+section('lang 属性与 skip-lint 变体')
+const ltTok = first(tokenizeBBCode('[codeblock lang=text]\n[section]\nkey=42\n[/codeblock]'), 'codeblock')
+ok(ltTok?.lang === 'text' && ltTok.v.includes('key=42'), 'codeblock lang=text 解析', JSON.stringify(ltTok))
+ok(first(tokenizeBBCode('[codeblock]\nx\n[/codeblock]'), 'codeblock')?.lang === undefined, '无 lang 属性为 undefined')
+ok(first(tokenizeBBCode('[code skip-lint][b]bold[/b][/code]'), 'code')?.v === '[b]bold[/b]', '[code skip-lint] 内部原样保留')
+
 section('降级原则(内容永不丢失)')
 const unknown = tokenizeBBCode('前面 [foo bar] 后面')
 ok(unknown.some((x) => x.t === 'text' && x.v.includes('[foo bar]')), '未知标签按字面保留', JSON.stringify(unknown))

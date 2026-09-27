@@ -2,6 +2,7 @@
      ref/url 事件向上抛,由文档面板决定站内跳转还是外开浏览器。 -->
 <script setup lang="ts">
 import type { BBToken } from '../../utils/bbcode'
+import BBCodeBlocks from './BBCodeBlocks.vue'
 
 defineProps<{ tokens: BBToken[] }>()
 const emit = defineEmits<{
@@ -24,6 +25,7 @@ function labelOf(tk: BBToken): string {
     <span v-if="tk.t === 'text'">{{ tk.v }}</span>
     <code v-else-if="tk.t === 'code'" class="bb-code">{{ tk.v }}</code>
     <pre v-else-if="tk.t === 'codeblock'" class="bb-codeblock"><code>{{ tk.v }}</code></pre>
+    <BBCodeBlocks v-else-if="tk.t === 'codeblocks'" :segments="tk.segments" />
     <b v-else-if="tk.t === 'style' && tk.style === 'bold'"><BBTokens :tokens="tk.children" @ref="(k, t) => emit('ref', k, t)" @url="(h) => emit('url', h)" /></b>
     <i v-else-if="tk.t === 'style' && tk.style === 'italic'"><BBTokens :tokens="tk.children" @ref="(k, t) => emit('ref', k, t)" @url="(h) => emit('url', h)" /></i>
     <u v-else-if="tk.t === 'style' && tk.style === 'underline'"><BBTokens :tokens="tk.children" @ref="(k, t) => emit('ref', k, t)" @url="(h) => emit('url', h)" /></u>

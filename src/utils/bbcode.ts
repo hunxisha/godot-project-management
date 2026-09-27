@@ -6,10 +6,19 @@
 
 export type BBStyle = 'bold' | 'italic' | 'underline' | 'strike' | 'center'
 
+/** 多语言代码块([codeblocks])的一个语言分段 */
+export interface BBCodeSegment {
+  /** 'gdscript' | 'csharp' 等;空串表示未标注语言 */
+  lang: string
+  code: string
+}
+
 export type BBToken =
   | { t: 'text', v: string }
   | { t: 'code', v: string }
-  | { t: 'codeblock', v: string }
+  | { t: 'codeblock', v: string, lang?: string }
+  /** [codeblocks] 容器:内含 [gdscript]/[csharp] 多个语言分段 */
+  | { t: 'codeblocks', segments: BBCodeSegment[] }
   | { t: 'style', style: BBStyle, children: BBToken[] }
   /** 站内引用:[method add_child] / [member owner] / [SceneTree] … */
   | { t: 'ref', kind: string, target: string }
@@ -25,8 +34,38 @@ const REF_KINDS = new Set(['method', 'member', 'constant', 'signal', 'enum', 'pa
 /** 裸类名引用:[Node] / [Vector2] / [@GlobalScope] */
 const BARE_CLASS_RE = /^@?[A-Za-z][A-Za-z0-9_]*$/
 
+/** [codeblocks] 里认可的语言分段标签(实测 4.7.2 只有 gdscript/csharp) */
+const CODEBLOCK_LANGS = new Set(['gdscript', 'csharp'])
+
 /** 嵌套深度上限(防御异常输入,正常文档不会超过 3 层) */
 const MAX_DEPTH = 8
+
+/**
+ * 提取标签上的 lang=xxx 属性([codeblock lang=text] / [codeblock lang=gdscript])。
+ */
+function langAttrOf(rawTag: string): string | undefined {
+  const m = /(?:^|[\s=])lang=([A-Za-z0-9_]+)/.exec(rawTag)
+  return m ? m[1] : undefined
+}
+
+/**
+ * 解析 [codeblocks] 内文为语言分段。认可的语言标签([gdscript]/[csharp],可带
+ * skip-lint 等属性)各成一段;一个都没匹配到时整段按单一无语言代码块降级。
+ */
+function parseCodeblockSegments(inner: string): BBCodeSegment[] {
+  /** @type {BBCodeSegment[]} */
+  const segments = []
+  const re = /\[([a-z]+)[^\]]*\]([\s\S]*?)\[\/\1\]/g
+  let matched = false
+  let m
+  while ((m = re.exec(inner)) !== null) {
+    if (!CODEBLOCK_LANGS.has(m[1])) continue
+    matched = true
+    segments.push({ lang: m[1], code: m[2] })
+  }
+  if (!matched) return [{ lang: '', code: inner }]
+  return segments
+}
 
 /**
  * 找到配对闭合标签 [/${tag}] 的位置;找不到返回 -1。
@@ -65,16 +104,32 @@ export function tokenizeBBCode(src: string, depth = 0): BBToken[] {
       continue
     }
 
-    // [codeblock] 与 [code]:内部原样保留,不解析任何标签
-    if (rawTag === 'codeblock' || rawTag.startsWith('codeblock=') || rawTag === 'code' || rawTag.startsWith('code=')) {
+    // [codeblocks]:多语言代码块容器,内文按语言分段
+    if (rawTag === 'codeblocks') {
+      const end = findClosing(text, 'codeblocks', close + 1)
+      if (end < 0) {
+        pushText(text.slice(open))
+        i = n
+      } else {
+        tokens.push({ t: 'codeblocks', segments: parseCodeblockSegments(text.slice(close + 1, end)) })
+        i = end + 'codeblocks'.length + 3
+      }
+      continue
+    }
+
+    // [codeblock]/[codeblock lang=x] 与 [code]/[code skip-lint]:内部原样保留,不解析任何标签
+    if (rawTag === 'codeblock' || /^codeblock[\s=]/.test(rawTag) || rawTag === 'code' || /^code[\s=]/.test(rawTag)) {
       const kind = rawTag.startsWith('codeblock') ? 'codeblock' : 'code'
       const inner = findClosing(text, kind, close + 1)
       if (inner < 0) {
         // 没有闭合:整个 remainder 按字面降级
         pushText(text.slice(open))
         i = n
+      } else if (kind === 'codeblock') {
+        tokens.push({ t: 'codeblock', v: text.slice(close + 1, inner), lang: langAttrOf(rawTag) })
+        i = inner + kind.length + 3
       } else {
-        tokens.push({ t: kind, v: text.slice(close + 1, inner) })
+        tokens.push({ t: 'code', v: text.slice(close + 1, inner) })
         i = inner + kind.length + 3
       }
       continue
@@ -161,6 +216,7 @@ export function bbToPlainText(tokens: BBToken[]): string {
   for (const tk of tokens) {
     if (tk.t === 'text') out.push(tk.v)
     else if (tk.t === 'code' || tk.t === 'codeblock') out.push(tk.v)
+    else if (tk.t === 'codeblocks') out.push(tk.segments.map((s) => s.code).join('\n'))
     else if (tk.t === 'style') out.push(bbToPlainText(tk.children))
     else if (tk.t === 'url') out.push(tk.label)
     else if (tk.t === 'br') out.push(' ')
