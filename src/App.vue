@@ -7,10 +7,12 @@ import ProjectsView from './views/ProjectsView.vue'
 import VersionsView from './views/VersionsView.vue'
 import MarketplaceView from './views/MarketplaceView.vue'
 import AddonsView from './views/AddonsView.vue'
+import DocsView from './views/DocsView.vue'
+import DocSearchPalette from './components/docs/DocSearchPalette.vue'
 import BackupsView from './views/BackupsView.vue'
 import SettingsView from './views/SettingsView.vue'
 import { notify } from './services/bridge'
-import type { BackupTask, DownloadTask, ExportTask } from './types/godot'
+import type { BackupTask, DocsTask, DownloadTask, ExportTask } from './types/godot'
 
 const tab = ref('dashboard')
 /** addProject 功能(拖入)带入的文件路径 */
@@ -25,15 +27,21 @@ const pendingMarketMode = ref<string | null>(null)
 const backupScope = ref<string | null>(null)
 /** 备份页 → 项目页:切到项目页并直接打开该项目的备份弹窗 */
 const backupRequest = ref<string | null>(null)
+/** 全局搜索(Ctrl+K)命中的跳转目标:切到文档页并打开对应类 */
+const docTarget = ref<{ className: string, anchor?: string } | null>(null)
+/** 文档搜索面板开关 */
+const paletteOpen = ref(false)
 
 // ---------- 全局任务(引擎/模板下载 + 备份/恢复 + 一键导出,常驻订阅,切页不断线) ----------
 
 const tasks = ref<DownloadTask[]>([])
 const backupTasks = ref<BackupTask[]>([])
 const exportTasks = ref<ExportTask[]>([])
+const docsTasks = ref<DocsTask[]>([])
 let unwatchTasks: (() => void) | null = null
 let unwatchBackupTasks: (() => void) | null = null
 let unwatchExportTasks: (() => void) | null = null
+let unwatchDocsTasks: (() => void) | null = null
 
 const TASK_STATUS: Record<string, string> = {
   queued: '排队中',
@@ -98,8 +106,26 @@ const barTasks = computed<BarTask[]>(() => {
       error: t.status === 'error'
     })
   }
+  for (const t of docsTasks.value) {
+    if (t.status === 'done' || t.status === 'canceled') continue
+    const base = t.status === 'parsing' && t.total
+      ? `解析 ${Math.min(100, Math.round((t.done / t.total) * 100))}%`
+      : DOCS_PHASE[t.status] || t.status
+    out.push({
+      id: `docs-${t.id}`,
+      label: `文档 · ${t.tag}`,
+      brief: base,
+      error: t.status === 'error'
+    })
+  }
   return out
 })
+
+const DOCS_PHASE: Record<string, string> = {
+  queued: '排队中',
+  dumping: '引擎导出中',
+  parsing: '解析中'
+}
 
 const hasBackupTask = computed(() => backupTasks.value.some((t) => !BACKUP_TERMINAL[t.phase]))
 
@@ -169,13 +195,51 @@ onMounted(() => {
       }
     })
   })
+
+  // 文档库生成任务:任务栏条目 + 完成通知(库内容刷新由 DocsView 自己订阅处理)
+  const notifiedDocs = new Set<string>()
+  unwatchDocsTasks = window.services.watchDocsTasks((snap) => {
+    docsTasks.value = snap
+    const finished = snap.filter((t) => t.status === 'done' || t.status === 'canceled' || t.status === 'error')
+    if (!finished.length) return
+    queueMicrotask(() => {
+      for (const t of finished) {
+        if (!notifiedDocs.has(t.id)) {
+          notifiedDocs.add(t.id)
+          if (t.status === 'done') notify(`${t.versionName} 文档库生成完成(${t.total} 类)`)
+          else if (t.status === 'error') notify(`${t.versionName} 文档库生成失败:${t.error || '未知原因'}`)
+        }
+        window.services.dismissDocsTask(t.id)
+      }
+    })
+  })
+
+  // Ctrl+K / Cmd+K 呼出全局文档搜索
+  const onKeydown = (e: KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault()
+      paletteOpen.value = true
+    }
+  }
+  window.addEventListener('keydown', onKeydown)
+  keydownCleanup = () => window.removeEventListener('keydown', onKeydown)
 })
+
+let keydownCleanup: (() => void) | null = null
 
 onBeforeUnmount(() => {
   if (unwatchTasks) unwatchTasks()
   if (unwatchBackupTasks) unwatchBackupTasks()
   if (unwatchExportTasks) unwatchExportTasks()
+  if (unwatchDocsTasks) unwatchDocsTasks()
+  if (keydownCleanup) keydownCleanup()
 })
+
+/** 文档搜索命中 → 切到文档页并打开对应类 */
+function gotoDocTarget(hit: { className: string, anchor?: string }) {
+  docTarget.value = hit
+  tab.value = 'docs'
+}
 
 function gotoCreate() {
   pendingCreate.value = true
@@ -239,6 +303,11 @@ function gotoCreateBackup(id: string) {
           @navigate="tab = $event"
           @consumed="pendingAddonProject = null"
         />
+        <DocsView
+          v-else-if="tab === 'docs'"
+          :pending-target="docTarget"
+          @consumed="docTarget = null"
+        />
         <BackupsView
           v-else-if="tab === 'backups'"
           :enter-project-id="backupScope"
@@ -249,6 +318,14 @@ function gotoCreateBackup(id: string) {
         <SettingsView v-else />
       </KeepAlive>
     </main>
+
+    <!-- 全局文档搜索(Ctrl+K) -->
+    <DocSearchPalette
+      :open="paletteOpen"
+      @close="paletteOpen = false"
+      @select="gotoDocTarget"
+      @navigate-docs="paletteOpen = false; tab = 'docs'"
+    />
 
     <!-- 全局任务栏:版本页有详细任务卡,其余页面显示紧凑进度条 -->
     <div v-if="tab !== 'versions' && barTasks.length" class="taskbar">

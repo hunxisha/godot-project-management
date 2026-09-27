@@ -8,6 +8,7 @@ const tabs = [
   { key: 'versions', label: '版本', icon: 'package' },
   { key: 'marketplace', label: '市场', icon: 'puzzle' },
   { key: 'addons', label: '已安装', icon: 'check' },
+  { key: 'docs', label: '文档', icon: 'book' },
   { key: 'backups', label: '备份', icon: 'archive' },
   { key: 'settings', label: '设置', icon: 'gear' }
 ]
@@ -110,7 +111,7 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>()
   color: var(--text-3);
 }
 
-/* 7 个标签 + 品牌区接近窗口宽度上限:允许横向滚动,任何宽度下都不换行、不溢出 */
+/* 8 个标签 + 品牌区接近窗口宽度上限:允许横向滚动,任何宽度下都不换行、不溢出 */
 .tabs {
   display: flex;
   gap: 2px;

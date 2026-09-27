@@ -275,6 +275,8 @@ export interface GodotSettings {
   deleteProjectFiles: 'ask' | 'always' | 'never'
   /** 项目备份默认目录 */
   backupRoot?: string
+  /** 文档页上次浏览的文档库版本 id(引擎文档浏览功能) */
+  docsVersionId?: string
   /** 默认备份方式:zip 打包 | copy 完整快照 */
   backupMode?: 'zip' | 'copy'
   /** 默认是否包含 .godot 编辑器缓存 */
