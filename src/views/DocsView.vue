@@ -5,6 +5,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from '../components/Icon.vue'
 import DocClassPanel from '../components/docs/DocClassPanel.vue'
 import { useDocs } from '../composables/useDocs'
+import { notify } from '../services/bridge'
 import type { DocsTask } from '../types/godot'
 
 const props = defineProps<{
@@ -113,6 +114,12 @@ function cancelTask(id: string) {
   window.services.docsCancelTask(id)
 }
 
+/** 发起生成:preload 拒绝入队的原因(版本缺失/在途)必须浮出来,不能静默 */
+function onGenerate(id: string) {
+  const r = generate(id)
+  if (!r.ok) notify(r.error || '无法发起生成')
+}
+
 function applyPending() {
   const t = props.pendingTarget
   if (!t) return
@@ -152,22 +159,22 @@ const PHASE_TEXT: Record<string, string> = {
         <p>从已安装的 Godot 引擎一键导出离线类参考(--dump-extension-api-with-docs),与引擎版本逐字节对应。</p>
       </div>
       <div class="ver-cards">
-        <div v-for="v in versions" :key="v.id" class="ver-card">
+        <div v-for="v in versions" :key="v._id" class="ver-card">
           <div class="vc-main">
             <span class="vc-name">{{ v.name }}</span>
             <span class="vc-sub mono">{{ v.tag }}</span>
           </div>
-          <span class="vc-status" :class="{ ready: statuses[v.id]?.status === 'ready' }">{{ statusText(v.id) }}</span>
+          <span class="vc-status" :class="{ ready: statuses[v._id]?.status === 'ready' }">{{ statusText(v._id) }}</span>
           <button
-            v-if="!activeTaskByVersion[v.id]"
+            v-if="!activeTaskByVersion[v._id]"
             class="btn small"
-            @click="generate(v.id)"
+            @click="onGenerate(v._id)"
           >
             <Icon name="download" :size="12" /> 生成
           </button>
           <span v-else class="vc-progress">
-            <span class="bar"><span class="fill" :style="{ width: activeTaskByVersion[v.id].total ? `${Math.min(100, (activeTaskByVersion[v.id].done / activeTaskByVersion[v.id].total) * 100)}%` : '30%' }"></span></span>
-            <span class="pct">{{ PHASE_TEXT[activeTaskByVersion[v.id].status] || activeTaskByVersion[v.id].status }}</span>
+            <span class="bar"><span class="fill" :style="{ width: activeTaskByVersion[v._id].total ? `${Math.min(100, (activeTaskByVersion[v._id].done / activeTaskByVersion[v._id].total) * 100)}%` : '30%' }"></span></span>
+            <span class="pct">{{ PHASE_TEXT[activeTaskByVersion[v._id].status] || activeTaskByVersion[v._id].status }}</span>
           </span>
         </div>
         <div v-if="!versions.length" class="boot-empty">还没有已安装的引擎 —— 先到「版本」页安装一个 Godot。</div>
@@ -183,7 +190,7 @@ const PHASE_TEXT: Record<string, string> = {
             :value="currentVersionId"
             @change="selectVersion(($event.target as HTMLSelectElement).value)"
           >
-            <option v-for="v in readyVersions" :key="v.id" :value="v.id">{{ v.name }}</option>
+            <option v-for="v in readyVersions" :key="v._id" :value="v._id">{{ v.name }}</option>
           </select>
           <button class="icon-btn" title="管理文档库" @click="managing = !managing">
             <Icon name="gear" :size="14" />
@@ -191,14 +198,14 @@ const PHASE_TEXT: Record<string, string> = {
         </div>
 
         <div v-if="managing" class="manage">
-          <div v-for="v in versions" :key="v.id" class="mg-row">
+          <div v-for="v in versions" :key="v._id" class="mg-row">
             <span class="mg-name mono">{{ v.tag }}</span>
-            <span class="mg-status">{{ statusText(v.id) }}</span>
+            <span class="mg-status">{{ statusText(v._id) }}</span>
             <span class="grow"></span>
-            <button v-if="statuses[v.id]?.status === 'ready' && !activeTaskByVersion[v.id]" class="mini-btn" title="删除文档库" @click="removeLibrary(v.id)">
+            <button v-if="statuses[v._id]?.status === 'ready' && !activeTaskByVersion[v._id]" class="mini-btn" title="删除文档库" @click="removeLibrary(v._id)">
               <Icon name="trash" :size="12" />
             </button>
-            <button v-if="!activeTaskByVersion[v.id]" class="mini-btn" title="生成/重新生成" @click="generate(v.id)">
+            <button v-if="!activeTaskByVersion[v._id]" class="mini-btn" title="生成/重新生成" @click="onGenerate(v._id)">
               <Icon name="refresh" :size="12" />
             </button>
           </div>

@@ -50,6 +50,22 @@ const CLASS_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$|^@[A-Za-z]+$/
 
 // ---------- 路径 ----------
 
+const VERSION_PREFIX = 'godot/version/'
+
+/**
+ * 版本标识归一化:全插件的约定是 versionId = 完整 db 文档 id(godot/version/<tag>-<变体>-<平台>,
+ * 见 install.js 的 version.id),但也接受裸键。返回 docId(查文档用)与 key(路径/db 落盘用的
+ * 安全裸键 —— 完整 id 里的斜杠不能进文件路径)。
+ * @param {string} versionId
+ * @returns {{docId: string, key: string}}
+ */
+function versionKey(versionId) {
+  const input = String(versionId || '').trim()
+  const docId = input.startsWith(VERSION_PREFIX) ? input : VERSION_PREFIX + input
+  const key = docId.slice(VERSION_PREFIX.length).replace(/[^A-Za-z0-9._-]/g, '_')
+  return { docId, key }
+}
+
 /**
  * 文档库根目录:优先设置里的引擎安装根;未设置(用户只导入过本地引擎)时退回家目录。
  * @param {string} [versionId]
@@ -57,7 +73,8 @@ const CLASS_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$|^@[A-Za-z]+$/
 function docsRoot(versionId) {
   const settings = getDoc('godot/settings') || {}
   const base = settings.versionsRoot || path.join(os.homedir(), '.gpm-docs')
-  return versionId ? path.join(base, 'gpm-docs', versionId) : path.join(base, 'gpm-docs')
+  if (!versionId) return path.join(base, 'gpm-docs')
+  return path.join(base, 'gpm-docs', versionKey(versionId).key)
 }
 
 /**
@@ -77,7 +94,7 @@ function libIndexPath(versionId) {
 /**
  * @param {string} versionId
  */
-const DB_ID = (versionId) => `godot/docs/${versionId}`
+const DB_ID = (versionId) => `godot/docs/${versionKey(versionId).key}`
 const FAVORITES_ID = 'godot/docs/favorites'
 const HISTORY_ID = 'godot/docs/history'
 
@@ -333,8 +350,9 @@ function setTask(id, patch) {
 async function runGenerate(taskId) {
   const task = tasks.get(taskId)
   if (!task) return
+  // task.versionId 是完整 db 文档 id(与全插件约定一致),直接查
   const versionId = task.versionId
-  const version = getDoc(`godot/version/${versionId}`)
+  const version = getDoc(versionId)
   if (!version || !version.exePath || !fs.existsSync(version.exePath)) {
     setTask(taskId, { status: 'error', error: '引擎可执行文件不存在' })
     return
@@ -456,14 +474,16 @@ async function runGenerate(taskId) {
  * @returns {{ok: boolean, error?: string, taskId?: string}}
  */
 function generateDocs(versionId) {
-  const version = getDoc(`godot/version/${versionId}`)
+  const { docId } = versionKey(versionId)
+  const version = getDoc(docId)
   if (!version || !version.exePath) return { ok: false, error: '版本不存在或未绑定可执行文件' }
   if (!fs.existsSync(version.exePath)) return { ok: false, error: '引擎可执行文件不存在' }
-  const busy = tasks.list().find((/** @type {any} */ t) => t.versionId === versionId && !tasks.isTerminal(t.status))
+  const key = versionKey(versionId).key
+  const busy = tasks.list().find((/** @type {any} */ t) => versionKey(t.versionId).key === key && !tasks.isTerminal(t.status))
   if (busy) return { ok: false, error: '该版本的文档库正在生成中' }
   const task = tasks.create({
     kind: 'docs',
-    versionId,
+    versionId: docId,
     tag: version.tag,
     versionName: version.name,
     status: 'queued',
@@ -528,7 +548,7 @@ function docsLibraryStatus(versionId) {
       builtAt: record.builtAt
     }
   }
-  const busy = tasks.list().find((/** @type {any} */ t) => t.versionId === versionId && !tasks.isTerminal(t.status))
+  const busy = tasks.list().find((/** @type {any} */ t) => versionKey(t.versionId).key === versionKey(versionId).key && !tasks.isTerminal(t.status))
   if (busy) return { status: 'building', versionId, tag: busy.tag, name: busy.versionName }
   return null
 }

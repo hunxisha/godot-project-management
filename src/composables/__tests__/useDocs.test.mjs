@@ -24,16 +24,18 @@ for (const name of ['usedocs', 'vueshim']) {
 
 const docs = new Map()
 let rev = 0
+const VA = 'godot/version/vA'
+const VB = 'godot/version/vB'
 const VERSIONS = [
-  { _id: 'godot/version/vA', id: 'vA', tag: '4.7.2-stable', name: '4.7.2 Stable', exePath: 'X:/a.exe' },
-  { _id: 'godot/version/vB', id: 'vB', tag: '4.8-dev6', name: '4.8 Dev 6', exePath: 'X:/b.exe' }
+  { _id: 'godot/version/vA', id: 'godot/version/vA', tag: '4.7.2-stable', name: '4.7.2 Stable', exePath: 'X:/a.exe' },
+  { _id: 'godot/version/vB', id: 'godot/version/vB', tag: '4.8-dev6', name: '4.8 Dev 6', exePath: 'X:/b.exe' }
 ]
 let listClassesResult = { ok: false, error: '文档库不存在或未生成' }
 let searchCalls = []
 let generateCalls = []
 let favList = []
 let historyList = []
-let libraryStatuses = { vA: null, vB: null }
+let libraryStatuses = { [VA]: null, [VB]: null }
 
 const dbApi = {
   get: (id) => (docs.has(id) ? { ...docs.get(id) } : null),
@@ -102,49 +104,49 @@ const sleep = (ms = 5) => new Promise((r) => setTimeout(r, ms))
 
 async function main() {
   section('init:无保存选择时落到第一个可用库')
-  docs.set('godot/version/vA', VERSIONS[0])
-  docs.set('godot/version/vB', VERSIONS[1])
-  libraryStatuses = { vA: { status: 'ready', versionId: 'vA', tag: '4.7.2-stable', classCount: 1080 }, vB: null }
+  docs.set(VA, VERSIONS[0])
+  docs.set(VB, VERSIONS[1])
+  libraryStatuses = { [VA]: { status: 'ready', versionId: VA, tag: '4.7.2-stable', classCount: 1080 }, [VB]: null }
   listClassesResult = { ok: true, classes: [{ name: 'Node', inherits: 'Object', brief: '', builtin: false, isSingleton: false, m: [], p: [], s: [], c: [], e: [] }] }
   let { useDocs } = await freshModule()
   const d1 = useDocs()
   d1.init()
   await nextTick()
-  ok(d1.currentVersionId.value === 'vA', '当前库 = 第一个 ready 版本', d1.currentVersionId.value)
+  ok(d1.currentVersionId.value === VA, '当前库 = 第一个 ready 版本', d1.currentVersionId.value)
   ok(d1.classes.value.length === 1 && d1.classes.value[0].name === 'Node', '类列表来自当前库')
-  ok(d1.readyVersions.value.length === 1 && d1.readyVersions.value[0].id === 'vA', 'readyVersions 只含可用库')
+  ok(d1.readyVersions.value.length === 1 && d1.readyVersions.value[0].id === VA, 'readyVersions 只含可用库')
 
   section('init:恢复保存的选择')
-  docs.set('godot/settings', { _id: 'godot/settings', docsVersionId: 'vA' })
-  libraryStatuses = { vA: { status: 'ready', versionId: 'vA', tag: '4.7.2-stable', classCount: 1080 }, vB: null }
+  docs.set('godot/settings', { _id: 'godot/settings', docsVersionId: VA })
+  libraryStatuses = { [VA]: { status: 'ready', versionId: VA, tag: '4.7.2-stable', classCount: 1080 }, [VB]: null }
   ;({ useDocs } = await freshModule())
   const d2 = useDocs()
   d2.init()
-  ok(d2.currentVersionId.value === 'vA', '保存的库可用 → 恢复')
+  ok(d2.currentVersionId.value === VA, '保存的库可用 → 恢复')
 
   section('init:保存的库失效 → 回退')
-  docs.set('godot/settings', { _id: 'godot/settings', docsVersionId: 'vB' })
-  libraryStatuses = { vA: { status: 'ready', versionId: 'vA', tag: '4.7.2-stable', classCount: 1080 }, vB: null }
+  docs.set('godot/settings', { _id: 'godot/settings', docsVersionId: VB })
+  libraryStatuses = { [VA]: { status: 'ready', versionId: VA, tag: '4.7.2-stable', classCount: 1080 }, [VB]: null }
   ;({ useDocs } = await freshModule())
   const d3 = useDocs()
   d3.init()
-  ok(d3.currentVersionId.value === 'vA', '失效库回退到第一个可用', d3.currentVersionId.value)
+  ok(d3.currentVersionId.value === VA, '失效库回退到第一个可用', d3.currentVersionId.value)
   const settingsDoc = docs.get('godot/settings')
-  ok(settingsDoc.docsVersionId === 'vA', '回退后回写 settings', JSON.stringify(settingsDoc))
+  ok(settingsDoc.docsVersionId === VA, '回退后回写 settings', JSON.stringify(settingsDoc))
 
   section('selectVersion 持久化')
-  libraryStatuses = { vA: { status: 'ready', versionId: 'vA', tag: '4.7.2-stable' }, vB: { status: 'ready', versionId: 'vB', tag: '4.8-dev6' } }
+  libraryStatuses = { [VA]: { status: 'ready', versionId: VA, tag: '4.7.2-stable' }, [VB]: { status: 'ready', versionId: VB, tag: '4.8-dev6' } }
   ;({ useDocs } = await freshModule())
   const d4 = useDocs()
   d4.init()
-  d4.selectVersion('vB')
-  ok(d4.currentVersionId.value === 'vB', '切换当前库')
-  ok(docs.get('godot/settings').docsVersionId === 'vB', '选择已持久化')
+  d4.selectVersion(VB)
+  ok(d4.currentVersionId.value === VB, '切换当前库')
+  ok(docs.get('godot/settings').docsVersionId === VB, '选择已持久化')
 
   section('generate → building 状态')
-  const g = d4.generate('vB')
-  ok(g.ok === true && generateCalls[0] === 'vB', 'generate 委托 preload')
-  ok(d4.statuses.value.vB?.status === 'building', '入队后状态转 building', JSON.stringify(d4.statuses.value.vB))
+  const g = d4.generate(VB)
+  ok(g.ok === true && generateCalls[0] === VB, 'generate 委托 preload')
+  ok(d4.statuses.value[VB]?.status === 'building', '入队后状态转 building', JSON.stringify(d4.statuses.value[VB]))
 
   section('收藏与历史')
   d4.toggleFavorite('Node')
@@ -156,7 +158,7 @@ async function main() {
 
   section('search 委托(带当前库 id)')
   d4.search('node', 20)
-  ok(searchCalls.length === 1 && searchCalls[0].versionId === 'vB' && searchCalls[0].query === 'node' && searchCalls[0].limit === 20, '搜索参数透传', JSON.stringify(searchCalls[0]))
+  ok(searchCalls.length === 1 && searchCalls[0].versionId === VB && searchCalls[0].query === 'node' && searchCalls[0].limit === 20, '搜索参数透传', JSON.stringify(searchCalls[0]))
 
   section('继承链与派生(纯前端计算)')
   listClassesResult = {

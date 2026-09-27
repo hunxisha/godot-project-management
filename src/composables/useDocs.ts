@@ -9,7 +9,13 @@ import { computed, ref } from 'vue'
 import { getSettings, saveSettings } from '../services/bridge'
 import type { DocClassSummary, DocHistoryItem, DocLibraryStatus, DocSearchHit, GodotVersion } from '../types/godot'
 
-const versions = ref<GodotVersion[]>([])
+/**
+ * db 行的稳定标识:全插件约定 versionId = 完整 db 文档 id(godot/version/...),即 _id。
+ * (版本数据里同时有 id 与 _id,两者通常相同,但 _id 是 listDocs 行的主键,与 VersionsView 一致。)
+ */
+type VersionRow = GodotVersion & { _id: string }
+
+const versions = ref<VersionRow[]>([])
 const statuses = ref<Record<string, DocLibraryStatus | null>>({})
 const currentVersionId = ref('')
 const classes = ref<DocClassSummary[]>([])
@@ -18,13 +24,13 @@ const history = ref<DocHistoryItem[]>([])
 let initialized = false
 
 /** 已生成文档库的版本 */
-const readyVersions = computed(() => versions.value.filter((v) => statuses.value[v.id]?.status === 'ready'))
+const readyVersions = computed(() => versions.value.filter((v) => statuses.value[v._id]?.status === 'ready'))
 const currentStatus = computed(() => statuses.value[currentVersionId.value] ?? null)
 
 function refreshVersions() {
-  versions.value = (window.ztools.db.allDocs('godot/version/') || []) as unknown as GodotVersion[]
+  versions.value = (window.ztools.db.allDocs('godot/version/') || []) as unknown as VersionRow[]
   const next: Record<string, DocLibraryStatus | null> = {}
-  for (const v of versions.value) next[v.id] = window.services.docsLibraryStatus(v.id)
+  for (const v of versions.value) next[v._id] = window.services.docsLibraryStatus(v._id)
   statuses.value = next
 }
 

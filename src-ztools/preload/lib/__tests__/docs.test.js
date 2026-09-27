@@ -213,9 +213,10 @@ async function waitTask(id) {
   throw new Error('任务超时未完成')
 }
 
-const V1 = 'v1'
-docs.set(`godot/version/${V1}`, {
-  _id: `godot/version/${V1}`,
+// 版本标识用与 install.js 一致的真实形状:id = 完整 db 文档 id(godot/version/...)
+const V1 = 'godot/version/4.7.2-stable-standard-win64'
+docs.set(V1, {
+  _id: V1,
   id: V1,
   tag: '4.7.2-stable',
   name: '4.7.2 Stable',
@@ -284,14 +285,15 @@ async function main() {
   ok(t1.status === 'done', '任务到达 done', JSON.stringify({ status: t1.status, error: t1.error }))
   ok(t1.total === 5 && t1.done === 5, '类计数:3 core + 1 builtin + 1 伪类', `total=${t1.total}`)
 
-  const libDir = path.join(WORK, 'gpm-docs', V1)
+  const libDir = path.join(WORK, 'gpm-docs', '4.7.2-stable-standard-win64')
+  ok(!fs.existsSync(path.join(WORK, 'gpm-docs', 'godot')), '完整 db id 不进文件路径(无嵌套 godot 目录)')
   ok(fs.existsSync(path.join(libDir, 'index.json')), 'index.json 已写盘')
   ok(fs.existsSync(path.join(libDir, 'classes', 'Node.json')), '类正文 Node.json 已写盘')
   ok(fs.existsSync(path.join(libDir, 'classes', 'Object.json')), '空描述类也写盘')
   ok(!fs.readdirSync(libDir).some((n) => n.startsWith('.work-')), '工作临时目录已清理')
 
-  const rec = docs.get(`godot/docs/${V1}`)
-  ok(rec && rec.classCount === t1.total && rec.tag === '4.7.2-stable', 'db 元数据已落库')
+  const rec = docs.get('godot/docs/4.7.2-stable-standard-win64')
+  ok(rec && rec.classCount === t1.total && rec.tag === '4.7.2-stable', 'db 元数据已落库(裸键归一化)')
 
   const st = lib.docsLibraryStatus(V1)
   ok(st && st.status === 'ready' && st.classCount === t1.total, 'docsLibraryStatus=ready')
@@ -350,7 +352,7 @@ async function main() {
   const t4 = await waitTask(g4.taskId)
   ok(t4.status === 'error' && /退出码 1/.test(t4.error), '非零退出码报 error', t4.error)
   ok(fs.existsSync(path.join(libDir, 'index.json')), '失败保留旧库')
-  ok(docs.get(`godot/docs/${V1}`), '失败保留旧 db 记录')
+  ok(docs.get('godot/docs/4.7.2-stable-standard-win64'), '失败保留旧 db 记录')
   ok(lib.docsListClasses(V1).ok === true, '旧库仍可浏览')
   ok(!fs.readdirSync(path.join(WORK, 'gpm-docs')).some((n) => n.startsWith('.work-')), '失败后暂存目录已清理')
   state.exitCode = 0
@@ -368,7 +370,7 @@ async function main() {
   ok(info.libraries.length === 1 && info.libraries[0].versionId === V1 && info.sizeBytes > 0, 'docsCacheInfo 统计', JSON.stringify(info))
   lib.docsCleanCache([V1])
   ok(!fs.existsSync(libDir), '清理后目录删除')
-  ok(!docs.get(`godot/docs/${V1}`), '清理后 db 记录删除')
+  ok(!docs.get('godot/docs/4.7.2-stable-standard-win64'), '清理后 db 记录删除')
   ok(JSON.stringify(lib.docsListFavorites()) === '["Vector2"]' && lib.docsListHistory().length === 30, '收藏/历史不受清理影响')
   ok(lib.docsListClasses(V1).ok === false, '清理后列表返回错误')
 
