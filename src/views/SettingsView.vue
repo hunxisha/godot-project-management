@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
-import { getSettings, notify, openPath, pickDirectory, saveSettings } from '../services/bridge'
+import { getSettings, notify, openPath, pickDirectory, pickFile, saveSettings } from '../services/bridge'
 import Icon from '../components/Icon.vue'
 import ThemeSwitcher from '../components/ThemeSwitcher.vue'
-import type { OpenAction } from '../types/godot'
+import type { NetworkCheckResult, OpenAction } from '../types/godot'
 
 const state = reactive({ ...getSettings() })
 const apiKeyInput = ref('')
@@ -26,6 +26,64 @@ function chooseBackupRoot() {
   if (dir) {
     state.backupRoot = dir
     patchNow()
+  }
+}
+
+// ---------- 数据迁移 / 网络诊断 ----------
+
+const dtBusy = ref(false)
+
+function exportData() {
+  if (dtBusy.value) return
+  const dir = pickDirectory('选择导出位置')
+  if (!dir) return
+  dtBusy.value = true
+  try {
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+    const r = window.services.exportPluginData(`${dir}\\ztools-godot-data-${stamp}.json`.replace(/\//g, '\\'))
+    if (r.ok) notify(`已导出:${r.projects} 个项目、${r.favorites} 条收藏(设置已包含)`)
+    else notify(r.error || '导出失败')
+  } finally {
+    dtBusy.value = false
+  }
+}
+
+function importData() {
+  if (dtBusy.value) return
+  const file = pickFile('选择要导入的数据文件', ['json'])
+  if (!file) return
+  dtBusy.value = true
+  try {
+    const r = window.services.importPluginData(file)
+    if (r.ok) {
+      const parts = [`项目新增 ${r.projectsAdded} 个`]
+      if (r.projectsOffline) parts.push(`本机不存在 ${r.projectsOffline} 个(已跳过)`)
+      if (r.projectsSkipped) parts.push(`无效 ${r.projectsSkipped} 个`)
+      parts.push(`收藏新增 ${r.favoritesAdded} 条`, `设置补齐 ${r.settingsAdopted} 项`)
+      notify(`导入完成:${parts.join(', ')}`)
+      Object.assign(state, getSettings())
+    } else {
+      notify(r.error || '导入失败')
+    }
+  } finally {
+    dtBusy.value = false
+  }
+}
+
+const netChecking = ref(false)
+const netResults = ref<NetworkCheckResult[]>([])
+
+async function runDiagnostics() {
+  if (netChecking.value) return
+  netChecking.value = true
+  netResults.value = []
+  try {
+    const r = await window.services.runNetworkDiagnostics()
+    netResults.value = r.results || []
+  } catch (e: any) {
+    notify(e?.message || '诊断失败')
+  } finally {
+    netChecking.value = false
   }
 }
 
@@ -337,6 +395,50 @@ function openStoreSite() {
         </label>
       </div>
     </div>
+
+    <div class="card section">
+      <div class="sec-head">
+        <span class="sec-ico"><Icon name="hard-drive" :size="15" /></span>
+        <span class="sec-title">数据迁移</span>
+      </div>
+      <div class="sec-body dt-body">
+        <button class="btn" :disabled="dtBusy" @click="exportData">
+          <Icon name="upload" :size="13" /> 导出数据
+        </button>
+        <button class="btn" :disabled="dtBusy" @click="importData">
+          <Icon name="download" :size="13" /> 导入数据
+        </button>
+      </div>
+      <div class="hint">
+        导出内容:设置、项目清单、市场收藏(打包为一个 JSON 文件)。导入时:项目只登记本机路径存在的条目;
+        收藏按 assetId 合并不覆盖已有;设置只补本机缺失的键(安装目录、代理这类机器本地配置不会被导入值覆盖)。
+      </div>
+    </div>
+
+    <div class="card section">
+      <div class="sec-head">
+        <span class="sec-ico"><Icon name="globe" :size="15" /></span>
+        <span class="sec-title">网络诊断</span>
+      </div>
+      <div class="sec-body dt-body">
+        <button class="btn" :disabled="netChecking" @click="runDiagnostics">
+          <span v-if="netChecking" class="spin"></span>
+          <Icon v-else name="globe" :size="13" />
+          {{ netChecking ? '检测中…' : '开始检测' }}
+        </button>
+      </div>
+      <div v-if="netResults.length" class="net-results">
+        <div v-for="r in netResults" :key="r.name" class="net-row" :class="{ bad: !r.ok }">
+          <Icon :name="r.ok ? 'check' : 'alert'" :size="13" />
+          <span class="net-name">{{ r.name }}</span>
+          <span class="net-ms mono">{{ r.ok ? `${r.ms} ms` : '不可达' }}</span>
+          <span v-if="!r.ok" class="net-err">{{ r.error }}</span>
+        </div>
+        <div class="hint">
+          诊断走的是插件的实际网络链路(含代理设置);GitHub 不可达时引擎下载与导出模板会受影响。
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -512,5 +614,51 @@ function openStoreSite() {
 
 .switch-row .switch {
   margin-left: auto;
+}
+
+/* 数据迁移 / 网络诊断 */
+.dt-body {
+  display: flex;
+  gap: 8px;
+}
+
+.net-results {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.net-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  color: var(--ok);
+}
+
+.net-row.bad {
+  color: var(--danger);
+}
+
+.net-name {
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.net-ms {
+  color: var(--text-3);
+  min-width: 60px;
+}
+
+.net-err {
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

@@ -12,6 +12,8 @@ const { launchProject } = require('./lib/launcher')
 const assets = require('./lib/assets')
 const templates = require('./lib/templates')
 const exporter = require('./lib/exporter')
+const datatransfer = require('./lib/datatransfer')
+const diagnostics = require('./lib/diagnostics')
 
 /** @type {import('../../src/types/services').Services} */
 window.services = {
@@ -62,6 +64,16 @@ window.services = {
   cancelExportTask: (id) => exporter.cancelExportTask(id),
   /** 移除导出任务记录 */
   dismissExportTask: (id) => exporter.dismissExportTask(id),
+  /** 导出历史(时间倒序;projectId 省略时返回全部) */
+  listExportHistory: (projectId) => exporter.listExportHistory(projectId),
+  /** 删除一条导出历史记录(只删记录,不动产物文件) */
+  removeExportHistoryEntry: (id) => exporter.removeExportHistoryEntry(id),
+  /** 导出插件数据(设置+项目清单+市场收藏)到 JSON 文件 */
+  exportPluginData: (destPath) => datatransfer.exportPluginData(destPath),
+  /** 从 JSON 文件导入插件数据(项目仅登记本机存在的路径;收藏合并;设置只补缺失键) */
+  importPluginData: (srcPath) => datatransfer.importPluginData(srcPath),
+  /** 网络诊断:依次探测商店 API/GitHub/官方 CDN 的可达性与延迟 */
+  runNetworkDiagnostics: () => diagnostics.runNetworkDiagnostics(),
   /** 备份项目:先写临时产物,成功后原子改名并落库;失败/取消不留痕迹 */
   backupProject: (projectId, opts, onProgress) => backup.backupProject(projectId, opts, onProgress),
   /** 预估备份规模(文件数 + 字节) */

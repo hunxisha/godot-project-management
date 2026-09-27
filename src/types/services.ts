@@ -20,7 +20,9 @@ import type {
   GodotProject,
   ExportPreset,
   ExportTask,
+  ExportHistoryEntry,
   AssetDetail,
+  NetworkCheckResult,
   GodotRelease,
   GodotVersion,
   InstallPlan,
@@ -84,6 +86,24 @@ export interface Services {
   cancelExportTask(id: string): void
   /** 移除导出任务记录 */
   dismissExportTask(id: string): void
+  /** 导出历史(时间倒序;projectId 省略时返回全部) */
+  listExportHistory(projectId?: string): ExportHistoryEntry[]
+  /** 删除一条导出历史记录(只删记录,不动产物文件) */
+  removeExportHistoryEntry(id: string): { ok: boolean }
+  /** 导出插件数据(设置+项目清单+市场收藏)到 JSON 文件 */
+  exportPluginData(destPath: string): { ok: boolean, error?: string, projects?: number, favorites?: number }
+  /** 从 JSON 文件导入插件数据(项目仅登记本机存在的路径;收藏合并;设置只补缺失键) */
+  importPluginData(srcPath: string): {
+    ok: boolean
+    error?: string
+    projectsAdded?: number
+    projectsOffline?: number
+    projectsSkipped?: number
+    favoritesAdded?: number
+    settingsAdopted?: number
+  }
+  /** 网络诊断:依次探测商店 API/GitHub/官方 CDN 的可达性与延迟 */
+  runNetworkDiagnostics(): Promise<{ ok: boolean, results: NetworkCheckResult[] }>
   /** 查询项目的 .godot 编辑器缓存大小 */
   getProjectCacheInfo(projectId: string): { ok: boolean, error?: string, exists?: boolean, size?: number }
   /** 清理项目的 .godot 编辑器缓存 */

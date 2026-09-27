@@ -6,7 +6,7 @@
 const { spawn } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
-const { getDoc } = require('./store')
+const { getDoc, putDoc, removeDoc, listDocs } = require('./store')
 const { ensureDir } = require('./extract')
 const { createTaskQueue } = require('./taskqueue')
 const { exportTemplateStatus } = require('./templates')
@@ -176,6 +176,23 @@ function runExport(params) {
       if (canceled) {
         setTask(id, { status: 'canceled' })
       } else if (code === 0) {
+        // 导出成功:落一条历史记录(产物大小以实际文件为准)
+        let size = 0
+        try { size = fs.statSync(outputPath).size } catch (e) { /* 产物可能被移走,大小记 0 */ }
+        try {
+          const histId = `godot/export/${params.projectId}/${Date.now()}`
+          putDoc(histId, {
+            // id 显式入库:listExportHistory 的条目按此字段删除(渲染层不接触 _id)
+            id: histId,
+            projectId: params.projectId,
+            projectName: project.name,
+            presetName: preset.name,
+            outputPath,
+            mode,
+            size,
+            finishedAt: Date.now()
+          })
+        } catch (e) { /* 历史落库失败不影响导出结果 */ }
         setTask(id, { status: 'done' })
       } else {
         setTask(id, { status: 'error', error: `导出失败(退出码 ${code})` })
@@ -218,11 +235,33 @@ function watchExportTasks(fn) {
   return tasks.watch(fn)
 }
 
+/**
+ * 导出历史(时间倒序;projectId 省略时返回全部)。
+ * @param {string} [projectId]
+ * @returns {{id: string, projectId: string, projectName: string, presetName: string, outputPath: string, mode: string, size: number, finishedAt: number}[]}
+ */
+function listExportHistory(projectId) {
+  const prefix = projectId ? `godot/export/${projectId}/` : 'godot/export/'
+  return listDocs(prefix).sort((a, b) => (b.finishedAt || 0) - (a.finishedAt || 0))
+}
+
+/**
+ * 删除一条导出历史记录(只删记录,不动产物文件)。
+ * @param {string} id
+ * @returns {{ok: boolean}}
+ */
+function removeExportHistoryEntry(id) {
+  removeDoc(id)
+  return { ok: true }
+}
+
 module.exports = {
   parseExportPresets,
   listExportPresets,
   runExport,
   cancelExportTask,
   dismissExportTask,
-  watchExportTasks
+  watchExportTasks,
+  listExportHistory,
+  removeExportHistoryEntry
 }

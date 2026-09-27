@@ -65,7 +65,9 @@ stub('extract.js', {
     fs.writeFileSync(path.join(installDir, 'Godot_v4.7.2-stable_win64.exe'), 'fake')
     extracted.push(installDir)
   },
-  dirSize: () => 12345
+  dirSize: () => 12345,
+  // install.js 下载后会做 zip 预检;桩里视为合法压缩包
+  inspectZip: () => ({ ok: true, entries: ['Godot.exe'] })
 })
 
 const FAKE_EXE = path.join('C:', 'fake', 'Godot.exe')

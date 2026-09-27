@@ -101,6 +101,27 @@ export interface AssetDetail {
   lastUpdated: string
 }
 
+/** 导出历史条目 */
+export interface ExportHistoryEntry {
+  id: string
+  projectId: string
+  projectName: string
+  presetName: string
+  outputPath: string
+  mode: string
+  size: number
+  finishedAt: number
+}
+
+/** 网络诊断单项结果 */
+export interface NetworkCheckResult {
+  name: string
+  url: string
+  ok: boolean
+  ms: number
+  error?: string
+}
+
 /** 插件设置 */
 export interface GodotSettings {
   /** 引擎安装根目录(首次下载时选择并保存) */

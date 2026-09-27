@@ -2,7 +2,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const { downloadResumable } = require('./http')
-const { extractZip, ensureDir, dirSize } = require('./extract')
+const { extractZip, ensureDir, dirSize, inspectZip } = require('./extract')
 const { findExecutable, verifyExecutable, parseVersionOutput, parseTagFromFileName, currentPlatform, displayName } = require('./godotExe')
 const { putDoc, removeDoc } = require('./store')
 const { createTaskQueue } = require('./taskqueue')
@@ -82,6 +82,10 @@ function downloadAndInstall(params, opts) {
       await dl.promise
       const afterDownload = tasks.get(id)
       if (!afterDownload || afterDownload.status === 'canceled') return
+
+      // zip 预检:解压前先验证压缩包可解析,拦住「下到半个文件」的坏包
+      const insp = inspectZip(zipPath)
+      if (!insp.ok) throw new Error(`下载的压缩包无法解析(${insp.error}),请重试(已完成部分会保留)`)
 
       setTask(id, { status: 'extracting' })
       await extractZip(zipPath, installDir)

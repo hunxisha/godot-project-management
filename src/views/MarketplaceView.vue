@@ -49,7 +49,10 @@ const {
   searchError,
   results,
   hasSearched,
-  onSearchEnter
+  page: searchPage,
+  pages: searchPages,
+  onSearchEnter,
+  changePage: changeSearchPage
 } = useMarketSearch({
   hydrate: hydrateVersions,
   // 模板模式下搜索查 type=1;mode 在下方 useMarketBrowse 里声明,闭包到搜索时才求值
@@ -306,10 +309,19 @@ watch(
         <Icon name="x" :size="11" />
       </div>
 
-      <!-- 搜索结果概要 -->
+      <!-- 搜索结果概要(服务端分页,每页 20;多页时提供翻页) -->
       <div v-if="query.trim() && hasSearched && !searchError && !browsing" class="result-line">
         <span class="rl-text">
           “{{ query.trim() }}” 的搜索结果 · {{ displayAssets.length }} 项<template v-if="tagFilter">({{ tagFilter }})</template>
+        </span>
+        <span v-if="searchPages > 1" class="search-pager">
+          <button class="btn small" :disabled="searchPage <= 1 || searching" @click="changeSearchPage(-1)">
+            <Icon name="chevron-left" :size="12" />
+          </button>
+          <span class="search-page-info mono">{{ searchPage }} / {{ searchPages }}</span>
+          <button class="btn small" :disabled="searchPage >= searchPages || searching" @click="changeSearchPage(1)">
+            <Icon name="chevron-right" :size="12" />
+          </button>
         </span>
         <span class="grow"></span>
         <button class="btn small ghost" @click="query = ''"><Icon name="x" :size="11" /> 清除搜索</button>
@@ -651,6 +663,20 @@ watch(
 .rl-text {
   font-size: 12.5px;
   color: var(--text-2);
+}
+
+/* 搜索分页(服务端分页,每页 20) */
+.search-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.search-page-info {
+  font-size: 11.5px;
+  color: var(--text-3);
+  min-width: 44px;
+  text-align: center;
 }
 
 /* 收藏失败诊断条:仅失败时渲染,点击可关闭 */

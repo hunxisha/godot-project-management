@@ -1,6 +1,7 @@
 # Godot 项目管理
 
-> 下载并管理 Godot 引擎版本、隔离并快捷打开不同版本的项目、浏览安装 Godot 插件、为项目做完整备份。
+> 下载并管理 Godot 引擎版本与导出模板、隔离并快捷打开项目、浏览官方资产市场并安装插件与素材、
+> 一键 headless 导出游戏、为项目做完整备份。
 
 ZTools 插件。渲染层为 **Vue 3 + Vite + TypeScript**，Node 能力由 **preload 层**（CommonJS）注入，
 两者之间只通过 `window.services`（预加载能力）与 `window.ztools`（宿主 API）两个全局对象通信。
@@ -14,12 +15,27 @@ ZTools 插件。渲染层为 **Vue 3 + Vite + TypeScript**，Node 能力由 **pr
 | 页面 | 内容 |
 |---|---|
 | **概览** | 项目与引擎统计、收藏项目快捷入口、默认引擎 |
-| **项目** | 添加/新建/删除项目、绑定引擎版本、拖入 `project.godot` 或项目文件夹、版本不匹配提醒、收藏、**创建备份** |
-| **版本** | 从 GitHub 拉取引擎版本列表（24h 缓存）、队列式下载安装、解压校验、导入本地引擎、删除已装版本 |
-| **市场** | 官方 Asset Store 浏览（热门/推荐/新品/最近更新/收藏 + 标签筛选 + 分页）、按版本安装、支持安装任意历史 release |
-| **已安装** | 列出项目 `addons/` 下的插件、启用/禁用、卸载、从历史版本替换、插件名跳转资产库、批量操作、复制到其他项目（**保留市场来源**） |
+| **项目** | 添加/新建/删除项目（支持「从市场模板创建」）、绑定引擎版本、拖入 `project.godot` 或项目文件夹、版本不匹配提醒、收藏、创建备份、**一键导出**（见下）、自定义启动参数、`.godot` 缓存清理 |
+| **版本** | 引擎版本列表（官方归档 + 24h 缓存）、队列式下载安装（**断点续传 + 自动重试**）、解压前 zip 预检、导入本地引擎、删除已装版本、**导出模板下载/安装/卸载**（遵循 Godot 目录规则，含 `._sc_` 自包含模式） |
+| **市场** | 官方 Asset Store：插件/素材浏览（全部/模板/推荐/新品/最近更新/收藏 + 标签筛选 + 服务端分页搜索翻页）、**内容嗅探安装**（插件进 `addons/`，纯素材按原结构入项目根）、安装确认预览（类型/冲突/wrapper 并入选项）、完整项目一键**另存为新项目**、仅下载 zip、资产详情（截图/许可/评分）、**全库更新巡检**、插件与素材**复制到其他项目** |
+| **已安装** | 插件/素材分区展示、启用/禁用、卸载（Windows 移入回收站）、从历史版本替换、批量操作、检查更新 |
 | **备份** | 全部项目备份的集中管理：统计、搜索、筛选、按项目分组 / 时间轴、批量删除、备注、完整性校验、保留策略清理、三步恢复向导 |
-| **设置** | 主题（5 色板 × 明暗）、引擎目录、网络代理、Asset Store 账号、默认打开动作、删除项目行为、备份默认项 |
+| **设置** | 主题（5 色板 × 明暗）、引擎目录、网络代理、Asset Store 账号、默认打开动作、删除项目行为、备份默认项、**数据导出/导入**（换机迁移）、**网络诊断** |
+
+### 一键导出
+
+项目的 `export_presets.cfg` 会被解析成预设列表，选择后调用引擎 CLI
+（`--headless --export-release / --export-pack`）完成导出：
+
+- 导出前预检该引擎版本的**导出模板**是否就绪，缺模板可一键下载（进度走全局任务栏）；
+- 引擎输出尾行实时展示，可取消，失败带诊断日志；
+- 支持「导出全部预设」（串行队列）；导出历史落库（产物大小/路径/时间），可打开所在目录。
+
+### 素材与插件怎么区分
+
+商店 API 的类型字段把纯素材（模型/精灵等）也归在 Addon 下，不可信。安装时以 **zip 内容嗅探**
+为唯一判据：含 `plugin.cfg` 走插件链路（进 `addons/` 并按设置启用）；否则视为纯素材，按包内
+原结构写入项目根，并记录文件清单——卸载按清单精确回收（Windows 移入回收站），更新先清后装。
 
 ### 触发指令
 
@@ -41,35 +57,36 @@ ZTools 插件。渲染层为 **Vue 3 + Vite + TypeScript**，Node 能力由 **pr
   刻意不随色板变化——前者承载含义，后者用于区分项目。新增色板的步骤与对比度门槛见
   [docs/theme-system.md](docs/theme-system.md)。
 - **数据存储**：全部状态存在 ZTools 的 db 中（无独立数据库文件），按文档 ID 前缀区分：
-  `godot/settings`、`godot/version/*`、`godot/project/*`、`godot/asset/*`、`godot/backup/*`。
+  `godot/settings`、`godot/version/*`、`godot/project/*`、`godot/asset/*`、`godot/backup/*`、
+  `godot/templates/*`、`godot/export/*`、`godot/cache/*`。
+  换机迁移用「设置 → 数据导出/导入」：项目只登记本机存在的路径，收藏按 assetId 合并，设置只补缺失键。
 
 ## 目录结构
 
 ```
 ├── src/                          渲染层(Vue 3 + TypeScript)
 │   ├── main.ts                   入口 + 环境守卫(缺少宿主 API 时给出可执行提示)
-│   ├── App.vue                   标签路由、KeepAlive、全局任务栏
+│   ├── App.vue                   标签路由、KeepAlive、全局任务栏(下载/备份/导出)
 │   ├── main.css                  设计令牌与 10 套主题
 │   ├── views/                    7 个页面
-│   ├── components/               通用组件与 dialogs/ 下的 4 个对话框
-│   ├── composables/              useBackups(备份状态) / useTheme(主题) / useProjectActions
+│   ├── components/               通用组件与 dialogs/ 下的对话框
+│   ├── composables/              备份/主题/市场浏览·搜索·安装·巡检/导出/项目操作等组合式函数
 │   ├── services/bridge.ts        宿主 API 统一出口
 │   ├── types/godot.ts            领域模型与文档 ID 约定
-│   └── utils/format.ts           共享格式化
+│   ├── types/services.ts         window.services 契约(唯一权威,编译器强制两侧一致)
+│   └── utils/                    共享工具(格式化/版本兼容/标签分组/头像渐变)
 ├── src-ztools/                   ZTools 插件目录
 │   ├── plugin.json               插件清单(指令、preload、图标、平台)
 │   ├── logo.png
 │   ├── preload/
 │   │   ├── services.js           window.services 门面
-│   │   └── lib/                  领域模块:releases/install/extract/godotExe/projects/
-│   │                             launcher/assets/backup + 基础设施 http/store/fsutil
+│   │   ├── sandbox.d.ts          手写精简沙箱声明(刻意不声明 setImmediate)
+│   │   └── lib/                  领域模块:releases/install/templates/exporter/extract/
+│   │                             godotExe/projects/launcher/assets/backup/datatransfer/
+│   │                             diagnostics + 基础设施 http/store/fsutil/taskqueue
 │   └── dist/                     构建产物(git 忽略)
-├── src-ztools/preload/lib/__tests__/   preload 回归测试
-├── src/composables/__tests__/          组合式函数回归测试 + .ts 打包脚本
-├── src/__tests__/                      主题与格式化回归测试
-│   ├── backup-redesign-plan.md    备份功能的设计与实施计划
-│   ├── theme-system.md            主题（色板 × 明暗）系统说明
-│   └── glossary.md                术语表（正名 + 实现入口）
+├── docs/                         设计文档(备份/主题/优化计划/GodotHub 集成策划/术语表)
+└── */__tests__/                  回归测试(preload 与渲染层)
 ```
 
 ## 开发
@@ -89,18 +106,17 @@ npm run build      # vue-tsc 类型检查 + 构建到 src-ztools/dist/
 
 ```bash
 npm run verify     # 类型检查 + 全部回归断言（提交前跑这一条）
-npm test           # 全部 1235 项断言（其中 2 项默认跳过，见下）
+npm test           # 全部断言（数量随版本增长,各套件实况见下）
 ```
 
-| 命令 | 覆盖 | 断言 |
-|---|---|---|
-| `npm run typecheck` | `vue-tsc --noEmit` 类型检查 | — |
-| `npm run test:theme` | 主题令牌完整性、设计约束、10 种组合的 WCAG 对比度 | 134 |
-| `npm run test:preload` | 备份领域层：创建/查询/校验/恢复/取消/清理/删除 | 101（+1 跳过） |
-| `npm run test:preload:sandbox` | 同上，但先删掉 `setImmediate` 以模拟宿主沙箱 | 101（+1 跳过） |
-| `npm run test:preload:unit` | 版本串解析/展示名/平台标识、任务队列语义、文件系统工具与分片让出降级链、HTTP 下载与代理、下载安装编排、`window.services` 与类型契约的逐项一致性 | 230 |
-| `npm run test:addons` | 插件来源解析与复制过户（默认 + 沙箱各一遍） | 40 ×2 |
-| `npm run test:renderer` | 渲染层:纯工具(版本兼容/标签分组/头像渐变/格式化)、备份与恢复对话框骨架、市场搜索/浏览/安装、项目列表与新建删除、插件多选/批量/更新/切版本、备份页删除确认与批量备份 | 589 |
+| 命令 | 覆盖 |
+|---|---|
+| `npm run typecheck` | `vue-tsc` 渲染层 + `tsc` preload 双层类型检查 |
+| `npm run test:theme` | 主题令牌完整性、设计约束、10 种组合的 WCAG 对比度 |
+| `npm run test:preload` / `:sandbox` | 备份领域层全套（后者先删掉 `setImmediate` 模拟宿主沙箱） |
+| `npm run test:preload:unit` | 版本解析、任务队列、文件工具、HTTP 下载与**断点续传**、引擎安装、**导出模板**、**一键导出**、启动参数拆分、**数据迁移/网络诊断**、services 契约一致性 |
+| `npm run test:addons` | 插件/素材来源、安装分流、清单卸载、复制过户（默认 + 沙箱各一遍） |
+| `npm run test:renderer` | 渲染层:市场搜索(分页/竞态守卫)/浏览/安装确认层、项目列表、已装操作、备份、纯工具 |
 
 提交与 PR 由 GitHub Actions 跑同一条命令（见 `.github/workflows/ci.yml`）。
 
@@ -119,7 +135,8 @@ npm test           # 全部 1235 项断言（其中 2 项默认跳过，见下�
 
 - Node.js ≥ 18（构建与测试）
 - ZTools 宿主（运行插件）
-- 网络：版本列表走 GitHub，插件市场走 store.godotengine.org，均可通过设置中的 HTTP 代理转发
+- 网络：引擎与模板走 GitHub/官方 CDN，市场走 store.godotengine.org，均可通过设置中的 HTTP 代理转发
+  （设置 → 网络诊断可一键探测三条链路）
 
 ## 许可
 

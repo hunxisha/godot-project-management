@@ -220,6 +220,24 @@ function trashPath(p, isDir) {
 }
 
 /**
+ * 批量移入回收站:单个失败不中断其余,失败项原样返回(调用方决定是否提示)。
+ * @param {{path: string, isDir?: boolean}[]} items
+ * @returns {string[]} 移入回收站失败的路径
+ */
+function trashPaths(items) {
+  /** @type {string[]} */
+  const failed = []
+  for (const item of items || []) {
+    try {
+      trashPath(item.path, item.isDir)
+    } catch (e) {
+      failed.push(item.path)
+    }
+  }
+  return failed
+}
+
+/**
  * 静默删除(用于清理临时产物,失败不抛)。
  * @param {string} [p]
  */
@@ -348,6 +366,7 @@ module.exports = {
   stampSec,
   uniquePath,
   trashPath,
+  trashPaths,
   rmQuiet,
   tempPath,
   makeExcluder,

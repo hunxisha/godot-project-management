@@ -24,6 +24,10 @@ export function useMarketSearch(opts: UseMarketSearchOptions) {
   const results = ref<MarketAsset[]>([])
   /** 已完成过一次搜索(用来区分「防抖等待中」与「确实没有结果」) */
   const hasSearched = ref(false)
+  /** 当前搜索页(服务端分页,每页 20) */
+  const page = ref(1)
+  /** 服务端返回的总页数 */
+  const pages = ref(1)
 
   let timer: ReturnType<typeof setTimeout> | null = null
   /** 搜索序号:回车立即搜索与防抖搜索可能并发,旧请求晚到时不得覆盖新结果 */
@@ -42,9 +46,10 @@ export function useMarketSearch(opts: UseMarketSearchOptions) {
     searchError.value = ''
     try {
       const assetType = opts.getAssetType?.() ?? 0
-      const r = await window.services.searchAssets(query.value.trim(), undefined, 1, assetType)
+      const r = await window.services.searchAssets(query.value.trim(), undefined, page.value, assetType)
       if (mySeq !== seq) return
       results.value = r.result
+      pages.value = r.pages || 1
       await opts.hydrate(results.value)
     } catch (e: any) {
       if (mySeq !== seq) return
@@ -57,9 +62,19 @@ export function useMarketSearch(opts: UseMarketSearchOptions) {
     }
   }
 
-  /** 回车立即搜索(绕过防抖) */
+  /** 回车立即搜索(绕过防抖;回到第 1 页) */
   function onSearchEnter() {
     if (!query.value.trim()) return
+    cancelPending()
+    page.value = 1
+    search()
+  }
+
+  /** 翻页(上一页/下一页,立即请求当前关键词对应页) */
+  function changePage(delta: number) {
+    const next = page.value + delta
+    if (!query.value.trim() || next < 1 || next > pages.value) return
+    page.value = next
     cancelPending()
     search()
   }
@@ -69,15 +84,18 @@ export function useMarketSearch(opts: UseMarketSearchOptions) {
     results.value = []
     searchError.value = ''
     hasSearched.value = false
+    page.value = 1
+    pages.value = 1
   }
 
-  // 输入防抖自动搜索
+  // 输入防抖自动搜索;换词回到第 1 页
   watch(query as Ref<string>, () => {
     cancelPending()
     if (!query.value.trim()) {
       reset()
       return
     }
+    page.value = 1
     timer = setTimeout(search, debounceMs)
   })
 
@@ -90,8 +108,11 @@ export function useMarketSearch(opts: UseMarketSearchOptions) {
     searchError,
     results,
     hasSearched,
+    page,
+    pages,
     search,
     onSearchEnter,
+    changePage,
     /** 关键词是否非空(视图用来决定「显示搜索结果还是浏览列表」) */
     isSearching: () => !!query.value.trim(),
     cancelPending,

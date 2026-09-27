@@ -288,6 +288,41 @@ section('10. useMarketSearch:竞态守卫,旧请求晚到不覆盖新结果')
   s.cancelPending()
 }
 
+section('11. useMarketSearch:搜索分页(服务端页码状态)')
+{
+  reset()
+  const s = useMarketSearch({ hydrate: () => {}, debounceMs: 60000 })
+  window.services.searchAssets = (...args) => {
+    searchCalls.push(args[0])
+    searchArgList.push(args)
+    const p = args[2] || 1
+    return Promise.resolve({ result: [{ assetId: `r/${p}`, title: `P${p}` }], page: p, pages: 3 })
+  }
+  s.query.value = 'godot'
+  await s.search()
+  ok(searchArgList[0][2] === 1, '首次搜索请求第 1 页', JSON.stringify(searchArgList[0]))
+  ok(s.pages.value === 3, '记录服务端总页数', String(s.pages.value))
+
+  s.changePage(1)
+  await sleep(10)
+  ok(searchArgList[1][2] === 2, '下一页请求第 2 页', JSON.stringify(searchArgList[1]))
+  ok(s.results.value[0].assetId === 'r/2', '结果刷新为第 2 页内容')
+
+  s.changePage(-1)
+  await sleep(10)
+  ok(searchArgList[2][2] === 1, '上一页回到第 1 页')
+
+  s.changePage(-1)
+  await sleep(10)
+  ok(searchArgList.length === 3, '已在第 1 页时上一页不发请求')
+
+  // 换词回到第 1 页
+  s.query.value = 'new-word'
+  await sleep(10)
+  ok(searchArgList[searchArgList.length - 1][2] === 1, '新关键词从第 1 页开始', JSON.stringify(searchArgList[searchArgList.length - 1]))
+  s.cancelPending()
+}
+
 // ---------- 结果 ----------
 console.log(`\n${'='.repeat(56)}`)
 console.log(`PASS ${pass}  FAIL ${failures.length}`)

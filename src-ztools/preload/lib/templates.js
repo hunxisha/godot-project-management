@@ -16,7 +16,8 @@ const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
 const { downloadResumable } = require('./http')
-const { extractZip, ensureDir, dirSize } = require('./extract')
+const { extractZip, ensureDir, dirSize, inspectZip } = require('./extract')
+const { trashPath } = require('./fsutil')
 const { currentPlatform } = require('./godotExe')
 const { getDoc, putDoc, removeDoc } = require('./store')
 
@@ -202,6 +203,10 @@ function downloadAndInstallTemplates({ versionId }, opts) {
       await dl.promise
       if (!tasks.get(id) || tasks.get(id).status === 'canceled') return
 
+      // zip 预检:解压前先验证压缩包可解析,拦住「下到半个文件」的坏包
+      const insp = inspectZip(zipPath)
+      if (!insp.ok) throw new Error(`下载的压缩包无法解析(${insp.error}),请重试(已完成部分会保留)`)
+
       setTask(id, { status: 'extracting' })
       tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ztools-godot-tpl-'))
       const extractDir = path.join(tmpDir, 'x')
@@ -275,7 +280,8 @@ function uninstallExportTemplates(opts) {
     const versionDir = (doc && doc.versionDir) || versionDirFromTag(v.tag)
     const base = templatesBase || resolveTemplatesBase(v.exePath).base
     const dir = path.join(base, versionDir)
-    if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true })
+    // 显式卸载走回收站(与项目删除一致),误删可恢复
+    if (fs.existsSync(dir)) trashPath(dir, true)
     removeDoc(`godot/templates/${versionId}`)
     return { ok: true }
   } catch (e) {

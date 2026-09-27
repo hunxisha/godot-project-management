@@ -58,7 +58,7 @@ global.window = {
 // ---------- http 打桩(必须在 require assets.js 之前) ----------
 // 网络层替换为本地夹具:getJson 路由到预置的 detail/releases,downloadFile 直接复制夹具 zip;
 // holdDownload 模式让下载挂起(预览取消测试用),cancel 即以「已取消」拒绝。
-const state = { fixtureZip: '', downloads: 0, releaseCalls: 0, holdDownload: false, rejectHold: null }
+const state = { fixtureZip: '', downloads: 0, releaseCalls: 0, holdDownload: false, rejectHold: null, garbageDownload: false }
 const routes = { detail: {}, releases: {} }
 
 function stub(relFile, exports) {
@@ -92,6 +92,11 @@ stub('http.js', {
           state.rejectHold(new Error('已取消'))
         }
       }
+    }
+    if (state.garbageDownload) {
+      // 坏包:写入非 zip 字节,供「zip 预检」用例验证拦截
+      fs.writeFileSync(dest, 'this is not a zip file at all....')
+      return { promise: Promise.resolve(), cancel: () => {} }
     }
     fs.copyFileSync(state.fixtureZip, dest)
     return { promise: Promise.resolve(), cancel: () => {} }
@@ -510,6 +515,15 @@ async function main() {
   const pvRes = await pvPending
   ok(pvRes.ok === false && pvRes.error === '已取消', `取消后预览以「已取消」了结(${pvRes.error})`)
   ok(state.holdDownload === false, '句柄已从在途表移除')
+
+  // ---------- 20 ----------
+  section('20. zip 预检:坏包在解压前被拦截')
+  serveAsset('pub/garbage', { name: 'Garbage', version: '1.0.0' })
+  state.garbageDownload = true
+  const r20 = await assets.installAsset({ projectId: pidA, assetId: 'pub/garbage' })
+  ok(r20.ok === false && /无法解析/.test(r20.error || ''), `坏包被预检拦截(${r20.error})`)
+  ok(!docs.get(`godot/asset/${pidA}/pub/garbage`), '坏包不写安装记录')
+  state.garbageDownload = false
 
   console.log(`\n${'='.repeat(56)}`)
   console.log(`PASS ${pass}  FAIL ${failures.length}`)

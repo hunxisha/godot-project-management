@@ -212,6 +212,9 @@ async function main() {
     ok(child.args[0] === '--headless', 'headless 参数在最前', JSON.stringify(child.args))
     ok(child.args.includes('--export-release') && child.args.includes('Windows Desktop'), 'release 模式与预设名正确')
     ok(fs.existsSync(path.join(projectPath, 'builds')), '输出目录已创建')
+    const hist = exporter.listExportHistory(pid)
+    ok(hist.length === 1 && hist[0].presetName === 'Windows Desktop', '导出成功落一条历史记录', JSON.stringify(hist.map((h) => h.presetName)))
+    ok(!!hist[0].outputPath && hist[0].finishedAt > 0, '历史记录含输出路径与完成时间')
 
     // .pck 输出走 export-pack
     state.outputLines = ['packing...']
@@ -246,6 +249,11 @@ async function main() {
     const t4c = await waitTask(r4c.taskId)
     ok(t4c.status === 'error' && /启动引擎失败/.test(t4c.error || ''), `spawn 失败如实报错(${t4c.error})`)
     state.failSpawn = false
+
+    // 失败/取消的导出不写历史(此前两次成功共 2 条);removeExportHistoryEntry 只删记录
+    ok(exporter.listExportHistory(pid).length === 2, '失败与取消导出都不写历史(仍只有两次成功)', String(exporter.listExportHistory(pid).length))
+    exporter.removeExportHistoryEntry(exporter.listExportHistory(pid)[0].id)
+    ok(exporter.listExportHistory(pid).length === 1, '历史记录可删除')
 
     // dismiss 移除任务
     const before = latestSnap.length

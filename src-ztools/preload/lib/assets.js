@@ -10,7 +10,8 @@ const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
 const { getJson, downloadFile } = require('./http')
-const { extractZip, ensureDir, readZipEntries } = require('./extract')
+const { extractZip, ensureDir, readZipEntries, inspectZip } = require('./extract')
+const { trashPath, uniquePath } = require('./fsutil')
 const { getDoc, putDoc, putDocVerbose, removeDoc, listDocs } = require('./store')
 const { addProject } = require('./projects')
 
@@ -416,15 +417,41 @@ function resolveUnder(root, rel) {
  * @param {string} projectPath
  * @param {string[]} [relPaths]
  */
-function removeInstalledFiles(projectPath, relPaths) {
+/**
+ * 按安装清单删除素材文件,然后自底向上清掉因此变空的父目录(到项目根为止)。
+ * toTrash=true 时(显式卸载):先把文件移进同一暂存目录再整体移入回收站 ——
+ * Windows 下逐文件入回收站要为每个文件起一个 PowerShell 进程,大清单慢到不可用;
+ * 更新(先清后装)走直接删除,没必要为被替换的旧版本保留回收站记录。
+ * @param {string} projectPath
+ * @param {string[]} [relPaths]
+ * @param {{toTrash?: boolean}} [opts]
+ */
+function removeInstalledFiles(projectPath, relPaths, opts) {
+  const o = opts || {}
   /** @type {Set<string>} */
   const parentDirs = new Set()
+  // 回收站暂存目录:所有待删文件先移进来,最后一次 trashPath
+  let stageDir = ''
+  if (o.toTrash) stageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ztools-trash-'))
   for (const rel of relPaths || []) {
     const dest = resolveUnder(projectPath, rel)
     if (!dest) continue
     try {
       const st = fs.statSync(dest)
-      if (st.isFile()) fs.rmSync(dest, { force: true })
+      if (st.isFile()) {
+        if (stageDir) {
+          // 同盘 rename 瞬时完成;跨盘回退复制后删除(最终都会进回收站)
+          const target = uniquePath(path.join(stageDir, path.basename(dest)))
+          try {
+            fs.renameSync(dest, target)
+          } catch (e) {
+            fs.cpSync(dest, target)
+            fs.rmSync(dest, { force: true })
+          }
+        } else {
+          fs.rmSync(dest, { force: true })
+        }
+      }
     } catch (e) { /* 不存在或删不掉:跳过,不阻断其余清理 */ }
     const parent = path.dirname(dest)
     if (parent !== projectPath) parentDirs.add(parent)
@@ -447,6 +474,14 @@ function removeInstalledFiles(projectPath, relPaths) {
         break
       }
       cur = path.dirname(cur)
+    }
+  }
+  if (stageDir) {
+    // 整体移入回收站;失败(如宿主无回收站能力)回退为直接删除,不留悬空清单
+    try {
+      trashPath(stageDir, true)
+    } catch (e) {
+      try { fs.rmSync(stageDir, { recursive: true, force: true }) } catch (e2) { /* ignore */ }
     }
   }
 }
@@ -755,6 +790,10 @@ async function installAsset({ projectId, assetId, assetMeta, version, stageId, s
       await dl.promise
     }
 
+    // zip 预检:解压前先验证压缩包可解析,拦住「下到半个文件」的坏包
+    const insp = inspectZip(zipPath)
+    if (!insp.ok) throw new Error(`下载的压缩包无法解析(${insp.error}),请重试安装`)
+
     onProgress && onProgress({ stage: 'extracting' })
     const extractDir = path.join(tmpDir, 'x')
     await extractZip(zipPath, extractDir)
@@ -935,6 +974,10 @@ async function saveAssetAsProject({ assetId, version, stageId, destRoot }, onPro
       await dl.promise
     }
 
+    // zip 预检:另存为新项目前先验证压缩包可解析
+    const inspProj = inspectZip(zipPath)
+    if (!inspProj.ok) throw new Error(`下载的压缩包无法解析(${inspProj.error}),请重试`)
+
     onProgress && onProgress({ stage: 'extracting' })
     const extractDir = path.join(tmpDir, 'x')
     await extractZip(zipPath, extractDir)
@@ -1041,14 +1084,15 @@ function uninstallAddon({ projectId, dirName, assetId }) {
     if (assetId) {
       const doc = getDoc(`godot/asset/${projectId}/${assetId}`)
       if (doc && doc.kind === 'asset') {
-        removeInstalledFiles(project.path, doc.installedPaths)
+        removeInstalledFiles(project.path, doc.installedPaths, { toTrash: true })
         removeDoc(doc._id)
         return { ok: true }
       }
     }
 
     const addonDir = path.join(project.path, 'addons', dirName)
-    if (fs.existsSync(addonDir)) fs.rmSync(addonDir, { recursive: true, force: true })
+    // 显式卸载走回收站(与项目删除一致),误删可恢复
+    if (fs.existsSync(addonDir)) trashPath(addonDir, true)
     setPluginEnabled(project.path, [dirName], false)
     for (const doc of listDocs(`godot/asset/${projectId}/`)) {
       // 素材记录的 dirNames 是项目根顶层条目,不能按目录名匹配到插件卸载

@@ -1,10 +1,13 @@
 <script setup lang="ts">
 // 一键导出对话框:列出项目 export_presets.cfg 里的预设,选择后调用引擎 headless 导出。
-// 导出前预检导出模板(缺模板给出一键获取入口);导出中展示引擎输出尾行,可取消。
+// 导出前预检导出模板(缺模板给出一键获取入口);导出中展示引擎输出尾行,可取消;
+// 支持一次导出全部预设(串行走导出队列);展示本项目的导出历史(产物大小/打开目录)。
 import { computed, ref, watch } from 'vue'
 import Icon from '../Icon.vue'
+import { showInFolder } from '../../services/bridge'
+import { fmtSize, formatRelative } from '../../utils/format'
 import { useExport } from '../../composables/useExport'
-import type { ExportPreset, GodotProject } from '../../types/godot'
+import type { ExportHistoryEntry, ExportPreset, GodotProject } from '../../types/godot'
 
 const props = defineProps<{
   open: boolean
@@ -24,6 +27,8 @@ const selected = ref('')
 /** 模板缺失标记(runExport 的预检结果) */
 const missingTemplates = ref(false)
 const templateHint = ref('')
+/** 导出历史(本项目) */
+const history = ref<ExportHistoryEntry[]>([])
 
 const task = computed(() => (props.project ? ex.taskFor(props.project._id) : undefined))
 
@@ -35,6 +40,7 @@ async function load() {
   selected.value = ''
   missingTemplates.value = false
   templateHint.value = ''
+  loadHistory()
   try {
     const r = window.services.listExportPresets(props.project._id)
     if (!r.ok) {
@@ -48,10 +54,25 @@ async function load() {
   }
 }
 
+function loadHistory() {
+  if (!props.project) return
+  history.value = window.services.listExportHistory(props.project._id).slice(0, 8)
+}
+
 watch(
   () => props.open,
   (open) => {
     if (open) load()
+  }
+)
+
+// 本项目导出完成后刷新历史(任务由 App 全局订阅清理,这里在清理前就能看到 done)
+watch(
+  () => ex.tasks.value.map((t) => `${t.id}:${t.status}`).join('|'),
+  () => {
+    if (props.project && ex.tasks.value.some((t) => t.projectId === props.project!._id && t.status === 'done')) {
+      loadHistory()
+    }
   }
 )
 
@@ -67,6 +88,20 @@ function start() {
   loadError.value = r.error || '发起导出失败'
 }
 
+/** 可实际发起导出的预设(配置了 export_path 的) */
+const runnablePresets = computed(() => presets.value.filter((p) => p.exportPath))
+
+/** 一次导出全部预设(串行走导出队列;缺模板时第一个就会失败并给出提示) */
+function exportAll() {
+  if (!props.project || task.value) return
+  missingTemplates.value = false
+  for (const p of runnablePresets.value) {
+    ex.run(props.project._id, p.name)
+  }
+}
+
+const exportAllDisabled = computed(() => !runnablePresets.value.length || !!task.value || loading.value || !!loadError.value)
+
 /** 缺模板时的一键获取:下载任务在全局任务栏可见,完成后重新点击导出即可 */
 function fetchTemplates() {
   if (!props.project?.versionId) return
@@ -77,6 +112,12 @@ function fetchTemplates() {
   } else {
     templateHint.value = r.error || '模板下载失败'
   }
+}
+
+/** 删除一条历史记录(产物文件不受影响) */
+function removeHistory(id: string) {
+  window.services.removeExportHistoryEntry(id)
+  loadHistory()
 }
 </script>
 
@@ -137,6 +178,13 @@ function fetchTemplates() {
         </template>
 
         <div class="ed-foot">
+          <button
+            v-if="presets.length > 1"
+            class="btn"
+            :disabled="exportAllDisabled"
+            title="按队列依次导出全部已配置路径的预设"
+            @click="exportAll"
+          ><Icon name="layers" :size="12" /> 导出全部</button>
           <span class="grow"></span>
           <button class="btn ghost" @click="emit('close')">关闭</button>
           <button
@@ -144,6 +192,24 @@ function fetchTemplates() {
             :disabled="!selected || !!task || loading || !!loadError || missingTemplates"
             @click="start"
           ><Icon name="upload" :size="12" /> 开始导出</button>
+        </div>
+
+        <!-- 导出历史(本项目,最近 8 条) -->
+        <div v-if="history.length" class="ed-history">
+          <div class="ed-hist-title">导出历史</div>
+          <div v-for="h in history" :key="h.id" class="ed-hist-row">
+            <Icon name="archive" :size="12" />
+            <span class="ed-hist-main">
+              <span class="ed-hist-name">{{ h.presetName }}</span>
+              <span class="ed-hist-meta mono" :title="h.outputPath">{{ fmtSize(h.size) }} · {{ formatRelative(h.finishedAt) }}</span>
+            </span>
+            <button class="btn small ghost" title="打开产物所在目录" @click="showInFolder(h.outputPath)">
+              <Icon name="folder" :size="12" />
+            </button>
+            <button class="btn small ghost danger-text" title="删除这条历史记录(不影响产物文件)" @click="removeHistory(h.id)">
+              <Icon name="x" :size="12" />
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -281,5 +347,53 @@ function fetchTemplates() {
   padding-top: 12px;
   margin-top: 12px;
   border-top: 1px solid var(--border);
+}
+
+/* 导出历史 */
+.ed-history {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.ed-hist-title {
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--text-3);
+  margin-bottom: 6px;
+}
+
+.ed-hist-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 12px;
+}
+
+.ed-hist-row .icon {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.ed-hist-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ed-hist-name {
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.ed-hist-meta {
+  font-size: 10.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>
