@@ -28,7 +28,14 @@ import type {
   InstallPlan,
   MarketAsset,
   Platform,
-  Variant
+  Variant,
+  DocClassDetail,
+  DocClassSummary,
+  DocHistoryItem,
+  DocLibraryStatus,
+  DocSearchHit,
+  DocsCacheInfo,
+  DocsTask
 } from './godot'
 
 /** 下载安装一个引擎版本的入参 */
@@ -308,6 +315,37 @@ export interface Services {
   uninstallAddon(opts: { projectId: string, dirName: string, assetId?: string }): { ok: boolean, error?: string }
   /** 启用/禁用插件 */
   setAddonEnabled(opts: { projectId: string, dirName: string, enabled: boolean }): { ok: boolean, error?: string }
+  /** ---------- 引擎文档库 ---------- */
+  /** 生成版本文档库(入队,进度走 watchDocsTasks,任务 kind='docs';在途时拒绝重复) */
+  docsGenerate(versionId: string): { ok: boolean, error?: string, taskId?: string }
+  /** 取消文档库生成任务 */
+  docsCancelTask(id: string): void
+  /** 移除已结束的文档库任务记录 */
+  dismissDocsTask(id: string): void
+  /** 订阅文档库任务快照,返回取消订阅函数 */
+  watchDocsTasks(fn: (tasks: DocsTask[]) => void): () => void
+  /** 文档库状态(ready=已生成 / building=生成中 / null=未生成) */
+  docsLibraryStatus(versionId: string): DocLibraryStatus | null
+  /** 删除文档库(目录+db 记录;收藏/历史为全局,保留) */
+  docsDeleteLibrary(versionId: string): { ok: boolean }
+  /** 类列表(来自索引;未生成时 ok=false) */
+  docsListClasses(versionId: string): { ok: boolean, error?: string, classes?: DocClassSummary[] }
+  /** 类正文(未知类/非法类名返回 null) */
+  docsGetClass(versionId: string, className: string): DocClassDetail | null
+  /** 本地搜索:类名/方法/成员/信号/枚举/常量,按分值排序 */
+  docsSearch(versionId: string, query: string, limit?: number): DocSearchHit[]
+  /** 收藏/取消收藏(全局,按类名跨版本) */
+  docsToggleFavorite(className: string, fav: boolean): { ok: boolean }
+  /** 收藏列表 */
+  docsListFavorites(): string[]
+  /** 最近浏览(最新在前,上限 30) */
+  docsListHistory(): DocHistoryItem[]
+  /** 记录一次浏览(去重置顶) */
+  docsPushHistory(className: string): void
+  /** 文档库缓存统计(设置页清理用) */
+  docsCacheInfo(): DocsCacheInfo
+  /** 清理文档库缓存(versionIds 省略时清全部;收藏/历史不受影响) */
+  docsCleanCache(versionIds?: string[]): { ok: boolean, removed?: number }
 }
 
 declare global {

@@ -83,6 +83,141 @@ export interface ExportTask {
   error?: string
 }
 
+/** 文档库生成任务(--dump-extension-api-with-docs 的生命周期) */
+export interface DocsTask {
+  id: string
+  kind: 'docs'
+  versionId: string
+  tag: string
+  versionName: string
+  status: 'queued' | 'dumping' | 'parsing' | 'done' | 'error' | 'canceled'
+  /** parsing 阶段进度:已解析/总类数 */
+  done: number
+  total: number
+  /** 引擎输出尾部(失败诊断用) */
+  log: string
+  error?: string
+}
+
+/** 文档库状态(版本页/文档页的生成状态徽标) */
+export interface DocLibraryStatus {
+  status: 'ready' | 'building'
+  versionId: string
+  tag: string
+  name?: string
+  /** ready 时:类数与生成时间 */
+  classCount?: number
+  builtAt?: number
+}
+
+/** 索引条目:类列表与搜索共用的轻量摘要 */
+export interface DocClassSummary {
+  name: string
+  inherits: string | null
+  brief: string
+  builtin: boolean
+  isSingleton: boolean
+  /** 方法/成员/信号/常量(含枚举值)/枚举 名单(来自 preload 紧凑索引) */
+  m: string[]
+  p: string[]
+  s: string[]
+  c: string[]
+  e: string[]
+}
+
+export interface DocParam {
+  name: string
+  type: string
+  defaultValue?: string
+}
+
+export interface DocMethod {
+  name: string
+  returnType: string
+  params: DocParam[]
+  qualifiers: string[]
+  description: string
+}
+
+export interface DocMember {
+  name: string
+  type: string
+  setter?: string
+  getter?: string
+  defaultValue?: string
+  description: string
+}
+
+export interface DocSignal {
+  name: string
+  params: DocParam[]
+  description: string
+}
+
+export interface DocConstant {
+  name: string
+  value: string
+  /** 所属枚举名(散装常量无此字段) */
+  enum?: string
+  description: string
+}
+
+export interface DocEnum {
+  name: string
+  bitfield: boolean
+  values: DocConstant[]
+}
+
+export interface DocOperator {
+  name: string
+  returnType: string
+  params: DocParam[]
+  description: string
+}
+
+/** 类正文(classes/<Name>.json 的内容) */
+export interface DocClassDetail {
+  name: string
+  inherits: string | null
+  brief: string
+  description: string
+  builtin: boolean
+  isSingleton: boolean
+  methods: DocMethod[]
+  members: DocMember[]
+  signals: DocSignal[]
+  constants: DocConstant[]
+  enums: DocEnum[]
+  operators: DocOperator[]
+}
+
+export type DocHitKind = 'class' | 'method' | 'member' | 'signal' | 'enum' | 'constant'
+
+export interface DocSearchHit {
+  kind: DocHitKind
+  className: string
+  name: string
+  brief: string
+  score: number
+}
+
+export interface DocHistoryItem {
+  name: string
+  at: number
+}
+
+/** 文档库缓存统计(设置页清理用) */
+export interface DocsCacheInfo {
+  sizeBytes: number
+  libraries: {
+    versionId: string
+    tag: string
+    classes: number
+    builtAt: number
+    sizeBytes: number
+  }[]
+}
+
 /** 资产详情(详情弹层用;扩展字段缺失时为空) */
 export interface AssetDetail {
   assetId: string

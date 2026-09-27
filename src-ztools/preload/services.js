@@ -2,7 +2,7 @@
 // 能力模块位于 lib/ 下,按功能领域拆分
 //
 // 下面的 @type 引用渲染层的类型契约(src/types/services.ts) —— 它是**唯一权威**:
-// 这份对象必须不多不少地实现 Services 的 47 个方法,少一个、多一个、签名不对都会编译失败。
+// 这份对象必须不多不少地实现 Services 的 61 个方法,少一个、多一个、签名不对都会编译失败。
 // 这取代了原先「两处手写 + 一个比对测试」的做法(见 docs/optimization-plan.md 的 P0-2)。
 const { currentPlatform, fetchReleases } = require('./lib/releases')
 const install = require('./lib/install')
@@ -14,6 +14,7 @@ const templates = require('./lib/templates')
 const exporter = require('./lib/exporter')
 const datatransfer = require('./lib/datatransfer')
 const diagnostics = require('./lib/diagnostics')
+const docs = require('./lib/docs')
 
 /** @type {import('../../src/types/services').Services} */
 window.services = {
@@ -30,8 +31,12 @@ window.services = {
   watchTasks: (fn) => install.watchTasks(fn),
   /** 导入本地引擎可执行文件 */
   importLocalExe: (exePath) => install.importLocalExe(exePath),
-  /** 删除已装版本 */
-  deleteVersion: (v) => install.deleteVersion(v),
+  /** 删除已装版本(同时清理该版本的文档库缓存;文档库可再生成,无需确认) */
+  deleteVersion: (v) => {
+    const r = install.deleteVersion(v)
+    if (r.ok) docs.docsDeleteLibrary(v.id)
+    return r
+  },
   /** 查询已装引擎的导出模板状态 */
   exportTemplateStatus: (versionId) => templates.exportTemplateStatus({ versionId }),
   /** 下载安装导出模板(入队,进度走 watchTasks,任务 kind='templates') */
@@ -155,5 +160,36 @@ window.services = {
   /** 卸载插件或素材(市场素材传 assetId 按安装清单删除) */
   uninstallAddon: (opts) => assets.uninstallAddon(opts),
   /** 启用/禁用插件 */
-  setAddonEnabled: (opts) => assets.setAddonEnabled(opts)
+  setAddonEnabled: (opts) => assets.setAddonEnabled(opts),
+  /** ---------- 引擎文档库 ---------- */
+  /** 生成版本文档库(入队,进度走 watchDocsTasks,任务 kind='docs';在途时拒绝重复) */
+  docsGenerate: (versionId) => docs.generateDocs(versionId),
+  /** 取消文档库生成任务 */
+  docsCancelTask: (id) => docs.cancelDocsTask(id),
+  /** 移除已结束的文档库任务记录 */
+  dismissDocsTask: (id) => docs.dismissDocsTask(id),
+  /** 订阅文档库任务快照,返回取消订阅函数 */
+  watchDocsTasks: (fn) => docs.watchDocsTasks(fn),
+  /** 文档库状态(ready=已生成 / building=生成中 / null=未生成) */
+  docsLibraryStatus: (versionId) => docs.docsLibraryStatus(versionId),
+  /** 删除文档库(目录+db 记录;收藏/历史为全局,保留) */
+  docsDeleteLibrary: (versionId) => docs.docsDeleteLibrary(versionId),
+  /** 类列表(来自索引;未生成时 ok=false) */
+  docsListClasses: (versionId) => docs.docsListClasses(versionId),
+  /** 类正文(未知类/非法类名返回 null) */
+  docsGetClass: (versionId, className) => docs.docsGetClass(versionId, className),
+  /** 本地搜索:类名/方法/成员/信号/枚举/常量,按分值排序 */
+  docsSearch: (versionId, query, limit) => docs.docsSearch(versionId, query, limit),
+  /** 收藏/取消收藏(全局,按类名跨版本) */
+  docsToggleFavorite: (className, fav) => docs.docsToggleFavorite(className, fav),
+  /** 收藏列表 */
+  docsListFavorites: () => docs.docsListFavorites(),
+  /** 最近浏览(最新在前,上限 30) */
+  docsListHistory: () => docs.docsListHistory(),
+  /** 记录一次浏览(去重置顶) */
+  docsPushHistory: (className) => docs.docsPushHistory(className),
+  /** 文档库缓存统计(设置页清理用) */
+  docsCacheInfo: () => docs.docsCacheInfo(),
+  /** 清理文档库缓存(versionIds 省略时清全部;收藏/历史不受影响) */
+  docsCleanCache: (versionIds) => docs.docsCleanCache(versionIds)
 }
