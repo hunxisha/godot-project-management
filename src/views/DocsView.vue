@@ -143,6 +143,14 @@ function gotoClass(cls: string, anchorName?: string | null, opts: { push?: boole
 }
 
 const canGoBack = computed(() => backStack.value.length > 0)
+/** 返回按钮上显示的上一个类名 */
+const prevClassName = computed(() => backStack.value[backStack.value.length - 1] ?? '')
+/** 窄窗(≤900px):列表与详情二选一,详情区需要「类列表」入口 */
+const isNarrow = ref(window.innerWidth <= 900)
+
+function onResize() {
+  isNarrow.value = window.innerWidth <= 900
+}
 
 function goBack() {
   const prev = backStack.value.pop()
@@ -201,17 +209,26 @@ watch(() => props.pendingVersionId, (v, old) => {
   if (v && v !== old) applyPendingVersion()
 })
 
-// Alt+← / Cmd+[ 返回上一个类(Ctrl+K 之外的第二个键盘入口)
+// Alt+← 返回上一个类(Ctrl+K 之外的第二个键盘入口)
 function onKeydown(e: KeyboardEvent) {
-  if (e.altKey && e.key === 'ArrowLeft') {
-    if (!canGoBack.value) return
-    e.preventDefault()
-    goBack()
-  }
+  if (!e.altKey || e.key !== 'ArrowLeft') return
+  if (!canGoBack.value) return
+  // 输入框内不拦截(侧栏过滤/搜索面板),避免与文本编辑快捷键打架
+  const el = e.target as HTMLElement | null
+  const tag = el?.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || el?.isContentEditable) return
+  e.preventDefault()
+  goBack()
 }
 
-onMounted(() => window.addEventListener('keydown', onKeydown))
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+  window.addEventListener('resize', onResize)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('resize', onResize)
+})
 
 /** 当前类不在当前库时的提示(切库/搜索跳转到未收录的类) */
 const classMissing = computed(() => !!selected.value && classes.value.length > 0 && !classes.value.some((c) => c.name === selected.value))
@@ -367,12 +384,21 @@ const PHASE_TEXT: Record<string, string> = {
       </aside>
 
       <section class="detail">
+        <!-- 返回条常驻:按钮上直接印 Alt+←,让快捷键一眼可见;无来路时禁用并说明原因。
+             窄窗额外给「类列表」入口(宽窗左侧列表常驻,不需要) -->
         <div class="detail-bar">
-          <button class="btn-back" @click="showList = true">
+          <button v-if="isNarrow" class="btn-back" @click="showList = true">
             <Icon name="chevron-left" :size="13" /> 类列表
           </button>
-          <button v-if="canGoBack" class="btn-back" title="返回上一个类(Alt+←)" @click="goBack">
-            <Icon name="chevron-left" :size="13" /> 返回
+          <button
+            class="btn-back"
+            :disabled="!canGoBack"
+            :title="canGoBack ? '返回上一个类' : '点击描述里的链接跳转后会记录来路,即可返回'"
+            @click="goBack"
+          >
+            <Icon name="chevron-left" :size="13" />
+            返回<span v-if="prevClassName" class="prev-name mono">{{ prevClassName }}</span>
+            <span class="kbd">Alt+←</span>
           </button>
         </div>
         <div v-if="classMissing" class="missing-lib">
@@ -736,7 +762,6 @@ const PHASE_TEXT: Record<string, string> = {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin: 10px 14px 0;
   padding: 5px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -744,12 +769,46 @@ const PHASE_TEXT: Record<string, string> = {
   color: var(--text-2);
   font-size: 12px;
   cursor: pointer;
+  flex-shrink: 0;
 }
 
-/* 返回按钮只在窄窗(列表/详情二选一)与有来路时出现 */
+.btn-back:hover {
+  color: var(--brand);
+  border-color: color-mix(in srgb, var(--brand) 35%, transparent);
+}
+
+.btn-back:disabled {
+  opacity: 0.5;
+  cursor: default;
+  color: var(--text-3);
+  border-color: var(--border);
+}
+
+/* 返回条:有来路(或窄窗)时常驻,宽窄窗都要看得见 */
 .detail-bar {
-  display: none;
+  display: flex;
+  align-items: center;
   gap: 6px;
+  padding: 10px 18px 0;
+  flex-shrink: 0;
+}
+
+.prev-name {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--brand);
+}
+
+.kbd {
+  margin-left: 3px;
+  padding: 1px 5px;
+  font-size: 10px;
+  color: var(--text-3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-2);
 }
 
 .missing-lib {
@@ -809,10 +868,6 @@ const PHASE_TEXT: Record<string, string> = {
 
   .layout:not(.narrow) .detail {
     display: none;
-  }
-
-  .detail-bar {
-    display: flex;
   }
 }
 </style>
