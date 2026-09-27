@@ -20,6 +20,7 @@ const { getDoc, putDoc, removeDoc, listDocs } = require('./store')
 const { ensureDir, dirSize } = require('./extract')
 const { createTaskQueue, TERMINAL_PHASES } = require('./taskqueue')
 const { CanceledError, createCancelToken, checkCancel, forEachSliced, rmQuiet } = require('./fsutil')
+const { getText } = require('./http')
 
 /** @typedef {import('../../../src/types/godot').DocClassDetail} DocClassDetail */
 /** @typedef {import('../../../src/types/godot').DocClassSummary} DocClassSummary */
@@ -332,6 +333,168 @@ function loadIndex(versionId) {
   }
 }
 
+// ---------- 中文类参考翻译 ----------
+//
+// 官方中文翻译在 godot 仓库的 doc/translations/zh_Hans.po(与编辑器内置中文帮助同源),
+// msgid 就是类文档英文原文 —— 实测(4.7.2)与 --dump-extension-api-with-docs 的描述字符串
+// 逐字符一致,brief 1018/1018、description 1009/1009 精确命中。因此「按原文查表替换」即可,
+// 无需任何对齐算法;未命中的条目(未翻译/新版本新增)保持英文。
+
+const TRANSLATION_LOCALE = 'zh_Hans'
+/** 翻译下载超时:9-10MB 的 po,慢网络下给足余量 */
+const TRANSLATION_TIMEOUT_MS = 60_000
+
+/**
+ * @param {string} s po 单段转义还原
+ * @returns {string}
+ */
+function unescapePo(s) {
+  let out = ''
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i]
+    if (c === '\\' && i + 1 < s.length) {
+      const n = s[++i]
+      out += n === 'n' ? '\n' : n === 't' ? '\t' : n === '"' ? '"' : n === '\\' ? '\\' : n
+    } else out += c
+  }
+  return out
+}
+
+/**
+ * 解析 .po 为 msgid→msgstr 表。
+ * 跳过:头部(msgid 为空)、fuzzy(未复核)、msgctxt(避免同文异译误替换)、复数形式、空 msgstr(未翻译)。
+ * @param {string} text
+ * @returns {{map: Map<string, string>, entries: number, untranslated: number, skipped: number}}
+ */
+function parsePo(text) {
+  const map = new Map()
+  let entries = 0, untranslated = 0, skipped = 0
+  const lines = String(text || '').split(/\r?\n/)
+  /** @type {{msgid: string, msgstr: string} | null} */
+  let cur = null
+  let field = null
+  // #, fuzzy / msgctxt 出现在条目**之前**,属于下一个 msgid —— 不能在 flush 时才消费,
+  // 否则会错标到上一条(fuzzy 误杀上一条、msgctxt 条目反而混进表,实测踩过)。
+  let pendingFuzzy = false
+  let pendingCtx = false
+  let fuzzyFlag = false
+  let hasCtx = false
+  const flush = () => {
+    if (cur && cur.msgid) {
+      entries++
+      if (!cur.msgstr) untranslated++
+      else if (fuzzyFlag || hasCtx) skipped++
+      else map.set(cur.msgid, cur.msgstr)
+    }
+    cur = null
+    field = null
+  }
+  for (const line of lines) {
+    if (line.startsWith('#,') && line.includes('fuzzy')) { pendingFuzzy = true; continue }
+    if (line.startsWith('#')) continue
+    if (line.startsWith('msgctxt ')) { pendingCtx = true; field = null; continue }
+    if (line.startsWith('msgid_plural') || line.startsWith('msgstr[')) { field = 'plural'; continue }
+    if (line.startsWith('msgid ')) {
+      flush()
+      cur = { msgid: '', msgstr: '' }
+      field = 'msgid'
+      fuzzyFlag = pendingFuzzy
+      hasCtx = pendingCtx
+      pendingFuzzy = false
+      pendingCtx = false
+    } else if (line.startsWith('msgstr ')) field = 'msgstr'
+    // 关键字行(msgid "…")与续行("…")都要提取引号内容
+    const body = line.replace(/^(msgid|msgstr)\s+/, '')
+    const m = /^"(.*)"\s*$/.exec(body)
+    if (!m || !cur) continue
+    if (field === 'msgid') cur.msgid += unescapePo(m[1])
+    else if (field === 'msgstr') cur.msgstr += unescapePo(m[1])
+  }
+  flush()
+  return { map, entries, untranslated, skipped }
+}
+
+/**
+ * 翻译来源的 ref 回退链:完整 tag(4.7.2-stable)→ 小版本分支(4.7)→ master。
+ * dev/预发布版本没有对应 tag,回退到分支或 master 的翻译(按原文查表,多几条少几条不影响正确性)。
+ * @param {string} tag
+ * @returns {string[]}
+ */
+function translationRefs(tag) {
+  const refs = []
+  if (tag) refs.push(tag)
+  const m = /^(\d+\.\d+)/.exec(tag || '')
+  if (m && !refs.includes(m[1])) refs.push(m[1])
+  if (!refs.includes('master')) refs.push('master')
+  return refs
+}
+
+/**
+ * 下载(带磁盘缓存)并解析中文翻译表;全部来源失败返回 null,生成降级为英文。
+ * @param {string} tag
+ * @param {{canceled: boolean}} token
+ * @returns {Promise<Map<string, string> | null>}
+ */
+async function loadZhTranslations(tag, token) {
+  const cacheDir = path.join(docsRoot(), 'po-cache')
+  for (const ref of translationRefs(tag)) {
+    const cached = path.join(cacheDir, `${TRANSLATION_LOCALE}-${ref}.po`)
+    try {
+      let text = ''
+      if (fs.existsSync(cached)) {
+        text = fs.readFileSync(cached, 'utf8')
+      } else {
+        checkCancel(token)
+        text = await Promise.race([
+          getText(`https://raw.githubusercontent.com/godotengine/godot/${ref}/doc/translations/${TRANSLATION_LOCALE}.po`),
+          /** @type {Promise<never>} */ (new Promise((_resolve, reject) => {
+            setTimeout(() => reject(new Error('翻译下载超时')), TRANSLATION_TIMEOUT_MS)
+          }))
+        ])
+        if (!text || !text.includes('msgid')) throw new Error('翻译内容异常')
+        checkCancel(token)
+        ensureDir(cacheDir)
+        const tmp = `${cached}.tmp`
+        fs.writeFileSync(tmp, text)
+        fs.renameSync(tmp, cached)
+      }
+      const { map } = parsePo(text)
+      if (map.size) return map
+    } catch (e) {
+      // 该 ref 不可用(404/网络/超时):试下一个,全失败则降级英文
+    }
+  }
+  return null
+}
+
+/**
+ * 应用翻译:命中 msgid 的描述字段替换为中文,其余保持英文原样。
+ * @param {DocClassDetail} cls
+ * @param {Map<string, string>} tr
+ * @param {{count: number}} hits 计数器(统计命中条数)
+ * @returns {DocClassDetail}
+ */
+function applyTranslations(cls, tr, hits) {
+  const t = (/** @type {string} */ s) => {
+    if (s) {
+      const z = tr.get(s)
+      if (z !== undefined) { hits.count++; return z }
+    }
+    return s
+  }
+  return {
+    ...cls,
+    brief: t(cls.brief),
+    description: t(cls.description),
+    members: cls.members.map((x) => ({ ...x, description: t(x.description) })),
+    methods: cls.methods.map((x) => ({ ...x, description: t(x.description) })),
+    signals: cls.signals.map((x) => ({ ...x, description: t(x.description) })),
+    constants: cls.constants.map((x) => ({ ...x, description: t(x.description) })),
+    enums: cls.enums.map((e) => ({ ...e, values: e.values.map((v) => ({ ...v, description: t(v.description) })) })),
+    operators: cls.operators.map((x) => ({ ...x, description: t(x.description) }))
+  }
+}
+
 // ---------- 生成流水线 ----------
 
 /**
@@ -360,7 +523,12 @@ async function runGenerate(taskId) {
   const libDir = docsRoot(versionId)
   const workDir = path.join(docsRoot(), `.work-${taskId}`)
   const token = createCancelToken()
+  /** 翻译命中计数(applyTranslations 回填) */
+  const zhHits = { count: 0 }
   try {
+    // 中文翻译与引擎导出并行启动:dump ~1s,翻译下载(9-10MB)可能更慢,先发车
+    // 失败/超时不影响生成 —— 降级英文
+    const zhPromise = loadZhTranslations(version.tag, token).catch(/** @type {() => null} */ (() => null))
     ensureDir(workDir)
     // ---- dumping:spawn 引擎,产物为 cwd 下的 extension_api.json ----
     setTask(taskId, { status: 'dumping', log: '' })
@@ -403,7 +571,11 @@ async function runGenerate(taskId) {
       throw new Error(`引擎导出失败(退出码 ${closeCode})${tail.length ? ': ' + tail[tail.length - 1] : ''}`)
     }
 
-    // ---- parsing:映射 + 写入暂存目录,分片让出 ----
+    // ---- parsing:映射 + 应用中文翻译 + 写入暂存目录,分片让出 ----
+    // 首次生成要先下载 9-10MB 的翻译文件(慢网络可长达分钟级),单独一个阶段让用户看得到
+    setTask(taskId, { status: 'translating' })
+    checkCancel(token)
+    const tr = await zhPromise
     setTask(taskId, { status: 'parsing', done: 0, total: 0 })
     const api = JSON.parse(fs.readFileSync(jsonPath, 'utf8'))
     /** @type {{name: string}[]} */
@@ -412,10 +584,15 @@ async function runGenerate(taskId) {
     /** @type {DocClassDetail[]} */
     const mapped = []
     for (const c of api.classes || []) {
-      mapped.push(mapClass(c, { isSingleton: singletonNames.has(c.name) }))
+      const cls = mapClass(c, { isSingleton: singletonNames.has(c.name) })
+      mapped.push(tr ? applyTranslations(cls, tr, zhHits) : cls)
     }
-    for (const c of api.builtin_classes || []) mapped.push(mapClass(c, { builtin: true }))
-    mapped.push(mapGlobalScope(api))
+    for (const c of api.builtin_classes || []) {
+      const cls = mapClass(c, { builtin: true })
+      mapped.push(tr ? applyTranslations(cls, tr, zhHits) : cls)
+    }
+    const gs = mapGlobalScope(api)
+    mapped.push(tr ? applyTranslations(gs, tr, zhHits) : gs)
 
     // 原子接管:先写进 workDir 下的暂存目录,全部成功后一次性替换旧库 ——
     // 失败/取消只清暂存,旧库与 db 记录保持完好可浏览。
@@ -451,7 +628,10 @@ async function runGenerate(taskId) {
       name: version.name,
       classCount: total,
       builtAt: index.builtAt,
-      libDir
+      libDir,
+      // 库语言:拿到翻译表(哪怕覆盖不全)即视为中文库;未命中条目保留英文
+      lang: tr ? 'zh-CN' : 'en',
+      translatedCount: tr ? zhHits.count : 0
     })
     indexCache.delete(versionId)
     setTask(taskId, { status: 'done', done: total })
@@ -545,7 +725,9 @@ function docsLibraryStatus(versionId) {
       tag: record.tag,
       name: record.name,
       classCount: record.classCount,
-      builtAt: record.builtAt
+      builtAt: record.builtAt,
+      lang: record.lang,
+      translatedCount: record.translatedCount
     }
   }
   const busy = tasks.list().find((/** @type {any} */ t) => versionKey(t.versionId).key === versionKey(versionId).key && !tasks.isTerminal(t.status))
@@ -695,6 +877,8 @@ module.exports = {
   buildIndexEntry,
   searchIndex,
   wordScore,
+  parsePo,
+  applyTranslations,
   // 主流程
   generateDocs,
   docsLibraryStatus,

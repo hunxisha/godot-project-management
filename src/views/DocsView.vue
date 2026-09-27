@@ -138,13 +138,14 @@ watch(() => props.pendingTarget, (v, old) => {
 function statusText(id: string): string {
   const s = statuses.value[id]
   if (!s) return '未生成'
-  if (s.status === 'ready') return `${s.classCount} 类`
+  if (s.status === 'ready') return `${s.classCount} 类${s.lang === 'en' ? ' · 英文' : ' · 中文'}`
   return '生成中…'
 }
 
 const PHASE_TEXT: Record<string, string> = {
   queued: '排队中',
   dumping: '引擎导出中',
+  translating: '翻译下载中',
   parsing: '解析中'
 }
 </script>
@@ -156,7 +157,7 @@ const PHASE_TEXT: Record<string, string> = {
       <div class="boot-head">
         <Icon name="book" :size="26" />
         <h2>引擎文档库</h2>
-        <p>从已安装的 Godot 引擎一键导出离线类参考(--dump-extension-api-with-docs),与引擎版本逐字节对应。</p>
+        <p>从已安装的 Godot 引擎一键导出离线类参考(--dump-extension-api-with-docs),与引擎版本逐字节对应;自动套用官方简体中文翻译,未翻译条目保留英文。</p>
       </div>
       <div class="ver-cards">
         <div v-for="v in versions" :key="v._id" class="ver-card">

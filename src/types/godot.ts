@@ -90,7 +90,7 @@ export interface DocsTask {
   versionId: string
   tag: string
   versionName: string
-  status: 'queued' | 'dumping' | 'parsing' | 'done' | 'error' | 'canceled'
+  status: 'queued' | 'dumping' | 'translating' | 'parsing' | 'done' | 'error' | 'canceled'
   /** parsing 阶段进度:已解析/总类数 */
   done: number
   total: number
@@ -108,6 +108,10 @@ export interface DocLibraryStatus {
   /** ready 时:类数与生成时间 */
   classCount?: number
   builtAt?: number
+  /** 库语言:拿到官方中文翻译(可能覆盖不全)即视为 zh-CN,否则 en */
+  lang?: 'zh-CN' | 'en'
+  /** 中文描述命中条数(诊断翻译覆盖用) */
+  translatedCount?: number
 }
 
 /** 索引条目:类列表与搜索共用的轻量摘要 */

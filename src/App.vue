@@ -124,6 +124,7 @@ const barTasks = computed<BarTask[]>(() => {
 const DOCS_PHASE: Record<string, string> = {
   queued: '排队中',
   dumping: '引擎导出中',
+  translating: '翻译下载中',
   parsing: '解析中'
 }
 

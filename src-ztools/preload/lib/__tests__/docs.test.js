@@ -143,13 +143,15 @@ const FIXTURE = {
   singletons: [{ name: 'Input' }]
 }
 
-// ---------- child_process 打桩(内建模块必须用 Module._load 拦截) ----------
+// ---------- child_process / http 打桩(内建模块必须用 Module._load 拦截) ----------
 const state = {
   children: [],
   exitCode: 0,
   outputLines: ['Godot Engine v4.7.2.stable'],
   hang: false,
-  failSpawn: false
+  failSpawn: false,
+  /** 翻译下载桩:string=返回该 po;null=网络不可用 */
+  poText: null
 }
 
 function fakeSpawn(exePath, args, opts) {
@@ -185,6 +187,16 @@ const origLoad = Module._load
 Module._load = function (request, parent, isMain) {
   const fromDocs = parent && /docs\.js$/.test(parent.filename || '')
   if (fromDocs && request === 'node:child_process') return { spawn: fakeSpawn }
+  if (fromDocs && request === './http') {
+    return {
+      getText: (url) => new Promise((resolve, reject) => {
+        process.nextTick(() => {
+          if (typeof state.poText === 'string') resolve(state.poText)
+          else reject(new Error('网络不可用'))
+        })
+      })
+    }
+  }
   return origLoad.apply(this, arguments)
 }
 
@@ -276,6 +288,52 @@ async function main() {
   const clsHit = scored.find((h) => h.kind === 'class')
   ok(clsHit && clsHit.className === 'Input', '类名前缀命中', JSON.stringify(scored.slice(0, 3)))
 
+  // ---------- 中文翻译:po 解析与应用(纯函数) ----------
+  section('中文翻译:po 解析')
+  const PO_FIXTURE = [
+    '# 翻译头注释',
+    'msgid ""',
+    'msgstr ""',
+    '"Language: zh_Hans\\n"',
+    '',
+    'msgid "Base class for all scene objects."',
+    'msgstr "所有场景对象的基类。"',
+    '',
+    '#, fuzzy',
+    'msgid "fuzzy 的一条"',
+    'msgstr "不应进表"',
+    '',
+    'msgctxt "某上下文"',
+    'msgid "带上下文的一条"',
+    'msgstr "不应进表"',
+    '',
+    'msgid "未翻译的一条"',
+    'msgstr ""',
+    '',
+    'msgid ""',
+    '"多行 "',
+    '"msgid 第二段\\n"',
+    '"以换行结尾"',
+    'msgstr "多行译文"'
+  ].join('\n')
+  const poParsed = lib.parsePo(PO_FIXTURE)
+  ok(poParsed.map.size === 2, '头部/fuzzy/msgctxt/未翻译全部跳过', String(poParsed.map.size))
+  ok(poParsed.map.get('Base class for all scene objects.') === '所有场景对象的基类。', '单行 msgid 提取')
+  ok(poParsed.map.get('多行 msgid 第二段\n以换行结尾') === '多行译文', '多行 msgid 拼接与 \n 转义')
+
+  section('中文翻译:应用映射')
+  const trSmall = new Map([
+    ['Base class for all scene objects.', '所有场景对象的基类。'],
+    ['Adds a child [param node].', '添加子节点 [param node]。']
+  ])
+  const hits = { count: 0 }
+  const zhCls = lib.applyTranslations(core, trSmall, hits)
+  ok(zhCls.brief === '所有场景对象的基类。', 'brief 替换为中文')
+  ok(zhCls.description === core.description, '未命中的描述保持英文')
+  ok(zhCls.methods.find((m) => m.name === 'add_child').description === '添加子节点 [param node]。', '方法描述替换(BBCode 原样保留)')
+  ok(zhCls.methods.find((m) => m.name === 'get_tree').description === 'Returns the tree.', '未命中方法保持英文')
+  ok(hits.count === 2, '命中计数', String(hits.count))
+
   // ---------- 生成全流程 ----------
   section('生成全流程')
   ok(!fs.existsSync(path.join(WORK, 'gpm-docs')), '生成前库根目录不存在')
@@ -363,6 +421,36 @@ async function main() {
   await waitTask(g5.taskId)
   ok(lib.docsLibraryStatus(V1).status === 'ready', '重新生成成功')
   ok(lib.docsListClasses(V1).classes.length === t1.total, '索引可再读')
+
+  // ---------- 中文翻译:生成流程(翻译下载桩) ----------
+  section('中文翻译:生成流程')
+  const zhPo = [
+    'msgid "Base class for all scene objects."',
+    'msgstr "所有场景对象的基类。"',
+    '',
+    "msgid \"Nodes are Godot's building blocks. See [method _ready] and [SceneTree].\"",
+    'msgstr "节点是 Godot 的基本构件。参见 [method _ready] 与 [SceneTree]。"'.replace('与', '与'),
+    ''
+  ]
+  state.poText = zhPo.join('\n')
+  const g6 = lib.generateDocs(V1)
+  await waitTask(g6.taskId)
+  const nodeZh = JSON.parse(fs.readFileSync(path.join(libDir, 'classes', 'Node.json'), 'utf8'))
+  ok(nodeZh.brief === '所有场景对象的基类。', '生成时 brief 已译为中文', nodeZh.brief)
+  ok(nodeZh.description.includes('基本构件') && nodeZh.description.includes('[method _ready]'), '描述中文且 BBCode 保留')
+  const zhRec = docs.get('godot/docs/4.7.2-stable-standard-win64')
+  ok(zhRec.lang === 'zh-CN' && zhRec.translatedCount > 0, 'db 记录 lang=zh-CN + 命中数', JSON.stringify({ lang: zhRec.lang, n: zhRec.translatedCount }))
+  ok(lib.docsLibraryStatus(V1).lang === 'zh-CN', '状态接口带 lang')
+  ok(fs.existsSync(path.join(WORK, 'gpm-docs', 'po-cache', 'zh_Hans-4.7.2-stable.po')), 'po 已磁盘缓存')
+
+  // 网络不可用 + 无缓存 → 降级英文库,生成不失败
+  fs.rmSync(path.join(WORK, 'gpm-docs', 'po-cache'), { recursive: true, force: true })
+  state.poText = null
+  const g7 = lib.generateDocs(V1)
+  await waitTask(g7.taskId)
+  const nodeEn = JSON.parse(fs.readFileSync(path.join(libDir, 'classes', 'Node.json'), 'utf8'))
+  ok(nodeEn.brief === 'Base class for all scene objects.', '无翻译时保持英文')
+  ok(lib.docsLibraryStatus(V1).lang === 'en', '降级库 lang=en', lib.docsLibraryStatus(V1).lang)
 
   // ---------- 缓存统计与清理 ----------
   section('缓存统计与清理')
