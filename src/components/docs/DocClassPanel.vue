@@ -528,8 +528,10 @@ function signature(m: { name: string, returnType: string, params: { name: string
 .toc {
   position: sticky;
   top: 0;
-  max-height: 100%;
+  /* 按视口约束:100% 相对本列自身内容高度不生效,目录栏会撑开到与正文等高且无法独立滚动 */
+  max-height: calc(100vh - 100px);
   overflow-y: auto;
+  scrollbar-width: thin;
   padding: 2px 0 12px;
   border-left: 1px solid var(--border);
   padding-left: 12px;

@@ -1,6 +1,6 @@
 {
   "name": "godot-project-management",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "下载并管理Godot版本,可隔离不同Godot版本项目,快捷打开Godot项目",
   "type": "module",
   "scripts": {
