@@ -107,6 +107,8 @@ export interface Services {
     projectsOffline?: number
     projectsSkipped?: number
     favoritesAdded?: number
+    docFavoritesAdded?: number
+    docHistoryAdded?: number
     settingsAdopted?: number
   }
   /** 网络诊断:依次探测商店 API/GitHub/官方 CDN 的可达性与延迟 */

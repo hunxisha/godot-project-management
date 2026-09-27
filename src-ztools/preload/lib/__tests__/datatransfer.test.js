@@ -97,6 +97,11 @@ async function main() {
     _id: 'godot/market/favorites',
     items: [{ assetId: 'a/b', title: 'Fav', addedAt: 1 }]
   })
+  docs.set('godot/docs/favorites', { _id: 'godot/docs/favorites', items: ['Node'] })
+  docs.set('godot/docs/history', {
+    _id: 'godot/docs/history',
+    items: [{ name: 'Node', at: 100 }, { name: 'Vector2', at: 200 }]
+  })
   const outPath = path.join(WORK, 'data.json')
   const r1 = exportPluginData(outPath)
   ok(r1.ok === true && r1.projects === 1 && r1.favorites === 1, `导出成功(${JSON.stringify(r1)})`)
@@ -104,6 +109,8 @@ async function main() {
   ok(data.kind === 'ztools-godot-data', '导出文件带 kind 标识')
   ok(data.projects.length === 1 && data.projects[0].path === projPath, '项目清单包含路径')
   ok(data.favorites.length === 1 && data.favorites[0].assetId === 'a/b', '收藏包含 assetId')
+  ok(data.docFavorites.length === 1 && data.docFavorites[0] === 'Node', '文档收藏被导出')
+  ok(data.docHistory.length === 2 && data.docHistory.some((h) => h.name === 'Vector2'), '浏览历史被导出')
   ok(data.settings.proxy === 'http://127.0.0.1:7890', '设置被导出')
   ok(data.projects[0]._id === undefined, '导出内容不含 db 内部字段(_id/_rev)')
 
@@ -121,8 +128,15 @@ async function main() {
   // 本机已有收藏 a/b(导入时应被保留而不是重复),设置已有 proxy(不应被覆盖),缺 autoEnablePlugin(应补上)
   docs.set('godot/market/favorites', { _id: 'godot/market/favorites', items: [{ assetId: 'a/b', title: 'Local', addedAt: 9 }] })
   docs.set('godot/settings', { _id: 'godot/settings', proxy: 'http://local:1' })
+  // 文档收藏:本机已有 Node,导入文件里加 Sprite2D;历史:本机 Vector2(at 1)与导入的 Vector2(at 300)取最新
+  docs.set('godot/docs/favorites', { _id: 'godot/docs/favorites', items: ['Node'] })
+  docs.set('godot/docs/history', { _id: 'godot/docs/history', items: [{ name: 'Vector2', at: 1 }] })
   data2.favorites.push({ assetId: 'c/d', title: 'Fav2', addedAt: 2 })
   data2.favorites.push({ title: 'no-id' })
+  data2.docFavorites.push('Sprite2D')
+  data2.docFavorites.push('Node')
+  data2.docHistory.push({ name: 'Vector2', at: 300 })
+  data2.docHistory.push({ name: 'Input', at: 250 })
   fs.writeFileSync(inPath, JSON.stringify(data2), 'utf8')
 
   const r2 = importPluginData(inPath)
@@ -132,6 +146,16 @@ async function main() {
   const fav = docs.get('godot/market/favorites')
   ok(fav.items.length === 2 && fav.items.some((x) => x.assetId === 'a/b') && fav.items.some((x) => x.assetId === 'c/d'),
     '本机已有收藏未被覆盖,新收藏并入')
+  const docFavs = docs.get('godot/docs/favorites')
+  ok(docFavs.items.length === 2 && docFavs.items.includes('Node') && docFavs.items.includes('Sprite2D'), '文档收藏并集')
+  ok(r2.docFavoritesAdded === 1, '文档收藏新增计数', JSON.stringify(r2))
+  const docHist = docs.get('godot/docs/history')
+  ok(
+    docHist.items.length === 3 &&
+    docHist.items[0].name === 'Vector2' && docHist.items[0].at === 300 &&
+    docHist.items[1].name === 'Input' && docHist.items[2].name === 'Node',
+    '浏览历史按最新合并且时间倒序', JSON.stringify(docHist)
+  )
   const settings = docs.get('godot/settings')
   ok(settings.proxy === 'http://local:1', '本机已有的代理设置不被导入值覆盖')
   ok(settings.autoEnablePlugin === true, '本机缺失的设置键被补上')

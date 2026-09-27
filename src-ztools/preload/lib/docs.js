@@ -661,6 +661,10 @@ function docsCleanCache(versionIds) {
     ? versionIds
     : listDocs('godot/docs/').filter((/** @type {any} */ d) => d.versionId).map((/** @type {any} */ d) => d.versionId))
   for (const id of ids) docsDeleteLibrary(id)
+  // 全部清空时连空的根目录一起移除,不留 gpm-docs 空壳
+  if (!listDocs('godot/docs/').some((/** @type {any} */ d) => d.versionId)) {
+    rmQuiet(docsRoot())
+  }
   return { ok: true, removed: ids.length }
 }
 

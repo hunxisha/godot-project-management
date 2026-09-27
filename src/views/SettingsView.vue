@@ -3,7 +3,8 @@ import { reactive, ref } from 'vue'
 import { getSettings, notify, openPath, pickDirectory, pickFile, saveSettings } from '../services/bridge'
 import Icon from '../components/Icon.vue'
 import ThemeSwitcher from '../components/ThemeSwitcher.vue'
-import type { NetworkCheckResult, OpenAction } from '../types/godot'
+import { fmtSize } from '../utils/format'
+import type { DocsCacheInfo, NetworkCheckResult, OpenAction } from '../types/godot'
 
 const state = reactive({ ...getSettings() })
 const apiKeyInput = ref('')
@@ -29,7 +30,7 @@ function chooseBackupRoot() {
   }
 }
 
-// ---------- 数据迁移 / 网络诊断 ----------
+// ---------- 数据迁移 / 文档库缓存 / 网络诊断 ----------
 
 const dtBusy = ref(false)
 
@@ -67,6 +68,23 @@ function importData() {
     }
   } finally {
     dtBusy.value = false
+  }
+}
+
+// ---------- 文档库缓存 ----------
+
+const docsCache = ref<DocsCacheInfo | null>(null)
+
+function refreshDocsCache() {
+  docsCache.value = window.services.docsCacheInfo()
+}
+refreshDocsCache()
+
+function cleanDocsCache(versionIds?: string[]) {
+  const r = window.services.docsCleanCache(versionIds)
+  if (r.ok) {
+    notify(`已清理 ${r.removed ?? 0} 个文档库(收藏与浏览历史保留)`)
+    refreshDocsCache()
   }
 }
 
@@ -410,8 +428,36 @@ function openStoreSite() {
         </button>
       </div>
       <div class="hint">
-        导出内容:设置、项目清单、市场收藏(打包为一个 JSON 文件)。导入时:项目只登记本机路径存在的条目;
-        收藏按 assetId 合并不覆盖已有;设置只补本机缺失的键(安装目录、代理这类机器本地配置不会被导入值覆盖)。
+        导出内容:设置、项目清单、市场收藏、文档收藏与浏览历史(打包为一个 JSON 文件)。导入时:项目只登记本机路径存在的条目;
+        收藏按 assetId 合并不覆盖已有;文档收藏与历史并集合并;设置只补本机缺失的键(安装目录、代理这类机器本地配置不会被导入值覆盖)。
+      </div>
+    </div>
+
+    <div class="card section">
+      <div class="sec-head">
+        <span class="sec-ico"><Icon name="book" :size="15" /></span>
+        <span class="sec-title">文档库缓存</span>
+      </div>
+      <div class="sec-body dt-body">
+        <button
+          class="btn"
+          :disabled="!docsCache || !docsCache.libraries.length"
+          @click="cleanDocsCache()"
+        >
+          <Icon name="trash" :size="13" /> 清理全部
+        </button>
+        <span v-if="docsCache" class="dt-size">共 {{ fmtSize(docsCache.sizeBytes) }}</span>
+      </div>
+      <div v-if="docsCache && docsCache.libraries.length" class="docs-cache-list">
+        <div v-for="l in docsCache.libraries" :key="l.versionId" class="dc-row">
+          <span class="dc-tag mono">{{ l.tag }}</span>
+          <span class="dc-meta">{{ l.classes }} 类 · {{ fmtSize(l.sizeBytes) }}</span>
+          <span class="grow"></span>
+          <button class="mini-link" @click="cleanDocsCache([l.versionId])">删除</button>
+        </div>
+      </div>
+      <div class="hint">
+        文档库是从已装引擎导出的离线类参考,可随时在「文档」页重新生成,删除不影响插件其它数据。
       </div>
     </div>
 
@@ -616,10 +662,56 @@ function openStoreSite() {
   margin-left: auto;
 }
 
-/* 数据迁移 / 网络诊断 */
+/* 数据迁移 / 文档库缓存 / 网络诊断 */
 .dt-body {
   display: flex;
   gap: 8px;
+  align-items: center;
+}
+
+.dt-size {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.docs-cache-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.dc-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+}
+
+.dc-tag {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.dc-meta {
+  color: var(--text-3);
+}
+
+.mini-link {
+  border: none;
+  background: none;
+  padding: 2px 6px;
+  font-size: 12px;
+  color: var(--danger);
+  cursor: pointer;
+  border-radius: 5px;
+}
+
+.mini-link:hover {
+  background: var(--surface-2);
 }
 
 .net-results {
