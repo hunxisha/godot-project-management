@@ -59,8 +59,8 @@ const servicesApi = {
     searchCalls.push({ versionId, query, limit })
     return [{ kind: 'class', className: 'Node', name: 'Node', brief: '', score: 103 }]
   },
-  docsGenerate: (versionId) => {
-    generateCalls.push(versionId)
+  docsGenerate: (versionId, opts) => {
+    generateCalls.push({ versionId, opts })
     return { ok: true, taskId: 'docs-x' }
   },
   docsDeleteLibrary: () => ({ ok: true }),
@@ -145,8 +145,10 @@ async function main() {
 
   section('generate → building 状态')
   const g = d4.generate(VB)
-  ok(g.ok === true && generateCalls[0] === VB, 'generate 委托 preload')
+  ok(g.ok === true && generateCalls[0].versionId === VB, 'generate 委托 preload')
   ok(d4.statuses.value[VB]?.status === 'building', '入队后状态转 building', JSON.stringify(d4.statuses.value[VB]))
+  d4.generate(VB, { forceTranslation: true })
+  ok(generateCalls[1].opts?.forceTranslation === true, '强刷翻译选项透传 preload', JSON.stringify(generateCalls[1]))
 
   section('收藏与历史')
   d4.toggleFavorite('Node')

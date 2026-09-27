@@ -162,8 +162,9 @@ window.services = {
   /** 启用/禁用插件 */
   setAddonEnabled: (opts) => assets.setAddonEnabled(opts),
   /** ---------- 引擎文档库 ---------- */
-  /** 生成版本文档库(入队,进度走 watchDocsTasks,任务 kind='docs';在途时拒绝重复) */
-  docsGenerate: (versionId) => docs.generateDocs(versionId),
+  /** 生成版本文档库(入队,进度走 watchDocsTasks,任务 kind='docs';在途时拒绝重复)。
+   *  opts.forceTranslation=true 忽略 po 磁盘缓存重新下载官方翻译 */
+  docsGenerate: (versionId, opts) => docs.generateDocs(versionId, opts),
   /** 取消文档库生成任务 */
   docsCancelTask: (id) => docs.cancelDocsTask(id),
   /** 移除已结束的文档库任务记录 */

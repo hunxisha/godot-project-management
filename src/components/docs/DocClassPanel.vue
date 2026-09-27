@@ -5,7 +5,8 @@ import { computed, nextTick, ref, watch } from 'vue'
 import Icon from '../Icon.vue'
 import BBRich from './BBRich.vue'
 import { useDocs } from '../../composables/useDocs'
-import { openExternal } from '../../services/bridge'
+import { copyText, notify, openExternal } from '../../services/bridge'
+import { onlineDocsUrl } from '../../utils/godotDocs'
 import type { DocClassDetail } from '../../types/godot'
 
 const props = defineProps<{
@@ -23,7 +24,10 @@ const detail = ref<DocClassDetail | null>(null)
 const flash = ref('')
 const missing = computed(() => !detail.value)
 
-const { favorites, toggleFavorite, pushHistory, derivedOf, inheritsChainOf } = useDocs()
+const { favorites, toggleFavorite, pushHistory, derivedOf, inheritsChainOf, currentStatus } = useDocs()
+
+/** 当前库的引擎 tag(拼在线文档链接用) */
+const currentTag = computed(() => currentStatus.value?.tag)
 
 const chain = computed(() => inheritsChainOf(props.className))
 const derived = computed(() => derivedOf(props.className))
@@ -46,7 +50,7 @@ const toc = computed<TocGroup[]>(() => {
   const add = (key: string, label: string, items: TocItem[]) => { if (items.length) g.push({ key, label, items }) }
   add('signals', '信号', d.signals.map((s) => ({ anchor: `signal-${s.name}`, label: s.name })))
   add('members', '成员', d.members.map((x) => ({ anchor: `member-${x.name}`, label: x.name })))
-  add('methods', '方法', d.methods.map((x) => ({ anchor: `method-${x.name}`, label: x.name })))
+  add('methods', '方法', d.methods.map((m) => ({ anchor: methodAnchor(m), label: m.name })))
   add('enums', '枚举与常量', [
     ...d.enums.map((e) => ({ anchor: `enum-${e.name}`, label: e.name })),
     ...plainConstants.value.map((c) => ({ anchor: `constant-${c.name}`, label: c.name }))
@@ -92,7 +96,11 @@ watch(() => [props.versionId, props.className], load, { immediate: true })
 const rootEl = ref<HTMLElement | null>(null)
 
 function scrollToAnchor(anchor: string) {
-  const el = rootEl.value?.querySelector(`[data-doc-id="doc-${anchor}"]`)
+  const root = rootEl.value
+  if (!root) return
+  // 精确匹配优先;方法锚点已带参数个数,旧格式(仅符号名)回退按前缀取第一个
+  const el = root.querySelector(`[data-doc-id="doc-${anchor}"]`) ||
+    root.querySelector(`[data-doc-id^="doc-${anchor}-"]`)
   if (!el) return
   el.scrollIntoView({ block: 'start' })
   flash.value = anchor
@@ -116,9 +124,46 @@ function onRef(kind: string, target: string) {
     }
     return
   }
-  // 无类前缀:[param] 归属方法无从定位,其余按本类成员滚动
-  if (kind === 'param') return
+  // [param x]:定位到含该参数的方法签名(取第一个匹配),至少给一个落点
+  if (kind === 'param') {
+    const hit = detail.value?.methods.find((m) => m.params.some((p) => p.name === target))
+    if (hit) scrollToAnchor(`method-${hit.name}`)
+    return
+  }
   scrollToAnchor(`${kind}-${target}`)
+}
+
+/** 重载方法锚点需带参数个数消歧(同名不同参的方法会互相撞锚点) */
+function methodAnchor(m: { name: string, params: unknown[] }): string {
+  return `method-${m.name}-${m.params.length}`
+}
+
+/**
+ * 锚点 → DOM data-doc-id。滚动/跳转统一走 anchorDomId,渲染侧的 data-doc-id 与之一致。
+ * 旧格式(无参数个数的 method-<name>)仍兼容:滚动时回退按前缀查第一个匹配。
+ */
+function anchorDomId(anchor: string): string {
+  return `doc-${anchor}`
+}
+
+/** 复制签名(Markdown):外链指向官方在线文档,便于贴进笔记/issue */
+function copySignature(text: string, kind: string, symbol: string) {
+  const url = onlineDocsAnchorSafe(kind, symbol)
+  const ok = copyText(`${text}\n\n${url}`)
+  notify(ok ? '已复制签名与文档链接' : '复制失败,请手动选中复制')
+}
+
+/** 方法/成员/信号的在线锚点(未知 kind 回退类页) */
+function onlineDocsAnchorSafe(kind: string, symbol: string): string {
+  const base = onlineDocsUrl(currentTag.value, detail.value?.name ?? props.className)
+  const prefixes: Record<string, string> = { method: 'method', signal: 'signal', constant: 'constant', enum: 'enum', member: 'property' }
+  const p = prefixes[kind]
+  return p ? `${base}#${p}-${String(symbol).toLowerCase()}` : base
+}
+
+/** 打开该类在官方在线文档的页面 */
+function openOnline() {
+  openExternal(onlineDocsUrl(currentTag.value, props.className))
 }
 
 /** 方法签名展示:name(a: Type = default, ...) -> Ret */
@@ -138,6 +183,12 @@ function signature(m: { name: string, returnType: string, params: { name: string
           <span v-if="detail.builtin" class="badge">builtin</span>
           <span v-if="detail.isSingleton" class="badge warn">单例</span>
           <span class="grow"></span>
+          <button class="icon-btn" title="复制类签名与文档链接" @click="copySignature(`class ${detail.name}${detail.inherits ? ' extends ' + detail.inherits : ''}`, 'class', detail.name)">
+            <Icon name="copy" :size="14" />
+          </button>
+          <button class="icon-btn" title="在官方在线文档中打开" @click="openOnline">
+            <Icon name="external" :size="14" />
+          </button>
           <button class="icon-btn" :class="{ on: isFav }" :title="isFav ? '取消收藏' : '收藏'" @click="toggleFavorite(detail.name)">
             <Icon name="star" :size="15" />
           </button>
@@ -176,6 +227,9 @@ function signature(m: { name: string, returnType: string, params: { name: string
         >
           <div class="sig mono">
             <span class="kw">signal</span> {{ s.name }}<span v-if="s.params.length">({{ s.params.map((p) => `${p.name}: ${p.type}`).join(', ') }})</span><span v-else>()</span>
+            <button class="sig-act" title="复制签名与文档链接" @click="copySignature(`signal ${detail.name}.${s.name}(${s.params.map((p) => `${p.name}: ${p.type}`).join(', ')})`, 'signal', s.name)">
+              <Icon name="copy" :size="11" />
+            </button>
           </div>
           <div v-if="s.description" class="item-desc"><BBRich :text="s.description" @ref="onRef" @url="openExternal" /></div>
         </div>
@@ -194,6 +248,9 @@ function signature(m: { name: string, returnType: string, params: { name: string
             <span class="type">{{ mb.type }}</span> <span class="name">{{ mb.name }}</span>
             <span v-if="mb.defaultValue !== undefined" class="default">= {{ mb.defaultValue }}</span>
             <span v-if="!mb.setter" class="badge dim">只读</span>
+            <button class="sig-act" title="复制签名与文档链接" @click="copySignature(`${mb.type} ${detail.name}.${mb.name}`, 'member', mb.name)">
+              <Icon name="copy" :size="11" />
+            </button>
           </div>
           <div v-if="mb.description" class="item-desc"><BBRich :text="mb.description" @ref="onRef" @url="openExternal" /></div>
         </div>
@@ -205,12 +262,15 @@ function signature(m: { name: string, returnType: string, params: { name: string
           v-for="m in detail.methods"
           :key="m.name + m.params.length"
           class="item"
-          :data-doc-id="`doc-method-${m.name}`"
-          :class="{ flash: flash === `method-${m.name}` }"
+          :data-doc-id="`doc-${methodAnchor(m)}`"
+          :class="{ flash: flash === methodAnchor(m) || flash === `method-${m.name}` }"
         >
           <div class="sig mono">
             <span v-for="q in m.qualifiers" :key="q" class="kw">{{ q }}</span>
             <span class="name">{{ signature(m) }}</span>
+            <button class="sig-act" title="复制签名与文档链接" @click="copySignature(`${detail.name}.${signature(m)}`, 'method', m.name)">
+              <Icon name="copy" :size="11" />
+            </button>
           </div>
           <div v-if="m.description" class="item-desc"><BBRich :text="m.description" @ref="onRef" @url="openExternal" /></div>
         </div>
@@ -477,6 +537,31 @@ function signature(m: { name: string, returnType: string, params: { name: string
 .sig .default {
   color: var(--text-3);
   margin-left: 5px;
+}
+
+.item:hover .sig-act {
+  opacity: 1;
+}
+
+.sig-act {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 7px;
+  vertical-align: -3px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-3);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.sig-act:hover {
+  color: var(--brand);
 }
 
 .item-desc {

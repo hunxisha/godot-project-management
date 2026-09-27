@@ -326,13 +326,14 @@ async function main() {
     ['Base class for all scene objects.', '所有场景对象的基类。'],
     ['Adds a child [param node].', '添加子节点 [param node]。']
   ])
-  const hits = { count: 0 }
+  const hits = { count: 0, total: 0 }
   const zhCls = lib.applyTranslations(core, trSmall, hits)
   ok(zhCls.brief === '所有场景对象的基类。', 'brief 替换为中文')
   ok(zhCls.description === core.description, '未命中的描述保持英文')
   ok(zhCls.methods.find((m) => m.name === 'add_child').description === '添加子节点 [param node]。', '方法描述替换(BBCode 原样保留)')
   ok(zhCls.methods.find((m) => m.name === 'get_tree').description === 'Returns the tree.', '未命中方法保持英文')
   ok(hits.count === 2, '命中计数', String(hits.count))
+  ok(hits.total >= hits.count && hits.total >= 6, '可翻译字符串总数被统计', String(hits.total))
 
   // ---------- 生成全流程 ----------
   section('生成全流程')
@@ -440,6 +441,7 @@ async function main() {
   ok(nodeZh.description.includes('基本构件') && nodeZh.description.includes('[method _ready]'), '描述中文且 BBCode 保留')
   const zhRec = docs.get('godot/docs/4.7.2-stable-standard-win64')
   ok(zhRec.lang === 'zh-CN' && zhRec.translatedCount > 0, 'db 记录 lang=zh-CN + 命中数', JSON.stringify({ lang: zhRec.lang, n: zhRec.translatedCount }))
+  ok(zhRec.stringCount >= zhRec.translatedCount && zhRec.stringCount > 0, 'db 记录可翻译字符串总数(覆盖率分母)', JSON.stringify({ t: zhRec.stringCount, h: zhRec.translatedCount }))
   ok(lib.docsLibraryStatus(V1).lang === 'zh-CN', '状态接口带 lang')
   ok(fs.existsSync(path.join(WORK, 'gpm-docs', 'po-cache', 'zh_Hans-4.7.2-stable.po')), 'po 已磁盘缓存')
 
@@ -451,6 +453,24 @@ async function main() {
   const nodeEn = JSON.parse(fs.readFileSync(path.join(libDir, 'classes', 'Node.json'), 'utf8'))
   ok(nodeEn.brief === 'Base class for all scene objects.', '无翻译时保持英文')
   ok(lib.docsLibraryStatus(V1).lang === 'en', '降级库 lang=en', lib.docsLibraryStatus(V1).lang)
+
+  // ---------- 强制刷新翻译(forceTranslation) ----------
+  section('强制刷新翻译')
+  // 1) 正常生成:建缓存,brief 为 v1 译文
+  state.poText = zhPo.join('\n')
+  const f1 = lib.generateDocs(V1)
+  await waitTask(f1.taskId)
+  ok(JSON.parse(fs.readFileSync(path.join(libDir, 'classes', 'Node.json'), 'utf8')).brief === '所有场景对象的基类。', '正常生成使用 v1 译文', JSON.parse(fs.readFileSync(path.join(libDir, 'classes', 'Node.json'), 'utf8')).brief)
+  // 2) 换新译文但不强刷:po 磁盘缓存命中,仍是 v1
+  state.poText = ['msgid "Base class for all scene objects."', 'msgstr "场景对象的基类(新版译文)。"'].join('\n')
+  const f2 = lib.generateDocs(V1)
+  await waitTask(f2.taskId)
+  ok(JSON.parse(fs.readFileSync(path.join(libDir, 'classes', 'Node.json'), 'utf8')).brief === '所有场景对象的基类。', '不强刷时缓存命中仍是旧译文', JSON.parse(fs.readFileSync(path.join(libDir, 'classes', 'Node.json'), 'utf8')).brief)
+  // 3) 强刷:清缓存重新下载,拿到新版译文
+  const f3 = lib.generateDocs(V1, { forceTranslation: true })
+  await waitTask(f3.taskId)
+  ok(JSON.parse(fs.readFileSync(path.join(libDir, 'classes', 'Node.json'), 'utf8')).brief === '场景对象的基类(新版译文)。', '强刷后应用新译文', JSON.parse(fs.readFileSync(path.join(libDir, 'classes', 'Node.json'), 'utf8')).brief)
+  state.poText = null
 
   // ---------- 缓存统计与清理 ----------
   section('缓存统计与清理')

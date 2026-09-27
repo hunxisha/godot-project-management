@@ -112,6 +112,8 @@ export interface DocLibraryStatus {
   lang?: 'zh-CN' | 'en'
   /** 中文描述命中条数(诊断翻译覆盖用) */
   translatedCount?: number
+  /** 可翻译字符串总数:translatedCount/stringCount 即覆盖率 */
+  stringCount?: number
 }
 
 /** 索引条目:类列表与搜索共用的轻量摘要 */

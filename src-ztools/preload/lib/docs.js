@@ -435,8 +435,10 @@ function translationRefs(tag) {
  * @param {{canceled: boolean}} token
  * @returns {Promise<Map<string, string> | null>}
  */
-async function loadZhTranslations(tag, token) {
+async function loadZhTranslations(tag, token, force = false) {
   const cacheDir = path.join(docsRoot(), 'po-cache')
+  // 强刷翻译:清掉整个 po 缓存,重新走下载(官方翻译随上游更新)
+  if (force) rmQuiet(cacheDir)
   for (const ref of translationRefs(tag)) {
     const cached = path.join(cacheDir, `${TRANSLATION_LOCALE}-${ref}.po`)
     try {
@@ -469,14 +471,17 @@ async function loadZhTranslations(tag, token) {
 
 /**
  * 应用翻译:命中 msgid 的描述字段替换为中文,其余保持英文原样。
+ * 同时统计「可翻译字符串总数」(hits.total)与「实际命中数」(hits.count),
+ * 供 db 记录翻译覆盖率 —— 未命中是官方翻译缺失,不是插件丢失内容。
  * @param {DocClassDetail} cls
  * @param {Map<string, string>} tr
- * @param {{count: number}} hits 计数器(统计命中条数)
+ * @param {{count: number, total: number}} hits 计数器
  * @returns {DocClassDetail}
  */
 function applyTranslations(cls, tr, hits) {
   const t = (/** @type {string} */ s) => {
     if (s) {
+      hits.total++
       const z = tr.get(s)
       if (z !== undefined) { hits.count++; return z }
     }
@@ -524,11 +529,11 @@ async function runGenerate(taskId) {
   const workDir = path.join(docsRoot(), `.work-${taskId}`)
   const token = createCancelToken()
   /** 翻译命中计数(applyTranslations 回填) */
-  const zhHits = { count: 0 }
+  const zhHits = { count: 0, total: 0 }
   try {
     // 中文翻译与引擎导出并行启动:dump ~1s,翻译下载(9-10MB)可能更慢,先发车
-    // 失败/超时不影响生成 —— 降级英文
-    const zhPromise = loadZhTranslations(version.tag, token).catch(/** @type {() => null} */ (() => null))
+    // 失败/超时不影响生成 —— 降级英文;forceTranslation 时先清缓存再下载
+    const zhPromise = loadZhTranslations(version.tag, token, !!task.forceTranslation).catch(/** @type {() => null} */ (() => null))
     ensureDir(workDir)
     // ---- dumping:spawn 引擎,产物为 cwd 下的 extension_api.json ----
     setTask(taskId, { status: 'dumping', log: '' })
@@ -631,7 +636,9 @@ async function runGenerate(taskId) {
       libDir,
       // 库语言:拿到翻译表(哪怕覆盖不全)即视为中文库;未命中条目保留英文
       lang: tr ? 'zh-CN' : 'en',
-      translatedCount: tr ? zhHits.count : 0
+      translatedCount: tr ? zhHits.count : 0,
+      // 可翻译字符串总数:translatedCount/stringCount 即翻译覆盖率
+      stringCount: tr ? zhHits.total : 0
     })
     indexCache.delete(versionId)
     setTask(taskId, { status: 'done', done: total })
@@ -650,10 +657,13 @@ async function runGenerate(taskId) {
 
 /**
  * 生成指定版本的文档库(入队,立即返回)。同版本在途时拒绝重复入队。
+ * opts.forceTranslation=true 时忽略 po 磁盘缓存,重新下载官方翻译
+ * (翻译随上游更新,重新生成时可强制刷新)。
  * @param {string} versionId
+ * @param {{forceTranslation?: boolean}} [opts]
  * @returns {{ok: boolean, error?: string, taskId?: string}}
  */
-function generateDocs(versionId) {
+function generateDocs(versionId, opts) {
   const { docId } = versionKey(versionId)
   const version = getDoc(docId)
   if (!version || !version.exePath) return { ok: false, error: '版本不存在或未绑定可执行文件' }
@@ -666,6 +676,7 @@ function generateDocs(versionId) {
     versionId: docId,
     tag: version.tag,
     versionName: version.name,
+    forceTranslation: !!(opts && opts.forceTranslation),
     status: 'queued',
     done: 0,
     total: 0,
@@ -727,7 +738,8 @@ function docsLibraryStatus(versionId) {
       classCount: record.classCount,
       builtAt: record.builtAt,
       lang: record.lang,
-      translatedCount: record.translatedCount
+      translatedCount: record.translatedCount,
+      stringCount: record.stringCount
     }
   }
   const busy = tasks.list().find((/** @type {any} */ t) => versionKey(t.versionId).key === versionKey(versionId).key && !tasks.isTerminal(t.status))

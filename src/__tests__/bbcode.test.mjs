@@ -19,6 +19,13 @@ if (!existsSync(BUNDLE)) {
 }
 
 const { tokenizeBBCode, bbToPlainText, highlightCode } = await import(pathToFileURL(BUNDLE).href)
+const DOCS_BUNDLE = path.resolve(__dirname, '../../.gpm-test/out/godotdocs.mjs')
+if (!existsSync(DOCS_BUNDLE)) {
+  console.error(`找不到打包产物: ${DOCS_BUNDLE}`)
+  console.error('请先运行: node src/composables/__tests__/build-bundle.mjs')
+  process.exit(2)
+}
+const { onlineDocsUrl, onlineDocsAnchorUrl } = await import(pathToFileURL(DOCS_BUNDLE).href)
 
 let pass = 0
 const failures = []
@@ -110,6 +117,14 @@ const csKinds = csToks.filter((t) => t.c).map((t) => `${t.c}:${t.v}`)
 ok(csKinds.includes('kw:new') && csKinds.includes('ty:Array') && csKinds.includes('com:// note'), 'C#:关键字/类型/注释着色', csKinds.join(','))
 const txtToks = highlightCode('[section]', 'text')
 ok(txtToks.length === 1 && txtToks[0].c === '' && txtToks[0].v === '[section]', 'lang=text 整段原样不着色')
+
+section('官方在线文档链接换算')
+ok(onlineDocsUrl('4.7.2-stable', 'Node') === 'https://docs.godotengine.org/en/4.7/classes/class_node.html', 'tag 截取主.次位 + 类名小写', onlineDocsUrl('4.7.2-stable', 'Node'))
+ok(onlineDocsUrl(undefined, 'Node') === 'https://docs.godotengine.org/en/stable/classes/class_node.html', '无 tag 回退 stable')
+ok(onlineDocsUrl('4.8-dev6', '@GlobalScope').endsWith('class_@globalscope.html'), '@GlobalScope 页名保留 @')
+ok(onlineDocsAnchorUrl('4.7.2-stable', 'Node', 'method', 'add_child').endsWith('class_node.html#method-add_child'), '方法锚点')
+ok(onlineDocsAnchorUrl('4.7.2-stable', 'Node', 'member', 'owner').endsWith('#property-owner'), '成员锚点映射为 property')
+ok(onlineDocsAnchorUrl('4.7.2-stable', 'Node', 'weird', 'x') === onlineDocsUrl('4.7.2-stable', 'Node'), '未知 kind 回退类页')
 
 section('lang 属性与 skip-lint 变体')
 const ltTok = first(tokenizeBBCode('[codeblock lang=text]\n[section]\nkey=42\n[/codeblock]'), 'codeblock')

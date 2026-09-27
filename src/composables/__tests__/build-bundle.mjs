@@ -56,6 +56,7 @@ await build({
         markettags: path.join(root, 'src', 'utils', 'marketTags.ts'),
         avatar: path.join(root, 'src', 'utils', 'avatar.ts'),
         bbcode: path.join(root, 'src', 'utils', 'bbcode.ts'),
+        godotdocs: path.join(root, 'src', 'utils', 'godotDocs.ts'),
         // 测试专用:暴露 vue(与各入口共享同一个 chunk),供测试创建 ref
         vueshim: path.join(root, 'src', 'composables', '__tests__', 'vue-shim.mjs')
       },
@@ -67,6 +68,6 @@ await build({
   }
 })
 
-for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'usedocs', 'format', 'godotversion', 'markettags', 'avatar', 'bbcode', 'vueshim']) {
+for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'usedocs', 'format', 'godotversion', 'markettags', 'avatar', 'bbcode', 'godotdocs', 'vueshim']) {
   console.log(`bundle built: ${path.join(root, OUT_DIR, `${name}.mjs`)}`)
 }

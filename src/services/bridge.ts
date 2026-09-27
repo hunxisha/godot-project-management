@@ -79,3 +79,35 @@ export function pickFile(title: string, extensions: string[], defaultPath?: stri
 export const openPath = (p: string) => window.ztools.shellOpenPath(p)
 export const showInFolder = (p: string) => window.ztools.shellShowItemInFolder(p)
 export const openExternal = (url: string) => window.ztools.shellOpenExternal(url)
+
+// ---------- 剪贴板 ----------
+
+/** execCommand 兜底:clipboard API 在部分宿主 webview 里不可用 */
+function fallbackCopy(text: string): boolean {
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    const ok = document.execCommand('copy')
+    ta.remove()
+    return ok
+  } catch (e) {
+    return false
+  }
+}
+
+/** 复制文本到剪贴板;优先 clipboard API,失败走 execCommand 兜底 */
+export function copyText(text: string): boolean {
+  try {
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).catch(() => fallbackCopy(text))
+      return true
+    }
+  } catch (e) {
+    // 走兜底
+  }
+  return fallbackCopy(text)
+}

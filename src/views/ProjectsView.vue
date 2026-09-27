@@ -31,6 +31,8 @@ const emit = defineEmits<{
   (e: 'open-backups', id?: string): void
   /** 跳到市场模板模式(新建对话框的「从市场模板创建」入口) */
   (e: 'template-market'): void
+  /** 打开该项目的引擎版本文档库(未绑定/未生成时切到文档页引导) */
+  (e: 'open-docs', id: string): void
 }>()
 
 const settings = getSettings()
@@ -442,6 +444,13 @@ function onKeyDown(e: KeyboardEvent) {
               @click="openArgs(p)"
             >
               <Icon name="zap" :size="13" />
+            </button>
+            <button
+              class="btn small ghost icon-act"
+              title="查看该项目的引擎文档(离线类参考)"
+              @click="emit('open-docs', p._id)"
+            >
+              <Icon name="book" :size="13" />
             </button>
             <button
               class="btn small ghost icon-act"

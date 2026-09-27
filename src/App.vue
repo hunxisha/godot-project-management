@@ -31,6 +31,8 @@ const backupRequest = ref<string | null>(null)
 const docTarget = ref<{ className: string, anchor?: string } | null>(null)
 /** 文档搜索面板开关 */
 const paletteOpen = ref(false)
+/** 项目页 → 文档页:按项目绑定的引擎版本选库(docVersionId 为待切换的版本 id) */
+const docVersionRequest = ref<string | null>(null)
 
 // ---------- 全局任务(引擎/模板下载 + 备份/恢复 + 一键导出,常驻订阅,切页不断线) ----------
 
@@ -242,6 +244,13 @@ function gotoDocTarget(hit: { className: string, anchor?: string }) {
   tab.value = 'docs'
 }
 
+/** 项目卡片「查看文档」→ 文档页,并尝试切到该项目绑定的引擎版本 */
+function gotoProjectDocs(projectId: string) {
+  const project = window.ztools.db.get(projectId) as { versionId?: string } | null
+  docVersionRequest.value = project?.versionId ?? null
+  tab.value = 'docs'
+}
+
 function gotoCreate() {
   pendingCreate.value = true
   tab.value = 'projects'
@@ -290,6 +299,7 @@ function gotoCreateBackup(id: string) {
           @open-backups="gotoBackups"
           @backup-project="gotoCreateBackup"
           @template-market="gotoMarketTemplates"
+          @open-docs="gotoProjectDocs"
         />
         <VersionsView v-else-if="tab === 'versions'" />
         <MarketplaceView
@@ -307,7 +317,9 @@ function gotoCreateBackup(id: string) {
         <DocsView
           v-else-if="tab === 'docs'"
           :pending-target="docTarget"
+          :pending-version-id="docVersionRequest"
           @consumed="docTarget = null"
+          @version-consumed="docVersionRequest = null"
         />
         <BackupsView
           v-else-if="tab === 'backups'"

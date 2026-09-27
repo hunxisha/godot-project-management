@@ -6,14 +6,17 @@ import Icon from '../components/Icon.vue'
 import DocClassPanel from '../components/docs/DocClassPanel.vue'
 import { useDocs } from '../composables/useDocs'
 import { notify } from '../services/bridge'
-import type { DocsTask } from '../types/godot'
+import type { DocClassSummary, DocsTask } from '../types/godot'
 
 const props = defineProps<{
   /** 来自全局搜索命中的跳转目标,消费后回调 */
   pendingTarget?: { className: string, anchor?: string } | null
+  /** 来自项目卡片:要切换到的引擎版本文档库,消费后回调 */
+  pendingVersionId?: string | null
 }>()
 const emit = defineEmits<{
   (e: 'consumed'): void
+  (e: 'version-consumed'): void
 }>()
 
 const {
@@ -53,6 +56,7 @@ onMounted(() => {
     }
   })
   applyPending()
+  applyPendingVersion()
 })
 
 onBeforeUnmount(() => { if (unwatch) unwatch() })
@@ -69,13 +73,36 @@ const activeTaskByVersion = computed(() => {
   return map
 })
 
-/** 侧栏列表:收藏置顶 + 过滤后的字母序 */
+/** 成员名命中集合(用于列表项角标与排序分组) */
+const memberMatchNames = computed(() => {
+  const kw = filter.value.trim().toLowerCase()
+  if (!kw) return new Set<string>()
+  const out = new Set<string>()
+  for (const c of classes.value) {
+    if (c.name.toLowerCase().includes(kw)) continue
+    if (
+      c.m.some((x) => x.toLowerCase().includes(kw)) ||
+      c.p.some((x) => x.toLowerCase().includes(kw)) ||
+      c.s.some((x) => x.toLowerCase().includes(kw)) ||
+      c.c.some((x) => x.toLowerCase().includes(kw)) ||
+      c.e.some((x) => x.toLowerCase().includes(kw))
+    ) out.add(c.name)
+  }
+  return out
+})
+
+/** 侧栏列表:类名命中优先,其次成员名命中(找「哪个类有 tween_interval」不用开 Ctrl+K) */
 const filtered = computed(() => {
   const kw = filter.value.trim().toLowerCase()
-  const list = kw
-    ? classes.value.filter((c) => c.name.toLowerCase().includes(kw))
-    : classes.value
-  return [...list].sort((a, b) => a.name.localeCompare(b.name))
+  const byName: DocClassSummary[] = []
+  const byMember: DocClassSummary[] = []
+  for (const c of classes.value) {
+    if (!kw) { byName.push(c); continue }
+    if (c.name.toLowerCase().includes(kw)) byName.push(c)
+    else if (memberMatchNames.value.has(c.name)) byMember.push(c)
+  }
+  const cmp = (a: DocClassSummary, b: DocClassSummary) => a.name.localeCompare(b.name)
+  return [...byName.sort(cmp), ...byMember.sort(cmp)]
 })
 
 const favoriteItems = computed(() =>
@@ -91,12 +118,20 @@ const historyItems = computed(() =>
 )
 
 function openClass(name: string) {
-  selected.value = name
-  anchor.value = null
-  if (window.innerWidth <= 900) showList.value = false
+  gotoClass(name)
 }
 
-function onNavigate(cls: string, anchorName?: string) {
+const anchorKey = ref(0)
+/** 导航栈:跨类跳转时压入上一个类,支持返回(Alt+← / 返回按钮) */
+const backStack = ref<string[]>([])
+
+/** 统一入口:记录来路后打开某个类 */
+function gotoClass(cls: string, anchorName?: string | null, opts: { push?: boolean } = {}) {
+  const push = opts.push !== false
+  if (cls !== selected.value && selected.value && push) {
+    backStack.value.push(selected.value)
+    if (backStack.value.length > 50) backStack.value.shift()
+  }
   anchor.value = anchorName ?? null
   if (cls === selected.value && anchorName) {
     // 同类跳转:通过 anchorKey 变化让面板重新定位
@@ -107,7 +142,17 @@ function onNavigate(cls: string, anchorName?: string) {
   if (window.innerWidth <= 900) showList.value = false
 }
 
-const anchorKey = ref(0)
+const canGoBack = computed(() => backStack.value.length > 0)
+
+function goBack() {
+  const prev = backStack.value.pop()
+  if (!prev) return
+  gotoClass(prev, null, { push: false })
+}
+
+function onNavigate(cls: string, anchorName?: string) {
+  gotoClass(cls, anchorName)
+}
 
 /** 管理面板里的取消(模板不能直接访问 window) */
 function cancelTask(id: string) {
@@ -115,18 +160,20 @@ function cancelTask(id: string) {
 }
 
 /** 发起生成:preload 拒绝入队的原因(版本缺失/在途)必须浮出来,不能静默 */
-function onGenerate(id: string) {
-  const r = generate(id)
+function onGenerate(id: string, forceTranslation = false) {
+  const r = generate(id, { forceTranslation })
   if (!r.ok) notify(r.error || '无法发起生成')
+}
+
+/** 重新生成(勾选强刷翻译时忽略 po 缓存,重新下载官方翻译) */
+function onRegenerate(id: string, forceTranslation: boolean) {
+  onGenerate(id, forceTranslation)
 }
 
 function applyPending() {
   const t = props.pendingTarget
   if (!t) return
-  anchor.value = t.anchor ?? null
-  anchorKey.value++
-  selected.value = t.className
-  if (window.innerWidth <= 900) showList.value = false
+  gotoClass(t.className, t.anchor ?? null)
   emit('consumed')
 }
 
@@ -134,12 +181,60 @@ watch(() => props.pendingTarget, (v, old) => {
   if (v && v !== old) applyPending()
 })
 
+/** 项目卡片「查看文档」:切到该项目绑定的引擎版本;未生成则给出提示(留在库管理可见处) */
+function applyPendingVersion() {
+  const id = props.pendingVersionId
+  if (!id) return
+  const st = statuses.value[id]
+  if (st && st.status === 'ready') {
+    selectVersion(id)
+  } else if (versions.value.some((v) => v._id === id)) {
+    notify('该项目绑定的引擎还没有文档库,点「生成」即可创建')
+    if (!readyVersions.value.length) return
+  } else {
+    notify('该项目未绑定已安装的引擎')
+  }
+  emit('version-consumed')
+}
+
+watch(() => props.pendingVersionId, (v, old) => {
+  if (v && v !== old) applyPendingVersion()
+})
+
+// Alt+← / Cmd+[ 返回上一个类(Ctrl+K 之外的第二个键盘入口)
+function onKeydown(e: KeyboardEvent) {
+  if (e.altKey && e.key === 'ArrowLeft') {
+    if (!canGoBack.value) return
+    e.preventDefault()
+    goBack()
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
+
+/** 当前类不在当前库时的提示(切库/搜索跳转到未收录的类) */
+const classMissing = computed(() => !!selected.value && classes.value.length > 0 && !classes.value.some((c) => c.name === selected.value))
+
+/** 发起强刷翻译(带确认语义:会重新下载 9-10MB 翻译) */
+const forceTpl = ref(false)
+
 /** 状态徽标文案 */
 function statusText(id: string): string {
   const s = statuses.value[id]
   if (!s) return '未生成'
   if (s.status === 'ready') return `${s.classCount} 类${s.lang === 'en' ? ' · 英文' : ' · 中文'}`
   return '生成中…'
+}
+
+/** 翻译覆盖率(中文库才有意义):命中/可翻译总数 */
+function coverageText(id: string): string {
+  const s = statuses.value[id]
+  if (!s || s.status !== 'ready' || s.lang === 'en') return ''
+  const total = s.stringCount || 0
+  const hit = s.translatedCount || 0
+  if (!total) return ''
+  return `翻译覆盖 ${Math.round((hit / total) * 100)}%(${hit}/${total})`
 }
 
 const PHASE_TEXT: Record<string, string> = {
@@ -166,6 +261,7 @@ const PHASE_TEXT: Record<string, string> = {
             <span class="vc-sub mono">{{ v.tag }}</span>
           </div>
           <span class="vc-status" :class="{ ready: statuses[v._id]?.status === 'ready' }">{{ statusText(v._id) }}</span>
+          <span v-if="coverageText(v._id)" class="vc-coverage" :title="`官方翻译未覆盖的条目保留英文原文`">{{ coverageText(v._id) }}</span>
           <button
             v-if="!activeTaskByVersion[v._id]"
             class="btn small"
@@ -206,10 +302,14 @@ const PHASE_TEXT: Record<string, string> = {
             <button v-if="statuses[v._id]?.status === 'ready' && !activeTaskByVersion[v._id]" class="mini-btn" title="删除文档库" @click="removeLibrary(v._id)">
               <Icon name="trash" :size="12" />
             </button>
-            <button v-if="!activeTaskByVersion[v._id]" class="mini-btn" title="生成/重新生成" @click="onGenerate(v._id)">
+            <button v-if="!activeTaskByVersion[v._id]" class="mini-btn" title="生成/重新生成" @click="onGenerate(v._id, forceTpl)">
               <Icon name="refresh" :size="12" />
             </button>
           </div>
+          <label class="force-row">
+            <input v-model="forceTpl" type="checkbox" class="switch">
+            <span>重新生成时强制刷新中文翻译(忽略本地 po 缓存,重新下载约 10MB)</span>
+          </label>
           <div v-for="t in Object.values(activeTaskByVersion)" :key="t.id" class="mg-row">
             <span class="mg-name mono">{{ t.tag }}</span>
             <span class="mg-status">{{ PHASE_TEXT[t.status] || t.status }} {{ t.total ? `${t.done}/${t.total}` : '' }}</span>
@@ -259,16 +359,26 @@ const PHASE_TEXT: Record<string, string> = {
             @click="openClass(c.name)"
           >
             <span class="cls-name mono">{{ c.name }}</span>
-            <span v-if="c.inherits" class="cls-inherits mono">{{ c.inherits }}</span>
+            <span v-if="memberMatchNames.has(c.name)" class="cls-member-hit" title="成员名匹配">成员</span>
+            <span v-else-if="c.inherits" class="cls-inherits mono">{{ c.inherits }}</span>
           </button>
           <div v-if="!filtered.length" class="list-empty">没有匹配「{{ filter }}」的类</div>
         </div>
       </aside>
 
       <section class="detail">
-        <button class="btn-back" @click="showList = true">
-          <Icon name="chevron-left" :size="13" /> 类列表
-        </button>
+        <div class="detail-bar">
+          <button class="btn-back" @click="showList = true">
+            <Icon name="chevron-left" :size="13" /> 类列表
+          </button>
+          <button v-if="canGoBack" class="btn-back" title="返回上一个类(Alt+←)" @click="goBack">
+            <Icon name="chevron-left" :size="13" /> 返回
+          </button>
+        </div>
+        <div v-if="classMissing" class="missing-lib">
+          <Icon name="alert" :size="16" />
+          <span>「{{ selected }}」不在当前文档库({{ currentStatus?.tag }})中 —— 可能属于其他引擎版本。</span>
+        </div>
         <DocClassPanel
           v-if="selected && currentVersionId"
           :key="`${currentVersionId}-${selected}-${anchorKey}`"
@@ -622,6 +732,71 @@ const PHASE_TEXT: Record<string, string> = {
   opacity: 0.8;
 }
 
+.btn-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 10px 14px 0;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* 返回按钮只在窄窗(列表/详情二选一)与有来路时出现 */
+.detail-bar {
+  display: none;
+  gap: 6px;
+}
+
+.missing-lib {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 10px 18px 0;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-radius: 8px;
+  background: var(--warn-weak);
+  color: var(--warn);
+  font-size: 12.5px;
+}
+
+.vc-coverage {
+  font-size: 10.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.cls-member-hit {
+  margin-left: auto;
+  padding: 0 5px;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--brand);
+  border: 1px solid color-mix(in srgb, var(--brand) 35%, transparent);
+  border-radius: 5px;
+  flex-shrink: 0;
+}
+
+.force-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 2px 8px;
+  font-size: 11px;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.force-row .switch {
+  margin-top: 1px;
+  flex-shrink: 0;
+}
+
 /* 窄窗:列表与详情二选一 */
 @media (max-width: 900px) {
   .layout {
@@ -636,19 +811,8 @@ const PHASE_TEXT: Record<string, string> = {
     display: none;
   }
 
-  .btn-back {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    margin: 10px 14px 0;
-    padding: 5px 10px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface);
-    color: var(--text-2);
-    font-size: 12px;
-    cursor: pointer;
-    align-self: flex-start;
+  .detail-bar {
+    display: flex;
   }
 }
 </style>

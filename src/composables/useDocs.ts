@@ -77,11 +77,12 @@ function selectVersion(id: string) {
   loadClasses()
 }
 
-/** 发起生成;成功后状态转为 building(进度由 DocsView 订阅任务快照展示) */
-function generate(versionId: string): { ok: boolean, error?: string } {
-  const r = window.services.docsGenerate(versionId)
+/** 发起生成;成功后状态转为 building(进度由 DocsView 订阅任务快照展示)。
+ *  opts.forceTranslation=true 忽略 po 磁盘缓存重新下载官方翻译 */
+function generate(versionId: string, opts?: { forceTranslation?: boolean }): { ok: boolean, error?: string } {
+  const r = window.services.docsGenerate(versionId, opts)
   if (r.ok) {
-    statuses.value = { ...statuses.value, [versionId]: { status: 'building', versionId, tag: versions.value.find((v) => v.id === versionId)?.tag ?? '' } }
+    statuses.value = { ...statuses.value, [versionId]: { status: 'building', versionId, tag: versions.value.find((v) => v._id === versionId)?.tag ?? '' } }
   }
   return r
 }
