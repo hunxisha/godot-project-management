@@ -10,7 +10,7 @@ ZTools 插件。渲染层为 **Vue 3 + Vite + TypeScript**，Node 能力由 **pr
 
 ## 功能
 
-界面分 7 个页面（顶栏标签 + 主题切换按钮）：
+界面分 8 个页面（顶栏标签 + 主题切换按钮）：
 
 | 页面 | 内容 |
 |---|---|
@@ -19,8 +19,9 @@ ZTools 插件。渲染层为 **Vue 3 + Vite + TypeScript**，Node 能力由 **pr
 | **版本** | 引擎版本列表（官方归档 + 24h 缓存）、队列式下载安装（**断点续传 + 自动重试**）、解压前 zip 预检、导入本地引擎、删除已装版本、**导出模板下载/安装/卸载**（遵循 Godot 目录规则，含 `._sc_` 自包含模式） |
 | **市场** | 官方 Asset Store：插件/素材浏览（全部/模板/推荐/新品/最近更新/收藏 + 标签筛选 + 服务端分页搜索翻页）、**内容嗅探安装**（插件进 `addons/`，纯素材按原结构入项目根）、安装确认预览（类型/冲突/wrapper 并入选项）、完整项目一键**另存为新项目**、仅下载 zip、资产详情（截图/许可/评分）、**全库更新巡检**、插件与素材**复制到其他项目** |
 | **已安装** | 插件/素材分区展示、启用/禁用、卸载（Windows 移入回收站）、从历史版本替换、批量操作、检查更新 |
+| **文档** | **引擎类参考离线浏览**：从已装引擎一键生成文档库（`--dump-extension-api-with-docs`，与引擎版本逐字节对应，约 1s）、类详情（继承链/派生/描述行内链接/信号/成员/方法/枚举常量/通知/运算符）、`Ctrl+K` 全局搜索（类/方法/成员/信号/常量）、收藏与最近浏览（跨版本生效）、多版本库存与管理 |
 | **备份** | 全部项目备份的集中管理：统计、搜索、筛选、按项目分组 / 时间轴、批量删除、备注、完整性校验、保留策略清理、三步恢复向导 |
-| **设置** | 主题（5 色板 × 明暗）、引擎目录、网络代理、Asset Store 账号、默认打开动作、删除项目行为、备份默认项、**数据导出/导入**（换机迁移）、**网络诊断** |
+| **设置** | 主题（5 色板 × 明暗）、引擎目录、网络代理、Asset Store 账号、默认打开动作、删除项目行为、备份默认项、**数据导出/导入**（换机迁移）、**文档库缓存统计与清理**、**网络诊断** |
 
 ### 一键导出
 
@@ -36,6 +37,15 @@ ZTools 插件。渲染层为 **Vue 3 + Vite + TypeScript**，Node 能力由 **pr
 商店 API 的类型字段把纯素材（模型/精灵等）也归在 Addon 下，不可信。安装时以 **zip 内容嗅探**
 为唯一判据：含 `plugin.cfg` 走插件链路（进 `addons/` 并按设置启用）；否则视为纯素材，按包内
 原结构写入项目根，并记录文件清单——卸载按清单精确回收（Windows 移入回收站），更新先清后装。
+
+### 引擎文档库为什么不用 --doctool
+
+官方编辑器二进制的 `--doctool` 导出的 XML **只有 API 结构、描述文本为空**（在 4.7.2 /
+4.8-dev6 上实测）。插件改用 `--dump-extension-api-with-docs`：单个 `extension_api.json`
+（约 12MB、~1s）带完整 BBCode 描述，`JSON.parse` 即得——覆盖 core 类、builtin 类
+（Vector2 等）与 GDScript 全局函数，无需任何 XML 解析器。生成走暂存目录 + 原子接管，
+失败/取消不影响旧库；文档库是可再生成产物，不进数据迁移包（只有收藏与浏览历史跟着走）。
+设计与实测记录见 [docs/docs-browser-plan.md](docs/docs-browser-plan.md)。
 
 ### 触发指令
 
@@ -58,23 +68,24 @@ ZTools 插件。渲染层为 **Vue 3 + Vite + TypeScript**，Node 能力由 **pr
   [docs/theme-system.md](docs/theme-system.md)。
 - **数据存储**：全部状态存在 ZTools 的 db 中（无独立数据库文件），按文档 ID 前缀区分：
   `godot/settings`、`godot/version/*`、`godot/project/*`、`godot/asset/*`、`godot/backup/*`、
-  `godot/templates/*`、`godot/export/*`、`godot/cache/*`。
-  换机迁移用「设置 → 数据导出/导入」：项目只登记本机存在的路径，收藏按 assetId 合并，设置只补缺失键。
+  `godot/templates/*`、`godot/export/*`、`godot/docs/*`（文档库元数据/收藏/历史）、`godot/cache/*`。
+  换机迁移用「设置 → 数据导出/导入」：项目只登记本机存在的路径，收藏按 assetId 合并，
+  文档收藏与浏览历史并集合并，设置只补缺失键。
 
 ## 目录结构
 
 ```
 ├── src/                          渲染层(Vue 3 + TypeScript)
 │   ├── main.ts                   入口 + 环境守卫(缺少宿主 API 时给出可执行提示)
-│   ├── App.vue                   标签路由、KeepAlive、全局任务栏(下载/备份/导出)
+│   ├── App.vue                   标签路由、KeepAlive、全局任务栏(下载/备份/导出/文档)、Ctrl+K
 │   ├── main.css                  设计令牌与 10 套主题
-│   ├── views/                    7 个页面
-│   ├── components/               通用组件与 dialogs/ 下的对话框
-│   ├── composables/              备份/主题/市场浏览·搜索·安装·巡检/导出/项目操作等组合式函数
+│   ├── views/                    8 个页面
+│   ├── components/               通用组件、dialogs/ 下的对话框、docs/ 下的文档组件(BBCode 渲染/类详情/搜索面板)
+│   ├── composables/              备份/主题/市场浏览·搜索·安装·巡检/导出/项目操作/文档库等组合式函数
 │   ├── services/bridge.ts        宿主 API 统一出口
 │   ├── types/godot.ts            领域模型与文档 ID 约定
 │   ├── types/services.ts         window.services 契约(唯一权威,编译器强制两侧一致)
-│   └── utils/                    共享工具(格式化/版本兼容/标签分组/头像渐变)
+│   └── utils/                    共享工具(格式化/版本兼容/标签分组/头像渐变/BBCode 解析)
 ├── src-ztools/                   ZTools 插件目录
 │   ├── plugin.json               插件清单(指令、preload、图标、平台)
 │   ├── logo.png
@@ -83,9 +94,9 @@ ZTools 插件。渲染层为 **Vue 3 + Vite + TypeScript**，Node 能力由 **pr
 │   │   ├── sandbox.d.ts          手写精简沙箱声明(刻意不声明 setImmediate)
 │   │   └── lib/                  领域模块:releases/install/templates/exporter/extract/
 │   │                             godotExe/projects/launcher/assets/backup/datatransfer/
-│   │                             diagnostics + 基础设施 http/store/fsutil/taskqueue
+│   │                             diagnostics/docs + 基础设施 http/store/fsutil/taskqueue
 │   └── dist/                     构建产物(git 忽略)
-├── docs/                         设计文档(备份/主题/优化计划/GodotHub 集成策划/术语表)
+├── docs/                         设计文档(备份/主题/优化计划/GodotHub 集成策划/引擎文档浏览策划/术语表)
 └── */__tests__/                  回归测试(preload 与渲染层)
 ```
 
@@ -114,9 +125,9 @@ npm test           # 全部断言（数量随版本增长,各套件实况见下�
 | `npm run typecheck` | `vue-tsc` 渲染层 + `tsc` preload 双层类型检查 |
 | `npm run test:theme` | 主题令牌完整性、设计约束、10 种组合的 WCAG 对比度 |
 | `npm run test:preload` / `:sandbox` | 备份领域层全套（后者先删掉 `setImmediate` 模拟宿主沙箱） |
-| `npm run test:preload:unit` | 版本解析、任务队列、文件工具、HTTP 下载与**断点续传**、引擎安装、**导出模板**、**一键导出**、启动参数拆分、**数据迁移/网络诊断**、services 契约一致性 |
+| `npm run test:preload:unit` | 版本解析、任务队列、文件工具、HTTP 下载与**断点续传**、引擎安装、**导出模板**、**一键导出**、启动参数拆分、**数据迁移/网络诊断**、**引擎文档库**、services 契约一致性 |
 | `npm run test:addons` | 插件/素材来源、安装分流、清单卸载、复制过户（默认 + 沙箱各一遍） |
-| `npm run test:renderer` | 渲染层:市场搜索(分页/竞态守卫)/浏览/安装确认层、项目列表、已装操作、备份、纯工具 |
+| `npm run test:renderer` | 渲染层:市场搜索(分页/竞态守卫)/浏览/安装确认层、项目列表、已装操作、备份、文档数据层与 **BBCode 解析**、纯工具 |
 
 提交与 PR 由 GitHub Actions 跑同一条命令（见 `.github/workflows/ci.yml`）。
 
