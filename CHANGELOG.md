@@ -2,6 +2,33 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.9.1
+
+新建项目对齐 Godot 编辑器:支持 Git 管理,图标改回官方默认。
+
+### 新功能
+
+- **用 Git 管理项目**:新建对话框新增开关(与编辑器的版本控制选项等价)—— 写官方内容的
+  `.gitignore`(`.godot/`、`/android/`)与 `.gitattributes`(`* text=auto eol=lf`)后
+  `git init`,并把初始文件提交为首个 commit。git 不可用或提交失败(常见于未配置 git 身份)
+  都不阻断项目创建:文件照写,结果分三种情况在通知里说清
+
+### 修复
+
+- **新建项目的 icon.svg 不再是插件自制图标**:改用 Godot 编辑器写入的官方默认图标
+  (`editor/icons/DefaultProjectIcon.svg`,经 `get_default_project_icon()` 落盘),
+  与官方逐字符一致 —— 之前项目里会带一个插件风格的自绘图标
+- 补上官方同样会写的 **`.editorconfig`**(`root = true` / `charset = utf-8`),
+  确保外部编辑器与 IDE 使用 UTF-8
+
+### 工程
+
+- 新增 `src-ztools/preload/lib/__tests__/projects.test.js`:逐字符比对图标与两个 Git
+  元数据文件的内容、勾选/不勾选 Git 的文件差异、git 不可用时的容错、重名与非法名称边界
+- 断言数 1,926 → **1,953** 项
+
+> 本机实测:勾选 Git 后 `git init` + 首次提交成功;`icon.svg` 与官方文件一致(995 字节机器人头)。
+
 ## 1.9.0
 
 文档页第三档:跨版本 API 差异、项目脚本文档、描述正文检索。
