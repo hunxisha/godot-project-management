@@ -144,21 +144,6 @@ function derivedOf(className: string): DocClassSummary[] {
   return classes.value.filter((c) => c.inherits === className)
 }
 
-/** 继承树节点:懒加载(children 仅在展开时填充) */
-export interface DocTreeNode {
-  name: string
-  /** 直接派生数(含未展开的部分) */
-  childCount: number
-  children: DocTreeNode[]
-  /** 是否已展开过(区分「未加载」与「确实没有子节点」) */
-  expanded: boolean
-}
-
-/** 建一个懒加载节点(childCount>0 时可展开) */
-function treeNode(name: string): DocTreeNode {
-  return { name, childCount: derivedOf(name).length, children: [], expanded: false }
-}
-
 /** 继承链:从当前类一路向上到根(详情面板面包屑用) */
 function inheritsChainOf(className: string): DocClassSummary[] {
   const chain: DocClassSummary[] = []
@@ -195,7 +180,6 @@ export function useDocs() {
     pushHistory,
     search,
     derivedOf,
-    inheritsChainOf,
-    treeNode
+    inheritsChainOf
   }
 }

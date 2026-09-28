@@ -4,9 +4,9 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import Icon from '../Icon.vue'
 import BBRich from './BBRich.vue'
-import DocTreeNodeView from './DocTreeNode.vue'
+import DocTreePanel from './DocTreePanel.vue'
+import DocTreeDialog from './DocTreeDialog.vue'
 import { useDocs } from '../../composables/useDocs'
-import type { DocTreeNode } from '../../composables/useDocs'
 import { copyText, notify, openExternal, showInFolder } from '../../services/bridge'
 import { onlineDocsUrl } from '../../utils/godotDocs'
 import type { DocClassDetail, DocClassExtras } from '../../types/godot'
@@ -28,7 +28,7 @@ const extras = ref<DocClassExtras | null>(null)
 const flash = ref('')
 const missing = computed(() => !detail.value)
 
-const { favorites, toggleFavorite, pushHistory, derivedOf, inheritsChainOf, currentStatus, treeNode } = useDocs()
+const { favorites, toggleFavorite, pushHistory, derivedOf, inheritsChainOf, currentStatus } = useDocs()
 
 /** 当前库的引擎 tag(拼在线文档链接用) */
 const currentTag = computed(() => currentStatus.value?.tag)
@@ -37,51 +37,10 @@ const chain = computed(() => inheritsChainOf(props.className))
 const derived = computed(() => derivedOf(props.className))
 const isFav = computed(() => favorites.value.includes(props.className))
 
-// ---------- 继承树(懒加载展开,点击节点跳转) ----------
-
-const treeOpen = ref(false)
-const treeRoot = ref<DocTreeNode | null>(null)
-/** 单个节点的直接派生展开上限(避免 Node 这类大类一次铺开几百行) */
-const TREE_CHILD_CAP = 40
-
-/** 当前类及其祖先链:树里高亮 */
-const treePath = computed(() => new Set([props.className, ...chain.value.map((c) => c.name)]))
-
-/** 建树并沿当前类路径逐级展开(打开即定位到当前类) */
-function buildTree() {
-  const chainNames = [...chain.value].reverse().map((c) => c.name)
-  const root = treeNode(chainNames[0] ?? props.className)
-  expandNode(root)
-  let cur = root
-  for (const name of [...chainNames.slice(1), props.className]) {
-    const next = cur.children.find((c) => c.name === name)
-    if (!next) break
-    expandNode(next)
-    cur = next
-  }
-  treeRoot.value = root
-}
-
-/** 展开节点:填充直接派生(按名排序,超上限截断) */
-function expandNode(node: DocTreeNode) {
-  if (node.expanded) return
-  node.children = derivedOf(node.name)
-    .slice()
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .slice(0, TREE_CHILD_CAP)
-    .map((c) => treeNode(c.name))
-  node.expanded = true
-}
-
-watch(treeOpen, (open) => {
-  if (open) buildTree()
-  else treeRoot.value = null
-})
-
-/** 切类时若树开着,重新定位 */
-watch(() => props.className, () => {
-  if (treeOpen.value) buildTree()
-})
+/** 右侧栏标签:目录 / 继承树 */
+const sideTab = ref<'toc' | 'tree'>('toc')
+/** 完整继承树弹层 */
+const treeDialogOpen = ref(false)
 
 
 /** 通知(NOTIFICATION_*)单独成节,其余常量与枚举并列 */
@@ -263,9 +222,11 @@ function signature(m: { name: string, returnType: string, params: { name: string
           </template>
           <span v-else class="crumb-none">无(根类)</span>
         </div>
+        <!-- 派生数:明细在右侧「继承树」标签里,头部只给提示 -->
         <div v-if="derived.length" class="crumbs">
           <span class="crumb-label">派生:</span>
-          <button v-for="d in derived" :key="d.name" class="crumb mono" @click="emit('navigate', d.name)">{{ d.name }}</button>
+          <span class="derived-count">{{ derived.length }} 个</span>
+          <button class="tree-open-inline" @click="sideTab = 'tree'">在继承树中查看</button>
         </div>
         <!-- 项目脚本类:显示来源文件,点击在文件管理器中定位 -->
         <div v-if="detail.sourceFile" class="crumbs">
@@ -273,15 +234,6 @@ function signature(m: { name: string, returnType: string, params: { name: string
           <button class="crumb mono" :title="detail.sourceFile" @click="showInFolder(detail.sourceFile)">
             {{ detail.sourceFile.split(/[\\/]/).pop() }}
           </button>
-        </div>
-        <div class="crumbs">
-          <button class="tree-toggle" :title="treeOpen ? '收起继承树' : '展开可浏览的继承树'" @click="treeOpen = !treeOpen">
-            <Icon :name="treeOpen ? 'chevron-down' : 'chevron-right'" :size="11" />
-            继承树
-          </button>
-        </div>
-        <div v-if="treeOpen && treeRoot" class="tree-box">
-          <DocTreeNodeView :node="treeRoot" :path="treePath" :cap="TREE_CHILD_CAP" @navigate="(n) => emit('navigate', n)" />
         </div>
       </header>
 
@@ -431,19 +383,42 @@ function signature(m: { name: string, returnType: string, params: { name: string
 
       </div><!-- /panel-main -->
 
-      <aside v-if="toc.length" class="toc">
-        <div class="toc-title">本页目录</div>
-        <template v-for="g in toc" :key="g.key">
-          <div class="toc-group" :class="{ on: activeToc === g.key }">{{ g.label }}</div>
-          <button
-            v-for="it in g.items"
-            :key="it.anchor"
-            type="button"
-            class="toc-item"
-            :title="it.label"
-            @click="scrollToAnchor(it.anchor)"
-          >{{ it.label }}</button>
-        </template>
+      <!-- 右侧栏:目录 / 继承树 双标签(树不再挤在正文头部) -->
+      <aside class="side" :class="{ 'tree-mode': sideTab === 'tree' }">
+        <div class="side-tabs">
+          <button class="side-tab" :class="{ on: sideTab === 'toc' }" @click="sideTab = 'toc'">
+            <Icon name="layers" :size="11" /> 目录
+          </button>
+          <button class="side-tab" :class="{ on: sideTab === 'tree' }" @click="sideTab = 'tree'">
+            <Icon name="git-branch" :size="11" /> 继承树
+          </button>
+        </div>
+
+        <div v-if="sideTab === 'toc'" class="side-body">
+          <template v-if="toc.length">
+            <template v-for="g in toc" :key="g.key">
+              <div class="toc-group" :class="{ on: activeToc === g.key }">{{ g.label }}</div>
+              <button
+                v-for="it in g.items"
+                :key="it.anchor"
+                type="button"
+                class="toc-item"
+                :title="it.label"
+                @click="scrollToAnchor(it.anchor)"
+              >{{ it.label }}</button>
+            </template>
+          </template>
+          <div v-else class="side-empty">本页没有分节</div>
+        </div>
+
+        <div v-else class="side-body">
+          <div class="tree-head">
+            <button class="tree-full" title="在弹层中打开完整继承树(可搜索)" @click="treeDialogOpen = true">
+              <Icon name="external" :size="11" /> 完整树
+            </button>
+          </div>
+          <DocTreePanel :current-class="className" @navigate="(n) => emit('navigate', n)" />
+        </div>
       </aside>
     </div><!-- /panel-grid -->
 
@@ -452,6 +427,14 @@ function signature(m: { name: string, returnType: string, params: { name: string
       <p>未在当前文档库中找到「{{ className }}」。</p>
       <p class="hint">它可能属于其他版本,或文档库尚未收录。</p>
     </div>
+
+    <!-- 完整继承树(弹层,可搜索跳转) -->
+    <DocTreeDialog
+      :open="treeDialogOpen"
+      :current-class="className"
+      @close="treeDialogOpen = false"
+      @navigate="(n) => emit('navigate', n)"
+    />
   </div>
 </template>
 
@@ -548,34 +531,6 @@ function signature(m: { name: string, returnType: string, params: { name: string
 
 .crumb-none {
   color: var(--text-3);
-}
-
-.tree-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  border: none;
-  background: none;
-  padding: 1px 5px;
-  font-size: 12px;
-  color: var(--text-3);
-  cursor: pointer;
-  border-radius: 5px;
-}
-
-.tree-toggle:hover {
-  color: var(--brand);
-  background: var(--surface-2);
-}
-
-.tree-box {
-  margin-top: 8px;
-  padding: 9px 12px;
-  max-height: 340px;
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: var(--surface-2);
 }
 
 .sec {
@@ -755,36 +710,123 @@ function signature(m: { name: string, returnType: string, params: { name: string
   color: var(--text-3);
 }
 
-/* ---------- 本页目录(右侧粘性栏) ---------- */
+/* ---------- 右侧栏(目录 / 继承树 双标签) ---------- */
 .panel-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 176px;
-  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) var(--side-w, 176px);
+  gap: 18px;
   align-items: start;
+}
+
+/* 树模式需要更宽(类名普遍较长),目录模式保持窄栏不抢正文 */
+.panel-grid:has(.side.tree-mode) {
+  --side-w: 250px;
 }
 
 .panel-main {
   min-width: 0;
 }
 
-.toc {
+.side {
   position: sticky;
   top: 0;
-  /* 按视口约束:100% 相对本列自身内容高度不生效,目录栏会撑开到与正文等高且无法独立滚动 */
+  /* 按视口约束:100% 相对本列自身内容高度不生效,会撑开到与正文等高且无法独立滚动 */
   max-height: calc(100vh - 100px);
-  overflow-y: auto;
-  scrollbar-width: thin;
-  padding: 2px 0 12px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   border-left: 1px solid var(--border);
   padding-left: 12px;
 }
 
-.toc-title {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
+.side-tabs {
+  display: flex;
+  gap: 3px;
+  padding-bottom: 7px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.side-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: none;
   color: var(--text-3);
-  margin-bottom: 4px;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.side-tab:hover {
+  color: var(--text);
+}
+
+.side-tab.on {
+  color: var(--brand);
+  font-weight: 600;
+  background: var(--brand-weak);
+  border-color: color-mix(in srgb, var(--brand) 30%, transparent);
+}
+
+.side-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  padding-bottom: 12px;
+}
+
+.side-empty {
+  padding: 12px 4px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.tree-head {
+  display: flex;
+  justify-content: flex-end;
+  padding-bottom: 6px;
+}
+
+.tree-full {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-3);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.tree-full:hover {
+  color: var(--brand);
+  border-color: color-mix(in srgb, var(--brand) 35%, transparent);
+}
+
+.derived-count {
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.tree-open-inline {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  font-size: 12.5px;
+  color: var(--brand);
+  cursor: pointer;
+  border-radius: 5px;
+}
+
+.tree-open-inline:hover {
+  text-decoration: underline;
 }
 
 .toc-group {
@@ -825,7 +867,7 @@ function signature(m: { name: string, returnType: string, params: { name: string
     grid-template-columns: 1fr;
   }
 
-  .toc {
+  .side {
     display: none;
   }
 }
