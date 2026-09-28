@@ -66,6 +66,7 @@ const {
   cRenderer,
   cVersionId,
   cOpen,
+  cGit,
   nameInput,
   cPreview,
   openCreate,
@@ -539,6 +540,10 @@ function onKeyDown(e: KeyboardEvent) {
             </div>
           </div>
 
+          <label class="open-row">
+            <input v-model="cGit" class="switch" type="checkbox" />
+            <span>用 Git 管理项目<span class="row-hint">创建 .gitignore/.gitattributes(官方内容)并 git init</span></span>
+          </label>
           <label class="open-row">
             <input v-model="cOpen" class="switch" type="checkbox" />
             <span>创建后立即打开编辑器</span>

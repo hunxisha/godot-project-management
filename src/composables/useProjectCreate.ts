@@ -30,6 +30,8 @@ export function useProjectCreate(opts: UseProjectCreateOptions) {
   const cRenderer = ref<RendererOption>('forward_plus')
   const cVersionId = ref('')
   const cOpen = ref(true)
+  /** 用 Git 管理项目(与 Godot 编辑器新建项目时的版本控制选项一致) */
+  const cGit = ref(false)
   const nameInput = ref<HTMLInputElement>()
 
   /** 目标目录预览(父目录 + 项目名) */
@@ -53,6 +55,7 @@ export function useProjectCreate(opts: UseProjectCreateOptions) {
       ''
     cRenderer.value = 'forward_plus'
     cOpen.value = true
+    cGit.value = false
     showCreate.value = true
     nextTick(() => nameInput.value?.focus())
   }
@@ -72,7 +75,8 @@ export function useProjectCreate(opts: UseProjectCreateOptions) {
       parentDir: cParent.value.trim(),
       renderer: cRenderer.value,
       versionTag: v?.tag,
-      versionId: v?._id
+      versionId: v?._id,
+      gitInit: cGit.value
     })
     creating.value = false
     if (!r.ok || !r.project) {
@@ -81,7 +85,14 @@ export function useProjectCreate(opts: UseProjectCreateOptions) {
     }
     showCreate.value = false
     opts.reload()
-    opts.notify(`已创建项目:${r.project.name}`)
+    // git 结果单独告知:初始化失败不影响项目本身(文件已写好)
+    if (r.git && !r.git.initialized) {
+      opts.notify(`已创建项目:${r.project.name}(${r.git.error || 'Git 初始化未完成'})`)
+    } else if (r.git && !r.git.committed) {
+      opts.notify(`已创建项目:${r.project.name}(Git 已初始化,首次提交失败,请检查 git 身份配置)`)
+    } else {
+      opts.notify(`已创建项目:${r.project.name}${r.git ? '(已初始化 Git)' : ''}`)
+    }
     if (cOpen.value) {
       const row = opts.projects.value.find((p) => p._id === r.project!.id)
       if (row) opts.openProject(row)
@@ -96,6 +107,7 @@ export function useProjectCreate(opts: UseProjectCreateOptions) {
     cRenderer,
     cVersionId,
     cOpen,
+    cGit,
     nameInput,
     cPreview,
     openCreate,

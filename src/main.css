@@ -897,6 +897,14 @@ input[type='checkbox'].switch:checked::after {
   user-select: none;
 }
 
+/* 开关行的补充说明(如 Git 选项会写哪些文件) */
+.row-hint {
+  display: block;
+  margin-top: 1px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
 .modal-foot {
   display: flex;
   align-items: center;

@@ -2,6 +2,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const crypto = require('node:crypto')
+const { execSync } = require('node:child_process')
 const { getDoc, putDoc, removeDoc, listDocs } = require('./store')
 const { trashPath } = require('./fsutil')
 const { dirSize } = require('./extract')
@@ -171,28 +172,84 @@ const RENDERERS = {
   gl_compatibility: { feature: 'GL Compatibility', method: 'gl_compatibility', mobileMethod: 'gl_compatibility' }
 }
 
-const DEFAULT_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 48 48">
-<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5aa6db"/><stop offset="1" stop-color="#33689a"/></linearGradient></defs>
-<rect x="1.5" y="1.5" width="45" height="45" rx="11" fill="url(#g)"/>
-<rect x="14" y="17" width="20" height="17" rx="4.5" fill="#fff"/>
-<rect x="9.6" y="19.6" width="5.2" height="7" rx="1.7" fill="#fff"/>
-<rect x="33.2" y="19.6" width="5.2" height="7" rx="1.7" fill="#fff"/>
-<rect x="18.4" y="22.6" width="4.6" height="6.4" rx="1.5" fill="#33689a"/>
-<rect x="25" y="22.6" width="4.6" height="6.4" rx="1.5" fill="#33689a"/>
-</svg>
-`
+// 官方默认项目图标(与 Godot 编辑器新建项目写入的 icon.svg 完全一致):
+// 取自 godot 仓库 editor/icons/DefaultProjectIcon.svg,经 editor_icons.cpp 的
+// get_default_project_icon() 写入新项目 —— 保持原样,不做任何改动。
+const DEFAULT_ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128"><rect width="124" height="124" x="2" y="2" fill="#363d52" stroke="#212532" stroke-width="4" rx="14"/><g fill="#fff" transform="translate(12.322 12.322)scale(.101)"><path d="M105 673v33q407 354 814 0v-33z"/><path fill="#478cbf" d="m105 673 152 14q12 1 15 14l4 67 132 10 8-61q2-11 15-15h162q13 4 15 15l8 61 132-10 4-67q3-13 15-14l152-14V427q30-39 56-81-35-59-83-108-43 20-82 47-40-37-88-64 7-51 8-102-59-28-123-42-26 43-46 89-49-7-98 0-20-46-46-89-64 14-123 42 1 51 8 102-48 27-88 64-39-27-82-47-48 49-83 108 26 42 56 81zm0 33v39c0 276 813 276 814 0v-39l-134 12-5 69q-2 10-14 13l-162 11q-12 0-16-11l-10-65H446l-10 65q-4 11-16 11l-162-11q-12-3-14-13l-5-69z"/><path d="M483 600c0 34 58 34 58 0v-86c0-34-58-34-58 0z"/><circle cx="725" cy="526" r="90"/><circle cx="299" cy="526" r="90"/></g><g fill="#414042" transform="translate(12.322 12.322)scale(.101)"><circle cx="307" cy="532" r="60"/><circle cx="717" cy="532" r="60"/></g></svg>\n'
+
+// 官方 Git 元数据文件内容(editor/version_control/editor_vcs_interface.cpp
+// 的 create_vcs_metadata_files),逐行保持一致。
+const GIT_IGNORE = [
+  '# Godot 4+ specific ignores',
+  '.godot/',
+  '/android/',
+  ''
+].join('\n')
+
+const GIT_ATTRIBUTES = [
+  '# Normalize EOL for all files that Git considers text files.',
+  '* text=auto eol=lf',
+  ''
+].join('\n')
+
+// 官方 .editorconfig(project_dialog.cpp:确保外部编辑器/IDE 用 UTF-8)
+const EDITOR_CONFIG = [
+  'root = true',
+  '',
+  '[*]',
+  'charset = utf-8',
+  ''
+].join('\n')
 
 /**
- * 新建项目:在 parentDir 下创建以 name 命名的目录,写入 project.godot 与默认图标,
- * 然后注册到项目列表(复用 addProject 的解析与自动绑定逻辑)。
+ * 在项目目录初始化 Git 仓库:写官方 .gitignore/.gitattributes、git init、
+ * 并把初始文件提交为首个 commit。git 不可用或提交失败都不影响项目创建本身
+ * (文件已写好,用户可自行 init/commit)。
+ *
+ * 命令是固定字符串(不含用户输入),工作目录通过 cwd 选项传递 —— 不经过 shell 拼接,
+ * 因此没有注入面;沙箱里已声明 execSync,无需新增能力。
+ * @param {string} projectDir
+ * @returns {{initialized: boolean, error?: string, committed: boolean}}
+ */
+function initGitRepo(projectDir) {
+  try {
+    fs.writeFileSync(path.join(projectDir, '.gitignore'), GIT_IGNORE, 'utf8')
+    fs.writeFileSync(path.join(projectDir, '.gitattributes'), GIT_ATTRIBUTES, 'utf8')
+  } catch (e) {
+    return { initialized: false, committed: false, error: (e && e.message) || '写入 Git 元数据文件失败' }
+  }
+  const opts = { cwd: projectDir, stdio: 'ignore', timeout: 20_000 }
+  try {
+    execSync('git init', opts)
+  } catch (e) {
+    return { initialized: false, committed: false, error: '未找到 git 命令或初始化失败(元数据文件已写好,可手动 git init)' }
+  }
+  // 首次提交:失败常见于用户未配置 git 身份 —— 不算错误,仓库已可用
+  let committed = false
+  try {
+    execSync('git add -A', opts)
+    execSync('git commit -m "Initial commit"', opts)
+    committed = true
+  } catch (e) {
+    // 保持未提交状态,交给用户
+  }
+  return { initialized: true, committed }
+}
+
+/**
+ * 新建项目:在 parentDir 下创建以 name 命名的目录,写入 project.godot、官方默认图标
+ * 与 .editorconfig(与 Godot 编辑器新建项目一致);opts.gitInit 时额外 git init 并写
+ * .gitignore/.gitattributes(官方内容)。最后注册到项目列表(复用 addProject)。
  * @param {{
  *   name: string,
  *   parentDir: string,
  *   renderer: 'forward_plus'|'mobile'|'gl_compatibility',
  *   versionTag?: string,
  *   versionId?: string,
+ *   gitInit?: boolean,
  * }} opts
- * @returns {{ok: boolean, error?: string, project?: ProjectDoc, exists?: boolean}}
+ * @returns {{ok: boolean, error?: string, project?: ProjectDoc, exists?: boolean,
+ *            git?: {initialized: boolean, error?: string, committed: boolean}}}
  */
 function createProject(opts) {
   try {
@@ -244,8 +301,19 @@ function createProject(opts) {
 
     fs.writeFileSync(path.join(projectDir, 'project.godot'), godotIni, 'utf8')
     fs.writeFileSync(path.join(projectDir, 'icon.svg'), DEFAULT_ICON_SVG, 'utf8')
+    // 与官方一致:确保外部编辑器/IDE 使用 UTF-8
+    fs.writeFileSync(path.join(projectDir, '.editorconfig'), EDITOR_CONFIG, 'utf8')
 
-    return addProject(projectDir, opts.versionId)
+    // Git 管理:与 Godot 编辑器的「版本控制:Git」选项等价 —— 先写元数据文件,
+    // 再 git init(并把这两个文件纳入首次提交)
+    /** @type {{initialized: boolean, error?: string, committed: boolean} | undefined} */
+    let git
+    if (opts.gitInit) {
+      git = initGitRepo(projectDir)
+    }
+
+    const added = addProject(projectDir, opts.versionId)
+    return git ? { ...added, git } : added
   } catch (e) {
     return { ok: false, error: (e && e.message) || '创建失败' }
   }

@@ -129,7 +129,8 @@ export interface Services {
   }
   /** 递归扫描目录,返回所有含 project.godot 的目录 */
   scanProjects(rootDir: string): string[]
-  /** 新建项目:生成 project.godot 与默认图标并加入列表 */
+  /** 新建项目:生成 project.godot、官方默认图标与 .editorconfig;
+   *  gitInit=true 时额外 git init 并写官方 .gitignore/.gitattributes(含首次提交) */
   createProject(opts: {
     name: string
     parentDir: string
@@ -138,10 +139,14 @@ export interface Services {
     versionTag?: string
     /** 已装引擎版本 id,用于绑定项目与引擎 */
     versionId?: string
+    /** 用 Git 管理项目 */
+    gitInit?: boolean
   }): {
     ok: boolean
     error?: string
     project?: GodotProject
+    /** gitInit 时的结果(git 不可用/提交失败不阻断项目创建) */
+    git?: { initialized: boolean, error?: string, committed: boolean }
   }
   /** 删除项目记录(deleteFiles=true 同时删除项目文件夹,Windows 移入回收站) */
   removeProject(id: string, deleteFiles?: boolean): { ok: boolean, error?: string, filesDeleted?: boolean }

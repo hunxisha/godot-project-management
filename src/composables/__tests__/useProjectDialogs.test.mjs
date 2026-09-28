@@ -178,6 +178,7 @@ async function main() {
     ok(createCalls[0].parentDir === 'E:\\Work', '父目录已 trim')
     ok(createCalls[0].renderer === 'forward_plus', '渲染器透传')
     ok(createCalls[0].versionTag === '4.7-stable' && createCalls[0].versionId === 'godot/version/4.7', '引擎 tag 与 id 都透传')
+    ok(createCalls[0].gitInit === false, '默认不用 Git 管理', String(createCalls[0].gitInit))
     ok(c.showCreate.value === false, '成功后关闭对话框')
     ok(reloaded === 1, '成功后重读列表')
     ok(/已创建项目/.test(notifications[0] || ''), '提示创建成功', String(notifications[0]))
@@ -198,6 +199,49 @@ async function main() {
     c2.cParent.value = ''
     c2.submitCreate()
     ok(createCalls.length === 0, '父目录为空时不提交')
+
+    // Git 开关:勾选后透传,并在结果里区分三种 git 落点(成功/不可用/提交失败)
+    reset()
+    createResult = { ok: true, project: PROJ('g1', 'GitProj'), git: { initialized: true, committed: true } }
+    const cg1 = useProjectCreate({
+      projects: ref([]), versions: ref([]),
+      notify: (m) => notifications.push(m), reload: () => {}, openProject: () => {}
+    })
+    cg1.openCreate()
+    cg1.cName.value = 'GitProj'
+    cg1.cParent.value = 'E:\\Work'
+    cg1.cGit.value = true
+    cg1.submitCreate()
+    ok(createCalls[createCalls.length - 1].gitInit === true, '勾选后 gitInit 透传', JSON.stringify(createCalls[createCalls.length - 1]))
+    ok(/已初始化 Git/.test(notifications[notifications.length - 1] || ''), '初始化成功时提示带 Git', String(notifications[notifications.length - 1]))
+
+    reset()
+    createResult = { ok: true, project: PROJ('g2', 'NoGit'), git: { initialized: false, committed: false, error: '未找到 git 命令' } }
+    const cg2 = useProjectCreate({
+      projects: ref([]), versions: ref([]),
+      notify: (m) => notifications.push(m), reload: () => {}, openProject: () => {}
+    })
+    cg2.openCreate()
+    cg2.cName.value = 'NoGit'
+    cg2.cParent.value = 'E:\\Work'
+    cg2.cGit.value = true
+    cg2.submitCreate()
+    ok(/未找到 git 命令/.test(notifications[notifications.length - 1] || ''), 'git 不可用时说明原因(项目仍创建成功)', String(notifications[notifications.length - 1]))
+
+    reset()
+    createResult = { ok: true, project: PROJ('g3', 'HalfGit'), git: { initialized: true, committed: false } }
+    const cg3 = useProjectCreate({
+      projects: ref([]), versions: ref([]),
+      notify: (m) => notifications.push(m), reload: () => {}, openProject: () => {}
+    })
+    cg3.openCreate()
+    cg3.cName.value = 'HalfGit'
+    cg3.cParent.value = 'E:\\Work'
+    cg3.cGit.value = true
+    cg3.submitCreate()
+    ok(/首次提交失败/.test(notifications[notifications.length - 1] || ''), '提交失败单独提示(常见于未配 git 身份)', String(notifications[notifications.length - 1]))
+    cg3.openCreate()
+    ok(cg3.cGit.value === false, '重新打开对话框时 Git 开关复位')
 
     // 失败
     reset()
