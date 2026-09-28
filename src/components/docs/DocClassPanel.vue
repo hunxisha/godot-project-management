@@ -215,12 +215,15 @@ function signature(m: { name: string, returnType: string, params: { name: string
             <Icon name="star" :size="15" />
           </button>
         </div>
-        <div class="crumbs">
-          <span class="crumb-label">继承:</span>
-          <template v-if="chain.length">
-            <button v-for="p in chain" :key="p.name" class="crumb mono" @click="emit('navigate', p.name)">{{ p.name }}</button>
+        <!-- 继承链:当前类 < 父类 < 祖父 … < 根(当前类加粗,祖先可点击) -->
+        <div class="crumbs chain-line">
+          <Icon name="git-branch" :size="12" class="chain-ico" />
+          <span class="chain-current mono">{{ detail.name }}</span>
+          <template v-for="p in chain" :key="p.name">
+            <span class="chain-sep">&lt;</span>
+            <button class="crumb mono" :title="`跳转到 ${p.name}`" @click="emit('navigate', p.name)">{{ p.name }}</button>
           </template>
-          <span v-else class="crumb-none">无(根类)</span>
+          <span v-if="!chain.length" class="crumb-none">(根类,无父类)</span>
         </div>
         <!-- 派生数:明细在右侧「继承树」标签里,头部只给提示 -->
         <div v-if="derived.length" class="crumbs">
@@ -531,6 +534,30 @@ function signature(m: { name: string, returnType: string, params: { name: string
 
 .crumb-none {
   color: var(--text-3);
+}
+
+/* 继承链:当前类 < Node2D < CanvasItem < Node < Object */
+.chain-line {
+  gap: 5px;
+  align-items: baseline;
+}
+
+.chain-ico {
+  color: var(--text-3);
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.chain-current {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.chain-sep {
+  color: var(--text-3);
+  font-size: 12px;
+  font-family: var(--mono);
 }
 
 .sec {
