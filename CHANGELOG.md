@@ -2,6 +2,21 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## 1.9.3
+
+类详情的继承链改为「当前类 < 父类 < … < 根」的表达。
+
+### 改进
+
+- **继承链**：原来是「继承: Node2D CanvasItem Node Object」(从父类列起,不含当前类);
+  现改为 `AnimatedSprite2D < Node2D < CanvasItem < Node < Object` —— 当前类打头并加粗高亮,
+  用 `<` 指向父类,祖先保持可点击跳转,行首以分支图标标示;根类显示「(根类,无父类)」
+
+### 工程
+
+- `.gitignore` 忽略 ZCode CLI 的本地规则文件 `.zcodeignore`
+- AGENTS.md 明确:打包与发布(版本号/CHANGELOG/Release)仅在明确要求时执行,提交与推送仍自动同步
+
 ## 1.9.2
 
 重做继承树:移到右侧栏、以当前类为中心,并修掉「当前类根本不在树里」的截断缺陷。
