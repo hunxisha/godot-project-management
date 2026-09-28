@@ -12,6 +12,14 @@
 4. 提交后自动推送：`git -c http.proxy=http://127.0.0.1:7897 push`（远端 origin = github.com/hunxisha/godot-project-management，直连会被重置，必须走本机 7897 代理；代理只用单次 `-c` 参数）。
 5. 推送后用 `git status` 确认工作区干净且与远端同步。
 
+## 打包与发布约定
+
+**打包（zpx）与发布（版本号 bump、CHANGELOG 发版段落、GitHub Release）只在用户明确要求时才执行。**
+
+- 改完代码默认只做「提交 + 推送」同步，**不 bump 版本号、不打包、不发 Release**。
+- 用户明确说「打包」「发版」「发布」时，才走完整发版流程：三处版本号同步 → CHANGELOG 新段落（含断言数）→ `npm run build` → zpx 打包到 `E:\ZTools插件开发\zpx插件包` → 创建 GitHub Release 并附 zpx。
+- 不擅自判断「这次改动值得发版」——版本节奏由用户决定。
+
 禁止事项：
 
 - 不使用 `git push --force` / `--force-with-lease`、`git reset --hard`、`git checkout .`、`git clean -f` 等破坏性命令。
