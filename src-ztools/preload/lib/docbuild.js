@@ -122,9 +122,9 @@ async function writeLibrary(mapped, ctx, zhHits) {
     libDir: ctx.libDir,
     // 库语言:拿到翻译表(哪怕覆盖不全)即视为中文库;未命中条目保留英文
     lang: ctx.tr ? 'zh-CN' : 'en',
-    translatedCount: ctx.tr ? zhHits.count : 0,
+    translatedCount: ctx.tr ? hits.count : 0,
     // 可翻译字符串总数:translatedCount/stringCount 即翻译覆盖率
-    stringCount: ctx.tr ? zhHits.total : 0,
+    stringCount: ctx.tr ? hits.total : 0,
     // kind: 'engine'(引擎 API) | 'project'(项目脚本扫描)
     kind: ctx.kind || 'engine',
     sourceProject: ctx.sourceProject

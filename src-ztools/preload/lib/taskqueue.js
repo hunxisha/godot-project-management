@@ -120,7 +120,7 @@ function createTaskQueue(opts) {
     return tasks.get(id)
   }
 
-  /** @param {Task} task @param {Task} fields */
+  /** @param {Task | null | undefined} task 不存在的任务静默跳过(setTask 承诺的行为) @param {Task} fields */
   function patch(task, fields) {
     if (!task) return
     Object.assign(task, fields)

@@ -334,7 +334,7 @@ function dosDateTime(d) {
  * @param {{
  *   onProgress?: (p:{phase:string,done:number,total:number,current:string,bytes:number}) => void,
  *   includeCache?: boolean,
- *   exclude?: (name:string,isDir:boolean) => boolean,
+ *   exclude?: ((name:string,isDir:boolean) => boolean) | null,
  *   level?: 1|6|9,
  *   token?: object,
  *   phase?: string,

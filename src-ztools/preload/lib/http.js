@@ -117,7 +117,8 @@ function httpsGet(url, headers, cb) {
  */
 function getText(url, headers) {
   return new Promise((resolve, reject) => {
-    httpsGet(url, headers, (res) => {
+    // headers 省略时传 {}:与 spread undefined 等价,零行为变更
+    httpsGet(url, headers || {}, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         res.resume()
         return resolve(getText(res.headers.location, headers))
@@ -167,10 +168,12 @@ function downloadFile(url, destPath, opts = {}) {
   let activeWs = null
   /** 一旦了结(成功或失败)就不再二次了结 */
   let settled = false
-  /** @type {((err: Error) => void) | null} 供 cancel() 主动了结用 */
-  let rejectOnce = null
+  // 供 cancel() 主动了结用。占位实义函数仅保证类型非空:executor 构造时同步覆盖,
+  // 真调到占位说明初始化时序被破坏,直接抛出(与原先 null 调用抛 TypeError 同为不可达)。
+  /** @type {(err: Error) => void} */
+  let rejectOnce = (err) => { throw new Error(`downloadResumable 内部时序错误:${err.message}`) }
 
-  const promise = new Promise((resolve, reject) => {
+  const promise = /** @type {Promise<void>} */ (new Promise((resolve, reject) => {
     /** @param {Error} err */
     rejectOnce = (err) => {
       if (settled) return
@@ -191,6 +194,7 @@ function downloadFile(url, destPath, opts = {}) {
       if (depth > 5) return rejectOnce(new Error('重定向次数过多'))
       // 断点续传:已有部分字节数作为本次请求的起点
       const base = opts.resume && fs.existsSync(destPath) ? fs.statSync(destPath).size : 0
+      /** @type {Record<string, string>} */
       const headers = base > 0 ? { Range: `bytes=${base}-` } : {}
       activeReq = httpsGet(currentUrl, headers, (res) => {
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
@@ -233,7 +237,7 @@ function downloadFile(url, destPath, opts = {}) {
       activeReq.on('error', (e) => rejectOnce(new Error('网络错误: ' + e.message)))
     }
     attempt(url)
-  })
+  }))
 
   return {
     promise,

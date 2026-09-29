@@ -3,7 +3,9 @@
 // 为什么单独一个配置:preload 是 CommonJS + 浏览器沙箱全局(没有 setImmediate、Buffer 也不完整),
 // 与渲染层的 ESM/DOM 环境不同,不能用同一份 tsconfig 检查。
 //
-// 当前状态(实测):**0 个错误** —— 阶段 4 开工时 400 个,本批清零并接入闸门。
+// 当前状态(实测):**0 个错误** —— 阶段 4 开工时 400 个,本批清零并接入闸门;
+// 2026-09-29 补齐 `strictNullChecks`(第九批时还差 17 项,1.8/1.9 新代码一度漂移到 28 项,
+// 本批全部收回后闸门常开 —— 新代码的可空中间态从此由编译器把关)。
 // 清零靠三件事,缺一不可:
 //   1. 逐模块补 JSDoc(占比最大,见 docs/optimization-plan.md 阶段 4 各批记录);
 //   2. `src-ztools/preload/sandbox.d.ts` —— **路线 B:手写精简沙箱声明**。边界探测实测:
@@ -42,7 +44,7 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "noImplicitAny": true,
-    "strictNullChecks": false,
+    "strictNullChecks": true,
     "resolveJsonModule": true,
     // 宿主 API 类型(ZTools 的 window.ztools.*)。这是本项目已有的 devDependency,
     // 与「引入 @types/node」是两件事:它描述的是宿主契约,不是 Node 运行时。

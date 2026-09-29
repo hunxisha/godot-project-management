@@ -113,8 +113,8 @@ function matchVersion(project) {
     pool = versions.filter((v) => v.tag && v.tag.startsWith(wanted + '.') || v.tag === wanted || v.tag.startsWith(wanted + '-'))
   }
   if (!pool.length) {
-    // config_version: 5=4.x, 4=3.x
-    const major = project.configVersion >= 5 ? '4' : '3'
+    // config_version: 5=4.x, 4=3.x;缺失(undefined)与 <5 同走 3.x —— ?? 0 不改行为
+    const major = (project.configVersion ?? 0) >= 5 ? '4' : '3'
     pool = versions.filter((v) => v.tag && v.tag.startsWith(major + '.'))
   }
   if (!pool.length) return undefined

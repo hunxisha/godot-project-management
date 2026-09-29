@@ -173,7 +173,7 @@ function invalidateExists(p) {
 /**
  * @typedef {object} NormalizedBackupOpts 归一化后的备份参数(创建与预估共用)
  * @property {'zip'|'copy'} mode
- * @property {string} destDir
+ * @property {string} [destDir] 归一化不补默认;backupProject 在入口守卫「未指定即抛」
  * @property {boolean} includeCache
  * @property {string} label
  * @property {string[]} excludeNames
@@ -447,7 +447,7 @@ function verifyBackup(backupId) {
       const r = inspectZip(rec.destPath, 'project.godot')
       valid = r.ok
       entryCount = r.entries.length
-      if (!r.ok) error = r.error
+      if (!r.ok) error = r.error || ''
     } else if (!fs.existsSync(path.join(rec.destPath, 'project.godot'))) {
       error = '快照目录内未找到 project.godot'
     } else {
@@ -518,11 +518,15 @@ function deleteBackups(backupIds, opts) {
  */
 function pruneBackups(opts) {
   const o = opts || {}
-  const keep = Number.isFinite(o.keepPerProject) && o.keepPerProject >= 0
-    ? Math.floor(o.keepPerProject)
+  // 先提取局部再判:typeof 'number' 是真正的类型守卫(Number.isFinite 不是),守卫后收窄;
+  // 组合语义与原先单用 Number.isFinite 完全等价(非 number 一律 false)
+  const keepRaw = o.keepPerProject
+  const daysRaw = o.olderThanDays
+  const keep = typeof keepRaw === 'number' && Number.isFinite(keepRaw) && keepRaw >= 0
+    ? Math.floor(keepRaw)
     : null
-  const days = Number.isFinite(o.olderThanDays) && o.olderThanDays > 0
-    ? Math.floor(o.olderThanDays)
+  const days = typeof daysRaw === 'number' && Number.isFinite(daysRaw) && daysRaw > 0
+    ? Math.floor(daysRaw)
     : null
   if (keep === null && days === null) {
     return { ok: false, dryRun: true, targets: [], totalSize: 0, error: '未指定清理条件' }

@@ -202,7 +202,8 @@ function downloadAndInstallTemplates({ versionId }, opts) {
         return
       }
       await dl.promise
-      if (!tasks.get(id) || tasks.get(id).status === 'canceled') return
+      const afterDl = tasks.get(id)
+      if (!afterDl || afterDl.status === 'canceled') return
 
       // zip 预检:解压前先验证压缩包可解析,拦住「下到半个文件」的坏包
       const insp = inspectZip(zipPath)

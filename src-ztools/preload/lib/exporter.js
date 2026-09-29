@@ -139,8 +139,9 @@ function runExport(params) {
   const id = task.id
   tasks.emit()
 
-  const job = () => new Promise((resolve) => {
-    if (!tasks.get(id) || tasks.get(id).status === 'canceled') return resolve()
+  const job = /** @returns {Promise<void>} */ () => new Promise((resolve) => {
+    const cur = tasks.get(id)
+    if (!cur || cur.status === 'canceled') return resolve()
     try {
       ensureDir(path.dirname(outputPath))
     } catch (e) { /* 输出目录创建失败交给导出进程报错 */ }
