@@ -227,7 +227,7 @@ onBeforeUnmount(() => {
           :class="{ active: activeGroup === g.id }"
           @click="scrollToGroup(g.id)"
         >
-          <Icon :name="g.icon" :size="13" /> { g.label }
+          <Icon :name="g.icon" :size="13" /> {{ g.label }}
         </button>
       </nav>
 
@@ -566,7 +566,9 @@ onBeforeUnmount(() => {
 }
 
 .settings {
-  max-width: 680px;
+  max-width: 880px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .section {
