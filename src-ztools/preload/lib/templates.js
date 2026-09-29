@@ -141,8 +141,9 @@ function exportTemplateStatus(opts) {
  * 下载并安装导出模板(入队,立即返回)。
  * 重新安装会覆盖:先删除旧目录再落新包(与素材的先清后装同语义)。
  * @param {{versionId: string}} params
- * @param {{versionsRoot?: string, templatesBase?: string}} [opts]
+ * @param {{versionsRoot?: string, templatesBase?: string, platform?: string}} [opts]
  *   templatesBase 仅供测试覆盖安装根;缺省按 Godot 规则解析(._sc_ → exe 旁,否则用户数据目录)
+ *   platform 仅供测试注入目标平台(测试模板包内是固定平台的文件);缺省用真实平台
  * @returns {{ok: boolean, error?: string, taskId?: string}}
  */
 function downloadAndInstallTemplates({ versionId }, opts) {
@@ -161,7 +162,7 @@ function downloadAndInstallTemplates({ versionId }, opts) {
     versionId,
     tag: v.tag,
     variant: v.variant,
-    platform: currentPlatform(),
+    platform: o.platform || currentPlatform(),
     url,
     fileName,
     status: 'queued',
@@ -226,7 +227,7 @@ function downloadAndInstallTemplates({ versionId }, opts) {
       // templatesBase 仅供测试覆盖安装根;正常路径按 Godot 规则解析(._sc_ → exe 旁,否则用户数据目录)
       const baseDir = o.templatesBase || resolveTemplatesBase(v.exePath).base
       const dest = path.join(baseDir, versionDir)
-      const fileCount = verifyTemplatesDir(sourceRoot, process.platform)
+      const fileCount = verifyTemplatesDir(sourceRoot, o.platform || process.platform)
 
       ensureDir(baseDir)
       fs.rmSync(dest, { recursive: true, force: true })

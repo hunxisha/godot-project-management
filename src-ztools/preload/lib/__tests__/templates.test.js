@@ -190,7 +190,8 @@ async function main() {
     'templates/web_release.zip': 'web'
   })
   const tplBase = path.join(WORK, 'export_templates')
-  const r3 = templates.downloadAndInstallTemplates({ versionId }, { versionsRoot: path.join(WORK, 'root'), templatesBase: tplBase })
+  // 注入 win32:假模板包内是固定平台的 windows 文件,校验平台不能依赖真实运行环境(CI 是 linux)
+  const r3 = templates.downloadAndInstallTemplates({ versionId }, { versionsRoot: path.join(WORK, 'root'), templatesBase: tplBase, platform: 'win32' })
   ok(r3.ok === true && !!r3.taskId, '安装入队成功', r3.error)
   const t3 = await waitTask(r3.taskId)
   ok(t3.status === 'done', `任务完成(${t3.status} ${t3.error || ''})`)
@@ -209,7 +210,7 @@ async function main() {
   // ---------- 4 ----------
   section('4. 覆盖重装:先清后装,目录不残留旧文件')
   const before4 = state.downloads
-  const r4 = templates.downloadAndInstallTemplates({ versionId }, { versionsRoot: path.join(WORK, 'root'), templatesBase: tplBase })
+  const r4 = templates.downloadAndInstallTemplates({ versionId }, { versionsRoot: path.join(WORK, 'root'), templatesBase: tplBase, platform: 'win32' })
   const t4 = await waitTask(r4.taskId)
   ok(t4.status === 'done', '重装完成', t4.error)
   ok(state.downloads === before4 + 1, '重装重新下载')
