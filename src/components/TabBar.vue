@@ -49,7 +49,7 @@ function isActive(t: Tab) {
         </g>
       </svg>
       <div class="titles">
-        <span class="name">Godot 管理</span>
+        <span class="name">Godot 工坊</span>
         <span class="sub">引擎 · 项目 · 插件</span>
       </div>
     </div>

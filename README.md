@@ -1,4 +1,4 @@
-# Godot 项目管理
+# Godot 工坊
 
 > 下载并管理 Godot 引擎版本与导出模板、隔离并快捷打开项目、浏览官方资产市场并安装插件与素材、
 > 一键 headless 导出游戏、为项目做完整备份。
@@ -56,7 +56,7 @@ dev 版本走「tag → 小版本分支 → master」回退链，全部失败则
 
 | 指令 | 触发词 | 进入 |
 |---|---|---|
-| `godot` | `godot` / `Godot管理` | 概览 |
+| `godot` | `godot` / `Godot工坊` | 概览 |
 | `projects` | `gp` / `godot项目` / `打开godot项目` | 项目 |
 | `versions` | `gv` / `godot版本` / `下载godot` | 版本 |
 | `plugins` | `godot插件` / `godot插件市场` | 市场 |
