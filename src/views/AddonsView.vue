@@ -208,6 +208,12 @@ function openStore(a: AddonInfo) {
       <div class="view-head">
         <h2><Icon name="check" :size="16" /> 已安装插件与素材 <span class="count-pill">{{ addons.length }}</span></h2>
         <span v-if="addons.length" class="head-stat">插件 {{ pluginRows.length }} · 已启用 {{ enabledCount }} · 素材 {{ assetRows.length }}</span>
+        <span class="grow"></span>
+        <!-- 插件页子切换:与「市场」互跳 -->
+        <div class="seg head-seg" role="tablist" aria-label="插件子页">
+          <button @click="emit('navigate', 'marketplace')">市场</button>
+          <button class="on" aria-current="true">已安装</button>
+        </div>
       </div>
 
       <EmptyState

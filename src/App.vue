@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import TabBar from './components/TabBar.vue'
 import Icon from './components/Icon.vue'
 import Dashboard from './views/Dashboard.vue'
@@ -15,6 +15,15 @@ import { notify } from './services/bridge'
 import type { BackupTask, DocsTask, DownloadTask, ExportTask } from './types/godot'
 
 const tab = ref('dashboard')
+/** 插件页(市场+已安装合并为一个导航项)当前子页:切走再切回「插件」时回到上次位置 */
+const pluginSubTab = ref<'marketplace' | 'addons'>('marketplace')
+watch(tab, (v) => {
+  if (v === 'marketplace' || v === 'addons') pluginSubTab.value = v
+})
+/** TabBar「插件」→ 上次的子页(默认市场);其余 key 直通 */
+function onTabBar(v: string) {
+  tab.value = v === 'plugins' ? pluginSubTab.value : v
+}
 /** addProject 功能(拖入)带入的文件路径 */
 const enterPayload = ref<string[] | null>(null)
 /** 概览页触发「新建项目」:切到项目页并自动打开新建弹窗 */
@@ -282,7 +291,7 @@ function gotoCreateBackup(id: string) {
 
 <template>
   <div class="app">
-    <TabBar v-model="tab" />
+    <TabBar :model-value="tab" @update:model-value="onTabBar" />
     <main class="content">
       <!-- 仅缓存市场页:切走再切回保留浏览状态(模式/标签/页码/数据),直到插件重启 -->
       <KeepAlive include="MarketplaceView">

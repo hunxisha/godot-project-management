@@ -650,6 +650,11 @@ input[type='checkbox'].switch:checked::after {
   box-shadow: var(--shadow-sm);
 }
 
+/* 视图头部的插件子切换条(市场 | 已安装):窄窗口下不压缩 */
+.head-seg {
+  flex-shrink: 0;
+}
+
 /* 胶囊筛选标签 */
 .chip {
   display: inline-flex;

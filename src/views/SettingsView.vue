@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getSettings, notify, openPath, pickDirectory, pickFile, saveSettings } from '../services/bridge'
 import Icon from '../components/Icon.vue'
 import ThemeSwitcher from '../components/ThemeSwitcher.vue'
@@ -169,6 +169,47 @@ function logoutStore() {
 function openStoreSite() {
   window.ztools.shellOpenExternal('https://store.godotengine.org/settings/#tab-api')
 }
+
+// ---------- 设置分组锚点导航(左栏 + scrollspy) ----------
+
+const groups = [
+  { id: 'general', label: '通用', icon: 'grid' },
+  { id: 'engine', label: '引擎与网络', icon: 'globe' },
+  { id: 'account', label: '账号', icon: 'key' },
+  { id: 'backup', label: '备份', icon: 'archive' },
+  { id: 'data', label: '数据', icon: 'hard-drive' }
+] as const
+
+type GroupId = (typeof groups)[number]['id']
+const activeGroup = ref<GroupId>('general')
+const flowEl = ref<HTMLElement | null>(null)
+let spyRoot: HTMLElement | null = null
+
+/** 左栏点击 → 对应分组滚到视口顶部 */
+function scrollToGroup(id: GroupId) {
+  document.getElementById('grp-' + id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+/** scrollspy:取「上缘已越过阈值」的最后一个分组 */
+function spyHandler() {
+  let current: GroupId = groups[0].id
+  for (const g of groups) {
+    const el = document.getElementById('grp-' + g.id)
+    if (el && el.getBoundingClientRect().top <= 150) current = g.id
+  }
+  activeGroup.value = current
+}
+
+onMounted(() => {
+  // 滚动容器是 App.vue 的 .content(页面级滚动)
+  spyRoot = flowEl.value?.closest('.content') ?? null
+  spyRoot?.addEventListener('scroll', spyHandler, { passive: true })
+  spyHandler()
+})
+
+onBeforeUnmount(() => {
+  spyRoot?.removeEventListener('scroll', spyHandler)
+})
 </script>
 
 <template>
@@ -177,6 +218,22 @@ function openStoreSite() {
       <h2><Icon name="gear" :size="16" /> 设置</h2>
     </div>
 
+    <div class="settings-layout">
+      <!-- 左侧分组锚点:点击滚动,scrollspy 跟随高亮 -->
+      <nav class="settings-nav" aria-label="设置分组">
+        <button
+          v-for="g in groups"
+          :key="g.id"
+          :class="{ active: activeGroup === g.id }"
+          @click="scrollToGroup(g.id)"
+        >
+          <Icon :name="g.icon" :size="13" /> { g.label }
+        </button>
+      </nav>
+
+      <div ref="flowEl" class="settings-flow">
+      <section :id="'grp-general'" class="settings-group">
+        <h3 class="group-title"><Icon name="grid" :size="13" /> 通用</h3>
     <div class="card section">
       <div class="sec-head">
         <span class="sec-ico"><Icon name="palette" :size="15" /></span>
@@ -191,6 +248,66 @@ function openStoreSite() {
       </div>
     </div>
 
+    <div class="card section">
+      <div class="sec-head">
+        <span class="sec-ico"><Icon name="play" :size="15" /></span>
+        <span class="sec-title">打开项目的默认动作</span>
+      </div>
+      <div class="sec-body">
+        <div class="seg">
+          <button
+            v-for="a in openActions"
+            :key="a.value"
+            :class="{ on: state.defaultOpenAction === a.value }"
+            @click="state.defaultOpenAction = a.value; patchNow()"
+          >
+            <Icon :name="a.icon" :size="12" /> {{ a.label }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card section">
+      <div class="sec-head">
+        <span class="sec-ico"><Icon name="trash" :size="15" /></span>
+        <span class="sec-title">删除项目时</span>
+      </div>
+      <div class="sec-body">
+        <div class="seg">
+          <button
+            v-for="m in deleteModes"
+            :key="m.value"
+            :class="{ on: state.deleteProjectFiles === m.value }"
+            @click="state.deleteProjectFiles = m.value; patchNow()"
+          >
+            {{ m.label }}
+          </button>
+        </div>
+      </div>
+      <div class="hint">
+        「每次询问」在删除弹窗中自由勾选;「默认同时删除」弹窗默认勾上删除文件;「仅移除记录」不再提供删除文件选项。Windows 下删除的项目文件夹会移入回收站,可恢复。
+      </div>
+    </div>
+
+    <div class="card section">
+      <div class="sec-head">
+        <span class="sec-ico"><Icon name="puzzle" :size="15" /></span>
+        <span class="sec-title">插件安装</span>
+      </div>
+      <div class="sec-body">
+        <label class="switch-row">
+          <div class="switch-text">
+            <span class="switch-label">自动启用插件</span>
+            <span class="switch-desc">安装插件后自动在 project.godot 中启用</span>
+          </div>
+          <input v-model="state.autoEnablePlugin" type="checkbox" class="switch" @change="patchNow" />
+        </label>
+      </div>
+    </div>
+      </section>
+
+      <section :id="'grp-engine'" class="settings-group">
+        <h3 class="group-title"><Icon name="globe" :size="13" /> 引擎与网络</h3>
     <div class="card section">
       <div class="sec-head">
         <span class="sec-ico"><Icon name="folder" :size="15" /></span>
@@ -230,6 +347,34 @@ function openStoreSite() {
 
     <div class="card section">
       <div class="sec-head">
+        <span class="sec-ico"><Icon name="globe" :size="15" /></span>
+        <span class="sec-title">网络诊断</span>
+      </div>
+      <div class="sec-body dt-body">
+        <button class="btn" :disabled="netChecking" @click="runDiagnostics">
+          <span v-if="netChecking" class="spin"></span>
+          <Icon v-else name="globe" :size="13" />
+          {{ netChecking ? '检测中…' : '开始检测' }}
+        </button>
+      </div>
+      <div v-if="netResults.length" class="net-results">
+        <div v-for="r in netResults" :key="r.name" class="net-row" :class="{ bad: !r.ok }">
+          <Icon :name="r.ok ? 'check' : 'alert'" :size="13" />
+          <span class="net-name">{{ r.name }}</span>
+          <span class="net-ms mono">{{ r.ok ? `${r.ms} ms` : '不可达' }}</span>
+          <span v-if="!r.ok" class="net-err">{{ r.error }}</span>
+        </div>
+        <div class="hint">
+          诊断走的是插件的实际网络链路(含代理设置);GitHub 不可达时引擎下载与导出模板会受影响。
+        </div>
+      </div>
+    </div>
+      </section>
+
+      <section :id="'grp-account'" class="settings-group">
+        <h3 class="group-title"><Icon name="key" :size="13" /> 账号</h3>
+    <div class="card section">
+      <div class="sec-head">
         <span class="sec-ico"><Icon name="key" :size="15" /></span>
         <span class="sec-title">Asset Store 账号</span>
         <span v-if="state.storeAccount" class="tag ok">已连接</span>
@@ -264,26 +409,10 @@ function openStoreSite() {
         在 <span class="link" @click="openStoreSite">store.godotengine.org 的 API 密钥页面</span> 登录并生成 Key 后粘贴到此处;退出登录不会撤销网站上的 Key。
       </div>
     </div>
+      </section>
 
-    <div class="card section">
-      <div class="sec-head">
-        <span class="sec-ico"><Icon name="play" :size="15" /></span>
-        <span class="sec-title">打开项目的默认动作</span>
-      </div>
-      <div class="sec-body">
-        <div class="seg">
-          <button
-            v-for="a in openActions"
-            :key="a.value"
-            :class="{ on: state.defaultOpenAction === a.value }"
-            @click="state.defaultOpenAction = a.value; patchNow()"
-          >
-            <Icon :name="a.icon" :size="12" /> {{ a.label }}
-          </button>
-        </div>
-      </div>
-    </div>
-
+      <section :id="'grp-backup'" class="settings-group">
+        <h3 class="group-title"><Icon name="archive" :size="13" /> 备份</h3>
     <div class="card section">
       <div class="sec-head">
         <span class="sec-ico"><Icon name="archive" :size="15" /></span>
@@ -375,45 +504,10 @@ function openStoreSite() {
         </div>
       </div>
     </div>
+      </section>
 
-    <div class="card section">
-      <div class="sec-head">
-        <span class="sec-ico"><Icon name="trash" :size="15" /></span>
-        <span class="sec-title">删除项目时</span>
-      </div>
-      <div class="sec-body">
-        <div class="seg">
-          <button
-            v-for="m in deleteModes"
-            :key="m.value"
-            :class="{ on: state.deleteProjectFiles === m.value }"
-            @click="state.deleteProjectFiles = m.value; patchNow()"
-          >
-            {{ m.label }}
-          </button>
-        </div>
-      </div>
-      <div class="hint">
-        「每次询问」在删除弹窗中自由勾选;「默认同时删除」弹窗默认勾上删除文件;「仅移除记录」不再提供删除文件选项。Windows 下删除的项目文件夹会移入回收站,可恢复。
-      </div>
-    </div>
-
-    <div class="card section">
-      <div class="sec-head">
-        <span class="sec-ico"><Icon name="puzzle" :size="15" /></span>
-        <span class="sec-title">插件安装</span>
-      </div>
-      <div class="sec-body">
-        <label class="switch-row">
-          <div class="switch-text">
-            <span class="switch-label">自动启用插件</span>
-            <span class="switch-desc">安装插件后自动在 project.godot 中启用</span>
-          </div>
-          <input v-model="state.autoEnablePlugin" type="checkbox" class="switch" @change="patchNow" />
-        </label>
-      </div>
-    </div>
-
+      <section :id="'grp-data'" class="settings-group">
+        <h3 class="group-title"><Icon name="hard-drive" :size="13" /> 数据</h3>
     <div class="card section">
       <div class="sec-head">
         <span class="sec-ico"><Icon name="hard-drive" :size="15" /></span>
@@ -460,29 +554,7 @@ function openStoreSite() {
         文档库是从已装引擎导出的离线类参考,可随时在「文档」页重新生成,删除不影响插件其它数据。
       </div>
     </div>
-
-    <div class="card section">
-      <div class="sec-head">
-        <span class="sec-ico"><Icon name="globe" :size="15" /></span>
-        <span class="sec-title">网络诊断</span>
-      </div>
-      <div class="sec-body dt-body">
-        <button class="btn" :disabled="netChecking" @click="runDiagnostics">
-          <span v-if="netChecking" class="spin"></span>
-          <Icon v-else name="globe" :size="13" />
-          {{ netChecking ? '检测中…' : '开始检测' }}
-        </button>
-      </div>
-      <div v-if="netResults.length" class="net-results">
-        <div v-for="r in netResults" :key="r.name" class="net-row" :class="{ bad: !r.ok }">
-          <Icon :name="r.ok ? 'check' : 'alert'" :size="13" />
-          <span class="net-name">{{ r.name }}</span>
-          <span class="net-ms mono">{{ r.ok ? `${r.ms} ms` : '不可达' }}</span>
-          <span v-if="!r.ok" class="net-err">{{ r.error }}</span>
-        </div>
-        <div class="hint">
-          诊断走的是插件的实际网络链路(含代理设置);GitHub 不可达时引擎下载与导出模板会受影响。
-        </div>
+      </section>
       </div>
     </div>
   </div>
@@ -752,5 +824,102 @@ function openStoreSite() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ---------- 分组锚点布局 ---------- */
+.settings-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 22px;
+  max-width: 880px;
+}
+
+.settings-nav {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 132px;
+  flex-shrink: 0;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.settings-nav button {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.settings-nav button:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.settings-nav button.active {
+  background: var(--surface);
+  color: var(--brand);
+  font-weight: 600;
+  box-shadow: var(--shadow-sm);
+}
+
+.settings-flow {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  /* 锚点滚动落点:给 sticky 头留余量 */
+  scroll-margin-top: 16px;
+}
+
+.group-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 2px 0 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+@media (max-width: 860px) {
+  .settings-layout {
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .settings-nav {
+    position: static;
+    flex-direction: row;
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .settings-nav button {
+    flex-shrink: 0;
+  }
 }
 </style>

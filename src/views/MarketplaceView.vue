@@ -247,6 +247,11 @@ watch(
         <h2><Icon name="puzzle" :size="16" /> 插件市场</h2>
         <span class="head-sub">官方 Asset Store</span>
         <span class="grow"></span>
+        <!-- 插件页子切换:与「已安装」互跳(navigate 复用既有 tab 转发) -->
+        <div class="seg head-seg" role="tablist" aria-label="插件子页">
+          <button class="on" aria-current="true">市场</button>
+          <button @click="emit('navigate', 'addons')">已安装</button>
+        </div>
       </div>
 
       <!-- 工具栏(滚动时吸顶):第一行 安装目标 + 搜索,第二行 浏览模式 -->

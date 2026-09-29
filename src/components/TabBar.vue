@@ -2,19 +2,26 @@
 import Icon from './Icon.vue'
 import ThemeSwitcher from './ThemeSwitcher.vue'
 
-const tabs = [
+type Tab = { key: string; label: string; icon: string; match?: string[] }
+
+// 顺序按使用频率:项目 → 文档(查 API 高频,与项目相邻)→ 插件(市场+已安装合并)→ 版本 → 备份。
+// 「插件」匹配 marketplace / addons 两个内部 key(App.vue 负责转发与记忆子页)。
+// 设置不放导航:右上角齿轮直达(低频,不占黄金位)。
+const tabs: Tab[] = [
   { key: 'dashboard', label: '概览', icon: 'grid' },
   { key: 'projects', label: '项目', icon: 'folder' },
-  { key: 'versions', label: '版本', icon: 'package' },
-  { key: 'marketplace', label: '市场', icon: 'puzzle' },
-  { key: 'addons', label: '已安装', icon: 'check' },
   { key: 'docs', label: '文档', icon: 'book' },
-  { key: 'backups', label: '备份', icon: 'archive' },
-  { key: 'settings', label: '设置', icon: 'gear' }
+  { key: 'plugins', label: '插件', icon: 'puzzle', match: ['marketplace', 'addons'] },
+  { key: 'versions', label: '版本', icon: 'package' },
+  { key: 'backups', label: '备份', icon: 'archive' }
 ]
 
-defineProps<{ modelValue: string }>()
+const props = defineProps<{ modelValue: string }>()
 const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>()
+
+function isActive(t: Tab) {
+  return t.match ? t.match.includes(props.modelValue) : props.modelValue === t.key
+}
 </script>
 
 <template>
@@ -52,7 +59,7 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>()
         v-for="t in tabs"
         :key="t.key"
         class="tab"
-        :class="{ active: modelValue === t.key }"
+        :class="{ active: isActive(t) }"
         @click="emit('update:modelValue', t.key)"
       >
         <Icon :name="t.icon" :size="14" />
@@ -61,6 +68,15 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>()
     </div>
 
     <span class="grow"></span>
+    <button
+      class="gear"
+      :class="{ active: modelValue === 'settings' }"
+      title="设置"
+      aria-label="设置"
+      @click="emit('update:modelValue', 'settings')"
+    >
+      <Icon name="gear" :size="16" />
+    </button>
     <ThemeSwitcher />
   </nav>
 </template>
@@ -167,6 +183,31 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: string): void }>()
     padding: 5px 10px;
     gap: 4px;
   }
+}
+
+.gear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+
+.gear:hover {
+  color: var(--text);
+}
+
+.gear.active {
+  color: var(--brand);
+  border-color: var(--brand);
+  background: var(--surface);
 }
 
 @media (max-width: 900px) {
