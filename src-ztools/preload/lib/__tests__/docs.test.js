@@ -187,7 +187,9 @@ function fakeSpawn(exePath, args, opts) {
 const Module = require('node:module')
 const origLoad = Module._load
 Module._load = function (request, parent, isMain) {
-  const fromDocs = parent && /docs\.js$/.test(parent.filename || '')
+  // 文档域模块族(2026-09-29 拆分后 spawn 在 docbuild、getText 在 docpo/docextras):
+  // 只要调用方属于文档域就拦截,与拆分前的「parent 是 docs.js」同义。
+  const fromDocs = parent && /[/\\](docs|docpaths|doctasks|docmodel|docpo|docextras|docbuild|gdscan|docdiff|docfulltext)\.js$/.test(parent.filename || '')
   if (fromDocs && request === 'node:child_process') return { spawn: fakeSpawn }
   if (fromDocs && request === './http') {
     return {
