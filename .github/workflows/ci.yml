@@ -23,6 +23,9 @@ jobs:
 
       - name: 安装依赖(严格按 lockfile)
         run: npm ci
+        # electron 只进 devDependencies 供桌面版用;verify 全程无头,跳过 ~100MB 二进制下载
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
 
       - name: 类型检查 + 回归断言
         run: npm run verify

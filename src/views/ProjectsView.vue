@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getSettings, isWindows, notify, pickDirectory, putDoc } from '../services/bridge'
+import { IS_DESKTOP } from '../services/desktop'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import BackupCreateDialog from '../components/dialogs/BackupCreateDialog.vue'
@@ -37,6 +38,8 @@ const emit = defineEmits<{
 
 const settings = getSettings()
 const isWin = isWindows()
+// 桌面版没有 ZTools 子输入栏,过滤走页内搜索框(见模板 head-search)
+const isDesktop = IS_DESKTOP
 
 const ACTION_LABEL: Record<OpenAction, string> = { editor: '打开', run: '运行', folder: '目录' }
 const ACTION_ICON: Record<OpenAction, string> = { editor: 'pencil', run: 'play', folder: 'folder' }
@@ -339,6 +342,14 @@ function onKeyDown(e: KeyboardEvent) {
           <Icon name="star" :size="11" :stroke-width="favOnly ? 2.4 : 1.7" /> 收藏 {{ favCount }}
         </button>
       </div>
+      <input
+        v-if="isDesktop"
+        v-model="filter"
+        class="input head-search"
+        type="search"
+        placeholder="过滤项目"
+        @input="selected = -1"
+      />
       <span class="grow"></span>
       <button class="btn small ghost" title="集中管理所有项目的备份" @click="emit('open-backups')">
         <Icon name="archive" :size="13" /> 备份管理
@@ -687,6 +698,15 @@ function onKeyDown(e: KeyboardEvent) {
 
 .head-seg {
   margin-left: 10px;
+}
+
+/* 桌面版页内搜索框(替代 ZTools 子输入栏) */
+.head-search {
+  width: 200px;
+  margin-left: 10px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
 }
 
 .list {

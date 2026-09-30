@@ -5,11 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:desktop": "electron desktop/main/index.js",
+    "smoke:desktop": "electron desktop/main/index.js --ztools-smoke",
+    "build:desktop": "npm run build && node desktop/scripts/sync-vendor.cjs",
+    "dist:desktop": "npm run build:desktop && cd desktop && npx electron-builder --config builder.json",
     "typecheck": "vue-tsc --noEmit && npm run typecheck:preload",
     "typecheck:preload": "tsc -p tsconfig.preload.json",
     "build": "vue-tsc && vite build",
     "verify": "npm run typecheck && npm test",
-    "test": "npm run test:theme && npm run test:preload && npm run test:preload:sandbox && npm run test:preload:unit && npm run test:addons && npm run test:renderer",
+    "test": "npm run test:theme && npm run test:preload && npm run test:preload:sandbox && npm run test:preload:unit && npm run test:addons && npm run test:desktop && npm run test:renderer",
+    "test:desktop": "node desktop/preload/__tests__/dbdoc.test.js",
     "test:theme": "node src/__tests__/theme.test.mjs",
     "test:renderer": "node src/composables/__tests__/build-bundle.mjs && node src/__tests__/format.test.mjs && node src/__tests__/utils.test.mjs && node src/__tests__/bbcode.test.mjs && node src/__tests__/docTree.test.mjs && node src/composables/__tests__/useTaskDialog.test.mjs && node src/composables/__tests__/useMarketSearch.test.mjs && node src/composables/__tests__/useMarketBrowse.test.mjs && node src/composables/__tests__/useMarketInstall.test.mjs && node src/composables/__tests__/useProjectList.test.mjs && node src/composables/__tests__/useProjectDialogs.test.mjs && node src/composables/__tests__/useInstallProgress.test.mjs && node src/composables/__tests__/useAddonSelection.test.mjs && node src/composables/__tests__/useAddonActions.test.mjs && node src/composables/__tests__/useBackupPageActions.test.mjs && node src/composables/__tests__/useMarketFavorites.test.mjs && node src/composables/__tests__/useBackups.test.mjs && node src/composables/__tests__/useDocs.test.mjs",
     "test:format": "node src/composables/__tests__/build-bundle.mjs && node src/__tests__/format.test.mjs",
@@ -26,6 +31,8 @@
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.1",
     "@ztools-center/ztools-api-types": "^1.0.1",
+    "electron": "^44.5.0",
+    "electron-builder": "^26.15.3",
     "typescript": "^5.3.0",
     "vite": "^6.0.11",
     "vue-tsc": "^2.0.0"

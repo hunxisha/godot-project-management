@@ -7,5 +7,10 @@ graphify-out/
 /docs/
 /design/
 
+# 桌面版构建产物(sync-vendor 同步 / electron-builder 输出)
+/desktop/renderer/
+/desktop/vendor/
+/desktop/release/
+
 # AI 工具(ZCode CLI)的本地忽略规则,前半部分从本文件同步而来
 .zcodeignore
