@@ -1,11 +1,14 @@
-# 桌面版三平台打包与发布草稿(docs/desktop-app-plan.md §5)。
+# 桌面版三平台打包与发布草稿(设计见 docs/desktop-app-plan.md §5)。
 #
 # 触发:
-#   - 推送 desktop-v* tag(如 desktop-v1.0.0)→ 三平台 matrix 构建,
-#     electron-builder 以 GitHub publish 配置写入同名 **draft** Release,人工核对后发布
+#   - 推送 desktop-v* tag(如 desktop-v1.0.0)→ 三平台 matrix 构建 + 建 **草稿** Release 并附产物
 #   - workflow_dispatch 手动触发 → 只出 artifact 不发布,用于发版前试打包
 #
-# 与 verify 工作流的关系:本工作流不跑 verify(发布前以最后一次 verify 绿为准)。
+# 为什么不用 electron-builder 自带的 publish:① v1.0 不做自动更新,update-info(latest.yml)无用;
+# ② 只有 publish 配置而没有 repository 时会触发上游 computeChannelNames 空配置解引用报错(u26.15.3 实测);
+# ③ 本仓库既有发布流程就是 gh CLI,口径统一。
+#
+# 版本号取自 desktop/package.json(桌面版独立版本线),与插件 zpx 版本号无关。
 name: desktop-release
 
 on:
@@ -20,13 +23,13 @@ permissions:
 jobs:
   build:
     strategy:
-      # 一平台失败不拖累其他平台,产物照常上传排查
+      # 单平台失败不拖累其他平台,已成功的产物照常上传便于排查
       fail-fast: false
       matrix:
         include:
-          - { os: windows-latest, args: "--win" }
-          - { os: macos-latest, args: "--mac" }
-          - { os: ubuntu-latest, args: "--linux" }
+          - { os: windows-latest, args: '--win' }
+          - { os: macos-latest, args: '--mac' }
+          - { os: ubuntu-latest, args: '--linux' }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -41,20 +44,43 @@ jobs:
       - name: 构建渲染层并同步桌面版静态资源
         run: npm run build:desktop
 
-      - name: electron-builder 打包(tag 触发时发布草稿,手动触发只出产物)
+      - name: 打包(免签名,不做 publish)
         working-directory: desktop
-        run: >-
-          npx electron-builder --config builder.json ${{ matrix.args }}
-          ${{ startsWith(github.ref, 'refs/tags/') && '--publish always' || '--publish never' }}
+        run: npx electron-builder --config electron-builder.cjs ${{ matrix.args }} --publish never
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 免签名起步:禁止 electron-builder 自动发现本机签名证书
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.os }}
+          # 逐架构列出:排除 windows 的「多架构合并安装包」与 blockmap(前者与分架构包重复,后者仅自动更新用)
           path: |
-            desktop/release/*.exe
+            desktop/release/*-x64-setup.exe
+            desktop/release/*-arm64-setup.exe
             desktop/release/*.dmg
             desktop/release/*.AppImage
             desktop/release/*.deb
           if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 建草稿 Release 并附三平台产物
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          REPO="${{ github.repository }}"
+          gh release view "$TAG" -R "$REPO" >/dev/null 2>&1 \
+            || gh release create "$TAG" -R "$REPO" --draft --title "桌面版 $TAG" \
+                 --notes "Godot 工坊桌面版 $TAG(Electron)。免签名构建:Windows 首次运行会有 SmartScreen 提示,macOS 需右键打开。"
+          gh release upload "$TAG" -R "$REPO" dist/* --clobber
+          echo "产物已附到草稿 Release,请在 GitHub 上核对后手动发布。"

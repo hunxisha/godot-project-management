@@ -8,7 +8,7 @@
     "dev:desktop": "electron desktop/main/index.js",
     "smoke:desktop": "electron desktop/main/index.js --ztools-smoke",
     "build:desktop": "npm run build && node desktop/scripts/sync-vendor.cjs",
-    "dist:desktop": "npm run build:desktop && cd desktop && npx electron-builder --config builder.json",
+    "dist:desktop": "npm run build:desktop && cd desktop && npx electron-builder --config electron-builder.cjs",
     "typecheck": "vue-tsc --noEmit && npm run typecheck:preload",
     "typecheck:preload": "tsc -p tsconfig.preload.json",
     "build": "vue-tsc && vite build",
@@ -31,7 +31,7 @@
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.1",
     "@ztools-center/ztools-api-types": "^1.0.1",
-    "electron": "^44.5.0",
+    "electron": "44.5.0",
     "electron-builder": "^26.15.3",
     "typescript": "^5.3.0",
     "vite": "^6.0.11",
