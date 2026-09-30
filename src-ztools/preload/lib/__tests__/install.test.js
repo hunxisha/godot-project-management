@@ -224,6 +224,51 @@ async function main() {
   install.dismissTask(idE)
   ok(lastSnapshot.filter((t) => TERMINAL[t.status]).length === 0, '终态任务清理干净', String(lastSnapshot.length))
 
+  // ---------- 9. 主地址 404 → 回落备用直链 ----------
+  // 线上缺陷:归档页先把版本列出来,CDN 的 ?version=&flavor= 映射还没跟上(或上游压根没发
+  // 当前平台的包),点下载就是「下载失败 HTTP 404」。这里钉死「404 才换地址」的回落行为。
+  section('9. 主地址 404 → 回落备用直链')
+  const FALLBACK = 'https://example.test/godot-builds/4.8-dev7/linux.x86_64.zip'
+  const withFallback = { ...PARAMS('4.8-dev7'), fallbackUrl: FALLBACK }
+  const fbBefore = downloads.length
+  const idF = install.downloadAndInstall(withFallback, { versionsRoot: ROOT })
+  ok(taskOf(idF).fallbackUrl === FALLBACK, '任务带上备用直链(重试时仍可用)', String(taskOf(idF).fallbackUrl))
+  ok(downloads.length === fbBefore + 1, '先试主地址')
+  ok(downloads[fbBefore].url === withFallback.url, '第一个句柄用主地址', downloads[fbBefore].url)
+  downloads[fbBefore].fail('下载失败 HTTP 404')
+  ok(await waitUntil(() => downloads.length === fbBefore + 2), '主地址 404 后立刻换备用直链')
+  ok(downloads[fbBefore + 1].url === FALLBACK, '第二个句柄用备用直链', downloads[fbBefore + 1].url)
+  ok(taskOf(idF).url === FALLBACK, '任务展示的地址已切到真正在用的那条', String(taskOf(idF).url))
+  ok(taskOf(idF).status === 'downloading', '换地址后仍是下载中,不额外报错', taskOf(idF).status)
+  downloads[fbBefore + 1].finish()
+  ok(await waitUntil(() => taskOf(idF).status === 'done'), '备用直链成功后照常安装', taskOf(idF).status)
+  ok(taskOf(idF).version.source === FALLBACK, '版本记录里的来源是真正下成的地址', String(taskOf(idF).version.source))
+  install.dismissTask(idF)
+
+  // ---------- 10. 两个地址都没有 → 给人看的文案 ----------
+  section('10. 两个地址都 404 → 可读文案,原始原因留档')
+  const bothMissing = { ...PARAMS('4.8-dev8'), fallbackUrl: 'https://example.test/godot-builds/4.8-dev8/linux.x86_64.zip' }
+  const missBefore = downloads.length
+  const idG = install.downloadAndInstall(bothMissing, { versionsRoot: ROOT })
+  downloads[missBefore].fail('下载失败 HTTP 404')
+  ok(await waitUntil(() => downloads.length === missBefore + 2), '先回落一次备用直链')
+  downloads[missBefore + 1].fail('下载失败 HTTP 404')
+  ok(await waitUntil(() => taskOf(idG).status === 'error'), '两个地址都没有 → error', taskOf(idG).status)
+  ok(/构建产物/.test(String(taskOf(idG).error)), '文案说清是上游没发布本平台产物', String(taskOf(idG).error))
+  ok(taskOf(idG).errorDetail === '下载失败 HTTP 404', '原始原因留在 errorDetail 供排查', String(taskOf(idG).errorDetail))
+  install.dismissTask(idG)
+
+  section('11. 非 404 失败不换地址(换地址没有意义)')
+  const netFail = { ...PARAMS('4.7.1-stable'), fallbackUrl: 'https://example.test/godot-builds/4.7.1-stable/linux.x86_64.zip' }
+  const netBefore = downloads.length
+  const idH = install.downloadAndInstall(netFail, { versionsRoot: ROOT })
+  ok(downloads.length === netBefore + 1, '只创建了一个句柄')
+  downloads[netBefore].fail('网络错误: socket hang up')
+  ok(await waitUntil(() => taskOf(idH).status === 'error'), '网络错误直接进 error', taskOf(idH).status)
+  ok(downloads.length === netBefore + 1, '没有多余地重试备用直链')
+  ok(taskOf(idH).error === '网络错误: socket hang up', '非 404 保留原始文案', String(taskOf(idH).error))
+  install.dismissTask(idH)
+
   // ---------- 结果 ----------
   console.log(`\n${'='.repeat(56)}`)
   console.log(`PASS ${pass}  FAIL ${failures.length}`)

@@ -52,6 +52,8 @@ interface GpmRequest {
 /** stat 结果(只声明被用到的字段) */
 interface GpmStats {
   size: number
+  /** 文件模式位(POSIX):判断可执行位用,Windows 上恒为 0 */
+  mode: number
   mtime: any
   mtimeMs: number
   isDirectory(): boolean

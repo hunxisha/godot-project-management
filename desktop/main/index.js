@@ -4,6 +4,7 @@
 const { app, BrowserWindow, ipcMain, dialog, nativeTheme, Notification } = require('electron')
 const fs = require('node:fs')
 const path = require('node:path')
+const { hideMainWindow, shouldQuitOnAllWindowsClosed } = require('./window-policy')
 
 // 双布局:打包后走 desktop/renderer(sync-vendor 同步),仓库开发态直接用 src-ztools/dist
 function resolveDistIndex() {
@@ -59,7 +60,10 @@ ipcMain.on('ztools:notification', (_e, body) => {
 })
 
 ipcMain.on('ztools:hide-main-window', (e) => {
-  BrowserWindow.fromWebContents(e.sender)?.close()
+  // 不能 close():唯一窗口一关就是 window-all-closed → app.quit(),
+  // 用户在「启动项目」后会看到软件自己退出(v1.0 无托盘,关掉找不回来)。
+  // 策略与理由见 window-policy.js。
+  hideMainWindow(BrowserWindow.fromWebContents(e.sender))
 })
 
 // 主进程 → 渲染层的进入事件(.godot 文件关联等,后续版本接入;预留转发通道)
@@ -146,6 +150,6 @@ if (!gotLock) {
   })
 
   app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit()
+    if (shouldQuitOnAllWindowsClosed(process.platform)) app.quit()
   })
 }

@@ -132,7 +132,15 @@ async function download(release: GodotRelease) {
   const root = await ensureRoot()
   if (!root) return
   window.services.downloadAndInstall(
-    { tag: release.tag, variant: variant.value, platform, url: asset.url, fileName: asset.name, totalSize: asset.size },
+    {
+      tag: release.tag,
+      variant: variant.value,
+      platform,
+      url: asset.url,
+      fallbackUrl: asset.fallbackUrl,
+      fileName: asset.name,
+      totalSize: asset.size
+    },
     { versionsRoot: root }
   )
 }
@@ -152,7 +160,15 @@ function retryTask(t: DownloadTask) {
     return
   }
   window.services.downloadAndInstall(
-    { tag: t.tag, variant: t.variant, platform: t.platform, url: t.url, fileName: t.fileName, totalSize: t.totalSize },
+    {
+      tag: t.tag,
+      variant: t.variant,
+      platform: t.platform,
+      url: t.url,
+      fallbackUrl: t.fallbackUrl,
+      fileName: t.fileName,
+      totalSize: t.totalSize
+    },
     { versionsRoot: settings.versionsRoot! }
   )
 }

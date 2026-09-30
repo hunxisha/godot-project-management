@@ -50,10 +50,39 @@ function launchProject({ projectId, action }) {
       return { ok: false, error: '未绑定可用的 Godot 引擎,请先在「版本」页安装或绑定' }
     }
 
+    // Linux/macOS 上解压出来的引擎在部分文件系统(或被解压器丢位)会缺执行位。
+    // 这时 spawn 报 EACCES,而 'error' 是**异步**事件:没有监听者就是未捕获异常,
+    // 宿主进程直接退出 —— 桌面版上表现为「点启动,软件就关了」。先补位再前置校验。
+    if (process.platform !== 'win32') {
+      try {
+        fs.chmodSync(version.exePath, 0o755)
+      } catch (e) { /* ignore */ }
+      /** 补位后仍没有任何执行位(0o111)—— 再 spawn 只会换回 EACCES,而它的报错是异步的 */
+      let executable = false
+      try {
+        executable = (fs.statSync(version.exePath).mode & 0o111) !== 0
+      } catch (e) {
+        executable = false
+      }
+      if (!executable) {
+        return { ok: false, error: '引擎文件不可用(缺少执行权限或已被移动),请删除该版本后重新下载' }
+      }
+    }
+
     const args = ['--path', project.path]
     if (action === 'editor') args.push('-e')
     args.push(...splitLaunchArgs(project.launchArgs))
     const child = spawn(version.exePath, args, { detached: true, stdio: 'ignore' })
+    // 兜底:spawn 的失败晚于本函数返回,只能在这里接住。吞掉是为了不让宿主陪葬,
+    // 但要让用户看见,否则「点了没反应」同样无从排查。
+    child.on('error', (e) => {
+      const msg = (e && e.message) || '未知错误'
+      console.error('[godot-workshop] 启动 Godot 失败:', msg)
+      try {
+        const host = typeof window !== 'undefined' ? window.ztools : null
+        host && typeof host.showNotification === 'function' && host.showNotification(`启动 Godot 失败:${msg}`)
+      } catch (err) { /* 通知失败不影响其它功能 */ }
+    })
     child.unref()
 
     const updated = {

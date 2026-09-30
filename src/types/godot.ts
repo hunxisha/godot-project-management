@@ -437,6 +437,11 @@ export const DEFAULT_SETTINGS: GodotSettings = {
 export interface ReleaseAsset {
   name: string
   url: string
+  /**
+   * 备用直链(官方构建仓库同名资产)。CDN 的版本映射表会滞后于构建仓库:
+   * 新 tag 发布当天点下载常见 `下载失败 HTTP 404`,回落到这里即可下到同一个包。
+   */
+  fallbackUrl?: string
   /** 归档页不提供大小;0 表示未知,下载开始后从响应 Content-Length 获取 */
   size?: number
 }
@@ -459,6 +464,8 @@ export interface DownloadTask {
   variant: Variant
   platform: Platform
   url: string
+  /** 备用直链:主地址 404 时自动回落(见 ReleaseAsset.fallbackUrl) */
+  fallbackUrl?: string
   fileName: string
   totalSize: number
   status: DownloadStatus
@@ -469,6 +476,8 @@ export interface DownloadTask {
   /** B/s */
   speed: number
   error?: string
+  /** 未经翻译的原始失败原因(诊断用,界面展示 error) */
+  errorDetail?: string
   /** 完成后对应的版本 id */
   versionId?: string
   /** 完成后对应的版本文档 */

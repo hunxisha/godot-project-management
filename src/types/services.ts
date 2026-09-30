@@ -47,6 +47,12 @@ export interface DownloadParams {
   variant: Variant
   platform: Platform
   url: string
+  /**
+   * 备用直链(官方构建仓库同名资产)。CDN 的版本映射表会滞后于构建仓库 ——
+   * 归档页已经列出新版本、CDN 却还没映射时,点下载就是「下载失败 HTTP 404」;
+   * 主地址 404/403 时自动回落这条地址(见 ReleaseAsset.fallbackUrl)。
+   */
+  fallbackUrl?: string
   fileName: string
   /** 安装包字节数;商店/发布列表偶尔缺这个字段,下游只把它当进度条分母的提示值 */
   totalSize?: number

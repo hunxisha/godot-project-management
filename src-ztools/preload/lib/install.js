@@ -17,6 +17,46 @@ const tasks = createTaskQueue({
 })
 
 /**
+ * 下载候选地址:主地址(官方 CDN)+ 备用直链(官方构建仓库同名资产),去重且丢弃空值。
+ * @param {string} url
+ * @param {string} [fallbackUrl]
+ * @returns {string[]}
+ */
+function downloadSources(url, fallbackUrl) {
+  /** @type {string[]} */
+  const out = []
+  for (const u of [url, fallbackUrl]) {
+    if (u && !out.includes(u)) out.push(u)
+  }
+  return out
+}
+
+/**
+ * 上游「这个地址没有这个包」的判据:CDN 映射滞后会 404,产物被撤下会 403。
+ * 只有这类错误才值得换备用直链 —— 网络断了换地址没有意义。
+ * @param {unknown} e
+ * @returns {boolean}
+ */
+function isMissingAssetError(e) {
+  return /HTTP 40[34]/.test((/** @type {Error} */ (e) && /** @type {Error} */ (e).message) || '')
+}
+
+/**
+ * 失败原因 → 给用户看的一句话;原始原因留在任务的 errorDetail 里备查。
+ * 404 的实测成因只有一个:上游把版本列进了归档页,却没发布当前平台的产物
+ * (如 4.8-dev7:归档页有条目,构建仓库里只有 Android 与模板,没有桌面版包),
+ * 这时说「下载失败 HTTP 404」等于没说。
+ * @param {unknown} e
+ * @returns {string}
+ */
+function describeFailure(e) {
+  const raw = (/** @type {Error} */ (e) && /** @type {Error} */ (e).message) || '安装失败'
+  if (raw === '已取消') return '已取消'
+  if (isMissingAssetError(e)) return '该版本暂无当前平台的构建产物(上游未发布或已下架),请换一个版本再试'
+  return raw
+}
+
+/**
  * 更新任务字段(任务已被移除时静默跳过)。
  * @param {string} id
  * @param {import('./taskqueue').Task} patch
@@ -33,11 +73,13 @@ function setTask(id, patch) {
  */
 function downloadAndInstall(params, opts) {
   const finalUrl = params.url
+  const fallbackUrl = params.fallbackUrl || ''
   const task = tasks.create({
     tag: params.tag,
     variant: params.variant,
     platform: params.platform,
     url: finalUrl,
+    fallbackUrl,
     fileName: params.fileName,
     totalSize: params.totalSize,
     status: 'queued',
@@ -56,30 +98,59 @@ function downloadAndInstall(params, opts) {
     const zipPath = path.join(downloadsDir, params.fileName + '.part')
     // 成功后才清理 .part;失败保留(已下载字节留在盘上,重试从断点继续)
     let succeeded = false
+    /** 真正下成的地址(可能是备用直链),落库时记它而不是主地址 */
+    let usedUrl = finalUrl
+
+    /**
+     * 依次尝试候选地址。仅当上游确实没有这个包(404/403)时才换下一个地址重来;
+     * 换地址后从零开始 —— .part 里可能是另一个地址的半截内容,续传会拼出坏包。
+     * @returns {Promise<void>}
+     */
+    const runDownload = async () => {
+      const sources = downloadSources(finalUrl, fallbackUrl)
+      for (let i = 0; i < sources.length; i++) {
+        const url = sources[i]
+        if (i > 0) {
+          // 界面显示真正在用的地址,任务卡片上的链接才不会是错的那条
+          usedUrl = url
+          setTask(id, { url, received: 0, speed: 0 })
+          try {
+            fs.existsSync(zipPath) && fs.unlinkSync(zipPath)
+          } catch (e) { /* ignore */ }
+        }
+        let lastTime = Date.now()
+        let lastReceived = 0
+        try {
+          const dl = downloadResumable(url, zipPath, {
+            attempts: 3,
+            total: params.totalSize,
+            onProgress: (received, total) => {
+              const now = Date.now()
+              const speed = Math.max(0, ((received - lastReceived) / Math.max(1, now - lastTime)) * 1000)
+              lastTime = now
+              lastReceived = received
+              setTask(id, { received, totalSize: total || params.totalSize, speed })
+            }
+          })
+          tasks.setToken(id, dl)
+          const cur = tasks.get(id)
+          if (!cur || cur.status === 'canceled') {
+            dl.cancel()
+            dl.promise.catch(() => {}) // 主动取消后无人 await,别留未处理的拒绝
+            throw new Error('已取消')
+          }
+          await dl.promise
+          return
+        } catch (e) {
+          if (i === sources.length - 1 || !isMissingAssetError(e)) throw e
+        }
+      }
+    }
 
     try {
       ensureDir(downloadsDir)
       setTask(id, { status: 'downloading' })
-      let lastTime = Date.now()
-      let lastReceived = 0
-      const dl = downloadResumable(finalUrl, zipPath, {
-        attempts: 3,
-        total: params.totalSize,
-        onProgress: (received, total) => {
-          const now = Date.now()
-          const speed = Math.max(0, ((received - lastReceived) / Math.max(1, now - lastTime)) * 1000)
-          lastTime = now
-          lastReceived = received
-          setTask(id, { received, totalSize: total || params.totalSize, speed })
-        }
-      })
-      tasks.setToken(id, dl)
-      const cur = tasks.get(id)
-      if (!cur || cur.status === 'canceled') {
-        dl.cancel()
-        return
-      }
-      await dl.promise
+      await runDownload()
       const afterDownload = tasks.get(id)
       if (!afterDownload || afterDownload.status === 'canceled') return
 
@@ -109,7 +180,7 @@ function downloadAndInstall(params, opts) {
         exePath,
         installDir,
         managed: true,
-        source: finalUrl,
+        source: usedUrl,
         installedAt: Date.now(),
         size: dirSize(installDir),
         verified: ok
@@ -118,11 +189,11 @@ function downloadAndInstall(params, opts) {
       succeeded = true
       setTask(id, { status: 'done', versionId, version })
     } catch (e) {
-      const message = e && e.message === '已取消' ? '已取消' : (e && e.message) || '安装失败'
-      if (message === '已取消') {
+      const detail = (/** @type {Error} */ (e) && /** @type {Error} */ (e).message) || '安装失败'
+      if (detail === '已取消') {
         setTask(id, { status: 'canceled' })
       } else {
-        setTask(id, { status: 'error', error: message })
+        setTask(id, { status: 'error', error: describeFailure(e), errorDetail: detail })
       }
     } finally {
       try {

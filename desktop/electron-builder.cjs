@@ -40,7 +40,9 @@ module.exports = {
     'renderer/**',
     'vendor/**',
     'package.json',
-    '!**/*.map'
+    '!**/*.map',
+    // 测试不进安装包(桌面版两个 __tests__ 目录只服务于 npm test)
+    '!**/__tests__/**'
   ],
   win: {
     icon: ICON,

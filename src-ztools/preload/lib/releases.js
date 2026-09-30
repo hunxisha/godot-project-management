@@ -5,6 +5,8 @@ const { currentPlatform, displayName } = require('./godotExe')
 
 const ARCHIVE_URL = 'https://godotengine.org/download/archive/'
 const CDN = 'https://downloads.godotengine.org/'
+// 官方构建仓库:CDN 的 ?version=&flavor= 映射表就是转发到这里的同名资产
+const BUILDS = 'https://github.com/godotengine/godot-builds/releases/download/'
 const CACHE_ID = 'godot/cache/releases'
 const TTL = 24 * 60 * 60 * 1000
 
@@ -31,7 +33,7 @@ function parseArchiveDate(s) {
  * tag = {version}-{flavor},flavor 为完整后缀(stable/dev6/beta3/rc2…)。
  * 3.x 与 4.x 的 Linux/macOS slug 命名不同,按 major 区分。
  * @param {string} tag 形如 '4.7.2-stable'
- * @returns {{name: string, url: string, size: number}[]} 当前平台的标准/mono 两种变体;不支持的版本返回空数组
+ * @returns {{name: string, url: string, fallbackUrl: string, size: number}[]} 当前平台的标准/mono 两种变体;不支持的版本返回空数组
  */
 function buildAssets(tag) {
   const idx = tag.indexOf('-')
@@ -68,11 +70,18 @@ function buildAssets(tag) {
           ['mono', 'mono_x11_64.zip', 'linux.64']
         ]
   }
-  return slugs.map(([variant, slug, pf]) => ({
-    name: `Godot_v${tag}_${slug}`,
-    url: `${CDN}?version=${version}&flavor=${flavor}&slug=${slug}&platform=${pf}`,
-    size: 0 // 归档页不提供大小,下载开始后从响应 Content-Length 获取
-  }))
+  return slugs.map(([variant, slug, pf]) => {
+    const name = `Godot_v${tag}_${slug}`
+    return {
+      name,
+      url: `${CDN}?version=${version}&flavor=${flavor}&slug=${slug}&platform=${pf}`,
+      // 备用直链。CDN 只是映射层:归档页会先把版本列出来,而产物在构建仓库里迟到
+      // (实测 4.8-dev7 归档页有条目、构建仓库里却没有桌面版包),此时 CDN 直接 404。
+      // 落回构建仓库的同名资产,既绕开映射滞后,也把「真的没有」与「映射没更新」区分开。
+      fallbackUrl: `${BUILDS}${tag}/${name}`,
+      size: 0 // 归档页不提供大小,下载开始后从响应 Content-Length 获取
+    }
+  })
 }
 
 /**
@@ -80,7 +89,7 @@ function buildAssets(tag) {
  * 解析官方归档页,返回 [{ tag, name, publishedAt, prerelease, assets: [{ name, url, size }] }],
  * 含稳定版与 dev/beta/rc 预发布版,assets 为当前平台的标准/mono 两种变体直链。
  * @param {boolean} [force] 为真时忽略缓存强制重新拉取
- * @returns {Promise<Array<{tag: string, name: string, publishedAt: string, prerelease: boolean, assets: {name: string, url: string, size: number}[]}>>}
+ * @returns {Promise<Array<{tag: string, name: string, publishedAt: string, prerelease: boolean, assets: {name: string, url: string, fallbackUrl: string, size: number}[]}>>}
  */
 async function fetchReleases(force) {
   const cache = getDoc(CACHE_ID)
