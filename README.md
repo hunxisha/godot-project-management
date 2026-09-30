@@ -8,6 +8,9 @@ ZTools 插件。渲染层为 **Vue 3 + Vite + TypeScript**，Node 能力由 **pr
 
 支持平台：Windows / macOS / Linux。
 
+> **另提供桌面版（Electron）**：同一套渲染层与能力层换宿主，无需安装 ZTools 即可独立运行，
+> 功能与插件版对齐。构建与开发命令见下方「[桌面版](#桌面版electron)」。
+
 ## 功能
 
 界面分 8 个页面（顶栏标签 + 主题切换按钮）：
@@ -101,7 +104,15 @@ dev 版本走「tag → 小版本分支 → master」回退链，全部失败则
 │   │                             godotExe/projects/launcher/assets/backup/datatransfer/
 │   │                             diagnostics/docs + 基础设施 http/store/fsutil/taskqueue
 │   └── dist/                     构建产物(git 忽略)
-├── docs/                         设计文档(备份/主题/优化计划/GodotHub 集成策划/引擎文档浏览策划/术语表)
+├── desktop/                      桌面版(Electron 宿主,复用上面的渲染层与能力层)
+│   ├── main/index.js             主进程:窗口、原生对话框/通知、单实例、冒烟自检
+│   ├── preload/
+│   │   ├── index.js              入口:挂垫片后原样加载 src-ztools/preload/services.js
+│   │   ├── ztshim.js             window.ztools 垫片(db + 14 个宿主方法映射到 Electron)
+│   │   └── dbdoc.js              JSON 文档存储(CouchDB 风格 _rev + 写穿 + 损坏回滚)
+│   ├── electron-builder.cjs      三平台打包配置
+│   └── scripts/sync-vendor.cjs   打包前把 dist/ 与能力层同步进 desktop/
+├── docs/                         设计文档(备份/主题/优化计划/GodotHub 集成策划/引擎文档浏览策划/桌面版策划/术语表)
 └── */__tests__/                  回归测试(preload 与渲染层)
 ```
 
@@ -118,6 +129,23 @@ npm run build      # vue-tsc 类型检查 + 构建到 src-ztools/dist/
 
 术语（分片让出、原子落盘、来源过户、保留策略…）见 [`docs/glossary.md`](docs/glossary.md)。
 
+### 桌面版（Electron）
+
+桌面版是**同一套渲染层与能力层的第二个宿主**，不是 fork：两端共用 `src/` 与 `src-ztools/preload/lib/`，
+差异全部收在 `desktop/` 与被 `window.ztools.isDesktop` 开关分流的少数位置（如项目页内嵌搜索框，
+替代 ZTools 的子输入栏）。因此能力层改动天然对两端生效，只要 `npm run verify` 绿即可。
+
+```bash
+npm run dev:desktop     # 启动桌面版(需先 npm run build 出 src-ztools/dist)
+npm run smoke:desktop   # 无头自检:垫片/能力层方法/db 往返/Vue 挂载/控制台报错,退出码即结果
+npm run dist:desktop    # 打包当前平台安装包到 desktop/release/
+```
+
+桌面版数据存在 Electron `userData/godot-workshop/db.json`，文档结构与 ZTools 宿主一致，
+因此「设置 → 数据导出/导入」可跨两端迁移。版本号在 `desktop/package.json` 独立走线
+（`desktop-v*` tag 触发 `.github/workflows/desktop-release.yml` 三平台打包并建草稿 Release），
+与插件 zpx 的发版节奏互不影响。设计细节与实测结论见 `docs/desktop-app-plan.md`。
+
 ## 测试
 
 ```bash
@@ -132,6 +160,7 @@ npm test           # 全部断言（数量随版本增长,各套件实况见下�
 | `npm run test:preload` / `:sandbox` | 备份领域层全套（后者先删掉 `setImmediate` 模拟宿主沙箱） |
 | `npm run test:preload:unit` | 版本解析、任务队列、文件工具、HTTP 下载与**断点续传**、引擎安装、**导出模板**、**一键导出**、启动参数拆分、**数据迁移/网络诊断**、**引擎文档库**、services 契约一致性 |
 | `npm run test:addons` | 插件/素材来源、安装分流、清单卸载、复制过户（默认 + 沙箱各一遍） |
+| `npm run test:desktop` | 桌面版文档存储:`_rev` 冲突语义、`allDocs` 前缀排序、写穿持久化与 `.bak` 损坏回滚、`store.js` 直连集成 |
 | `npm run test:renderer` | 渲染层:市场搜索(分页/竞态守卫)/浏览/安装确认层、项目列表、已装操作、备份、文档数据层与 **BBCode 解析**、纯工具 |
 
 提交与 PR 由 GitHub Actions 跑同一条命令（见 `.github/workflows/ci.yml`）。
@@ -153,6 +182,10 @@ npm test           # 全部断言（数量随版本增长,各套件实况见下�
 - ZTools 宿主（运行插件）
 - 网络：引擎与模板走 GitHub/官方 CDN，市场走 store.godotengine.org，均可通过设置中的 HTTP 代理转发
   （设置 → 网络诊断可一键探测三条链路）
+
+桌面版无宿主要求，安装包自带运行时（Windows 10+ / macOS 11+ / 主流 Linux 发行版）；
+当前为**免签名构建**：Windows 首次运行会有 SmartScreen「未知发布者」提示（选「更多信息 → 仍要运行」），
+macOS 需右键打开或到「隐私与安全性」放行。
 
 ## 许可
 
