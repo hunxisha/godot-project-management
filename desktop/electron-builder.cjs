@@ -9,7 +9,12 @@
 // 若启用 electron-builder 的 publish,在未配置 repository 时会触发上游
 // computeChannelNames 的空配置解引用报错,故此处显式关闭。
 
+const path = require('node:path')
 const pkg = require('../package.json')
+
+// 图标单一来源:沿用插件同一张 logo.png(512×512,满足各平台生成 .ico/.icns 的下限)。
+// 用绝对路径,避免相对 projectDir / buildResources 的解析歧义。
+const ICON = path.resolve(__dirname, '../src-ztools/logo.png')
 
 /** 取精确 electron 版本:优先已安装版本,回退根依赖声明(去范围前缀) */
 function electronVersion() {
@@ -38,6 +43,7 @@ module.exports = {
     '!**/*.map'
   ],
   win: {
+    icon: ICON,
     target: [
       { target: 'nsis', arch: ['x64', 'arm64'] }
     ]
@@ -48,6 +54,7 @@ module.exports = {
     artifactName: 'GodotWorkshop-${version}-${arch}-setup.${ext}'
   },
   mac: {
+    icon: ICON,
     target: [
       { target: 'dmg', arch: ['x64', 'arm64'] }
     ],
@@ -59,11 +66,15 @@ module.exports = {
     artifactName: 'GodotWorkshop-${version}-${arch}.${ext}'
   },
   linux: {
+    icon: ICON,
     target: [
       'AppImage',
       'deb'
     ],
-    category: 'Development'
+    category: 'Development',
+    // 与 desktop/package.json 的 desktopName 配合:让桌面环境把运行中的窗口关联到这个 .desktop 条目
+    // (desktopName 本身只在 package.json 里设,不是 linux 配置的合法键)
+    syncDesktopName: true
   },
   appImage: {
     artifactName: 'GodotWorkshop-${version}-${arch}.AppImage'
