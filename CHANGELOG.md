@@ -2,6 +2,41 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+> **两条版本线**：ZTools 插件（`vX.Y.Z`）与桌面版（`desktop-vX.Y.Z`）各自独立排序，
+> 互不影响。桌面版的完整发布说明见对应 GitHub Release。
+
+## 桌面版 1.0.0
+
+首次发布：把「Godot 工坊」从 ZTools 插件发育为独立桌面应用，Windows / macOS / Linux 三平台可装即用，
+**无需安装 ZTools**，七页功能与插件版 2.0.0 对齐。
+
+### 架构
+
+- **同一套渲染层与能力层的第二个宿主，不是 fork**：两端共用 `src/`（Vue 3 渲染层）与
+  `src-ztools/preload/lib/`（30 个 Node 能力模块），差异全部收在新增的 `desktop/` 目录
+  与被 `window.ztools.isDesktop` 分流的位置内
+- 新增 `desktop/`：主进程（窗口 / 原生对话框与通知 / 单实例）、`window.ztools` 垫片
+  （db 四方法与 14 个宿主方法映射到 Electron）、JSON 文档存储
+  （CouchDB 风格 `_rev` 冲突语义、写穿落盘、`.bak` 上一代回滚与损坏留档）
+- 能力层对宿主的依赖实测只有 `window.ztools` 一个对象，磁盘路径全走
+  `os.tmpdir()/homedir()/APPDATA` 与设置项 —— 因此能力层**一行未改**即可复用
+
+### 桌面版差异
+
+- 项目页新增**页内搜索框**，替代 ZTools 的子输入栏（渲染层唯一改动，按开关分流）
+- 深浅色可**实时跟随系统**切换（插件版受限于宿主无切换回调）
+- 数据落在 Electron `userData/godot-workshop/db.json`，文档结构与宿主一致，
+  故插件版「设置 → 数据导出/导入」可直接双向迁移
+
+### 工程
+
+- 新增文档存储断言 47 项（`_rev` 冲突语义 / `allDocs` 前缀排序 / 持久化与损坏回滚 /
+  `store.js` 直连集成），断言总数 2,019 项
+- `npm run smoke:desktop` 无头自检：垫片挂载、能力层 91 个方法在位、db 往返、
+  Vue 挂载、控制台零报错，退出码即结果
+- 三平台打包（NSIS / dmg / AppImage + deb）走 `.github/workflows/desktop-release.yml`，
+  推送 `desktop-v*` tag 触发并建草稿 Release；免签名起步（见 Release 说明的首次运行指引）
+
 ## 2.0.0
 
 界面信息架构重设计:导航栏 8 → 6 个标签,设置页改为分组锚点布局。

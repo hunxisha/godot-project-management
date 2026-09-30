@@ -1,6 +1,6 @@
 {
   "name": "godot-workshop-desktop",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "productName": "Godot 工坊",
   "description": "Godot 工坊桌面版(Electron 宿主)",
   "author": "hunxisha <hunxisha@users.noreply.github.com>",
