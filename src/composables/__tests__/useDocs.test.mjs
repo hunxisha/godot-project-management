@@ -110,7 +110,7 @@ async function main() {
   listClassesResult = { ok: true, classes: [{ name: 'Node', inherits: 'Object', brief: '', builtin: false, isSingleton: false, m: [], p: [], s: [], c: [], e: [] }] }
   let { useDocs } = await freshModule()
   const d1 = useDocs()
-  d1.init()
+  await d1.init()
   await nextTick()
   ok(d1.currentVersionId.value === VA, '当前库 = 第一个 ready 版本', d1.currentVersionId.value)
   ok(d1.classes.value.length === 1 && d1.classes.value[0].name === 'Node', '类列表来自当前库')
@@ -121,7 +121,7 @@ async function main() {
   libraryStatuses = { [VA]: { status: 'ready', versionId: VA, tag: '4.7.2-stable', classCount: 1080 }, [VB]: null }
   ;({ useDocs } = await freshModule())
   const d2 = useDocs()
-  d2.init()
+  await d2.init()
   ok(d2.currentVersionId.value === VA, '保存的库可用 → 恢复')
 
   section('init:保存的库失效 → 回退')
@@ -129,7 +129,7 @@ async function main() {
   libraryStatuses = { [VA]: { status: 'ready', versionId: VA, tag: '4.7.2-stable', classCount: 1080 }, [VB]: null }
   ;({ useDocs } = await freshModule())
   const d3 = useDocs()
-  d3.init()
+  await d3.init()
   ok(d3.currentVersionId.value === VA, '失效库回退到第一个可用', d3.currentVersionId.value)
   const settingsDoc = docs.get('godot/settings')
   ok(settingsDoc.docsVersionId === VA, '回退后回写 settings', JSON.stringify(settingsDoc))
@@ -138,24 +138,24 @@ async function main() {
   libraryStatuses = { [VA]: { status: 'ready', versionId: VA, tag: '4.7.2-stable' }, [VB]: { status: 'ready', versionId: VB, tag: '4.8-dev6' } }
   ;({ useDocs } = await freshModule())
   const d4 = useDocs()
-  d4.init()
-  d4.selectVersion(VB)
+  await d4.init()
+  await d4.selectVersion(VB)
   ok(d4.currentVersionId.value === VB, '切换当前库')
   ok(docs.get('godot/settings').docsVersionId === VB, '选择已持久化')
 
   section('generate → building 状态')
-  const g = d4.generate(VB)
+  const g = await d4.generate(VB)
   ok(g.ok === true && generateCalls[0].versionId === VB, 'generate 委托 preload')
   ok(d4.statuses.value[VB]?.status === 'building', '入队后状态转 building', JSON.stringify(d4.statuses.value[VB]))
-  d4.generate(VB, { forceTranslation: true })
+  await d4.generate(VB, { forceTranslation: true })
   ok(generateCalls[1].opts?.forceTranslation === true, '强刷翻译选项透传 preload', JSON.stringify(generateCalls[1]))
 
   section('收藏与历史')
-  d4.toggleFavorite('Node')
+  await d4.toggleFavorite('Node')
   ok(d4.favorites.value.includes('Node'), '收藏生效')
-  d4.toggleFavorite('Node')
+  await d4.toggleFavorite('Node')
   ok(!d4.favorites.value.includes('Node'), '再点取消收藏')
-  d4.pushHistory('Vector2')
+  await d4.pushHistory('Vector2')
   ok(d4.history.value.length === 1 && d4.history.value[0].name === 'Vector2', '历史记录')
 
   section('search 委托(带当前库 id)')
@@ -174,7 +174,7 @@ async function main() {
   }
   ;({ useDocs } = await freshModule())
   const d5 = useDocs()
-  d5.init()
+  await d5.init()
   await sleep()
   ok(d5.inheritsChainOf('Sprite2D').map((c) => c.name).join(',') === 'Node2D,Node,Object', '面包屑链完整', JSON.stringify(d5.inheritsChainOf('Sprite2D')))
   ok(d5.derivedOf('Node').map((c) => c.name).join(',') === 'Node2D', '直接派生列表')

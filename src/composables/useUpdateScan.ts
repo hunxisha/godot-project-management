@@ -36,7 +36,7 @@ export function useUpdateScan() {
       for (let i = 0; i < projects.length; i++) {
         const p = projects[i]
         progress.value = `${i + 1}/${projects.length}`
-        const addons = window.services.listAddons(p.id) || []
+        const addons = (await window.services.listAddons(p.id)) || []
         const jobs = addons.filter((a) => a.fromMarket && a.assetId)
         await Promise.all(
           jobs.map(async (a) => {

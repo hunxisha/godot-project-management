@@ -4,9 +4,11 @@ import { getSettings, notify, pickDirectory, pickFile, isWindows, saveSettings, 
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import { useExportTemplates } from '../composables/useExportTemplates'
-import type { DownloadTask, GodotRelease, GodotVersion, ReleaseAsset, Variant } from '../types/godot'
+import { DEFAULT_SETTINGS, type DownloadTask, type GodotRelease, type GodotSettings, type GodotVersion, type ReleaseAsset, type Variant } from '../types/godot'
 
-const settings = reactive(getSettings())
+// 设置异步读取(阶段 A):先给默认值,onMounted 后用持久化值覆盖
+const settings = reactive<GodotSettings>({ ...DEFAULT_SETTINGS })
+getSettings().then((s) => Object.assign(settings, s)).catch(() => {})
 const platform = window.services.currentPlatform()
 
 const installed = ref<(GodotVersion & { _id: string })[]>([])
@@ -21,7 +23,9 @@ const importing = ref(false)
 const confirmingId = ref<string | null>(null)
 let unwatchTasks: (() => void) | null = null
 
-installed.value = window.ztools.db.allDocs('godot/version/') as any[]
+onMounted(async () => {
+  installed.value = ((await window.ztools.db.allDocs('godot/version/')) || []) as any[]
+})
 
 // ---------- 下载任务 ----------
 
@@ -119,9 +123,9 @@ function progressText(t: DownloadTask): string {
 
 async function ensureRoot(): Promise<string | null> {
   if (settings.versionsRoot) return settings.versionsRoot
-  const dir = pickDirectory('选择 Godot 引擎安装目录')
+  const dir = await pickDirectory('选择 Godot 引擎安装目录')
   if (!dir) return null
-  saveSettings({ versionsRoot: dir })
+  saveSettings({ versionsRoot: dir }).catch(() => {})
   settings.versionsRoot = dir
   return dir
 }
@@ -176,7 +180,7 @@ function retryTask(t: DownloadTask) {
 // ---------- 导入 / 删除 / 默认 ----------
 
 async function importLocal() {
-  const exe = pickFile('选择 Godot 可执行文件', isWindows() ? ['exe'] : ['*'])
+  const exe = await pickFile('选择 Godot 可执行文件', isWindows() ? ['exe'] : ['*'])
   if (!exe) return
   importing.value = true
   const r = await window.services.importLocalExe(exe)
@@ -193,14 +197,14 @@ async function importLocal() {
 }
 
 function setDefault(v: GodotVersion & { _id: string }) {
-  saveSettings({ defaultVersionId: v._id })
+  saveSettings({ defaultVersionId: v._id }).catch(() => {})
   settings.defaultVersionId = v._id
 }
 
-function askDelete(v: GodotVersion & { _id: string }) {
+async function askDelete(v: GodotVersion & { _id: string }) {
   if (confirmingId.value === v._id) {
     confirmingId.value = null
-    const r = window.services.deleteVersion({ id: v._id, installDir: v.installDir, managed: v.managed })
+    const r = await window.services.deleteVersion({ id: v._id, installDir: v.installDir, managed: v.managed })
     if (r.ok) {
       installed.value = installed.value.filter((x) => x._id !== v._id)
       if (settings.defaultVersionId === v._id) {

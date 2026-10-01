@@ -190,12 +190,12 @@ function onTargetChange() {
   reloadAddons()
 }
 
-function reloadAddons() {
+async function reloadAddons() {
   if (!targetId.value) {
     addons.value = []
     return
   }
-  addons.value = window.services.listAddons(targetId.value)
+  addons.value = await window.services.listAddons(targetId.value)
 }
 
 // ---------- 商店入口 ----------

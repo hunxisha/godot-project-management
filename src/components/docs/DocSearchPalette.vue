@@ -31,17 +31,29 @@ const KIND_LABEL: Record<string, string> = {
   body: '正文'
 }
 
-const results = computed<DocSearchHit[]>(() => {
+// 搜索异步化后(阶段 A)不能再用 computed 同步派生,改为 watch + 竞态守卫:
+// 只认最后一次输入的查询结果,防止快速输入时旧结果覆盖新结果
+const results = ref<DocSearchHit[]>([])
+
+watch([query, withBody], async () => {
   const q = query.value.trim()
-  if (!q) return []
-  const named = search(q, 30)
-  if (!withBody.value) return named
+  if (!q) {
+    results.value = []
+    return
+  }
+  const named = await search(q, 30)
+  if (query.value.trim() !== q) return
+  if (!withBody.value) {
+    results.value = named
+    return
+  }
   // 正文命中追加在名称命中之后(名称命中永远是更精确的意图)
   const body = currentStatus.value?.versionId
-    ? window.services.docsSearchFullText(currentStatus.value.versionId, q, 15)
+    ? await window.services.docsSearchFullText(currentStatus.value.versionId, q, 15)
     : []
+  if (query.value.trim() !== q) return
   const seen = new Set(named.map((h) => h.className))
-  return [...named, ...body.filter((h) => !seen.has(h.className))]
+  results.value = [...named, ...body.filter((h) => !seen.has(h.className))]
 })
 
 /** 空查询时给最近浏览/收藏作快速入口 */

@@ -6,42 +6,42 @@ import { DEFAULT_SETTINGS, type GodotSettings } from '../types/godot'
 
 type AnyDoc = { _id: string, _rev?: string, [key: string]: any }
 
-/** 读取单个文档,返回 _id + 数据字段 */
-export function getDoc<T>(id: string): (T & { _id: string }) | null {
+/** 读取单个文档,返回 _id + 数据字段(异步:Tauri 的 db 是 IPC,阶段 A 起两端统一) */
+export async function getDoc<T>(id: string): Promise<(T & { _id: string }) | null> {
   return (window.ztools.db.get(id) as AnyDoc | null) as any
 }
 
 /** 创建/更新文档 */
-export function putDoc<T extends object>(id: string, data: T): boolean {
+export async function putDoc<T extends object>(id: string, data: T): Promise<boolean> {
   const old = window.ztools.db.get(id) as AnyDoc | null
   const result = window.ztools.db.put({ _id: id, _rev: old?._rev, ...data })
   return !result.error
 }
 
 /** 删除文档 */
-export function removeDoc(id: string): boolean {
+export async function removeDoc(id: string): Promise<boolean> {
   const old = window.ztools.db.get(id) as AnyDoc | null
   if (!old) return true
   return !window.ztools.db.remove(old).error
 }
 
 /** 按前缀列出文档 */
-export function listDocs<T>(prefix: string): (T & { _id: string })[] {
+export async function listDocs<T>(prefix: string): Promise<(T & { _id: string })[]> {
   return (window.ztools.db.allDocs(prefix) || []) as any[]
 }
 
 // ---------- 设置 ----------
 
-export function getSettings(): GodotSettings {
-  const doc = getDoc<GodotSettings>('godot/settings')
+export async function getSettings(): Promise<GodotSettings> {
+  const doc = await getDoc<GodotSettings>('godot/settings')
   if (!doc) return { ...DEFAULT_SETTINGS }
   const { _id, _rev, ...data } = doc as AnyDoc
   return { ...DEFAULT_SETTINGS, ...data }
 }
 
-export function saveSettings(patch: Partial<GodotSettings>): GodotSettings {
-  const next = { ...getSettings(), ...patch }
-  putDoc('godot/settings', next)
+export async function saveSettings(patch: Partial<GodotSettings>): Promise<GodotSettings> {
+  const next = { ...(await getSettings()), ...patch }
+  await putDoc('godot/settings', next)
   return next
 }
 
@@ -56,7 +56,7 @@ export const notify = (body: string) => window.ztools.showNotification(body)
 export const hideMainWindow = () => window.ztools.hideMainWindow()
 
 /** 选择目录,返回绝对路径;取消返回 undefined */
-export function pickDirectory(title: string, defaultPath?: string): string | undefined {
+export async function pickDirectory(title: string, defaultPath?: string): Promise<string | undefined> {
   const result = window.ztools.showOpenDialog({
     title,
     defaultPath,
@@ -66,7 +66,7 @@ export function pickDirectory(title: string, defaultPath?: string): string | und
 }
 
 /** 选择单个文件,返回绝对路径;取消返回 undefined */
-export function pickFile(title: string, extensions: string[], defaultPath?: string): string | undefined {
+export async function pickFile(title: string, extensions: string[], defaultPath?: string): Promise<string | undefined> {
   const result = window.ztools.showOpenDialog({
     title,
     defaultPath,

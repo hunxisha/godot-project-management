@@ -133,7 +133,7 @@ const section = (t) => console.log(`\n=== ${t} ===`)
 const { useBackups } = await import(pathToFileURL(BUNDLE).href)
 
 const bk = useBackups()
-bk.refresh()
+await bk.refresh()
 
 // ---------- 1 ----------
 section('1. 加载与统计')
@@ -261,25 +261,25 @@ bk.exitBatch()
 
 // ---------- 10 ----------
 section('10. 备注 / 校验 / 删除')
-ok(bk.setLabel('b2', '备份快照 01') === true, 'setLabel 返回成功')
+ok(await bk.setLabel('b2', '备份快照 01') === true, 'setLabel 返回成功')
 ok(bk.records.value.find((r) => r._id === 'b2').label === '备份快照 01', '本地记录已更新备注')
-ok(bk.setLabel('b2', '') === true, '清除备注成功')
+ok(await bk.setLabel('b2', '') === true, '清除备注成功')
 ok(bk.records.value.find((r) => r._id === 'b2').label === undefined, '备注已移除')
-ok(bk.setLabel('nope', 'x') === false, '不存在的记录返回 false 并通知')
+ok(await bk.setLabel('nope', 'x') === false, '不存在的记录返回 false 并通知')
 ok(notifications.some((n) => /备注保存失败|不存在/.test(n)), '失败时弹出通知')
 
-const vr = bk.verify('b1')
+const vr = await bk.verify('b1')
 ok(vr.valid === true && bk.records.value.find((r) => r._id === 'b1').verified === true, '校验有效并写回本地')
-const vr2 = bk.verify('b7')
+const vr2 = await bk.verify('b7')
 ok(vr2.valid === false && bk.records.value.find((r) => r._id === 'b7').verified === false, '缺失备份校验为无效')
-const vm = bk.verifyMany(['b1', 'b5', 'b7'])
+const vm = await bk.verifyMany(['b1', 'b5', 'b7'])
 ok(vm.valid === 2 && vm.invalid === 1, `批量校验 2 有效 / 1 无效(实际 ${vm.valid}/${vm.invalid})`)
 
-const removed = bk.removeMany(['b1', 'b3'])
+const removed = await bk.removeMany(['b1', 'b3'])
 ok(removed === 2, `批量删除 2 条(实际 ${removed})`)
 ok(bk.records.value.length === 5, `刷新后剩 5 条(实际 ${bk.records.value.length})`)
 ok(bk.stats.value.count === 5, '统计同步刷新')
-ok(bk.removeOne('b5') === true, '单条删除成功')
+ok(await bk.removeOne('b5') === true, '单条删除成功')
 ok(bk.records.value.length === 4, '单条删除后剩 4 条')
 
 // ---------- 11 ----------
@@ -293,7 +293,7 @@ ok(bk.isCollapsed('godot/project/aaa') === false, '再次 toggle 展开')
 // ---------- 12 ----------
 section('12. 全空数据不崩')
 RECORDS = []
-bk.refresh()
+await bk.refresh()
 ok(bk.records.value.length === 0 && bk.groups.value.length === 0, '空数据下 groups 为空')
 ok(bk.timeline.value.length === 0, '空数据下 timeline 为空')
 ok(bk.uncovered.value.length === 3, '无任何备份时 3 个项目都算未备份')
@@ -308,7 +308,7 @@ RECORDS = [
   { _id: 'p3', projectId: 'godot/project/bbb', projectName: 'Beta', mode: 'zip', destPath: 'E:\\Backups\\p3.zip', size: 300, fileCount: 3, createdAt: now - 3000, missing: true },
   { _id: 'p4', projectId: 'godot/project/bbb', projectName: 'Beta', mode: 'zip', destPath: 'E:\\Backups\\p4.zip', size: 400, fileCount: 4, createdAt: now - 4000, verified: true, missing: false }
 ]
-bk.refresh()
+await bk.refresh()
 const unverified = bk.records.value.filter((r) => r.verified === undefined).length
 ok(unverified === 3, `巡检前 3 条未校验(实际 ${unverified})`)
 await bk.patrol()

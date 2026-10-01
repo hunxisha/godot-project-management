@@ -144,12 +144,12 @@ async function main() {
     c.cName.value = '  '
     ok(c.cPreview.value === 'E:\\Work', '项目名只有空白时退回父目录')
 
-    // chooseParent:选中目录则更新,取消则保持原值
+    // chooseParent:选中目录则更新,取消则保持原值(异步化后需 await,阶段 A)
     pickedDir = ['D:\\Games']
-    c.chooseParent()
+    await c.chooseParent()
     ok(c.cParent.value === 'D:\\Games', '选中目录后写入父目录', c.cParent.value)
     pickedDir = undefined
-    c.chooseParent()
+    await c.chooseParent()
     ok(c.cParent.value === 'D:\\Games', '取消选择时保持原值(不被清空)', c.cParent.value)
     await sleep()
   }
@@ -172,7 +172,7 @@ async function main() {
     c.openCreate()
     c.cName.value = '  NewGame  '
     c.cParent.value = '  E:\\Work  '
-    c.submitCreate()
+    await c.submitCreate()
     ok(createCalls.length === 1, '发起一次创建')
     ok(createCalls[0].name === 'NewGame', '名称已 trim', createCalls[0].name)
     ok(createCalls[0].parentDir === 'E:\\Work', '父目录已 trim')
@@ -197,7 +197,7 @@ async function main() {
     ok(createCalls.length === 0, '名称为空时不提交', String(createCalls.length))
     c2.cName.value = 'X'
     c2.cParent.value = ''
-    c2.submitCreate()
+    await c2.submitCreate()
     ok(createCalls.length === 0, '父目录为空时不提交')
 
     // Git 开关:勾选后透传,并在结果里区分三种 git 落点(成功/不可用/提交失败)
@@ -211,7 +211,7 @@ async function main() {
     cg1.cName.value = 'GitProj'
     cg1.cParent.value = 'E:\\Work'
     cg1.cGit.value = true
-    cg1.submitCreate()
+    await cg1.submitCreate()
     ok(createCalls[createCalls.length - 1].gitInit === true, '勾选后 gitInit 透传', JSON.stringify(createCalls[createCalls.length - 1]))
     ok(/已初始化 Git/.test(notifications[notifications.length - 1] || ''), '初始化成功时提示带 Git', String(notifications[notifications.length - 1]))
 
@@ -225,7 +225,7 @@ async function main() {
     cg2.cName.value = 'NoGit'
     cg2.cParent.value = 'E:\\Work'
     cg2.cGit.value = true
-    cg2.submitCreate()
+    await cg2.submitCreate()
     ok(/未找到 git 命令/.test(notifications[notifications.length - 1] || ''), 'git 不可用时说明原因(项目仍创建成功)', String(notifications[notifications.length - 1]))
 
     reset()
@@ -238,7 +238,7 @@ async function main() {
     cg3.cName.value = 'HalfGit'
     cg3.cParent.value = 'E:\\Work'
     cg3.cGit.value = true
-    cg3.submitCreate()
+    await cg3.submitCreate()
     ok(/首次提交失败/.test(notifications[notifications.length - 1] || ''), '提交失败单独提示(常见于未配 git 身份)', String(notifications[notifications.length - 1]))
     cg3.openCreate()
     ok(cg3.cGit.value === false, '重新打开对话框时 Git 开关复位')
@@ -253,7 +253,7 @@ async function main() {
     c3.openCreate()
     c3.cName.value = 'X'
     c3.cParent.value = 'E:\\Work'
-    c3.submitCreate()
+    await c3.submitCreate()
     ok(notifications[0] === '目录已存在', '失败时提示服务端原因', String(notifications[0]))
     ok(c3.showCreate.value === true, '失败时对话框保持打开(便于改)')
     await sleep()
@@ -322,7 +322,7 @@ async function main() {
     ok(notifications.length === 0, '也不提示')
 
     d.askDelete(PROJ('a', 'Alpha'))
-    d.confirmDelete()
+    await d.confirmDelete()
     ok(removeCalls[0].id === 'godot/project/a', '删除正确的项目', removeCalls[0].id)
     ok(d.showDelete.value === false, '成功后关闭确认框')
     ok(projects.value.length === 1 && projects.value[0].name === 'Beta', '从本地列表摘掉')
@@ -338,7 +338,7 @@ async function main() {
       dropLocal: (id) => { projects2.value = projects2.value.filter((p) => p._id !== id) }
     })
     d2.askDelete(PROJ('a', 'Alpha'))
-    d2.confirmDelete()
+    await d2.confirmDelete()
     ok(notifications[0] === '文件被占用', '失败时提示服务端原因', String(notifications[0]))
     ok(projects2.value.length === 1, '失败时列表不变(不能假装删掉了)')
     ok(d2.showDelete.value === true, '失败时确认框保持打开')
@@ -352,7 +352,7 @@ async function main() {
       dropLocal: (id) => { projects3.value = projects3.value.filter((p) => p._id !== id) }
     })
     d3.askDelete(PROJ('a', 'Alpha'))
-    d3.confirmDelete()
+    await d3.confirmDelete()
     ok(/已删除项目及文件/.test(notifications[0] || ''), '连文件删时的提示文案', String(notifications[0]))
   }
 

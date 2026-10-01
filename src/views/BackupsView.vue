@@ -84,10 +84,10 @@ function openRename(record: BackupRecord) {
   nextTick(() => renameInput.value?.focus())
 }
 
-function saveRename() {
+async function saveRename() {
   const t = renameTarget.value
   if (!t) return
-  if (setLabel(t._id, renameValue.value)) renameTarget.value = null
+  if (await setLabel(t._id, renameValue.value)) renameTarget.value = null
 }
 
 // ---------- 校验 ----------

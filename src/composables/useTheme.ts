@@ -95,11 +95,15 @@ function apply() {
 export function useTheme() {
   if (!initialized) {
     initialized = true
-    try {
-      const s = getSettings()
-      if (s.theme && THEMES.some((t) => t.id === s.theme)) theme.value = s.theme
-      if (s.themeMode) mode.value = s.themeMode
-    } catch (e) { /* 读设置失败时用默认值 */ }
+    // 设置读取是异步的(阶段 A,见 docs/tauri-migration-plan.md):先用默认外观立即可用,
+    // 读到持久化值后再二次 apply(普通值/Promise 均等价,两端宿主共用此实现)
+    getSettings()
+      .then((s) => {
+        if (s.theme && THEMES.some((t) => t.id === s.theme)) theme.value = s.theme
+        if (s.themeMode) mode.value = s.themeMode
+        apply()
+      })
+      .catch(() => { /* 读设置失败时用默认值 */ })
 
     // 系统在运行中切换深浅时,auto 模式需要跟着变(setExpendHeight 之类的宿主事件没有回调)
     try {
@@ -117,17 +121,13 @@ export function useTheme() {
   function setTheme(id: ThemeId) {
     theme.value = id
     apply()
-    try {
-      saveSettings({ theme: id })
-    } catch (e) { /* 保存失败不影响本次生效 */ }
+    saveSettings({ theme: id }).catch(() => { /* 保存失败不影响本次生效 */ })
   }
 
   function setMode(next: ThemeMode) {
     mode.value = next
     apply()
-    try {
-      saveSettings({ themeMode: next })
-    } catch (e) { /* 同上 */ }
+    saveSettings({ themeMode: next }).catch(() => { /* 同上 */ })
   }
 
   /** 快捷按钮:在 跟随宿主 → 浅色 → 深色 之间循环 */

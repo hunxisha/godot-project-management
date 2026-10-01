@@ -160,8 +160,8 @@ export function useMarketBrowse(opts: UseMarketBrowseOptions) {
   }
 
   /** 只刷新本地收藏列表(收藏/取消收藏后调用) */
-  function reloadFavorites() {
-    favorites.value = window.services.listFavorites()
+  async function reloadFavorites() {
+    favorites.value = await window.services.listFavorites()
     opts.hydrate(favorites.value)
   }
 

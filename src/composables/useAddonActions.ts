@@ -34,7 +34,7 @@ export function useAddonActions(opts: UseAddonActionsOptions) {
 
   // ---------- 批量启用 / 禁用 ----------
 
-  function batchToggle(enabled: boolean) {
+  async function batchToggle(enabled: boolean) {
     const dirs = selAddons.value
       .filter((a) => a.hasCfg && a.enabled !== enabled)
       .map((a) => a.dirName)
@@ -44,7 +44,7 @@ export function useAddonActions(opts: UseAddonActionsOptions) {
     }
     let n = 0
     for (const d of dirs) {
-      const r = window.services.setAddonEnabled({ projectId: projectId(), dirName: d, enabled })
+      const r = await window.services.setAddonEnabled({ projectId: projectId(), dirName: d, enabled })
       if (r.ok) n++
     }
     opts.reload()
@@ -53,7 +53,7 @@ export function useAddonActions(opts: UseAddonActionsOptions) {
 
   // ---------- 批量卸载(二次确认) ----------
 
-  function batchUninstall() {
+  async function batchUninstall() {
     if (!confirmingBatch.value) {
       armBatchConfirm()
       return
@@ -63,7 +63,7 @@ export function useAddonActions(opts: UseAddonActionsOptions) {
     let n = 0
     const failed: string[] = []
     for (const d of dirs) {
-      const r = window.services.uninstallAddon({
+      const r = await window.services.uninstallAddon({
         projectId: projectId(),
         dirName: d,
         // 素材条目凭 assetId 走安装清单删除;插件条目 assetId 缺省不影响原逻辑
@@ -81,8 +81,8 @@ export function useAddonActions(opts: UseAddonActionsOptions) {
 
   // ---------- 单个启用 / 卸载(卸载同样二次确认) ----------
 
-  function toggleEnabled(a: AddonInfo) {
-    const r = window.services.setAddonEnabled({
+  async function toggleEnabled(a: AddonInfo) {
+    const r = await window.services.setAddonEnabled({
       projectId: projectId(),
       dirName: a.dirName,
       enabled: !a.enabled
@@ -94,14 +94,14 @@ export function useAddonActions(opts: UseAddonActionsOptions) {
   const confirmingDir = ref<string | null>(null)
   let dirTimer: ReturnType<typeof setTimeout> | null = null
 
-  function uninstall(a: AddonInfo) {
+  async function uninstall(a: AddonInfo) {
     if (confirmingDir.value === a.dirName) {
       if (dirTimer) {
         clearTimeout(dirTimer)
         dirTimer = null
       }
       confirmingDir.value = null
-      const r = window.services.uninstallAddon({ projectId: projectId(), dirName: a.dirName, assetId: a.assetId })
+      const r = await window.services.uninstallAddon({ projectId: projectId(), dirName: a.dirName, assetId: a.assetId })
       if (r.ok) opts.reload()
       else opts.notify(r.error || '卸载失败')
       return
@@ -128,7 +128,7 @@ export function useAddonActions(opts: UseAddonActionsOptions) {
     showCopy.value = true
   }
 
-  function confirmCopy() {
+  async function confirmCopy() {
     if (!copyTargetId.value || copying.value) return
     copying.value = true
     // 选中项分区:插件按目录复制,素材按安装清单逐文件复制
@@ -141,7 +141,7 @@ export function useAddonActions(opts: UseAddonActionsOptions) {
     let adopted = 0
     let targetName = ''
     if (addonDirs.length) {
-      const r = window.services.copyAddonsToProject({
+      const r = await window.services.copyAddonsToProject({
         sourceProjectId: projectId(),
         dirNames: addonDirs,
         targetProjectId: copyTargetId.value
@@ -157,7 +157,7 @@ export function useAddonActions(opts: UseAddonActionsOptions) {
       targetName = r.targetName || ''
     }
     for (const assetId of assetIds) {
-      const r = window.services.copyAssetToProject({
+      const r = await window.services.copyAssetToProject({
         sourceProjectId: projectId(),
         assetId,
         targetProjectId: copyTargetId.value

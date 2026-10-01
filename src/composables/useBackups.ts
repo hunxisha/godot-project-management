@@ -60,10 +60,10 @@ export function useBackups() {
     return map
   })
 
-  function refresh() {
-    records.value = window.services.listBackups({ withStatus: true })
-    stats.value = window.services.backupStats()
-    projects.value = listDocs<GodotProject>('godot/project/') as ProjectRow[]
+  async function refresh() {
+    records.value = await window.services.listBackups({ withStatus: true })
+    stats.value = await window.services.backupStats()
+    projects.value = (await listDocs<GodotProject>('godot/project/')) as ProjectRow[]
     const ids = new Set(records.value.map((r) => r._id))
     selected.value = selected.value.filter((id) => ids.has(id))
     if (!records.value.length) exitBatch()
@@ -219,8 +219,8 @@ export function useBackups() {
   // ---------- 动作 ----------
 
   /** 保存备注名(label 传空串清除) */
-  function setLabel(id: string, label: string): boolean {
-    const r = window.services.updateBackup(id, { label })
+  async function setLabel(id: string, label: string): Promise<boolean> {
+    const r = await window.services.updateBackup(id, { label })
     if (!r.ok) {
       notify(r.error || '备注保存失败')
       return false
@@ -236,10 +236,10 @@ export function useBackups() {
   }
 
   /** 校验备份内容是否可用 */
-  function verify(id: string) {
+  async function verify(id: string) {
     busy.value = id
     try {
-      const r = window.services.verifyBackup(id)
+      const r = await window.services.verifyBackup(id)
       const rec = records.value.find((x) => x._id === id)
       if (rec) {
         rec.verified = r.valid
@@ -254,11 +254,11 @@ export function useBackups() {
   }
 
   /** 批量校验(只更新本地结果) */
-  function verifyMany(ids: string[]) {
+  async function verifyMany(ids: string[]) {
     let valid = 0
     let invalid = 0
     for (const id of ids) {
-      const r = window.services.verifyBackup(id)
+      const r = await window.services.verifyBackup(id)
       const rec = records.value.find((x) => x._id === id)
       if (rec) {
         rec.verified = r.valid
@@ -273,22 +273,22 @@ export function useBackups() {
   }
 
   /** 删除单条(keepRecordOnly=true 仅移除记录) */
-  function removeOne(id: string, keepRecordOnly = false): boolean {
-    const r = window.services.deleteBackup(id, { keepRecordOnly })
+  async function removeOne(id: string, keepRecordOnly = false): Promise<boolean> {
+    const r = await window.services.deleteBackup(id, { keepRecordOnly })
     if (!r.ok) {
       notify(r.error || '删除失败')
       return false
     }
-    refresh()
+    await refresh()
     notify(keepRecordOnly ? '已移除记录(文件保留)' : '已删除备份(移入回收站)')
     return true
   }
 
   /** 批量删除,返回成功移除的份数 */
-  function removeMany(ids: string[], keepRecordOnly = false): number {
+  async function removeMany(ids: string[], keepRecordOnly = false): Promise<number> {
     if (!ids.length) return 0
-    const r = window.services.deleteBackups(ids, { keepRecordOnly })
-    refresh()
+    const r = await window.services.deleteBackups(ids, { keepRecordOnly })
+    await refresh()
     if (r.failed && r.failed.length) {
       notify(`${r.removed} 份已移除,${r.failed.length} 份失败:${r.failed[0].error}`)
     } else {
@@ -331,7 +331,7 @@ export function useBackups() {
       for (let i = 0; i < candidates.length; i++) {
         const target = candidates[i]
         try {
-          const res = window.services.verifyBackup(target._id)
+          const res = await window.services.verifyBackup(target._id)
           const rec = records.value.find((x) => x._id === target._id)
           if (rec) {
             rec.verified = res.valid
@@ -345,7 +345,7 @@ export function useBackups() {
         }
       }
       // 巡检可能改变缺失数量,刷新统计头
-      stats.value = window.services.backupStats()
+      stats.value = await window.services.backupStats()
     } finally {
       patrolling.value = false
     }
@@ -361,7 +361,7 @@ export function useBackups() {
     projectIds: string[],
     onProgress?: (done: number, total: number, name: string) => void
   ) {
-    const s = getSettings()
+    const s = await getSettings()
     const destDir = s.backupRoot
     if (!destDir) return { ok: false, error: '请先在「设置 → 备份与恢复」中配置默认备份目录', count: 0 }
     if (!projectIds.length) return { ok: true, count: 0 }
@@ -381,7 +381,7 @@ export function useBackups() {
       } catch (e) { /* 单个项目失败不影响后续 */ }
     }
     onProgress?.(projectIds.length, projectIds.length, '')
-    refresh()
+    await refresh()
     return { ok: true, count }
   }
 

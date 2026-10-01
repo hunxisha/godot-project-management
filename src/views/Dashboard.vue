@@ -4,15 +4,16 @@ import { getSettings, listDocs, pickDirectory, saveSettings, showInFolder } from
 import { openProjectAction } from '../composables/useProjectActions'
 import { gradOf } from '../utils/avatar'
 import Icon from '../components/Icon.vue'
-import type { GodotProject, GodotVersion } from '../types/godot'
+import { DEFAULT_SETTINGS, type GodotProject, type GodotSettings, type GodotVersion } from '../types/godot'
 
 const emit = defineEmits<{ (e: 'navigate', tab: string): void, (e: 'create'): void }>()
 
 const projects = ref<(GodotProject & { _id: string })[]>([])
 const versions = ref<(GodotVersion & { _id: string })[]>([])
-const settings = getSettings()
+// 设置异步读取(阶段 A):先给默认值保证首屏可用,onMounted 后补齐
+const settings = ref<GodotSettings>({ ...DEFAULT_SETTINGS })
 
-const defaultVersion = computed(() => versions.value.find((v) => v._id === settings.defaultVersionId))
+const defaultVersion = computed(() => versions.value.find((v) => v._id === settings.value.defaultVersionId))
 
 const recentProjects = computed(() =>
   [...projects.value]
@@ -33,16 +34,16 @@ const hour = new Date().getHours()
 const greeting =
   hour < 5 ? '夜深了' : hour < 12 ? '早上好' : hour < 14 ? '中午好' : hour < 19 ? '下午好' : '晚上好'
 
-onMounted(() => {
-  projects.value = listDocs<GodotProject>('godot/project/')
-  versions.value = listDocs<GodotVersion>('godot/version/')
+onMounted(async () => {
+  projects.value = await listDocs<GodotProject>('godot/project/')
+  versions.value = await listDocs<GodotVersion>('godot/version/')
+  settings.value = await getSettings()
 })
 
-function chooseRoot() {
-  const dir = pickDirectory('选择 Godot 引擎安装目录')
+async function chooseRoot() {
+  const dir = await pickDirectory('选择 Godot 引擎安装目录')
   if (dir) {
-    saveSettings({ versionsRoot: dir })
-    settings.versionsRoot = dir
+    settings.value = await saveSettings({ versionsRoot: dir })
   }
 }
 </script>

@@ -117,7 +117,7 @@ async function main() {
       addons: [A('d1', { enabled: true }), A('d2', { enabled: false }), A('d3', { enabled: false })]
     })
     selection.toggleAll()
-    actions.batchToggle(true)
+    await actions.batchToggle(true)
     ok(nCalls('setEnabled') === 2, '只对「未启用」的 2 项发请求', String(nCalls('setEnabled')))
     ok(calls.filter((c) => c[0] === 'setEnabled').every((c) => c[1].enabled === true), '参数 enabled=true')
     ok(calls[0][1].projectId === 'godot/project/p1', '带上当前项目 id')
@@ -128,7 +128,7 @@ async function main() {
     reset()
     const s2 = make({ addons: [A('d1', { enabled: true })] })
     s2.selection.toggleAll()
-    s2.actions.batchToggle(true)
+    await s2.actions.batchToggle(true)
     ok(nCalls('setEnabled') === 0, '都已启用时不发请求')
     ok(notifications[0] === '所选插件均已启用', '给出「均已是目标状态」的提示', String(notifications[0]))
 
@@ -136,7 +136,7 @@ async function main() {
     reset()
     const s3 = make({ addons: [A('d1', { hasCfg: false, enabled: false }), A('d2', { enabled: false })] })
     s3.selection.toggleAll()
-    s3.actions.batchToggle(true)
+    await s3.actions.batchToggle(true)
     ok(nCalls('setEnabled') === 1 && calls[0][1].dirName === 'd2', '跳过没有 plugin.cfg 的项', JSON.stringify(calls.map((c) => c[1].dirName)))
   }
 
@@ -146,10 +146,10 @@ async function main() {
     reset()
     const { actions, selection } = make()
     selection.toggleAll()
-    actions.batchUninstall()
+    await actions.batchUninstall()
     ok(nCalls('uninstall') === 0, '第一次点击只进入待确认,不动手')
     ok(selection.confirmingBatch.value === true, '处于待确认态')
-    actions.batchUninstall()
+    await actions.batchUninstall()
     ok(nCalls('uninstall') === 2, '第二次点击才真的卸载', String(nCalls('uninstall')))
     ok(selection.checked.value.length === 0, '卸载后清空选择')
     ok(reloadCount === 1, '卸载后刷新')
@@ -159,9 +159,9 @@ async function main() {
     reset()
     const s = make()
     s.selection.toggleAll()
-    s.actions.batchUninstall()
+    await s.actions.batchUninstall()
     uninstallResult = { ok: false, error: '被占用' }
-    s.actions.batchUninstall()
+    await s.actions.batchUninstall()
     ok(/失败 2 个/.test(notifications[0] || ''), '失败数进提示', String(notifications[0]))
   }
 
@@ -170,32 +170,32 @@ async function main() {
   {
     reset()
     const { actions } = make()
-    actions.toggleEnabled(A('d1', { enabled: true }))
+    await actions.toggleEnabled(A('d1', { enabled: true }))
     ok(calls[0][1].enabled === false, '切换为禁用', String(calls[0][1].enabled))
     ok(reloadCount === 1, '成功后刷新')
-    actions.toggleEnabled(A('d2', { enabled: false }))
+    await actions.toggleEnabled(A('d2', { enabled: false }))
     ok(calls[1][1].enabled === true, '切换为启用')
 
     reset()
     setEnabledResult = { ok: false, error: '无权限' }
-    actions.toggleEnabled(A('d1'))
+    await actions.toggleEnabled(A('d1'))
     ok(notifications[0] === '无权限', '失败时提示服务端原因', String(notifications[0]))
     ok(reloadCount === 0, '失败不刷新')
 
     // 卸载:点两次
     reset()
-    actions.uninstall(A('d1'))
+    await actions.uninstall(A('d1'))
     ok(nCalls('uninstall') === 0, '第一次点击只进入待确认')
     ok(actions.confirmingDir.value === 'd1', '记录待确认的目录', String(actions.confirmingDir.value))
-    actions.uninstall(A('d1'))
+    await actions.uninstall(A('d1'))
     ok(nCalls('uninstall') === 1, '第二次点击才卸载', String(nCalls('uninstall')))
     ok(actions.confirmingDir.value === null, '确认后清掉待确认态')
     ok(reloadCount === 1, '卸载成功后刷新')
 
     // 点别的项会改为待确认那一项
     reset()
-    actions.uninstall(A('d1'))
-    actions.uninstall(A('d2'))
+    await actions.uninstall(A('d1'))
+    await actions.uninstall(A('d2'))
     ok(actions.confirmingDir.value === 'd2', '改点其他项时待确认跟随切换', String(actions.confirmingDir.value))
     ok(nCalls('uninstall') === 0, '此时仍未卸载任何项')
     await sleep(15)
@@ -315,7 +315,7 @@ async function main() {
     ok(actions.copyTargetId.value === 'godot/project/p2', '默认选中第一个非当前项目', String(actions.copyTargetId.value))
     ok(actions.copyTargets.value.length === 1, '复制目标排除当前项目', String(actions.copyTargets.value.length))
 
-    actions.confirmCopy()
+    await actions.confirmCopy()
     ok(nCalls('copy') === 1, '调用复制服务')
     ok(calls[0][1].sourceProjectId === 'godot/project/p1', '带来源项目')
     ok(calls[0][1].targetProjectId === 'godot/project/p2', '带目标项目')
@@ -329,7 +329,7 @@ async function main() {
     const s = make()
     s.selection.toggleCheck('d1')
     s.actions.openCopy()
-    s.actions.confirmCopy()
+    await s.actions.confirmCopy()
     ok(/跳过:d9/.test(notifications[0] || ''), '跳过项进文案', String(notifications[0]))
     ok(/其中 2 个已补回市场来源/.test(notifications[0] || ''), '补回来源数进文案', String(notifications[0]))
 
@@ -339,7 +339,7 @@ async function main() {
     const f = make()
     f.selection.toggleCheck('d1')
     f.actions.openCopy()
-    f.actions.confirmCopy()
+    await f.actions.confirmCopy()
     ok(notifications[0] === '目标不可写', '失败提示原因', String(notifications[0]))
     ok(f.actions.showCopy.value === true, '失败时保持对话框打开')
     ok(f.actions.copying.value === false, '失败后 copying 复位')
@@ -350,7 +350,7 @@ async function main() {
     const s2 = make({ addons: [assetRow] })
     s2.selection.toggleCheck('asset-pack')
     s2.actions.openCopy()
-    s2.actions.confirmCopy()
+    await s2.actions.confirmCopy()
     ok(nCalls('copyAsset') === 1, '素材条目调用 copyAssetToProject')
     ok(calls.find((c) => c[0] === 'copyAsset')[1].assetId === 'pub/pack', '带 assetId')
     ok(calls.find((c) => c[0] === 'copyAsset')[1].targetProjectId === 'godot/project/p2', '带目标项目')

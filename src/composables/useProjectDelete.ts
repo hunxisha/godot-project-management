@@ -10,8 +10,8 @@ export type DeleteFilesPolicy = 'ask' | 'always' | 'never'
 
 export interface UseProjectDeleteOptions {
   projects: Ref<ProjectRow[]>
-  /** 全局设置:删除项目时如何处理文件 */
-  policy?: DeleteFilesPolicy
+  /** 全局设置:删除项目时如何处理文件(设置异步化后允许传 getter,阶段 A) */
+  policy?: DeleteFilesPolicy | (() => DeleteFilesPolicy)
   notify: (msg: string) => void
   /** 删除成功后从本地列表摘掉该项 */
   dropLocal: (id: string) => void
@@ -23,24 +23,27 @@ export function useProjectDelete(opts: UseProjectDeleteOptions) {
   const delFiles = ref(false)
   const deleting = ref(false)
 
+  const policyOf = (): DeleteFilesPolicy =>
+    typeof opts.policy === 'function' ? opts.policy() : (opts.policy ?? 'ask')
+
   /** 弹出确认框;策略为「总是删除」时默认勾选 */
   function askDelete(p: ProjectRow) {
     deleteTarget.value = p
-    delFiles.value = opts.policy === 'always'
+    delFiles.value = policyOf() === 'always'
     showDelete.value = true
   }
 
   /** 实际是否连带删除磁盘文件 */
   function willDeleteFiles(): boolean {
-    return opts.policy !== 'never' && delFiles.value
+    return policyOf() !== 'never' && delFiles.value
   }
 
-  function confirmDelete() {
+  async function confirmDelete() {
     const p = deleteTarget.value
     if (!p || deleting.value) return
     deleting.value = true
     const deleteFiles = willDeleteFiles()
-    const r = window.services.removeProject(p._id, deleteFiles)
+    const r = await window.services.removeProject(p._id, deleteFiles)
     deleting.value = false
     if (!r.ok) {
       opts.notify(r.error || '删除失败')

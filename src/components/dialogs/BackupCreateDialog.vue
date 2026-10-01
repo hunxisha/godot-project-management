@@ -129,13 +129,13 @@ async function runEstimate() {
 
 watch(
   () => props.open,
-  (open) => {
+  async (open) => {
     if (!open) {
       end()
       return
     }
-    // 每次打开都重新读取设置,避免用到组件挂载时的过期快照
-    const settings = getSettings()
+    // 每次打开都重新读取设置,避免用到组件挂载时的过期快照(设置读取为异步,阶段 A)
+    const settings = await getSettings()
     targetId.value = props.projectId || props.projects[0]?._id || ''
     label.value = ''
     mode.value = settings.backupMode === 'copy' ? 'copy' : 'zip'
@@ -165,8 +165,8 @@ watch([targetId, includeCache, excludeGit, excludeBuild], () => {
   estimateTimer = setTimeout(runEstimate, 180)
 })
 
-function chooseDir() {
-  const d = pickDirectory('选择备份保存位置', destDir.value || getSettings().backupRoot)
+async function chooseDir() {
+  const d = await pickDirectory('选择备份保存位置', destDir.value || (await getSettings()).backupRoot)
   if (d) destDir.value = d
 }
 

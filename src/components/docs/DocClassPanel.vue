@@ -88,8 +88,8 @@ function onScroll() {
   })
 }
 
-function load() {
-  detail.value = props.className ? window.services.docsGetClass(props.versionId, props.className) : null
+async function load() {
+  detail.value = props.className ? await window.services.docsGetClass(props.versionId, props.className) : null
   flash.value = ''
   extras.value = null
   // 教程链接:后台按需拉取(缓存在库目录 extras/),失败静默 —— 离线浏览不受影响

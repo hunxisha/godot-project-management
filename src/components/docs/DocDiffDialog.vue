@@ -35,13 +35,13 @@ watch(() => props.open, (open) => {
   run()
 })
 
-function run() {
+async function run() {
   detail.value = {}
   if (!versionA.value || !versionB.value || versionA.value === versionB.value) {
     summary.value = null
     return
   }
-  summary.value = window.services.docsDiffLibraries(versionA.value, versionB.value)
+  summary.value = await window.services.docsDiffLibraries(versionA.value, versionB.value)
 }
 
 function swap() {
@@ -56,14 +56,14 @@ function tagOf(id: string): string {
 }
 
 /** 展开某类的成员级差异(按需读正文对比) */
-function toggleClass(name: string) {
+async function toggleClass(name: string) {
   if (name in detail.value) {
     const next = { ...detail.value }
     delete next[name]
     detail.value = next
     return
   }
-  const r = window.services.docsDiffClass(versionA.value, versionB.value, name)
+  const r = await window.services.docsDiffClass(versionA.value, versionB.value, name)
   detail.value = { ...detail.value, [name]: r.ok && r.diff ? r.diff : null }
 }
 

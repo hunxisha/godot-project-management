@@ -36,11 +36,11 @@ function opts(dryRun: boolean) {
   }
 }
 
-function runPreview() {
+async function runPreview() {
   if (!props.open) return
   loading.value = true
   try {
-    const r = window.services.pruneBackups(opts(true))
+    const r = await window.services.pruneBackups(opts(true))
     preview.value = { targets: r.targets || [], totalSize: r.totalSize || 0 }
   } catch (e) {
     preview.value = { targets: [], totalSize: 0 }
@@ -57,9 +57,9 @@ function schedulePreview() {
 
 watch(
   () => props.open,
-  (open) => {
+  async (open) => {
     if (!open) return
-    const s = getSettings()
+    const s = await getSettings()
     const keep = s.backupKeepPerProject
     const day = s.backupKeepDays
     if (typeof keep === 'number' && keep > 0) {
@@ -90,17 +90,17 @@ const details = computed(() =>
   })
 )
 
-function execute() {
+async function execute() {
   if (!canRun.value) return
   running.value = true
   try {
     if (saveDefault.value) {
-      saveSettings({
+      await saveSettings({
         backupKeepPerProject: mode.value === 'keep' ? Math.max(1, Math.floor(keepN.value) || 1) : undefined,
         backupKeepDays: mode.value === 'days' ? Math.max(1, Math.floor(days.value) || 1) : undefined
       })
     }
-    const r = window.services.pruneBackups(opts(false))
+    const r = await window.services.pruneBackups(opts(false))
     removed.value = r.removed ?? 0
     const failed = r.failed?.length || 0
     notify(failed

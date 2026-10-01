@@ -27,60 +27,58 @@ let initialized = false
 const readyVersions = computed(() => versions.value.filter((v) => statuses.value[v._id]?.status === 'ready'))
 const currentStatus = computed(() => statuses.value[currentVersionId.value] ?? null)
 
-function refreshVersions() {
-  versions.value = (window.ztools.db.allDocs('godot/version/') || []) as unknown as VersionRow[]
+async function refreshVersions() {
+  versions.value = ((await window.ztools.db.allDocs('godot/version/')) || []) as unknown as VersionRow[]
   const next: Record<string, DocLibraryStatus | null> = {}
-  for (const v of versions.value) next[v._id] = window.services.docsLibraryStatus(v._id)
+  for (const v of versions.value) next[v._id] = await window.services.docsLibraryStatus(v._id)
   statuses.value = next
 }
 
-function loadClasses() {
+async function loadClasses() {
   classes.value = []
   if (!currentVersionId.value) return
-  const r = window.services.docsListClasses(currentVersionId.value)
+  const r = await window.services.docsListClasses(currentVersionId.value)
   if (r.ok && r.classes) classes.value = r.classes
 }
 
-function refreshFavorites() {
-  favorites.value = window.services.docsListFavorites()
+async function refreshFavorites() {
+  favorites.value = await window.services.docsListFavorites()
 }
 
-function refreshHistory() {
-  history.value = window.services.docsListHistory()
+async function refreshHistory() {
+  history.value = await window.services.docsListHistory()
 }
 
 /** 首次进入:恢复上次浏览的库(失效则落到第一个已生成库) */
-function init() {
+async function init() {
   if (initialized) {
-    refreshVersions()
-    refreshFavorites()
-    refreshHistory()
-    loadClasses()
+    await Promise.all([refreshVersions(), refreshFavorites(), refreshHistory()])
+    await loadClasses()
     return
   }
   initialized = true
-  refreshVersions()
-  refreshFavorites()
-  refreshHistory()
-  const saved = getSettings().docsVersionId
+  await refreshVersions()
+  await refreshFavorites()
+  await refreshHistory()
+  const saved = (await getSettings()).docsVersionId
   const savedReady = !!saved && statuses.value[saved]?.status === 'ready'
   currentVersionId.value = savedReady && saved ? saved : (readyVersions.value[0]?.id ?? '')
   // 回退/清空后把解析结果写回去,避免每次进入都重复回退
-  if (currentVersionId.value !== saved) saveSettings({ docsVersionId: currentVersionId.value || undefined })
-  loadClasses()
+  if (currentVersionId.value !== saved) saveSettings({ docsVersionId: currentVersionId.value || undefined }).catch(() => {})
+  await loadClasses()
 }
 
-function selectVersion(id: string) {
+async function selectVersion(id: string) {
   if (!statuses.value[id] || statuses.value[id]!.status !== 'ready') return
   currentVersionId.value = id
-  saveSettings({ docsVersionId: id })
-  loadClasses()
+  saveSettings({ docsVersionId: id }).catch(() => {})
+  await loadClasses()
 }
 
 /** 发起生成;成功后状态转为 building(进度由 DocsView 订阅任务快照展示)。
  *  opts.forceTranslation=true 忽略 po 磁盘缓存重新下载官方翻译 */
-function generate(versionId: string, opts?: { forceTranslation?: boolean }): { ok: boolean, error?: string } {
-  const r = window.services.docsGenerate(versionId, opts)
+async function generate(versionId: string, opts?: { forceTranslation?: boolean }): Promise<{ ok: boolean, error?: string }> {
+  const r = await window.services.docsGenerate(versionId, opts)
   if (r.ok) {
     statuses.value = { ...statuses.value, [versionId]: { status: 'building', versionId, tag: versions.value.find((v) => v._id === versionId)?.tag ?? '' } }
   }
@@ -88,53 +86,51 @@ function generate(versionId: string, opts?: { forceTranslation?: boolean }): { o
 }
 
 /** 从外部 extension_api.json 导入建库(无引擎可用时的兜底) */
-function importLibrary(jsonPath: string): { ok: boolean, error?: string, versionId?: string } {
+async function importLibrary(jsonPath: string): Promise<{ ok: boolean, error?: string, versionId?: string }> {
   return window.services.docsImport({ jsonPath })
 }
 
 /** 扫描项目脚本(带 class_name 的 .gd)生成项目文档库 */
-function scanProject(projectId: string): { ok: boolean, error?: string, versionId?: string } {
+async function scanProject(projectId: string): Promise<{ ok: boolean, error?: string, versionId?: string }> {
   return window.services.docsScanProject(projectId)
 }
 
-function removeLibrary(versionId: string) {
-  window.services.docsDeleteLibrary(versionId)
-  refreshVersions()
+async function removeLibrary(versionId: string) {
+  await window.services.docsDeleteLibrary(versionId)
+  await refreshVersions()
   if (currentVersionId.value === versionId) {
     currentVersionId.value = readyVersions.value[0]?.id ?? ''
-    saveSettings({ docsVersionId: currentVersionId.value || undefined })
-    loadClasses()
+    saveSettings({ docsVersionId: currentVersionId.value || undefined }).catch(() => {})
+    await loadClasses()
   }
 }
 
 /** 任务完成/失败后调用:以 preload 实际状态为准刷新,并把当前库对齐到仍可用的库 */
-function afterTaskSettled() {
-  refreshVersions()
-  refreshFavorites()
-  refreshHistory()
+async function afterTaskSettled() {
+  await Promise.all([refreshVersions(), refreshFavorites(), refreshHistory()])
   const cur = currentVersionId.value
   if (cur && statuses.value[cur]?.status === 'ready') {
-    loadClasses()
+    await loadClasses()
     return
   }
   const next = readyVersions.value[0]?.id ?? ''
   currentVersionId.value = next
-  saveSettings({ docsVersionId: next || undefined })
-  loadClasses()
+  saveSettings({ docsVersionId: next || undefined }).catch(() => {})
+  await loadClasses()
 }
 
-function toggleFavorite(className: string) {
+async function toggleFavorite(className: string) {
   const fav = !favorites.value.includes(className)
-  window.services.docsToggleFavorite(className, fav)
-  favorites.value = window.services.docsListFavorites()
+  await window.services.docsToggleFavorite(className, fav)
+  favorites.value = await window.services.docsListFavorites()
 }
 
-function pushHistory(className: string) {
-  window.services.docsPushHistory(className)
-  history.value = window.services.docsListHistory()
+async function pushHistory(className: string) {
+  await window.services.docsPushHistory(className)
+  history.value = await window.services.docsListHistory()
 }
 
-function search(query: string, limit = 30): DocSearchHit[] {
+async function search(query: string, limit = 30): Promise<DocSearchHit[]> {
   if (!currentVersionId.value) return []
   return window.services.docsSearch(currentVersionId.value, query, limit)
 }

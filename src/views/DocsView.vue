@@ -170,8 +170,8 @@ function cancelTask(id: string) {
 }
 
 /** 发起生成:preload 拒绝入队的原因(版本缺失/在途)必须浮出来,不能静默 */
-function onGenerate(id: string, forceTranslation = false) {
-  const r = generate(id, { forceTranslation })
+async function onGenerate(id: string, forceTranslation = false) {
+  const r = await generate(id, { forceTranslation })
   if (!r.ok) notify(r.error || '无法发起生成')
 }
 
@@ -184,10 +184,10 @@ function onRegenerate(id: string, forceTranslation: boolean) {
  * 导入外部 extension_api.json 建库(无引擎可用的兜底):
  * 在任意机器跑 `godot --headless --dump-extension-api-with-docs` 得到该文件即可。
  */
-function onImport() {
-  const file = pickFile('选择 extension_api.json', ['json'])
+async function onImport() {
+  const file = await pickFile('选择 extension_api.json', ['json'])
   if (!file) return
-  const r = importLibrary(file)
+  const r = await importLibrary(file)
   if (!r.ok) {
     notify(r.error || '导入失败')
     return
@@ -199,16 +199,16 @@ function onImport() {
 const projects = ref<(GodotProject & { _id: string })[]>([])
 const scanProjectId = ref('')
 
-function refreshProjects() {
-  projects.value = (window.ztools.db.allDocs('godot/project/') || []) as unknown as (GodotProject & { _id: string })[]
+async function refreshProjects() {
+  projects.value = ((await window.ztools.db.allDocs('godot/project/')) || []) as unknown as (GodotProject & { _id: string })[]
   if (!scanProjectId.value || !projects.value.some((p) => p._id === scanProjectId.value)) {
     scanProjectId.value = projects.value[0]?._id ?? ''
   }
 }
 
-function onScanProject() {
+async function onScanProject() {
   if (!scanProjectId.value) return
-  const r = scanProject(scanProjectId.value)
+  const r = await scanProject(scanProjectId.value)
   if (!r.ok) {
     notify(r.error || '扫描失败')
     return

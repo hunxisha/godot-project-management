@@ -42,7 +42,7 @@ async function load() {
   templateHint.value = ''
   loadHistory()
   try {
-    const r = window.services.listExportPresets(props.project._id)
+    const r = await window.services.listExportPresets(props.project._id)
     if (!r.ok) {
       loadError.value = r.error || '读取导出预设失败'
     } else {
@@ -54,9 +54,9 @@ async function load() {
   }
 }
 
-function loadHistory() {
+async function loadHistory() {
   if (!props.project) return
-  history.value = window.services.listExportHistory(props.project._id).slice(0, 8)
+  history.value = (await window.services.listExportHistory(props.project._id)).slice(0, 8)
 }
 
 watch(
@@ -76,10 +76,10 @@ watch(
   }
 )
 
-function start() {
+async function start() {
   if (!props.project || !selected.value || task.value) return
   missingTemplates.value = false
-  const r = ex.run(props.project._id, selected.value)
+  const r = await ex.run(props.project._id, selected.value)
   if (r.ok) return
   if (r.missingTemplates) {
     missingTemplates.value = true
@@ -103,9 +103,9 @@ function exportAll() {
 const exportAllDisabled = computed(() => !runnablePresets.value.length || !!task.value || loading.value || !!loadError.value)
 
 /** 缺模板时的一键获取:下载任务在全局任务栏可见,完成后重新点击导出即可 */
-function fetchTemplates() {
+async function fetchTemplates() {
   if (!props.project?.versionId) return
-  const r = window.services.installExportTemplates(props.project.versionId)
+  const r = await window.services.installExportTemplates(props.project.versionId)
   if (r.ok) {
     templateHint.value = '模板开始下载(进度见任务栏),完成后即可导出'
     missingTemplates.value = false
@@ -115,9 +115,9 @@ function fetchTemplates() {
 }
 
 /** 删除一条历史记录(产物文件不受影响) */
-function removeHistory(id: string) {
-  window.services.removeExportHistoryEntry(id)
-  loadHistory()
+async function removeHistory(id: string) {
+  await window.services.removeExportHistoryEntry(id)
+  await loadHistory()
 }
 </script>
 

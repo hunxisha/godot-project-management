@@ -382,8 +382,29 @@ export interface Services {
   docsCleanCache(versionIds?: string[]): { ok: boolean, removed?: number }
 }
 
+/**
+ * 渲染层看到的 services 视图:所有数据方法统一为 Promise 返回(Tauri 2 的 IPC 只有异步,
+ * 阶段 A 见 docs/tauri-migration-plan.md §7)。Electron 门面返回普通值也满足本视图
+ * —— `await` 对普通值与 Promise 等价,两端共用同一份渲染层。
+ * 订阅(watch*)是「注册回调→返回取消函数」的事件通道,无需异步;currentPlatform
+ * 是注入的平台常量。二者保持同步签名。
+ * 注意:门面验证仍以 `Services` 为准(本类型只是视图变换),不影响 preload 的 @type 校验。
+ */
+type AsyncServices = {
+  [K in keyof Services]: K extends
+    | 'currentPlatform'
+    | 'watchTasks'
+    | 'watchExportTasks'
+    | 'watchBackupTasks'
+    | 'watchDocsTasks'
+    ? Services[K]
+    : Services[K] extends (...args: infer A) => infer R
+      ? (...args: A) => Promise<Awaited<R>>
+      : Services[K]
+}
+
 declare global {
   interface Window {
-    services: Services
+    services: AsyncServices
   }
 }

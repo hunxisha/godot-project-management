@@ -30,26 +30,26 @@ export function useExportTemplates(opts: UseExportTemplatesOptions) {
     )
   }
 
-  function refreshTplStatuses() {
+  async function refreshTplStatuses() {
     const next: Record<string, TemplateStatus> = {}
-    for (const v of opts.installed.value) next[v._id] = window.services.exportTemplateStatus(v._id)
+    for (const v of opts.installed.value) next[v._id] = await window.services.exportTemplateStatus(v._id)
     tplStatuses.value = next
   }
 
-  function installTemplates(v: GodotVersion & { _id: string }) {
-    const r = window.services.installExportTemplates(v._id)
+  async function installTemplates(v: GodotVersion & { _id: string }) {
+    const r = await window.services.installExportTemplates(v._id)
     if (!r.ok) opts.notify(r.error || '下载失败')
   }
 
-  function askUninstallTemplates(v: GodotVersion & { _id: string }) {
+  async function askUninstallTemplates(v: GodotVersion & { _id: string }) {
     if (confirmingTplId.value === v._id) {
       confirmingTplId.value = null
       if (tplTimer) {
         clearTimeout(tplTimer)
         tplTimer = null
       }
-      const r = window.services.uninstallExportTemplates(v._id)
-      if (r.ok) refreshTplStatuses()
+      const r = await window.services.uninstallExportTemplates(v._id)
+      if (r.ok) await refreshTplStatuses()
       else opts.notify(r.error || '卸载失败')
       return
     }

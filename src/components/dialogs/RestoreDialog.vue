@@ -100,8 +100,8 @@ watch(
   }
 )
 
-function chooseDestDir() {
-  const d = pickDirectory('选择恢复位置', destDir.value || undefined)
+async function chooseDestDir() {
+  const d = await pickDirectory('选择恢复位置', destDir.value || undefined)
   if (d) destDir.value = d
 }
 
@@ -138,14 +138,14 @@ async function start() {
   }
 }
 
-function openTarget() {
+async function openTarget() {
   if (mode.value === 'overwrite') {
     if (props.project?.path) openPath(props.project.path)
     return
   }
   const id = result.value?.newProjectId
   if (!id) return
-  const p = getDoc<GodotProject>(id)
+  const p = await getDoc<GodotProject>(id)
   if (p?.path) openPath(p.path)
   else notify('未找到项目路径')
 }

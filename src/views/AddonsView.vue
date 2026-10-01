@@ -129,13 +129,13 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-function reload() {
+async function reload() {
   if (!targetId.value) {
     addons.value = []
     clearSelection()
     return
   }
-  addons.value = window.services.listAddons(targetId.value)
+  addons.value = await window.services.listAddons(targetId.value)
   // 清掉已不存在的选择(卸载/换项目后不留幽灵选中项)
   prune()
 }

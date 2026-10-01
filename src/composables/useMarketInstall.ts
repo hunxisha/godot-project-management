@@ -63,24 +63,23 @@ export function useMarketInstall(opts: UseMarketInstallOptions) {
     }
   }
 
+  // slug 记忆缓存:设置读取异步化后(阶段 A),确认层预填仍需同步接口,
+  // 故在组合式函数初始化时拉一次设置进本地缓存,读写都走缓存再落库
+  const stripPrefs = ref<Record<string, boolean>>({})
+  getSettings().then((s) => { stripPrefs.value = s.assetStripTopDir || {} }).catch(() => { /* ignore */ })
+
   /** slug 记忆:下次安装同一资产的确认层预填同一选择(读写失败不影响安装) */
   function rememberStripPref(assetId: string, strip: boolean) {
-    try {
-      const slug = String(assetId).split('/')[1] || assetId
-      const s = getSettings()
-      saveSettings({ assetStripTopDir: { ...(s.assetStripTopDir || {}), [slug]: strip } })
-    } catch (e) { /* ignore */ }
+    const slug = String(assetId).split('/')[1] || assetId
+    stripPrefs.value = { ...stripPrefs.value, [slug]: strip }
+    saveSettings({ assetStripTopDir: stripPrefs.value }).catch(() => { /* ignore */ })
   }
 
   /** 确认层预填:上次对该资产的选择;没记过默认保留顶层目录(与官方编辑器行为一致) */
   function defaultStripOf(assetId: string): boolean {
     const slug = String(assetId).split('/')[1] || ''
     if (!slug) return false
-    try {
-      return getSettings().assetStripTopDir?.[slug] === true
-    } catch (e) {
-      return false
-    }
+    return stripPrefs.value[slug] === true
   }
 
   /** 第二步:真正的安装(带 stageId 复用暂存包;无 stageId 时 preload 自行下载) */
@@ -174,7 +173,7 @@ export function useMarketInstall(opts: UseMarketInstallOptions) {
   async function saveAsProject() {
     const p = preview.value
     if (!p || p.plan.kind !== 'project') return
-    const dir = pickDirectory(`选择「${p.title}」要保存到的位置`)
+    const dir = await pickDirectory(`选择「${p.title}」要保存到的位置`)
     if (!dir) return // 取消选择:确认层保持打开,暂存包留着可重试
     preview.value = null
     begin(p.asset.assetId)
@@ -196,7 +195,7 @@ export function useMarketInstall(opts: UseMarketInstallOptions) {
   /** 仅下载 zip 到本地(不安装、不写记录);不需要安装目标,只是复用卡片进度显示 */
   async function saveZip(asset: MarketAsset, version?: string) {
     if (busy() || preview.value) return
-    const dir = pickDirectory(`选择「${asset.title}」的保存位置`)
+    const dir = await pickDirectory(`选择「${asset.title}」的保存位置`)
     if (!dir) return
     begin(asset.assetId)
     let r

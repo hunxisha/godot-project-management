@@ -4,29 +4,31 @@ import { getSettings, notify, openPath, pickDirectory, pickFile, saveSettings } 
 import Icon from '../components/Icon.vue'
 import ThemeSwitcher from '../components/ThemeSwitcher.vue'
 import { fmtSize } from '../utils/format'
-import type { DocsCacheInfo, NetworkCheckResult, OpenAction } from '../types/godot'
+import { DEFAULT_SETTINGS, type DocsCacheInfo, type GodotSettings, type NetworkCheckResult, type OpenAction } from '../types/godot'
 
-const state = reactive({ ...getSettings() })
+// 设置异步读取(阶段 A):先给默认值,onMounted 后用持久化值覆盖
+const state = reactive<GodotSettings>({ ...DEFAULT_SETTINGS })
+getSettings().then((s) => Object.assign(state, s)).catch(() => {})
 const apiKeyInput = ref('')
 const verifying = ref(false)
 
-function patchNow() {
-  saveSettings({ ...state })
+async function patchNow() {
+  await saveSettings({ ...state })
 }
 
-function chooseRoot() {
-  const dir = pickDirectory('选择 Godot 引擎安装目录', state.versionsRoot)
+async function chooseRoot() {
+  const dir = await pickDirectory('选择 Godot 引擎安装目录', state.versionsRoot)
   if (dir) {
     state.versionsRoot = dir
-    patchNow()
+    await patchNow()
   }
 }
 
-function chooseBackupRoot() {
-  const dir = pickDirectory('选择项目备份目录', state.backupRoot)
+async function chooseBackupRoot() {
+  const dir = await pickDirectory('选择项目备份目录', state.backupRoot)
   if (dir) {
     state.backupRoot = dir
-    patchNow()
+    await patchNow()
   }
 }
 
@@ -34,14 +36,14 @@ function chooseBackupRoot() {
 
 const dtBusy = ref(false)
 
-function exportData() {
+async function exportData() {
   if (dtBusy.value) return
-  const dir = pickDirectory('选择导出位置')
+  const dir = await pickDirectory('选择导出位置')
   if (!dir) return
   dtBusy.value = true
   try {
     const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
-    const r = window.services.exportPluginData(`${dir}\\ztools-godot-data-${stamp}.json`.replace(/\//g, '\\'))
+    const r = await window.services.exportPluginData(`${dir}\\ztools-godot-data-${stamp}.json`.replace(/\//g, '\\'))
     if (r.ok) notify(`已导出:${r.projects} 个项目、${r.favorites} 条收藏(设置已包含)`)
     else notify(r.error || '导出失败')
   } finally {
@@ -49,20 +51,20 @@ function exportData() {
   }
 }
 
-function importData() {
+async function importData() {
   if (dtBusy.value) return
-  const file = pickFile('选择要导入的数据文件', ['json'])
+  const file = await pickFile('选择要导入的数据文件', ['json'])
   if (!file) return
   dtBusy.value = true
   try {
-    const r = window.services.importPluginData(file)
+    const r = await window.services.importPluginData(file)
     if (r.ok) {
       const parts = [`项目新增 ${r.projectsAdded} 个`]
       if (r.projectsOffline) parts.push(`本机不存在 ${r.projectsOffline} 个(已跳过)`)
       if (r.projectsSkipped) parts.push(`无效 ${r.projectsSkipped} 个`)
       parts.push(`收藏新增 ${r.favoritesAdded} 条`, `设置补齐 ${r.settingsAdopted} 项`)
       notify(`导入完成:${parts.join(', ')}`)
-      Object.assign(state, getSettings())
+      Object.assign(state, await getSettings())
     } else {
       notify(r.error || '导入失败')
     }
@@ -75,16 +77,16 @@ function importData() {
 
 const docsCache = ref<DocsCacheInfo | null>(null)
 
-function refreshDocsCache() {
-  docsCache.value = window.services.docsCacheInfo()
+async function refreshDocsCache() {
+  docsCache.value = await window.services.docsCacheInfo()
 }
 refreshDocsCache()
 
-function cleanDocsCache(versionIds?: string[]) {
-  const r = window.services.docsCleanCache(versionIds)
+async function cleanDocsCache(versionIds?: string[]) {
+  const r = await window.services.docsCleanCache(versionIds)
   if (r.ok) {
     notify(`已清理 ${r.removed ?? 0} 个文档库(收藏与浏览历史保留)`)
-    refreshDocsCache()
+    await refreshDocsCache()
   }
 }
 

@@ -13,7 +13,7 @@ import { useProjectDelete } from '../composables/useProjectDelete'
 import { gradOf } from '../utils/avatar'
 import { versionMismatch } from '../utils/godotVersion'
 import { formatRelative, fmtSize } from '../utils/format'
-import type { BackupRecord, OpenAction } from '../types/godot'
+import { DEFAULT_SETTINGS, type BackupRecord, type GodotSettings, type OpenAction } from '../types/godot'
 
 type Row = ProjectRow
 
@@ -36,7 +36,8 @@ const emit = defineEmits<{
   (e: 'open-docs', id: string): void
 }>()
 
-const settings = getSettings()
+// 设置异步读取(阶段 A):先给默认值,onMounted 后用持久化值覆盖
+const settings = ref<GodotSettings>({ ...DEFAULT_SETTINGS })
 const isWin = isWindows()
 // 桌面版没有 ZTools 子输入栏,过滤走页内搜索框(见模板 head-search)
 const isDesktop = IS_DESKTOP
@@ -78,7 +79,7 @@ const {
 } = useProjectCreate({
   projects,
   versions,
-  defaultVersionId: settings.defaultVersionId,
+  defaultVersionId: () => settings.value.defaultVersionId,
   notify,
   reload,
   openProject: (row) => openProject(row)
@@ -93,7 +94,7 @@ const {
   confirmDelete
 } = useProjectDelete({
   projects,
-  policy: settings.deleteProjectFiles,
+  policy: () => settings.value.deleteProjectFiles,
   notify,
   dropLocal
 })
@@ -101,8 +102,9 @@ const {
 /** 绑定的引擎版本与 project.godot 声明不一致(判定逻辑在 utils/godotVersion) */
 const mismatch = (p: Row) => versionMismatch(p, versions.value)
 
-onMounted(() => {
-  reload()
+onMounted(async () => {
+  settings.value = await getSettings()
+  await reload()
   refreshLastBackups()
   window.ztools.setSubInput(({ text }) => {
     filter.value = text
@@ -142,41 +144,41 @@ watch(
   }
 )
 
-function addFromPaths(paths: string[]) {
+async function addFromPaths(paths: string[]) {
   const names: string[] = []
   for (const p of paths) {
-    const r = window.services.addProject(p)
+    const r = await window.services.addProject(p)
     if (r.ok && r.project) {
       names.push(r.project.name + (r.exists ? '(已存在,已更新)' : ''))
     } else {
       notify(r.error || '添加失败')
     }
   }
-  reload()
+  await reload()
   if (names.length) notify(`已添加项目:${names.join('、')}`)
 }
 
-function addManually() {
-  const dir = pickDirectory('选择项目目录')
+async function addManually() {
+  const dir = await pickDirectory('选择项目目录')
   if (!dir) return
-  const r = window.services.addProject(dir)
+  const r = await window.services.addProject(dir)
   if (r.ok) {
-    reload()
+    await reload()
     notify(`已添加项目:${r.project?.name}${r.exists ? '(已存在,已更新)' : ''}`)
     return
   }
   if (r.error === '未找到 project.godot') {
-    const found = window.services.scanProjects(dir)
+    const found = await window.services.scanProjects(dir)
     if (!found.length) {
       notify('该目录下未找到 Godot 项目')
       return
     }
     let added = 0
     for (const f of found) {
-      const fr = window.services.addProject(f)
+      const fr = await window.services.addProject(f)
       if (fr.ok) added++
     }
-    reload()
+    await reload()
     notify(`扫描到 ${found.length} 个项目,已添加 ${added} 个`)
   } else {
     notify(r.error || '添加失败')
@@ -195,8 +197,8 @@ const lastBackups = ref<Record<string, BackupRecord>>({})
 const showBackupCreate = ref(false)
 const backupCreateTarget = ref('')
 
-function refreshLastBackups() {
-  lastBackups.value = window.services.listLatestBackups()
+async function refreshLastBackups() {
+  lastBackups.value = await window.services.listLatestBackups()
 }
 
 /** 打开备份创建对话框(行内按钮与跨页跳转共用) */
@@ -236,15 +238,15 @@ function openArgs(p: Row) {
   showArgs.value = true
 }
 
-function saveArgs() {
+async function saveArgs() {
   const p = argsTarget.value
   if (!p) return
   const { _id, launchArgs, ...fields } = p
-  const ok = putDoc(_id, { ...fields, launchArgs: argsDraft.value.trim() })
+  const ok = await putDoc(_id, { ...fields, launchArgs: argsDraft.value.trim() })
   if (ok) {
     notify('启动参数已保存,下次打开/运行时生效')
     showArgs.value = false
-    reload()
+    await reload()
   } else {
     notify('保存失败')
   }
@@ -257,12 +259,12 @@ const cacheExists = ref(false)
 const cacheSize = ref(0)
 const cleaning = ref(false)
 
-function openCache(p: Row) {
+async function openCache(p: Row) {
   cacheTarget.value = p
   showCache.value = true
   cacheLoading.value = true
   try {
-    const r = window.services.getProjectCacheInfo(p._id)
+    const r = await window.services.getProjectCacheInfo(p._id)
     cacheExists.value = !!r.exists
     cacheSize.value = r.size || 0
   } finally {
@@ -270,12 +272,12 @@ function openCache(p: Row) {
   }
 }
 
-function cleanCache() {
+async function cleanCache() {
   const p = cacheTarget.value
   if (!p || cleaning.value) return
   cleaning.value = true
   try {
-    const r = window.services.cleanProjectCache(p._id)
+    const r = await window.services.cleanProjectCache(p._id)
     if (r.ok) {
       notify(`已清理 ${fmtSize(r.freed || 0)} 缓存(下次打开编辑器时自动重建)`)
       showCache.value = false
