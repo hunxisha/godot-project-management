@@ -14,6 +14,7 @@ use tauri::{Manager, State};
 mod extract;
 mod http;
 #[allow(dead_code)]
+mod releases;
 mod store;
 #[allow(dead_code)]
 mod taskqueue;
