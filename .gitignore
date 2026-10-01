@@ -14,6 +14,9 @@ graphify-out/
 # electron-builder 会在 desktop/ 跑一次空 npm install(应用本身零运行时依赖)
 /desktop/node_modules/
 /desktop/package-lock.json
+# Tauri(Rust)构建产物与前端脚手架生成物
+/src-tauri/target/
+/src-tauri/gen/
 
 # AI 工具(ZCode CLI)的本地忽略规则,前半部分从本文件同步而来
 .zcodeignore

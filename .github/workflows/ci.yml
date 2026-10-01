@@ -34,3 +34,31 @@ jobs:
         run: npm run build
         # build 里已含 vue-tsc;单独跑一次是为了确认打包产物也能生成
         # (插件分发依赖 src-ztools/dist,见 README「开发」)
+
+  # 桌面版 2.0(Tauri)壳的编译闸门:渲染层产物存在才能过 generate_context!(它会把
+  # frontendDist 嵌进二进制)。领域命令落位后(T2-T4),测试与 clippy 在此追加。
+  tauri-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+      - name: 构建渲染层
+        run: npm run build
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: cargo check(Tauri 壳编译)
+        run: cargo check --manifest-path src-tauri/Cargo.toml

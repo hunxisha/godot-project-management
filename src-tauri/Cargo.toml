@@ -1,0 +1,22 @@
+[package]
+name = "godot-workshop"
+version = "1.0.1"
+description = "Godot 工坊桌面版(Tauri 宿主)"
+authors = ["hunxisha"]
+edition = "2021"
+rust-version = "1.77"
+
+# 桌面版 2.0(Tauri)与 1.x(Electron)走同一条 desktop-v* 版本线,见 docs/tauri-migration-plan.md
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

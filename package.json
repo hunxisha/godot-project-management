@@ -7,6 +7,10 @@
     "dev": "vite",
     "dev:desktop": "electron desktop/main/index.js",
     "smoke:desktop": "electron desktop/main/index.js --ztools-smoke",
+    "tauri": "tauri",
+    "dev:tauri": "tauri dev",
+    "build:tauri": "tauri build",
+    "cargo:check": "cargo check --manifest-path src-tauri/Cargo.toml",
     "build:desktop": "npm run build && node desktop/scripts/sync-vendor.cjs",
     "dist:desktop": "npm run build:desktop && cd desktop && npx electron-builder --config electron-builder.cjs",
     "typecheck": "vue-tsc --noEmit && npm run typecheck:preload",
@@ -29,6 +33,7 @@
     "vue": "^3.5.13"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.12.1",
     "@vitejs/plugin-vue": "^5.2.1",
     "@ztools-center/ztools-api-types": "^1.0.1",
     "electron": "44.5.0",
