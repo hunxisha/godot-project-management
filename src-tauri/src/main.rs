@@ -9,6 +9,7 @@ use serde_json::Value;
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
+mod http;
 mod store;
 
 struct AppState {
@@ -42,6 +43,28 @@ fn db_all_docs(state: State<AppState>, prefix: String) -> Vec<Value> {
     state.store.lock().unwrap().all_docs(&prefix)
 }
 
+/// 网络诊断三链路(端点与 lib/diagnostics.js 一致;代理取设置,由调用方传入)
+#[tauri::command]
+async fn run_network_diagnostics(proxy: Option<String>) -> Value {
+    const TARGETS: [(&str, &str); 3] = [
+        ("Asset Store API", "https://store.godotengine.org/api/v1/asset-types/"),
+        ("GitHub Releases", "https://github.com/godotengine/godot/releases"),
+        ("官方下载 CDN", "https://downloads.godotengine.org/"),
+    ];
+    let client = match http::client_with_proxy(proxy.as_deref()) {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({ "ok": false, "results": [], "error": e }),
+    };
+    let mut results = Vec::new();
+    for (name, url) in TARGETS {
+        let (ok, ms, status) = http::probe(&client, url).await;
+        results.push(serde_json::json!({
+            "name": name, "url": url, "ok": ok, "ms": ms as u64, "error": status,
+        }));
+    }
+    serde_json::json!({ "ok": results.iter().all(|r| r["ok"] == true), "results": results })
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -50,7 +73,7 @@ fn main() {
             app.manage(AppState { store: Mutex::new(db) });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs])
+        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics])
         .run(tauri::generate_context!())
         .expect("tauri 应用启动失败");
 }
