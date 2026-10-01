@@ -136,3 +136,42 @@ mod tests {
         assert!(build_client(Some("ht tp://不合法 url")).is_err(), "解析不了的代理要报可读错误");
     }
 }
+
+#[cfg(test)]
+mod range_probe {
+    use super::*;
+    use futures_util::StreamExt;
+
+    /// 诊断:对真实 URL 发 Range 请求,回报 (status, content_length, 前 16 字节 hex)
+    async fn range_head(url: &str, start: u64, proxy: Option<String>) -> (u16, Option<u64>, String) {
+        let client = build_client(proxy.as_deref()).unwrap();
+        let resp = client
+            .get(url)
+            .header("Range", format!("bytes={start}-"))
+            .send()
+            .await
+            .unwrap();
+        let status = resp.status().as_u16();
+        let len = resp.content_length();
+        let mut stream = resp.bytes_stream();
+        let mut first = Vec::new();
+        if let Some(Ok(chunk)) = stream.next().await {
+            first.extend_from_slice(&chunk[..chunk.len().min(16)]);
+        }
+        (status, len, hex(&first))
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn probe_real_range() {
+        let proxy = std::env::var("HTTPS_PROXY").ok();
+        let url = "https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_win64.exe.zip";
+        let (s, l, head) = range_head(url, 1024 * 1024, proxy).await;
+        println!("RANGE status={s} len={l:?} head={head}");
+        assert_eq!(s, 206, "Range 应命中 206");
+        let meta = build_client(None).unwrap()
+            .head(url).send().await.unwrap();
+        let full = meta.content_length().unwrap();
+        assert_eq!(l, Some(full - 1024 * 1024), "206 长度应等于 剩余字节");
+    }
+}

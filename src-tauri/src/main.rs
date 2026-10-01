@@ -5,19 +5,10 @@
 // docs/tauri-migration-plan.md 的 T2-T4 逐域落位,与 lib/ 同名域一一对应。
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use godot_workshop::{extract, http, releases, store, taskqueue, versions};
 use serde_json::Value;
 use std::sync::Mutex;
 use tauri::{Manager, State};
-
-// extract/taskqueue 的公开函数由 T3/T4 领域命令消费,先落测试与实现
-#[allow(dead_code)]
-mod extract;
-mod http;
-#[allow(dead_code)]
-mod releases;
-mod store;
-#[allow(dead_code)]
-mod taskqueue;
 
 struct AppState {
     store: Mutex<store::Store>,
@@ -78,9 +69,14 @@ fn main() {
             let dir = app.path().app_data_dir()?.join("godot-workshop");
             let db = store::Store::open(&dir.join("db.json"));
             app.manage(AppState { store: Mutex::new(db) });
+            app.manage(versions::Versions {
+                book: Mutex::new(crate::taskqueue::TaskBook::new()),
+                proxy: Mutex::new(None),
+                root: Mutex::new(None),
+            });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics])
+        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install])
         .run(tauri::generate_context!())
         .expect("tauri 应用启动失败");
 }
