@@ -9,6 +9,9 @@ use serde_json::Value;
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
+// extract 的公开函数由 T3/T4 领域命令消费,先落测试与实现
+#[allow(dead_code)]
+mod extract;
 mod http;
 mod store;
 
