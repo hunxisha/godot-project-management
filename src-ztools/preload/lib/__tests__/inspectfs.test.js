@@ -151,6 +151,27 @@ async function main() {
   ok(tryResolve(TREE, 42) === null, '非字符串 rel(number)→ null', tryResolve(TREE, 42))
   ok(tryResolve(TREE, undefined) === null, '非字符串 rel(undefined)→ null', tryResolve(TREE, undefined))
 
+  // ---------- 2. readProjectText ----------
+  section('2. readProjectText')
+  fs.writeFileSync(path.join(TREE, 'cn.txt'), '中文内容\n', 'utf8')
+  const t1 = F.readProjectText('godot/project/p1', 'project.godot')
+  ok(t1.ok === true && String(t1.text).includes('[application]'), '读到文本内容', JSON.stringify(t1))
+  ok(t1.truncated === false && t1.bytes === fs.statSync(path.join(TREE, 'project.godot')).size,
+    'bytes 等于磁盘真实大小(不硬编码字节数)', t1.bytes)
+  ok(F.readProjectText('godot/project/p1', 'big.bin').skippedBinary === true, '含 NUL 的字节流 → skippedBinary')
+  ok(F.readProjectText('godot/project/p1', 'big.bin').text === undefined, 'skippedBinary 时不返回 text')
+  ok(F.readProjectText('godot/project/p1', 'project.godot', { maxBytes: 8 }).truncated === true, '超 maxBytes → truncated')
+  ok(F.readProjectText('godot/project/p1', 'project.godot', { maxBytes: 8 }).text === undefined, 'truncated 时不返回 text')
+  ok(F.readProjectText('godot/project/p1', 'cn.txt').text === '中文内容\n', 'UTF-8 中文按原文返回')
+  ok(F.readProjectText('godot/project/p1', '../outside.txt').error === '非法路径', '上层越界 → 非法路径')
+  ok(F.readProjectText('godot/project/p1', 'a/../../b').error === '非法路径', '内嵌 .. 也拒')
+  ok(F.readProjectText('godot/project/p1', 'C:\\Windows\\a.txt').error === '非法路径', '绝对路径/盘符 → 非法路径')
+  ok(F.readProjectText('godot/project/p1', '/etc/passwd').error === '非法路径', 'POSIX 绝对路径 → 非法路径')
+  ok(F.readProjectText('godot/project/p1', '').error === '非法路径', '空 rel → 非法路径')
+  ok(F.readProjectText('godot/project/p1', 'nope.tscn').error === '文件不存在', '缺失文件 → 文件不存在')
+  ok(F.readProjectText('godot/project/p1', 'scene').error === '文件不存在', '目录不可当文件读')
+  ok(F.readProjectText('godot/project/none', 'a.txt').error === '项目不存在', '未知项目 → 项目不存在')
+
   console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
   if (failures.length) { console.log('失败项:'); for (const f of failures) console.log('  - ' + f); process.exit(1) }
   console.log('全部通过')

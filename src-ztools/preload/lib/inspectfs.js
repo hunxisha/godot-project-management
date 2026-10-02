@@ -45,6 +45,31 @@ function resolveRel(root, rel) {
 }
 
 /**
+ * 读项目内文本文件。默认限额 1MB;超限只报 truncated,不返回内容。
+ * 前 512 字节含 NUL 视为二进制(不按扩展名维护黑名单)。
+ * @param {string} projectId
+ * @param {string} rel
+ * @param {{maxBytes?:number}} [opts]
+ * @returns {import('../../../src/types/godot').ReadTextResult}
+ */
+function readProjectText(projectId, rel, opts) {
+  const o = opts || {}
+  const root = projectRoot(projectId)
+  if (!root) return { ok: false, error: '项目不存在' }
+  const abs = resolveRel(root, rel)
+  if (!abs) return { ok: false, error: '非法路径' }
+  let st
+  try { st = fs.statSync(abs) } catch (e) { return { ok: false, error: '文件不存在' } }
+  if (!st.isFile()) return { ok: false, error: '文件不存在' }
+  const max = o.maxBytes && o.maxBytes > 0 ? o.maxBytes : DEFAULT_MAX_BYTES
+  if (st.size > max) return { ok: true, bytes: st.size, truncated: true }
+  let buf
+  try { buf = fs.readFileSync(abs) } catch (e) { return { ok: false, error: '读取失败' } }
+  if (buf.subarray(0, 512).includes(0)) return { ok: true, bytes: st.size, skippedBinary: true }
+  return { ok: true, text: buf.toString('utf8'), bytes: st.size, truncated: false }
+}
+
+/**
  * 遍历项目文件树。默认**跳过**任意层级的 `.godot`(与 fsutil.walkFiles 的默认相反)。
  * @param {string} projectId
  * @param {{includeCache?:boolean, exts?:string[], skipDirs?:string[], maxEntries?:number}} [opts]
@@ -82,4 +107,4 @@ function scanProjectTree(projectId, opts) {
   return { ok: true, files, truncated: false }
 }
 
-module.exports = { projectRoot, resolveRel, DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES, scanProjectTree }
+module.exports = { projectRoot, resolveRel, DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES, scanProjectTree, readProjectText }

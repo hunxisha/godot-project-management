@@ -133,6 +133,8 @@ export interface Services {
   cleanProjectCache(projectId: string): { ok: boolean, error?: string, freed?: number }
   /** 遍历项目文件树(rel 为正斜杠相对路径;默认跳过任意层级的 .godot) */
   scanProjectTree(projectId: string, opts?: { includeCache?: boolean, exts?: string[], skipDirs?: string[], maxEntries?: number }): ScanTreeResult
+  /** 读项目内文本文件(默认限额 1MB;含 NUL 的按二进制跳过) */
+  readProjectText(projectId: string, rel: string, opts?: { maxBytes?: number }): ReadTextResult
   /** 添加项目(目录或 project.godot 文件路径) */
   addProject(inputPath: string): {
     ok: boolean

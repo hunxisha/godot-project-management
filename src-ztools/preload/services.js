@@ -69,6 +69,8 @@ const servicesImpl = {
   cleanProjectCache: (projectId) => projects.cleanProjectCache(projectId),
   /** 遍历项目文件树(工具页所有检查器的共用输入) */
   scanProjectTree: (projectId, opts) => inspectfs.scanProjectTree(projectId, opts),
+  /** 读项目内文本文件(供工具页解析 .tscn / project.godot 等) */
+  readProjectText: (projectId, rel, opts) => inspectfs.readProjectText(projectId, rel, opts),
   /** 列出项目的导出预设(解析 export_presets.cfg) */
   listExportPresets: (projectId) => exporter.listExportPresets(projectId),
   /** 发起导出(入队,进度走 watchExportTasks,任务 kind='export') */
