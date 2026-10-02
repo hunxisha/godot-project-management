@@ -952,6 +952,35 @@ fn docs_diff_libraries(state: State<AppState>, version_a: String, version_b: Str
     serde_json::json!({ "addedClasses": added, "removedClasses": removed, "changedClasses": changed })
 }
 
+
+#[tauri::command]
+async fn fetch_releases_cmd(state: State<'_, AppState>, versions: State<'_, Versions>, force: bool) -> Result<Value, ()> {
+    let base = std::env::temp_dir().join("gpm-releases-cache");
+    let proxy = versions.proxy.lock().unwrap().clone();
+    match godot_workshop::releases::fetch_releases(proxy, force, &base, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()).await {
+        Ok((list, _stale)) => Ok(serde_json::json!({ "releases": list })),
+        Err(e) => Ok(serde_json::json!({ "releases": [], "error": e })),
+    }
+}
+
+#[tauri::command]
+fn cancel_task(versions: State<Versions>, id: String) -> Value {
+    let tid: u64 = id.parse().unwrap_or(0);
+    serde_json::json!({ "ok": versions.book.lock().unwrap().cancel(tid) })
+}
+
+#[tauri::command]
+fn dismiss_task(versions: State<Versions>, id: String) -> Value {
+    let tid: u64 = id.parse().unwrap_or(0);
+    serde_json::json!({ "ok": versions.book.lock().unwrap().remove(tid) })
+}
+
+// 资产列表命令(市场浏览;端点与 lib/assetapi.js 一致)
+async fn store_get(client: &reqwest::Client, url: &str) -> Value {
+    client.get(url).send().await.ok()
+        .and_then(|r| async move { r.json::<Value>().await.ok() }.into()).is_some().then(|| Value::Null).unwrap_or(Value::Null)
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -965,7 +994,7 @@ fn main() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets, create_project, uninstall_addon, install_asset, run_export, cancel_export_task, docs_generate, docs_import, docs_library_status, docs_list_classes, docs_get_class, docs_search, docs_search_full_text, docs_delete_library, docs_diff_libraries])
+        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets, create_project, uninstall_addon, install_asset, run_export, cancel_export_task, docs_generate, docs_import, docs_library_status, docs_list_classes, docs_get_class, docs_search, docs_search_full_text, docs_delete_library, docs_diff_libraries, fetch_releases_cmd, cancel_task, dismiss_task])
         .run(tauri::generate_context!())
         .expect("tauri 应用启动失败");
 }
