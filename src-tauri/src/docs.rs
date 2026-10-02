@@ -102,11 +102,14 @@ fn params_of(args: Option<&Value>) -> Value {
         Some(arr) => Value::Array(
             arr.iter()
                 .map(|a| {
-                    json!({
+                    let mut p = json!({
                         "name": a.get("name").cloned().unwrap_or(Value::Null),
                         "type": a.get("type").cloned().unwrap_or(json!("Variant")),
-                        "defaultValue": a.get("default_value").cloned().unwrap_or(Value::Null),
-                    })
+                    });
+                    if let Some(dv) = a.get("default_value").filter(|v| !v.is_null()) {
+                        p["defaultValue"] = dv.clone();
+                    }
+                    p
                 })
                 .collect(),
         ),
@@ -133,14 +136,17 @@ pub fn map_class(c: &Value, builtin: bool, is_singleton: bool) -> Value {
         "description": c.get("description").cloned().unwrap_or(json!("")),
         "builtin": builtin,
         "isSingleton": is_singleton,
-        "members": members.map(|ms| Value::Array(ms.iter().map(|p| json!({
-            "name": p.get("name").cloned().unwrap_or(Value::Null),
-            "type": p.get("type").cloned().unwrap_or(json!("Variant")),
-            "setter": p.get("setter").cloned().unwrap_or(Value::Null),
-            "getter": p.get("getter").cloned().unwrap_or(Value::Null),
-            "defaultValue": p.get("default_value").cloned().unwrap_or(Value::Null),
-            "description": p.get("description").cloned().unwrap_or(json!("")),
-        })).collect())).unwrap_or(Value::Array(vec![])),
+        "members": members.map(|ms| Value::Array(ms.iter().map(|p| {
+            let mut m = json!({
+                "name": p.get("name").cloned().unwrap_or(Value::Null),
+                "type": p.get("type").cloned().unwrap_or(json!("Variant")),
+            });
+            for (src, dst) in [("setter", "setter"), ("getter", "getter"), ("default_value", "defaultValue")] {
+                if let Some(v) = p.get(src).filter(|v| !v.is_null()) { m[dst] = v.clone(); }
+            }
+            m["description"] = p.get("description").cloned().unwrap_or(json!(""));
+            m
+        }).collect())).unwrap_or(Value::Array(vec![])),
         "methods": c.get("methods").and_then(|v| v.as_array()).map(|ms| Value::Array(ms.iter().map(|m| json!({
             "name": m.get("name").cloned().unwrap_or(Value::Null),
             "returnType": m.get("return_type").cloned().unwrap_or(json!(if builtin {"Variant"} else {"void"})),
@@ -153,12 +159,15 @@ pub fn map_class(c: &Value, builtin: bool, is_singleton: bool) -> Value {
             "params": params_of(s.get("arguments")),
             "description": s.get("description").cloned().unwrap_or(json!("")),
         })).collect())).unwrap_or(Value::Array(vec![])),
-        "constants": c.get("constants").and_then(|v| v.as_array()).map(|ms| Value::Array(ms.iter().map(|k| json!({
-            "name": k.get("name").cloned().unwrap_or(Value::Null),
-            "value": k.get("value").map(|v| v.to_string()).unwrap_or_default(),
-            "enum": k.get("enum").cloned().unwrap_or(Value::Null),
-            "description": k.get("description").cloned().unwrap_or(json!("")),
-        })).collect())).unwrap_or(Value::Array(vec![])),
+        "constants": c.get("constants").and_then(|v| v.as_array()).map(|ms| Value::Array(ms.iter().map(|k| {
+            let mut m = json!({
+                "name": k.get("name").cloned().unwrap_or(Value::Null),
+                "value": k.get("value").map(|v| v.to_string()).unwrap_or_default(),
+            });
+            if let Some(e) = k.get("enum").filter(|v| !v.is_null()) { m["enum"] = e.clone(); }
+            m["description"] = k.get("description").cloned().unwrap_or(json!(""));
+            m
+        }).collect())).unwrap_or(Value::Array(vec![])),
         "enums": c.get("enums").and_then(|v| v.as_array()).map(|ms| Value::Array(ms.iter().map(|e| json!({
             "name": e.get("name").cloned().unwrap_or(Value::Null),
             "bitfield": e.get("is_bitfield").and_then(|v| v.as_bool()).unwrap_or(false),
@@ -212,13 +221,27 @@ pub fn map_global_scope(api: &Value) -> Value {
                 .collect()
         })
         .unwrap_or_default();
+    let enums: Vec<Value> = enums
+        .into_iter()
+        .map(|mut e| {
+            if let Some(vals) = e.get_mut("values").and_then(|v| v.as_array_mut()) {
+                for v in vals.iter_mut() {
+                    v["value"] = json!(v["value"].to_string());
+                    if v.get("description").is_none() { v["description"] = json!(""); }
+                }
+            }
+            e
+        })
+        .collect();
     let mut c = json!({
-        "name": "@GlobalScope", "inherits": Value::Null, "brief": "", "description": "",
-        "builtin": true, "isSingleton": true,
-        "members": [], "methods": methods, "signals": [],
+        "name": "@GlobalScope",
+        "inherits": Value::Null,
+        "brief": "全局作用域:GDScript 内置函数、全局常量与全局枚举。",
+        "description": "收录 GDScript 直接可用的内置函数(如 clamp / lerp / randi)与全局常量、枚举。这些成员不属于任何类,在任意脚本中直接调用。",
+        "builtin": true, "isSingleton": false,
+        "members": [], "signals": [], "methods": methods,
         "constants": consts, "enums": enums, "operators": [],
     });
-    c["brief"] = json!("GDScript 内置函数与全局常量");
     c
 }
 
