@@ -38,7 +38,12 @@ import type {
   DocLibraryStatus,
   DocSearchHit,
   DocsCacheInfo,
-  DocsTask
+  DocsTask,
+  TreeEntry,
+  ScanTreeResult,
+  ReadTextResult,
+  WriteTextResult,
+  TrashResult
 } from './godot'
 
 /** 下载安装一个引擎版本的入参 */
@@ -126,6 +131,8 @@ export interface Services {
   getProjectCacheInfo(projectId: string): { ok: boolean, error?: string, exists?: boolean, size?: number }
   /** 清理项目的 .godot 编辑器缓存 */
   cleanProjectCache(projectId: string): { ok: boolean, error?: string, freed?: number }
+  /** 遍历项目文件树(rel 为正斜杠相对路径;默认跳过任意层级的 .godot) */
+  scanProjectTree(projectId: string, opts?: { includeCache?: boolean, exts?: string[], skipDirs?: string[], maxEntries?: number }): ScanTreeResult
   /** 添加项目(目录或 project.godot 文件路径) */
   addProject(inputPath: string): {
     ok: boolean

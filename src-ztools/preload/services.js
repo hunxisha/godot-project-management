@@ -15,6 +15,7 @@ const exporter = require('./lib/exporter')
 const datatransfer = require('./lib/datatransfer')
 const diagnostics = require('./lib/diagnostics')
 const docs = require('./lib/docs')
+const inspectfs = require('./lib/inspectfs')
 
 /**
  * 门面实现:仍以同步的 Services 接口为唯一权威做编译期校验。
@@ -66,6 +67,8 @@ const servicesImpl = {
   getProjectCacheInfo: (projectId) => projects.getProjectCacheInfo(projectId),
   /** 清理项目的 .godot 编辑器缓存(下次打开编辑器时自动重建) */
   cleanProjectCache: (projectId) => projects.cleanProjectCache(projectId),
+  /** 遍历项目文件树(工具页所有检查器的共用输入) */
+  scanProjectTree: (projectId, opts) => inspectfs.scanProjectTree(projectId, opts),
   /** 列出项目的导出预设(解析 export_presets.cfg) */
   listExportPresets: (projectId) => exporter.listExportPresets(projectId),
   /** 发起导出(入队,进度走 watchExportTasks,任务 kind='export') */
