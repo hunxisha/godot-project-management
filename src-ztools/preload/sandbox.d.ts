@@ -117,6 +117,8 @@ declare module 'node:fs' {
   export function cpSync(src: string, dest: string, opts?: any): void
   export function chmodSync(path: string, mode: number | string): void
   export function statSync(path: string): GpmStats
+  /** 解析真实路径(跟随符号链接 / Windows reparse point);路径不存在时抛异常 */
+  export function realpathSync(path: string): string
   export function fstatSync(fd: number): GpmStats
   export function openSync(path: string, flags: string): number
   export function closeSync(fd: number): void

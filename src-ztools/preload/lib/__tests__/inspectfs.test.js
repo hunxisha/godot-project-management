@@ -84,6 +84,14 @@ function tryResolve(root, rel) {
   try { return F.resolveRel(root, rel) } catch (e) { return 'threw: ' + e.message }
 }
 
+/**
+ * resolveInside 与 resolveRel 同属只读闸,红线一样是「不抛异常」。
+ * 这里同样把异常摊成一个可指名 FAIL 的值,而不是让脚本崩在堆栈上。
+ */
+function tryResolveInside(root, rel) {
+  try { return F.resolveInside(root, rel) } catch (e) { return { error: 'threw: ' + e.message } }
+}
+
 async function main() {
   // ---------- 1. scanProjectTree ----------
   section('1. scanProjectTree')
@@ -171,6 +179,81 @@ async function main() {
   ok(F.readProjectText('godot/project/p1', 'nope.tscn').error === '文件不存在', '缺失文件 → 文件不存在')
   ok(F.readProjectText('godot/project/p1', 'scene').error === '文件不存在', '目录不可当文件读')
   ok(F.readProjectText('godot/project/none', 'a.txt').error === '项目不存在', '未知项目 → 项目不存在')
+
+  // ---------- 3. resolveInside:符号链接真实路径包含闸 ----------
+  // resolveRel 是纯文本闸:它只看 rel 的字面形态,不看解析后的真实落点。
+  // fs.statSync / fs.readFileSync 会跟随符号链接,于是「项目内一条指向
+  // C:\Users\me\.ssh\id_rsa 的链接」今天就读得出去 —— 而资产站 zip 解压正是
+  // 项目内出现符号链接的主路径。Tasks 4/5(write / trash)复用同一道闸,
+  // 所以这里挡住的是「泄漏」,将来挡住的是「删改项目外文件」。
+  section('3. resolveInside 符号链接包含闸')
+  const OUT = path.join(WORK, 'outside-target')
+  fs.mkdirSync(OUT, { recursive: true })
+  fs.writeFileSync(path.join(OUT, 'secret.txt'), 'SECRET-OUTSIDE-TREE\n', 'utf8')
+  // Windows 上建符号链接需要开发者模式或管理员权限(EPERM)。失败一律降级成**可见**的 SKIP,
+  // 绝不静默跳过(静默会让这台机器上的「全绿」等于「没测」)。
+  // 目录形态额外退到 NTFS junction:它同样是需要权限为零的 reparse point,
+  // fs.statSync / readFileSync 会跟随它,realpathSync 会把它解析到项目外 —— 正好是这条闸要挡的东西。
+  function trySymlink(target, linkPath, kind) {
+    const kinds = kind === 'dir' ? ['dir', 'junction'] : ['file']
+    let last = ''
+    for (const k of kinds) {
+      try {
+        fs.symlinkSync(target, linkPath, k)
+        return true
+      } catch (e) {
+        last = `${k}:${e.code}`
+      }
+    }
+    console.log(`  SKIP  无法创建${kind}符号链接(${JSON.stringify(path.basename(linkPath))}) → ${last}`)
+    return false
+  }
+  const canFileLink = trySymlink(path.join(OUT, 'secret.txt'), path.join(TREE, 'link-out.txt'), 'file')
+  const canDirLink = trySymlink(OUT, path.join(TREE, 'linkdir'), 'dir')
+
+  if (canFileLink) {
+    const s1 = F.readProjectText('godot/project/p1', 'link-out.txt')
+    ok(s1.ok === false && s1.error === '非法路径',
+      '项目内文件符号链接指向项目外 → 非法路径(不得读到内容)',
+      JSON.stringify({ ...s1, text: s1.text ? '泄漏' : undefined }))
+  } else {
+    ok(true, '本平台无法创建符号链接,跳过 #1')
+  }
+
+  if (canDirLink) {
+    const s2 = F.readProjectText('godot/project/p1', 'linkdir/secret.txt')
+    ok(s2.ok === false && s2.error === '非法路径',
+      '项目内目录符号链接指向项目外,读 linkdir/secret.txt → 非法路径',
+      JSON.stringify({ ...s2, text: s2.text ? '泄漏' : undefined }))
+  } else {
+    ok(true, '本平台无法创建符号链接,跳过 #2')
+  }
+
+  // 回归:新闸不得误伤常见路径(普通项目内文件照常读到)
+  const s3 = F.readProjectText('godot/project/p1', 'project.godot')
+  ok(s3.ok === true && s3.text === '[application]\nname="Demo"\n',
+    '项目内普通文件仍能读到原文(新闸不误伤常见路径)', JSON.stringify(s3))
+
+  // 写新文件用的路径此刻还不存在:必须退到最近的已存在祖先做包含校验后照常返回 abs
+  const s4 = tryResolveInside(TREE, 'scene/new/holder.tscn')
+  ok(typeof s4.abs === 'string' && relOf(s4.abs) === wantRel('scene', 'new', 'holder.tscn'),
+    '目标尚不存在时 resolveInside 返回 abs(新建文件不被闸挡掉)', JSON.stringify(s4))
+  ok(!s4.error, '目标尚不存在时不报错', s4.error)
+
+  const s5a = tryResolveInside(TREE, '')
+  ok(s5a.error === '非法路径', "resolveInside('') → 非法路径", JSON.stringify(s5a))
+  const s5b = tryResolveInside(TREE, '../x')
+  ok(s5b.error === '非法路径', "resolveInside('../x') → 非法路径", JSON.stringify(s5b))
+  const s5c = tryResolveInside(null, 'a.txt')
+  ok(s5c.error === '项目不存在', 'resolveInside(null root) → 项目不存在', JSON.stringify(s5c))
+
+  // ---------- 4. bytes 与返回内容同源 ----------
+  // 之前 bytes 取 statSync 的 st.size,而 text 取其后的 readFileSync 结果:
+  // Godot 编辑器正在写盘时两者会描述不同版本的文件(bytes 对不上返回的 text)。
+  section('4. bytes 与返回内容一致')
+  const s6 = F.readProjectText('godot/project/p1', 'cn.txt')
+  ok(s6.bytes === Buffer.byteLength(String(s6.text), 'utf8'),
+    'bytes 等于返回文本的真实 UTF-8 字节数(中文 fixture)', JSON.stringify(s6))
 
   console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
   if (failures.length) { console.log('失败项:'); for (const f of failures) console.log('  - ' + f); process.exit(1) }
