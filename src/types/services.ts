@@ -135,6 +135,8 @@ export interface Services {
   scanProjectTree(projectId: string, opts?: { includeCache?: boolean, exts?: string[], skipDirs?: string[], maxEntries?: number }): ScanTreeResult
   /** 读项目内文本文件(默认限额 1MB;含 NUL 的按二进制跳过) */
   readProjectText(projectId: string, rel: string, opts?: { maxBytes?: number }): ReadTextResult
+  /** 写项目内文本文件(同目录临时文件 + rename;默认先备份 .gpm-bak-<时间戳>) */
+  writeProjectText(projectId: string, rel: string, text: string, opts?: { backup?: boolean }): WriteTextResult
   /** 添加项目(目录或 project.godot 文件路径) */
   addProject(inputPath: string): {
     ok: boolean

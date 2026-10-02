@@ -20,10 +20,23 @@ const path = require('node:path')
 const LIB = path.resolve(__dirname, '..')
 
 let pass = 0
+/** 因平台限制(创建符号链接需权限)没能真正执行的断言数 */
+let skips = 0
 const failures = []
 function ok(cond, label, extra) {
   if (cond) { pass++; console.log(`  PASS  ${label}`) }
   else { failures.push(label); console.log(`  FAIL  ${label}${extra !== undefined ? '  → ' + extra : ''}`) }
+}
+/**
+ * 记一条「本机跑不了」的断言:输出**可见** SKIP,但**不计入 PASS**。
+ * 之前这里用 ok(true, …) 占位,全绿其实等于「没测」—— 头条 PASS 数因此虚高。
+ * (名字不叫 skip:main() 里已有 `const skip = scanProjectTree(…)` 会把它盖掉。)
+ * @param {string} label
+ * @param {string} [reason]
+ */
+function skipAssert(label, reason) {
+  skips++
+  console.log(`  SKIP  ${label}${reason ? ' → ' + reason : ''}`)
 }
 function section(t) { console.log(`\n=== ${t} ===`) }
 
@@ -191,42 +204,47 @@ async function main() {
   fs.mkdirSync(OUT, { recursive: true })
   fs.writeFileSync(path.join(OUT, 'secret.txt'), 'SECRET-OUTSIDE-TREE\n', 'utf8')
   // Windows 上建符号链接需要开发者模式或管理员权限(EPERM)。失败一律降级成**可见**的 SKIP,
-  // 绝不静默跳过(静默会让这台机器上的「全绿」等于「没测」)。
+  // 绝不静默跳过(静默会让这台机器上的「全绿」等于「没测」),也不记成 PASS(见 skipAssert())。
   // 目录形态额外退到 NTFS junction:它同样是需要权限为零的 reparse point,
   // fs.statSync / readFileSync 会跟随它,realpathSync 会把它解析到项目外 —— 正好是这条闸要挡的东西。
+  /**
+   * @param {string} target
+   * @param {string} linkPath
+   * @param {'file'|'dir'} kind
+   * @returns {{ok:boolean, reason:string}}
+   */
   function trySymlink(target, linkPath, kind) {
     const kinds = kind === 'dir' ? ['dir', 'junction'] : ['file']
     let last = ''
     for (const k of kinds) {
       try {
         fs.symlinkSync(target, linkPath, k)
-        return true
+        return { ok: true, reason: '' }
       } catch (e) {
         last = `${k}:${e.code}`
       }
     }
-    console.log(`  SKIP  无法创建${kind}符号链接(${JSON.stringify(path.basename(linkPath))}) → ${last}`)
-    return false
+    return { ok: false, reason: `无法创建${kind}符号链接(${JSON.stringify(path.basename(linkPath))}) → ${last}` }
   }
   const canFileLink = trySymlink(path.join(OUT, 'secret.txt'), path.join(TREE, 'link-out.txt'), 'file')
   const canDirLink = trySymlink(OUT, path.join(TREE, 'linkdir'), 'dir')
 
-  if (canFileLink) {
+  if (canFileLink.ok) {
     const s1 = F.readProjectText('godot/project/p1', 'link-out.txt')
     ok(s1.ok === false && s1.error === '非法路径',
       '项目内文件符号链接指向项目外 → 非法路径(不得读到内容)',
       JSON.stringify({ ...s1, text: s1.text ? '泄漏' : undefined }))
   } else {
-    ok(true, '本平台无法创建符号链接,跳过 #1')
+    skipAssert('读取穿过项目内文件符号链接的断言本机未执行', canFileLink.reason)
   }
 
-  if (canDirLink) {
+  if (canDirLink.ok) {
     const s2 = F.readProjectText('godot/project/p1', 'linkdir/secret.txt')
     ok(s2.ok === false && s2.error === '非法路径',
       '项目内目录符号链接指向项目外,读 linkdir/secret.txt → 非法路径',
       JSON.stringify({ ...s2, text: s2.text ? '泄漏' : undefined }))
   } else {
-    ok(true, '本平台无法创建符号链接,跳过 #2')
+    skipAssert('读取穿过项目内目录符号链接的断言本机未执行', canDirLink.reason)
   }
 
   // 回归:新闸不得误伤常见路径(普通项目内文件照常读到)
@@ -255,7 +273,164 @@ async function main() {
   ok(s6.bytes === Buffer.byteLength(String(s6.text), 'utf8'),
     'bytes 等于返回文本的真实 UTF-8 字节数(中文 fixture)', JSON.stringify(s6))
 
+  // ---------- 5. writeProjectText ----------
+  // 三条红线:① 原子落盘(同目录临时文件 + rename,失败必须清掉 .gpm-tmp- 残骸);
+  // ② 默认先备份(改坏了还能还原,备份名带秒级时间戳);③ 不自动建目录
+  // (拼错的路径若被 mkdir -p,项目里就静默长出 nosub/x.txt 这种垃圾树)。
+  // 编号说明:计划里这节写的是「3.」,但 Task 3 已占用 3/4 两节,这里顺延为 5。
+  section('5. writeProjectText')
+  fs.writeFileSync(path.join(TREE, 'cfg.txt'), 'OLD\n', 'utf8')
+  const w1 = F.writeProjectText('godot/project/p1', 'cfg.txt', 'NEW\n')
+  ok(w1.ok === true, '写入成功', JSON.stringify(w1))
+  ok(fs.readFileSync(path.join(TREE, 'cfg.txt'), 'utf8') === 'NEW\n', '内容已替换')
+  ok(/\.gpm-bak-\d{8}_\d{4}_\d{2}\.txt$/.test(String(w1.backupRel)),
+    'backupRel 形如 cfg.gpm-bak-YYYYMMDD_HHmm_ss.txt', w1.backupRel)
+  ok(fs.readFileSync(path.join(TREE, w1.backupRel), 'utf8') === 'OLD\n', '备份文件里是原内容')
+  ok(F.writeProjectText('godot/project/p1', 'sub/deep/new.txt', 'A').error === '目标目录不存在',
+    '不自动建目录(避免 typo 路径变成新文件)')
+  ok(F.writeProjectText('godot/project/p1', 'cfg.txt', 'X', { backup: false }).ok === true, 'backup:false 时仍可写')
+  ok(fs.readdirSync(TREE).filter((n) => /^cfg\.gpm-bak-.*\.txt$/.test(n)).length === 1,
+    'backup:false 这次不再产生新备份', String(fs.readdirSync(TREE).filter((n) => n.startsWith('cfg.gpm-bak'))))
+  ok(F.writeProjectText('godot/project/p1', '../evil.txt', 'X').error === '非法路径', '越界写 → 非法路径')
+  ok(F.writeProjectText('godot/project/p1', 'scene', 'X').error === '不能覆盖目录', '目标是目录 → 拒绝')
+  ok(F.writeProjectText('godot/project/none', 'a.txt', 'X').error === '项目不存在', '未知项目 → 项目不存在')
+  const c1 = F.writeProjectText('godot/project/p1', 'scene/new.txt', 'A')
+  ok(c1.ok === true && c1.backupRel === undefined, '原文件不存在时不产生备份', JSON.stringify(c1))
+  ok(fs.readFileSync(path.join(TREE, 'scene/new.txt'), 'utf8') === 'A', '新文件内容正确')
+  ok(F.writeProjectText('godot/project/p1', 'nosub/x.txt', 'A').error === '目标目录不存在', '缺目录一律拒绝,不递归创建')
+  ok(!fs.existsSync(path.join(TREE, 'nosub')), '被拒绝的写入不留任何痕迹')
+  ok(fs.readdirSync(TREE).filter((n) => n.startsWith('.gpm-tmp-')).length === 0, '不留 .gpm-tmp-* 残骸')
+
+  // text 非字符串:锁住 '内容不是文本' 这条串(Rust 侧 Task 7 逐字镜像),并确认拒绝后原文未被碰。
+  const wBad = F.writeProjectText('godot/project/p1', 'cfg.txt', 42)
+  ok(wBad.error === '内容不是文本', '非字符串内容 → 内容不是文本', JSON.stringify(wBad))
+  ok(fs.readFileSync(path.join(TREE, 'cfg.txt'), 'utf8') === 'X', '被拒绝的写入不改磁盘内容')
+  // backupRel 必须保留 rel 的目录前缀(项目相对路径,调用方要能直接 readProjectText 回来核对)。
+  const c2 = F.writeProjectText('godot/project/p1', 'scene/new.txt', 'B')
+  ok(/^scene\/new\.gpm-bak-\d{8}_\d{4}_\d{2}\.txt$/.test(String(c2.backupRel)),
+    '多级 rel 的 backupRel 带 scene/ 前缀(仍是项目相对路径)', JSON.stringify(c2))
+  ok(fs.readFileSync(path.join(TREE, c2.backupRel), 'utf8') === 'A', '多级备份里是上一次的原文')
+  ok(fs.readFileSync(path.join(TREE, 'scene/new.txt'), 'utf8') === 'B', '覆盖写第二次的落点正确')
+  ok(fs.readdirSync(path.join(TREE, 'scene')).filter((n) => n.startsWith('.gpm-tmp-')).length === 0,
+    '子目录写入同样不留 .gpm-tmp-* 残骸')
+
+  // 原子性的**过程**断言:上面所有断言只看结果文件,一个 `fs.writeFileSync(abs)` 的直写实现
+  // 也能全绿 —— 但直写会在写到一半时崩掉(断电/空间不足)把原文件留在半截状态,
+  // 而「同目录临时文件 + rename」在 POSIX/Windows 上都是原子替换。
+  // 所以这里钩住 fs 看它**怎么写**:先写 .gpm-tmp-* ,再 rename 到目标。
+  const calls = []
+  const realWrite = fs.writeFileSync
+  const realRename = fs.renameSync
+  fs.writeFileSync = (...a) => { calls.push(['write', a[0]]); return realWrite(...a) }
+  fs.renameSync = (...a) => { calls.push(['rename', a[0], a[1]]); return realRename(...a) }
+  let probe
+  try {
+    probe = F.writeProjectText('godot/project/p1', 'cfg.txt', 'ATOMIC\n')
+  } finally {
+    fs.writeFileSync = realWrite
+    fs.renameSync = realRename
+  }
+  const wTmp = calls.find((c) => c[0] === 'write')
+  const wRen = calls.find((c) => c[0] === 'rename')
+  const cfgAbs = path.join(TREE, 'cfg.txt')
+  ok(probe.ok === true && !!wTmp && path.basename(String(wTmp[1])).startsWith('.gpm-tmp-'),
+    '内容先落进 .gpm-tmp-* 临时文件(不是直写目标)', wTmp && wTmp[1])
+  ok(!!wTmp && path.dirname(String(wTmp[1])) === path.dirname(cfgAbs),
+    '临时文件与目标**同目录**(rename 才不跨盘、才谈得上原子)', wTmp && wTmp[1])
+  ok(!!wRen && wRen[1] === wTmp[1] && wRen[2] === cfgAbs,
+    '由 rename 把临时文件替换到目标', JSON.stringify(wRen))
+  ok(calls.every((c) => !(c[0] === 'write' && c[1] === cfgAbs)),
+    '全程没有一次 writeFileSync 直接打到目标路径')
+
+  // 失败路径:让 rename 抛一次。原语红线是「不抛异常」,且失败必须 ① 报 '写入失败'
+  // ② 原文件保持旧内容 ③ rmQuiet 清掉临时文件(否则用户项目里满是 .gpm-tmp-*)。
+  const beforeFail = fs.readFileSync(cfgAbs, 'utf8')
+  fs.renameSync = () => { throw Object.assign(new Error('simulated EXDEV'), { code: 'EXDEV' }) }
+  let wFail
+  try {
+    wFail = F.writeProjectText('godot/project/p1', 'cfg.txt', 'SHOULD-NOT-LAND')
+  } finally {
+    fs.renameSync = realRename
+  }
+  ok(wFail.ok === false && wFail.error === '写入失败', 'rename 失败 → 写入失败(只返回 error,不抛)', JSON.stringify(wFail))
+  ok(fs.readFileSync(cfgAbs, 'utf8') === beforeFail, '失败的写入没碰原文件(原子替换的意义)')
+  ok(fs.readdirSync(TREE).filter((n) => n.startsWith('.gpm-tmp-')).length === 0,
+    '失败的写入由 rmQuiet 清掉临时文件', String(fs.readdirSync(TREE).filter((n) => n.startsWith('.gpm-tmp-'))))
+
+  // 备份失败必须**停在覆写之前**:备份是这次修改唯一的退路,备份没成却照样写盘,
+  // 就等于把用户的原文件直接销毁了(工具页的「改坏了能还原」承诺当场失效)。
+  const bakBefore = fs.readdirSync(TREE).filter((n) => /^cfg\.gpm-bak-.*\.txt$/.test(n)).length
+  const realCopy = fs.copyFileSync
+  fs.copyFileSync = () => { throw Object.assign(new Error('simulated EACCES'), { code: 'EACCES' }) }
+  let wBakFail
+  try {
+    wBakFail = F.writeProjectText('godot/project/p1', 'cfg.txt', 'MUST-NOT-LAND')
+  } finally {
+    fs.copyFileSync = realCopy
+  }
+  ok(wBakFail.ok === false && wBakFail.error === '备份失败', '备份失败 → 备份失败(不继续覆写)', JSON.stringify(wBakFail))
+  ok(fs.readFileSync(cfgAbs, 'utf8') === beforeFail, '备份失败时原文件原封不动')
+  ok(fs.readdirSync(TREE).filter((n) => /^cfg\.gpm-bak-.*\.txt$/.test(n)).length === bakBefore,
+    '备份失败不留半截备份', String(fs.readdirSync(TREE).filter((n) => n.startsWith('cfg.gpm-bak'))))
+  ok(fs.readdirSync(TREE).filter((n) => n.startsWith('.gpm-tmp-')).length === 0,
+    '备份失败同样不留 .gpm-tmp-* 残骸')
+
+  // 写必须走 resolveInside(真实路径闸),而不是只有字面闸的 resolveRel:
+  // 项目内一条指向项目外的链接,resolveRel 看着完全合法,fs 却会把写落到链接目标上 ——
+  // 读取泄漏的是内容,写入改的是**别人的文件**,所以这里额外断言磁盘没被碰。
+  if (canDirLink.ok) {
+    const w3 = F.writeProjectText('godot/project/p1', 'linkdir/pwn.txt', 'PWNED')
+    ok(w3.ok === false && w3.error === '非法路径',
+      '写穿过项目内目录符号链接指向项目外 → 非法路径', JSON.stringify(w3))
+    ok(!fs.existsSync(path.join(OUT, 'pwn.txt')), '被挡住的写在项目外没留下文件')
+  } else {
+    skipAssert('写入穿过项目内目录符号链接的断言本机未执行', canDirLink.reason)
+  }
+  if (canFileLink.ok) {
+    const w4 = F.writeProjectText('godot/project/p1', 'link-out.txt', 'PWNED')
+    ok(w4.ok === false && w4.error === '非法路径',
+      '覆盖项目内指向项目外的文件符号链接 → 非法路径', JSON.stringify(w4))
+    ok(fs.readFileSync(path.join(OUT, 'secret.txt'), 'utf8') === 'SECRET-OUTSIDE-TREE\n',
+      '被挡住的写没有改动项目外的原文件')
+  } else {
+    skipAssert('写入穿过项目内文件符号链接的断言本机未执行', canFileLink.reason)
+  }
+
+  // ---------- 5b. resolveInside:项目正好落在文件系统根时不误伤 ----------
+  // realpathSync 对文件系统根('C:\\'、'/')会**保留**结尾分隔符,于是 realRoot + sep 拼出
+  // 'C:\\\\' / '//',任何子路径都不以它开头 —— 盘根项目的每次合法写/删都会被误判「非法路径」。
+  // TREE 在临时目录下,拿不到这个形态,所以这里直接对文件系统根调 resolveInside 断言。
+  section('5b. resolveInside 文件系统根前缀')
+  const FSROOT = path.parse(TREE).root // Windows 'C:\\';POSIX '/'
+  const rootReal = (() => { try { return fs.realpathSync(FSROOT) } catch (e) { return '' } })()
+  // 挑一个**确定存在、且自身不是符号链接**的根内目录:readdirSync 顺序不保证,
+  // 而 dangling symlink 会让 realpathSync 抛异常 —— 那报的是 '路径无法解析',与本节要测的
+  // 前缀拼接无关,却会让断言在别的机器上假失败。lstatSync 不跟随链接,正好用来筛掉它。
+  const someDir = (() => {
+    try {
+      return fs.readdirSync(FSROOT).find((n) => {
+        try {
+          const st = fs.lstatSync(path.join(FSROOT, n))
+          return st.isDirectory() && !st.isSymbolicLink()
+        } catch (e) { return false }
+      }) || ''
+    } catch (e) { return '' }
+  })()
+  if (rootReal && someDir) {
+    const r1 = tryResolveInside(FSROOT, someDir)
+    ok(!r1.error && typeof r1.abs === 'string',
+      `项目根为 ${JSON.stringify(FSROOT)} 时,根内已存在的目录不被误判(${someDir})`, JSON.stringify(r1))
+    const r2 = tryResolveInside(FSROOT, `${someDir}/gpm-not-here.txt`)
+    ok(!r2.error && typeof r2.abs === 'string',
+      '项目根为文件系统根时,根内**尚未存在**的路径也放行(新建文件不被挡)', JSON.stringify(r2))
+    const r3 = tryResolveInside(FSROOT, '../escape-from-root')
+    ok(r3.error === '非法路径', '文件系统根下越界仍拒(sep 修复没把闸拆掉)', JSON.stringify(r3))
+  } else {
+    skipAssert('文件系统根断言本机未执行(无法 realpath/列根目录)', `${rootReal || 'realpath 失败'} ${someDir || '找不到根内目录'}`)
+  }
+
   console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
+  console.log(`SKIP ${skips} 项未在本机执行(不计入上面的 PASS;>0 通常是本机没有创建符号链接的权限)`)
   if (failures.length) { console.log('失败项:'); for (const f of failures) console.log('  - ' + f); process.exit(1) }
   console.log('全部通过')
 }
