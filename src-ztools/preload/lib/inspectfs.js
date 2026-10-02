@@ -146,7 +146,7 @@ function relDirPrefix(rel) {
  * 写项目内文本文件:**同目录临时文件 + rename** 原子落盘,默认先把原文件备份成
  * `<名><扩展>.gpm-bak-<stampSec>`(marker 收尾,例:`player.gd.gpm-bak-20260301_1200_00`)。
  * 备份名**不保留原扩展名收尾**:否则 `player.gpm-bak-<ts>.gd` 仍以 .gd 结尾,Godot 会把它
- * 当真当一个脚本导入、scanProjectTree 会把它数成一份真实 .gd 资源、
+ * 当成真脚本导入、scanProjectTree 会把它数成一份真实 .gd 资源、
  * 导出预设 `filter include *` 甚至能把它一起打进发布包。不自动创建目录(避免把 typo 路径变成新文件)。
  * 注意:fsutil.tempPath 对文件会加 `.zip` 后缀,这里不能用它。
  *
