@@ -5,13 +5,15 @@
 //     也让 JS / Rust 两端只需比对 rel/size 序列就能验证 parity。
 //   · 读 / 写 / 删的 rel 过两道闸:resolveRel 挡字面越界(`..`、绝对路径、盘符),
 //     resolveInside 再挡「项目内的符号链接指向项目外」(realpath 后必须仍在根内)。
+//     第一道只看 rel 的字面形态,第二道才看真实落点 —— 读取漏第二道只是泄漏内容,
+//     写 / 删漏第二道改的就是**别人家的文件**(资产站 zip 解压正是项目内长链接的主路径)。
 //     遍历(scanProjectTree)不走这两道闸:它只列出 root 下的条目、由 fsutil.walkFiles
 //     自己逐级下钻,既不接收外部 rel 也不写盘,没有可越界的入参。
-//   · 读写原语都不抛异常,一律返回 { ok:false, error } —— 工具页要在结论里显示原因。
+//   · 读 / 写 / 删原语都不抛异常,一律返回 { ok:false, error } —— 工具页要在结论里显示原因。
 const fs = require('node:fs')
 const path = require('node:path')
 const { getDoc } = require('./store')
-const { walkFiles, makeExcluder, stampSec, rmQuiet, uniquePath } = require('./fsutil')
+const { walkFiles, makeExcluder, stampSec, rmQuiet, uniquePath, trashPaths } = require('./fsutil')
 
 const DEFAULT_MAX_BYTES = 1024 * 1024
 const DEFAULT_MAX_ENTRIES = 200000
@@ -268,4 +270,44 @@ function scanProjectTree(projectId, opts) {
   return { ok: true, files, truncated: false }
 }
 
-module.exports = { projectRoot, resolveRel, resolveInside, DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES, scanProjectTree, readProjectText, writeProjectText }
+/**
+ * 批量移入回收站(Windows)/永久删除(其他平台,见 fsutil.trashPath :215-219)。
+ * 单个失败**不中断其余**,失败项原样返回 { rel, error } —— 调用方据此提示「N 项成功、M 项失败」;
+ * ok 仅在零失败时为 true,moved 只计真正成功的那几项。空清单不是错误(→ ok:true, moved:0)。
+ *
+ * 闸用 resolveInside,与 writeProjectText 同一道:删除是读/写/删三翼里最重的一翼 ——
+ * resolveRel 只看 rel 的字面形态,项目内一条指向项目外的链接(资产站 zip 解压带进来的形态)
+ * 在它看来完全合法,而 PowerShell / rmSync 会跟随真实落点,把**别人家的一棵树**送进回收站。
+ * fsutil.trashPaths 回的是失败项的**绝对路径**,这里按 abs→rel 映射回去:对外只有 rel 一个键。
+ * 错误串一律取闸的原话('非法路径' / '路径无法解析';闸的 '目标目录不存在' 在删除侧够不着,
+ * 因为项目根总是那个已存在的祖先,缺失形态统一由 stat 收敛到 '文件不存在'),
+ * '项目不存在' 只来自 projectRoot,'移入回收站失败' 来自 trashPaths:
+ * Node 的 EPERM 英文串既不稳定也无处对照(Rust 侧 Task 7 逐字镜像同一批串)。
+ * @param {string} projectId
+ * @param {string[]} rels
+ * @returns {import('../../../src/types/godot').TrashResult}
+ */
+function movePathsToTrash(projectId, rels) {
+  const root = projectRoot(projectId)
+  if (!root) return { ok: false, error: '项目不存在' }
+  /** @type {{path: string, isDir: boolean, rel: string}[]} */
+  const items = []
+  /** @type {{rel: string, error: string}[]} */
+  const failed = []
+  for (const raw of rels || []) {
+    const rel = typeof raw === 'string' ? raw.replace(/\\/g, '/') : ''
+    const g = resolveInside(root, rel)
+    const abs = g.abs
+    // 闸的失败项带的是**调用方原样**的 rel(非字符串也 String 化):这一项根本没碰到盘,
+    // 归一化后的形态反而让渲染层对不回它点名的那一条。
+    if (!abs) { failed.push({ rel: String(raw), error: g.error || '非法路径' }); continue }
+    let st
+    try { st = fs.statSync(abs) } catch (e) { failed.push({ rel, error: '文件不存在' }); continue }
+    items.push({ path: abs, isDir: st.isDirectory(), rel })
+  }
+  const failedAbs = new Set(trashPaths(items.map((i) => ({ path: i.path, isDir: i.isDir }))))
+  for (const i of items) if (failedAbs.has(i.path)) failed.push({ rel: i.rel, error: '移入回收站失败' })
+  return { ok: failed.length === 0, moved: items.length - failedAbs.size, failed }
+}
+
+module.exports = { projectRoot, resolveRel, resolveInside, DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES, scanProjectTree, readProjectText, writeProjectText, movePathsToTrash }

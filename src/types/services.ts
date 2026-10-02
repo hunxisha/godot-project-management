@@ -137,6 +137,8 @@ export interface Services {
   readProjectText(projectId: string, rel: string, opts?: { maxBytes?: number }): ReadTextResult
   /** 写项目内文本文件(同目录临时文件 + rename;默认先备份 .gpm-bak-<时间戳>) */
   writeProjectText(projectId: string, rel: string, text: string, opts?: { backup?: boolean }): WriteTextResult
+  /** 批量移入回收站(Windows)/永久删除(其他平台);单个失败不中断,失败项如实返回 */
+  movePathsToTrash(projectId: string, rels: string[]): TrashResult
   /** 添加项目(目录或 project.godot 文件路径) */
   addProject(inputPath: string): {
     ok: boolean

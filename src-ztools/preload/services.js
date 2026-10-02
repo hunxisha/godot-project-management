@@ -73,6 +73,8 @@ const servicesImpl = {
   readProjectText: (projectId, rel, opts) => inspectfs.readProjectText(projectId, rel, opts),
   /** 写项目内文本文件(原子落盘 + 自动备份) */
   writeProjectText: (projectId, rel, text, opts) => inspectfs.writeProjectText(projectId, rel, text, opts),
+  /** 批量移入回收站(工具页删除类修复的唯一出口) */
+  movePathsToTrash: (projectId, rels) => inspectfs.movePathsToTrash(projectId, rels),
   /** 列出项目的导出预设(解析 export_presets.cfg) */
   listExportPresets: (projectId) => exporter.listExportPresets(projectId),
   /** 发起导出(入队,进度走 watchExportTasks,任务 kind='export') */

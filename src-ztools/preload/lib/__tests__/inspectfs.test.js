@@ -614,6 +614,131 @@ async function main() {
       `${rootReal || 'realpath 根目录失败'} ${someDir || '没有 realpath 问得到的候选目录'}`)
   }
 
+  // ---------- 6. movePathsToTrash ----------
+  // 三条红线:
+  //  ① 删除只走 resolveInside(真实路径闸),不走只有字面判断的 resolveRel。
+  //     项目内一条指向项目外的符号链接在 resolveRel 看来完全合法(rel 里没有 `..`),
+  //     而 fs / PowerShell 会跟随它 —— 读的时候只是泄漏内容,删的时候删的是**别人家的文件**。
+  //  ② 单项失败不中断其余:工具页要按「N 项成功、M 项失败」出结论,失败项必须原样带回。
+  //  ③ 空清单不是错误(moved:0)。
+  // 平台语义:fsutil.trashPath 在 Windows 进回收站、macOS/Linux 是永久删除,
+  // 所以这里只断言「消失」,不断言「可还原」。
+  // 编号说明:计划里这节写的是「4.」,但 Tasks 3-4 已占用 3/4/5/5b 四节,这里顺延为 6。
+  section('6. movePathsToTrash')
+  const trashRoot = makeTree('trashproj', { 'a.txt': 'A', 'b.txt': 'B', 'sub/c.txt': 'C' })
+  DB.set('godot/project/t1', { _id: 'godot/project/t1', id: 't1', path: trashRoot, name: 'T' })
+  /** 删除属动物件:异常一律摊成一条指名 FAIL,不能让脚本崩在堆栈上(与 tryResolve 同形) */
+  function tryTrash(projectId, rels) {
+    try { return F.movePathsToTrash(projectId, rels) } catch (e) { return { error: 'threw: ' + e.message } }
+  }
+  const tr = F.movePathsToTrash('godot/project/t1', ['a.txt', 'sub', 'nope.txt', '../evil'])
+  ok(!fs.existsSync(path.join(trashRoot, 'a.txt')), '单文件已消失')
+  ok(!fs.existsSync(path.join(trashRoot, 'sub')), '目录整体消失(含子文件)')
+  ok(fs.existsSync(path.join(trashRoot, 'b.txt')), '未点名的文件不受影响')
+  ok(tr.failed.some((f) => f.rel === 'nope.txt'), '缺失项进 failed 且不中断其余', JSON.stringify(tr.failed))
+  ok(tr.failed.some((f) => f.rel === '../evil' && f.error === '非法路径'), '越界项进 failed 并标非法路径')
+  ok(tr.ok === false && tr.moved === 2, '有失败则 ok:false,moved 只计成功数', JSON.stringify({ ok: tr.ok, moved: tr.moved }))
+  ok(F.movePathsToTrash('godot/project/t1', []).ok === true, '空清单 → ok:true')
+  ok(F.movePathsToTrash('godot/project/t1', []).moved === 0, '空清单 moved:0')
+  ok(F.movePathsToTrash('godot/project/none', ['a']).error === '项目不存在', '未知项目 → 项目不存在')
+
+  // ---------- 6b. 删除必须过真实路径闸(resolveInside),不得退回字面闸 ----------
+  // 上面那组里 '../evil' 靠**文本**就能挡住,换成项目内的链接就挡不住了:
+  // rel 里没有 `..`、没有盘符,resolveRel 放行,落点却在项目外。
+  // 所以这组断言是「实现有没有真的用 resolveInside」的唯一证据 ——
+  // 把实现改回 resolveRel,两条都会红(一条是 failed 里没了这一项,一条是项目外文件被删走)。
+  section('6b. 删除穿过项目内符号链接指向项目外 → 拒绝')
+  const OUT2 = path.join(WORK, 'trash-outside')
+  fs.mkdirSync(OUT2, { recursive: true })
+  fs.writeFileSync(path.join(OUT2, 'victim.txt'), 'MUST-SURVIVE\n', 'utf8')
+  const canTrashLink = trySymlink(OUT2, path.join(trashRoot, 'link-out-dir'), 'dir')
+  if (canTrashLink.ok) {
+    const victim = path.join(OUT2, 'victim.txt')
+    const t6 = F.movePathsToTrash('godot/project/t1', ['link-out-dir'])
+    ok(t6.ok === false && t6.moved === 0 &&
+      t6.failed.some((f) => f.rel === 'link-out-dir' && f.error === '非法路径'),
+      '项目内目录符号链接指向项目外 → 该项进 failed 标非法路径', JSON.stringify(t6))
+    ok(fs.existsSync(victim) && fs.readFileSync(victim, 'utf8') === 'MUST-SURVIVE\n',
+      '被挡住的删除没有波及项目外的文件(删除是动物件:漏一次闸就是删别人家数据)')
+    ok(fs.existsSync(path.join(trashRoot, 'link-out-dir')), '链接本身也还在(拒绝即不动盘)')
+  } else {
+    skipAssert('删除穿过项目内目录符号链接的断言本机未执行', canTrashLink.reason)
+  }
+
+  // ---------- 6c. 回收站真失败:不中断其余、moved 不数它、且不硬删兜底 ----------
+  // 6 的失败项都出在**闸**上(没碰到盘),这条把它出在 trash 那一步:
+  //  · 只断言闸的失败,挡不住「trash 阶段一遇错就 break」——那种实现下
+  //    后面几项根本不会被删,而 6 组里成功项排在失败项之前,照样全绿;
+  //  · 也挡不住 `moved: items.length` —— 6 组里 items.length 恰好等于成功数 2。
+  // 注入方式:按平台各自的分叉点打钩(Windows 走 PowerShell 的 execSync,
+  // POSIX 走 fs.unlinkSync),命中 doomed 那一项才抛,其余照常放行。
+  // 匹配用**文件名**而不是绝对路径:fsutil 把路径塞进 JSON.stringify 后再塞进整条命令的
+  // JSON.stringify,反斜杠被翻倍两轮('C:\\\\x'),拿 abs 或 JSON.stringify(abs) 去 includes
+  // 都匹配不上 —— 探针会静默不命中,于是这组断言全在空跑。
+  section('6c. 回收站单项失败(注入)')
+  const trashRoot2 = makeTree('trashproj2', { 'doomed.txt': 'D', 'ok2.txt': 'O' })
+  DB.set('godot/project/t2', { _id: 'godot/project/t2', id: 't2', path: trashRoot2, name: 'T2' })
+  const cp = require('node:child_process')
+  const doomedAbs = path.join(trashRoot2, 'doomed.txt')
+  const ok2Abs = path.join(trashRoot2, 'ok2.txt')
+  const realExecSync = cp.execSync
+  const realUnlinkSync = fs.unlinkSync
+  const hitsDoomed = (arg) => String(arg).includes('doomed.txt')
+  let injected = 0
+  cp.execSync = (...a) => { if (hitsDoomed(a[0])) { injected++; throw new Error('simulated recycle-bin failure') } return realExecSync(...a) }
+  fs.unlinkSync = (p, ...rest) => { if (hitsDoomed(p)) { injected++; throw new Error('simulated EPERM') } return realUnlinkSync(p, ...rest) }
+  let t7
+  try {
+    t7 = F.movePathsToTrash('godot/project/t2', ['doomed.txt', 'ok2.txt'])
+  } finally {
+    cp.execSync = realExecSync
+    fs.unlinkSync = realUnlinkSync
+  }
+  ok(injected === 1, '探针确实只命中 doomed 那一项(断言不是空跑)', String(injected))
+  ok(t7.ok === false && t7.moved === 1, 'moved 只数真正成功的 1 项(不是 items.length)', JSON.stringify({ ok: t7.ok, moved: t7.moved }))
+  ok(t7.failed.some((f) => f.rel === 'doomed.txt' && f.error === '移入回收站失败'),
+    '回收站失败 → failed 里是「移入回收站失败」(钉住这条串,Rust 侧逐字镜像)', JSON.stringify(t7.failed))
+  ok(!fs.existsSync(ok2Abs), '失败项之后的项照常被删除(不中断其余)', fs.readdirSync(trashRoot2).join(','))
+  ok(fs.existsSync(doomedAbs) && fs.readFileSync(doomedAbs, 'utf8') === 'D',
+    '回收站失败后不得退化成硬删:原文件还在原地', fs.readdirSync(trashRoot2).join(','))
+
+  // ---------- 6d. 入参畸形也不抛异常(只读/写/删原语的共同红线)----------
+  section('6d. 不抛异常 + 闸错误串如实透传')
+  const t8 = tryTrash('godot/project/t1', null)
+  ok(!String(t8.error || '').startsWith('threw') && t8.ok === true && t8.moved === 0,
+    'rels 为 null → 按空清单处理(不抛)', JSON.stringify(t8))
+  const t9 = tryTrash('godot/project/t1', [42, undefined, ''])
+  ok(!String(t9.error || '').startsWith('threw') && t9.ok === false && t9.moved === 0 &&
+    t9.failed.length === 3 && t9.failed.every((f) => f.error === '非法路径'),
+    '非字符串/空 rel 逐项标非法路径,不抛也不误删', JSON.stringify(t9.failed))
+  // 父目录也不存在的 rel:resolveInside 会退到最近的已存在祖先(项目根本身总在),
+  // 所以 '目标目录不存在' 那条在删除侧**够不着**,一律由后面的 stat 报 '文件不存在'。
+  // 这里钉住的是「所有缺失形态都收敛到同一句『文件不存在』」——Rust 侧 Task 7 只需镜像这一句。
+  const t10 = F.movePathsToTrash('godot/project/t1', ['nodir/x.txt'])
+  ok(t10.ok === false && t10.moved === 0 &&
+    t10.failed.some((f) => f.rel === 'nodir/x.txt' && f.error === '文件不存在'),
+    '父目录也不存在的缺失项 → 文件不存在(不报目录不存在、不抛)', JSON.stringify(t10.failed))
+  // rel 写成 Windows 反斜杠形态也要能删(对外只有 rel 一个键,形态必须容忍 —— 与 resolveRel 一致)。
+  fs.mkdirSync(path.join(trashRoot, 'sub2'), { recursive: true })
+  fs.writeFileSync(path.join(trashRoot, 'sub2', 'y.txt'), 'Y\n', 'utf8')
+  const t11 = F.movePathsToTrash('godot/project/t1', ['sub2\\y.txt'])
+  ok(t11.ok === true && t11.moved === 1, '反斜杠形态的 rel 照常解析并删除', JSON.stringify(t11))
+  ok(!fs.existsSync(path.join(trashRoot, 'sub2', 'y.txt')), '反斜杠 rel 的落点正确(目标文件已消失)')
+  const t12 = F.movePathsToTrash('godot/project/t1', ['sub2'])
+  ok(t12.ok === true && t12.moved === 1 && !fs.existsSync(path.join(trashRoot, 'sub2')),
+    '清空后的目录本身也是合法删除对象(不留空壳)')
+
+  // ---------- 6e. 残骸核对:fixture 里只剩预期文件 ----------
+  // 顺带钉住「删除只动点名项」:b.txt 与被拒绝的链接都还在,被拒的父目录没被顺手建/删。
+  section('6e. 测试残骸核对')
+  const leftTrash = fs.readdirSync(trashRoot).sort()
+  const wantLeft = ['b.txt'].concat(canTrashLink.ok ? ['link-out-dir'] : []).sort()
+  ok(leftTrash.join(',') === wantLeft.join(','),
+    'trashproj 里只剩预期文件(未点名项零改动)', leftTrash.join(','))
+  ok(!fs.readdirSync(trashRoot).some((n) => n.startsWith('.gpm-tmp-')),
+    '删除流程不产生 .gpm-tmp-* 残骸')
+  ok(!fs.existsSync(path.join(trashRoot, 'nodir')), '被拒绝的删除没在项目里长出目录树')
+
   console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
   console.log(`SKIP ${skips} 项未在本机执行(不计入上面的 PASS;>0 通常是本机没有创建符号链接的权限)`)
   if (failures.length) { console.log('失败项:'); for (const f of failures) console.log('  - ' + f); process.exit(1) }
