@@ -61,6 +61,29 @@ const TREE = makeTree('proj', {
 })
 DB.set('godot/project/p1', { _id: 'godot/project/p1', id: 'p1', path: TREE, name: 'Demo' })
 
+// resolveRel 的断言只比 rel(相对 root、正斜杠),不比绝对路径 —— 绝对路径的分隔符随平台变,
+// 而这条闸的全部安全语义(拒越界 / 容错 . 与重复斜杠)都落在 rel 上。
+// 期望值统一用 path.join(TREE, …) 生成再剥前缀,同一条断言在 Windows 与 *nix 上都成立。
+const BASE = TREE.split(path.sep).join('/')
+/** 绝对路径 → 归一化 rel;不在 TREE 之内(或非字符串)一律 null */
+function relOf(abs) {
+  if (typeof abs !== 'string') return null
+  const n = abs.split(path.sep).join('/')
+  return n.startsWith(BASE + '/') ? n.slice(BASE.length + 1) : null
+}
+/** 期望 rel:用平台正确的 path.join 拼出来,再剥掉 TREE 前缀 */
+function wantRel(...segs) {
+  return relOf(path.join(TREE, ...segs))
+}
+/**
+ * resolveRel 属只读原语,红线是「不抛异常」—— 非法输入必须返回 null。
+ * 这里把异常也变成一个可断言的值:守卫被删掉时报一条指名 FAIL,
+ * 而不是让整个脚本崩在堆栈上(那样其余断言就白跑了)。
+ */
+function tryResolve(root, rel) {
+  try { return F.resolveRel(root, rel) } catch (e) { return 'threw: ' + e.message }
+}
+
 async function main() {
   // ---------- 1. scanProjectTree ----------
   section('1. scanProjectTree')
@@ -98,6 +121,35 @@ async function main() {
   ok(F.scanProjectTree('godot/project/none').error === '项目不存在', '错误串为「项目不存在」')
   DB.set('godot/project/gone', { _id: 'godot/project/gone', id: 'gone', path: path.join(WORK, 'nope'), name: 'x' })
   ok(F.scanProjectTree('godot/project/gone').error === '项目目录已不存在', '目录被删 → 明确报错')
+
+  // ---------- 1b. resolveRel 路径闸 ----------
+  // scanProjectTree 不调用 resolveRel,所以第 1 节没覆盖到它。这条闸是模块头的红线之一
+  // (`..`、绝对路径、盘符都直接拒),后面 Task 3-5 的读 / 写 / 删全靠它兜底 —— 必须直接断言,
+  // 否则删掉盘符正则或 `!root` 守卫,CI 还是绿的。
+  section('1b. resolveRel 路径闸(直接断言)')
+  ok(relOf(F.resolveRel(TREE, 'scene/main.tscn')) === wantRel('scene', 'main.tscn'),
+    '多级正常路径原样解析', F.resolveRel(TREE, 'scene/main.tscn'))
+  ok(relOf(F.resolveRel(TREE, './a/b.txt')) === wantRel('a', 'b.txt'),
+    '开头的 ./ 被吃掉', F.resolveRel(TREE, './a/b.txt'))
+  ok(relOf(F.resolveRel(TREE, 'a//b')) === wantRel('a', 'b'),
+    '重复斜杠折叠为 a/b', F.resolveRel(TREE, 'a//b'))
+  ok(relOf(F.resolveRel(TREE, 'scene\\main.tscn')) === wantRel('scene', 'main.tscn'),
+    'Windows 反斜杠形态同样接受', F.resolveRel(TREE, 'scene\\main.tscn'))
+  ok(['scene/main.tscn', './a/b.txt', 'a//b', 'scene\\main.tscn']
+    .every((p) => typeof F.resolveRel(TREE, p) === 'string' &&
+      F.resolveRel(TREE, p).split(path.sep).join('/').startsWith(BASE + '/')),
+    '正例返回值一律落在项目根内(不越界)')
+
+  // 逐条单列:哪一条漂了就精确指向哪个守卫(前缀 / .. / 绝对 / 盘符)。
+  const ESCAPE = ['../evil', 'a/../../evil', '/etc/passwd', 'C:/Windows/x.exe',
+    'c:\\Windows\\x.exe', '', '.', '//']
+  for (const bad of ESCAPE) {
+    ok(tryResolve(TREE, bad) === null, `拒绝越界/绝对路径 ${JSON.stringify(bad)}`, tryResolve(TREE, bad))
+  }
+
+  ok(tryResolve(null, 'a.txt') === null, 'root 为 null → null(不退回相对 cwd)', tryResolve(null, 'a.txt'))
+  ok(tryResolve(TREE, 42) === null, '非字符串 rel(number)→ null', tryResolve(TREE, 42))
+  ok(tryResolve(TREE, undefined) === null, '非字符串 rel(undefined)→ null', tryResolve(TREE, undefined))
 
   console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
   if (failures.length) { console.log('失败项:'); for (const f of failures) console.log('  - ' + f); process.exit(1) }
