@@ -211,10 +211,19 @@ fn scan_project_tree(state: State<AppState>, project_id: String, opts: Option<Va
         include_cache: o.get("includeCache").and_then(|v| v.as_bool()).unwrap_or(false),
         exts: list("exts"),
         skip_dirs: list("skipDirs"),
-        max_entries: o.get("maxEntries").and_then(|v| v.as_u64())
-            .map(|n| n as usize).unwrap_or(godot_workshop::inspectfs::DEFAULT_MAX_ENTRIES),
+        max_entries: max_entries_of(&o),
     };
     godot_workshop::inspectfs::scan_json(&root, &scan)
+}
+
+/// maxEntries 归一:0 / 负数 / 非数字 / 缺省一律退默认,与 JS 侧
+/// `o.maxEntries && o.maxEntries > 0 ? o.maxEntries : DEFAULT_MAX_ENTRIES` 同语义(inspectfs.js:249)。
+/// 0 不是「不限」而是非法值 —— `collect_tree` 的上限检查在 push 之后,原样透传就变成
+/// 「回 1 条 + truncated:true」,体检结论整个反了。
+fn max_entries_of(o: &Value) -> usize {
+    o.get("maxEntries").and_then(|v| v.as_u64())
+        .filter(|n| *n > 0)
+        .map(|n| n as usize).unwrap_or(godot_workshop::inspectfs::DEFAULT_MAX_ENTRIES)
 }
 
 /// 4 个原语共用:projectId → 项目根(与 list_export_presets 同一取法)。
@@ -1183,4 +1192,22 @@ fn main() {
         .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, scan_project_tree, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets, create_project, uninstall_addon, install_asset, run_export, cancel_export_task, docs_generate, docs_import, docs_library_status, docs_list_classes, docs_get_class, docs_search, docs_search_full_text, docs_delete_library, docs_diff_libraries, fetch_releases_cmd, cancel_task, dismiss_task, search_assets, list_featured_cmd, list_all_assets_cmd, list_new_assets_cmd, list_recently_updated_cmd, list_project_assets_cmd, restore_backup])
         .run(tauri::generate_context!())
         .expect("tauri 应用启动失败");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// F-2:`maxEntries` 的 0 / 负数 / 非数字都必须回落默认(与 JS 侧 scanProjectTree 同归一)。
+    /// 少了 `>0` 那道闸时 0 会被原样送进 collect_tree,回「1 条 + truncated:true」。
+    #[test]
+    fn max_entries_of_falls_back_to_default_for_zero_and_garbage() {
+        let d = godot_workshop::inspectfs::DEFAULT_MAX_ENTRIES;
+        assert_eq!(max_entries_of(&json!({ "maxEntries": 0 })), d, "0 必须退默认而不是当上限用");
+        assert_eq!(max_entries_of(&json!({ "maxEntries": -1 })), d, "负数退默认");
+        assert_eq!(max_entries_of(&json!({ "maxEntries": "30" })), d, "非数字退默认");
+        assert_eq!(max_entries_of(&json!({ "maxEntries": null })), d, "null 退默认");
+        assert_eq!(max_entries_of(&json!({})), d, "缺省退默认");
+        assert_eq!(max_entries_of(&json!({ "maxEntries": 25 })), 25, "正整数原样生效");
+    }
 }
