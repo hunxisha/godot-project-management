@@ -590,3 +590,52 @@ export const DOC_PREFIX = {
   backup: 'godot/backup/',
   asset: 'godot/asset/'
 } as const
+
+// ---------- 工具页（项目体检）原语的返回类型 ----------
+// 见 docs/tools-page-plan.md §5.4。rel 一律是「相对项目根、正斜杠」的路径。
+
+/** scanProjectTree 的单条文件记录 */
+export interface TreeEntry {
+  /** 相对项目根,正斜杠。如 `scene/main.tscn` */
+  rel: string
+  /** 字节数 */
+  size: number
+  /** 最后修改时间(毫秒)。缓存体检靠它判断陈旧 */
+  mtimeMs: number
+  /** 小写扩展名,不含点。无扩展名时为空串 */
+  ext: string
+}
+
+export interface ScanTreeResult {
+  ok: boolean
+  error?: string
+  files?: TreeEntry[]
+  /** 命中 maxEntries 时 true:调用方必须在结论里标注「基于部分文件」 */
+  truncated?: boolean
+}
+
+export interface ReadTextResult {
+  ok: boolean
+  error?: string
+  text?: string
+  /** 文件字节数(截断/跳过时也会给) */
+  bytes?: number
+  /** 超过 maxBytes:未返回 text */
+  truncated?: boolean
+  /** 前 512 字节含 NUL:未返回 text */
+  skippedBinary?: boolean
+}
+
+export interface WriteTextResult {
+  ok: boolean
+  error?: string
+  /** 原文件的备份相对路径(未备份或原先无文件时为 undefined) */
+  backupRel?: string
+}
+
+export interface TrashResult {
+  ok: boolean
+  error?: string
+  moved?: number
+  failed?: { rel: string; error: string }[]
+}
