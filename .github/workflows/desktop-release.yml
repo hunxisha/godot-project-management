@@ -88,5 +88,5 @@ jobs:
             gh release create "$TAG" -R "$REPO" --draft --title "桌面版 $VER" \
               --notes-file desktop/RELEASE_NOTES.md
           fi
-          gh release upload "$TAG" -R "$REPO" dist/* --clobber
+          find dist -type f -print0 | xargs -0 gh release upload "$TAG" -R "$REPO" --clobber
           echo "产物已附到草稿 Release($TAG);请在 GitHub 上核对后手动发布。"
