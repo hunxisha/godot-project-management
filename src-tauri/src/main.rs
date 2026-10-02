@@ -981,6 +981,157 @@ async fn store_get(client: &reqwest::Client, url: &str) -> Value {
         .and_then(|r| async move { r.json::<Value>().await.ok() }.into()).is_some().then(|| Value::Null).unwrap_or(Value::Null)
 }
 
+
+// ---------- 市场浏览命令(端点与 lib/assetapi.js 一致) ----------
+
+async fn store_json(proxy: Option<String>, url: &str) -> Result<Value, String> {
+    let client = godot_workshop::http::client_with_proxy(proxy.as_deref())?;
+    let resp = client.get(url).send().await.map_err(|e| format!("市场请求失败:{e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("市场 HTTP {}", resp.status()));
+    }
+    resp.json::<Value>().await.map_err(|e| format!("市场解析失败:{e}"))
+}
+
+fn map_asset(a: &Value) -> Value {
+    let asset_id = format!(
+        "{}/{}",
+        a.get("publisher").and_then(|p| p.get("slug")).and_then(|v| v.as_str()).unwrap_or(""),
+        a.get("slug").and_then(|v| v.as_str()).unwrap_or("")
+    );
+    let tags: Vec<String> = a.get("tags").and_then(|v| v.as_array()).map(|t| {
+        t.iter().filter_map(|x| x.get("slug").and_then(|s| s.as_str()).map(String::from)).collect()
+    }).unwrap_or_default();
+    serde_json::json!({
+        "assetId": asset_id,
+        "title": a.get("name").cloned().unwrap_or(Value::Null),
+        "author": a.get("publisher").and_then(|p| p.get("name")).cloned().unwrap_or(Value::Null),
+        "category": a.get("tags").and_then(|t| t.as_array()).and_then(|t| t.first()).and_then(|t| t.get("display_name")).cloned().unwrap_or(Value::Null),
+        "tagSlugs": tags,
+        "versionString": "",
+        "godotVersion": "",
+        "iconUrl": a.get("thumbnail").cloned().unwrap_or(Value::Null),
+        "description": a.get("description").cloned().unwrap_or(Value::Null),
+        "storeUrl": a.get("store_url").cloned().unwrap_or(Value::Null),
+    })
+}
+
+async fn market_page(proxy: Option<String>, query: &str, page: u64) -> Result<Value, String> {
+    let v = store_json(proxy, query).await?;
+    let result: Vec<Value> = v.as_array().map(|a| a.iter().map(map_asset).collect()).unwrap_or_default();
+    Ok(serde_json::json!({ "result": result, "page": page, "pages": 1 }))
+}
+
+#[tauri::command]
+async fn search_assets(state: State<'_, AppState>, versions: State<'_, Versions>, filter: String, godot_version: Option<String>, page: Option<u64>, asset_type: Option<u64>) -> Result<Value, ()> {
+    let proxy = versions.proxy.lock().unwrap().clone();
+    let t = asset_type.unwrap_or(0);
+    let mut q = format!(
+        "https://store.godotengine.org/api/v1/search/query/?query={}&type={}&require_release=true&page={}&batch_size=20",
+        filter, t, page.unwrap_or(1)
+    );
+    if let Some(gv) = godot_version.filter(|s| !s.is_empty()) {
+        q.push_str(&format!("&godot_version={gv}"));
+    }
+    let v = store_json(proxy, &q).await.unwrap_or(serde_json::json!([]));
+    let empty = Vec::new();
+    let rows = v.get("result").and_then(|r| r.as_array()).unwrap_or(&empty);
+    let count = v.get("count").and_then(|c| c.as_u64()).unwrap_or(0);
+    let page_n = page.unwrap_or(1);
+    Ok(serde_json::json!({
+        "result": rows.iter().map(map_asset).collect::<Vec<_>>(),
+        "page": page_n,
+        "pages": std::cmp::max(1, count.div_ceil(20)),
+    }))
+}
+
+#[tauri::command]
+async fn list_featured_cmd(versions: State<'_, Versions>) -> Result<Value, ()> {
+    let proxy = versions.proxy.lock().unwrap().clone();
+    let v = store_json(proxy, "https://store.godotengine.org/api/v1/assets/?type=0&featured_only=true&require_release=true&page_size=20").await.unwrap_or(serde_json::json!([]));
+    Ok(Value::Array(v.as_array().map(|a| a.iter().map(map_asset).collect()).unwrap_or_default()))
+}
+
+#[tauri::command]
+async fn list_all_assets_cmd(versions: State<'_, Versions>, page: Option<u64>) -> Result<Value, ()> {
+    let proxy = versions.proxy.lock().unwrap().clone();
+    let pg = page.unwrap_or(1);
+    market_page(proxy, &format!("https://store.godotengine.org/api/v1/assets/?type=0&require_release=true&page_size=20&page={pg}"), pg).await.map_err(|_| ())
+}
+
+#[tauri::command]
+async fn list_new_assets_cmd(versions: State<'_, Versions>) -> Result<Value, ()> {
+    let proxy = versions.proxy.lock().unwrap().clone();
+    let v = store_json(proxy, "https://store.godotengine.org/api/v1/assets/?type=0&require_release=true&order=-create_date&page_size=40").await.unwrap_or(serde_json::json!([]));
+    Ok(Value::Array(v.as_array().map(|a| a.iter().map(map_asset).collect()).unwrap_or_default()))
+}
+
+#[tauri::command]
+async fn list_recently_updated_cmd(versions: State<'_, Versions>) -> Result<Value, ()> {
+    let proxy = versions.proxy.lock().unwrap().clone();
+    let v = store_json(proxy, "https://store.godotengine.org/api/v1/assets/?type=0&require_release=true&order=-modified_date&page_size=40").await.unwrap_or(serde_json::json!([]));
+    Ok(Value::Array(v.as_array().map(|a| a.iter().map(map_asset).collect()).unwrap_or_default()))
+}
+
+#[tauri::command]
+async fn list_project_assets_cmd(versions: State<'_, Versions>, page: Option<u64>) -> Result<Value, ()> {
+    let proxy = versions.proxy.lock().unwrap().clone();
+    let pg = page.unwrap_or(1);
+    market_page(proxy, &format!("https://store.godotengine.org/api/v1/assets/?type=1&require_release=true&order=-modified_date&page_size=20&page={pg}"), pg).await.map_err(|_| ())
+}
+
+#[tauri::command]
+fn restore_backup(state: State<AppState>, backup_id: String, mode: String, dest_dir: Option<String>, new_name: Option<String>) -> Value {
+    let mut st = state.store.lock().unwrap();
+    let Some(rec) = st.get(&backup_id) else { return serde_json::json!({ "ok": false, "error": "备份记录不存在" }); };
+    let Some(src) = rec.get("destPath").and_then(|v| v.as_str()).map(std::path::PathBuf::from) else {
+        return serde_json::json!({ "ok": false, "error": "记录缺少路径" });
+    };
+    if mode == "overwrite" {
+        // 项目当前路径覆盖恢复
+        let Some(pid) = rec.get("projectId").and_then(|v| v.as_str()).map(String::from) else {
+            return serde_json::json!({ "ok": false, "error": "记录缺少项目 id" });
+        };
+        let Some(proj) = st.get(&pid) else { return serde_json::json!({ "ok": false, "error": "原项目已删除" }); };
+        let Some(path) = proj.get("path").and_then(|v| v.as_str()).map(std::path::PathBuf::from) else {
+            return serde_json::json!({ "ok": false, "error": "项目缺少路径" });
+        };
+        match godot_workshop::backup::restore(&src, &path, true) {
+            Ok(n) => serde_json::json!({ "ok": true, "entries": n }),
+            Err(e) => serde_json::json!({ "ok": false, "error": e }),
+        }
+    } else {
+        let Some(dest_dir) = dest_dir else { return serde_json::json!({ "ok": false, "error": "缺少恢复位置" }); };
+        let name = new_name.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| format!("restored-{backup_id}"));
+        let dir = std::path::PathBuf::from(&dest_dir).join(&name);
+        if dir.exists() { return serde_json::json!({ "ok": false, "error": format!("目录已存在:{name}") }); }
+        match godot_workshop::backup::restore(&src, &dir, false) {
+            Ok(n) => {
+                // 登记为新项目(复用 projects 的解析与 id 规则)
+                let id = godot_workshop::projects::project_doc_id(&dir);
+                let text = std::fs::read_to_string(dir.join("project.godot")).unwrap_or_default();
+                let (pname, cfg, ev, _icon, _pl) = godot_workshop::projects::parse_project_godot_text(&text);
+                let versions = st.all_docs("godot/version/");
+                let vid = godot_workshop::projects::match_version(&(cfg, ev.clone()), &versions);
+                let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+                let project = serde_json::json!({
+                    "id": id, "path": dir.to_string_lossy(),
+                    "name": if pname.is_empty() { name.clone() } else { pname },
+                    "configVersion": cfg, "engineVersion": ev, "versionId": vid,
+                    "favorite": false, "openCount": 0, "addedAt": now_ms,
+                });
+                let res = st.put(&project);
+                if res.get("ok") == Some(&serde_json::json!(true)) {
+                    serde_json::json!({ "ok": true, "entries": n, "newProjectName": name, "newProjectId": id })
+                } else {
+                    serde_json::json!({ "ok": false, "error": "恢复完成但登记失败" })
+                }
+            }
+            Err(e) => serde_json::json!({ "ok": false, "error": e }),
+        }
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -996,7 +1147,7 @@ fn main() {
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets, create_project, uninstall_addon, install_asset, run_export, cancel_export_task, docs_generate, docs_import, docs_library_status, docs_list_classes, docs_get_class, docs_search, docs_search_full_text, docs_delete_library, docs_diff_libraries, fetch_releases_cmd, cancel_task, dismiss_task])
+        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets, create_project, uninstall_addon, install_asset, run_export, cancel_export_task, docs_generate, docs_import, docs_library_status, docs_list_classes, docs_get_class, docs_search, docs_search_full_text, docs_delete_library, docs_diff_libraries, fetch_releases_cmd, cancel_task, dismiss_task, search_assets, list_featured_cmd, list_all_assets_cmd, list_new_assets_cmd, list_recently_updated_cmd, list_project_assets_cmd, restore_backup])
         .run(tauri::generate_context!())
         .expect("tauri 应用启动失败");
 }
