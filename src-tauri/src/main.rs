@@ -421,6 +421,287 @@ fn list_export_presets(state: State<AppState>, project_id: String) -> Value {
     serde_json::json!({ "ok": true, "presets": presets })
 }
 
+
+// ---------- T4 尾巴:市场安装编排 + headless 导出 ----------
+
+use godot_workshop::assets;
+
+fn split_asset_id(asset_id: &str) -> (String, String) {
+    match asset_id.split_once('/') {
+        Some((a, b)) => (a.to_string(), b.to_string()),
+        None => (asset_id.to_string(), String::new()),
+    }
+}
+
+/// 解析资产下载地址(store API:releases 里按 version 或最新)
+async fn asset_download_url(proxy: Option<String>, asset_id: &str, version: Option<&str>) -> Result<(String, String, String), String> {
+    let client = godot_workshop::http::client_with_proxy(proxy.as_deref())?;
+    let (pubslug, slug) = split_asset_id(asset_id);
+    let detail: Value = client
+        .get(format!("https://store.godotengine.org/api/v1/assets/{pubslug}/{slug}/"))
+        .send().await.map_err(|e| format!("资产信息请求失败:{e}"))?
+        .json().await.map_err(|e| format!("资产信息解析失败:{e}"))?;
+    let releases: Value = client
+        .get(format!("https://store.godotengine.org/api/v1/releases/{pubslug}/{slug}/"))
+        .send().await.map_err(|e| format!("版本请求失败:{e}"))?
+        .json().await.map_err(|e| format!("版本解析失败:{e}"))?;
+    let empty = Vec::new();
+    let list = releases.as_array().unwrap_or(&empty);
+    let rel = version
+        .and_then(|v| list.iter().find(|r| r.get("version").and_then(|x| x.as_str()).map(|s| s == v).unwrap_or(false)))
+        .or_else(|| list.first());
+    let title = detail.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    match rel.and_then(|r| r.get("download_url").and_then(|v| v.as_str()).map(String::from)) {
+        Some(url) => Ok((url, title, rel.and_then(|r| r.get("version").and_then(|v| v.as_str()).map(String::from)).unwrap_or_default())),
+        None => Err("资产没有下载地址".into()),
+    }
+}
+
+#[tauri::command]
+async fn install_asset(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    versions: State<'_, Versions>,
+    project_id: String,
+    asset_id: String,
+    version: Option<String>,
+    strip_top_dir: Option<bool>,
+    auto_enable: Option<bool>,
+    asset_meta: Option<Value>,
+) -> Result<Value, ()> {
+    let proxy = versions.proxy.lock().unwrap().clone();
+    let (project_path, _meta) = {
+        let st = state.store.lock().unwrap();
+        match st.get(&project_id).and_then(|p| p.get("path").and_then(|v| v.as_str()).map(String::from)) {
+            Some(p) => (p, ()),
+            None => return Err(()),
+        }
+    };
+    let (url, title, version_string) = match asset_download_url(proxy.clone(), &asset_id, version.as_deref()).await {
+        Ok(v) => v,
+        Err(e) => return Ok(serde_json::json!({ "ok": false, "error": e })),
+    };
+    let task_id = versions.book.lock().unwrap().push("install", serde_json::json!({ "assetId": asset_id, "projectId": project_id, "title": title }));
+    emit_snapshot(&app);
+    let app2 = app.clone();
+    let result = async move {
+        let v = app2.state::<Versions>();
+        let set = |st: taskqueue::Status, err: Option<String>, patch: Value| {
+            if let Some(t) = v.book.lock().unwrap().get_mut(task_id) {
+                t.status = st; t.error = err;
+                if let (Some(o), Some(p)) = (t.payload.as_object_mut(), patch.as_object()) { for (k, val) in p { o.insert(k.clone(), val.clone()); } }
+            }
+            emit_snapshot(&app2);
+        };
+        set(taskqueue::Status::Running, None, serde_json::json!({}));
+        let stage = std::env::temp_dir().join(format!("gpm-asset-stage-{task_id}"));
+        let _ = std::fs::remove_dir_all(&stage);
+        std::fs::create_dir_all(&stage).ok();
+        let zip_path = stage.with_extension("zip");
+        let dl = godot_workshop::http::download(
+            godot_workshop::http::DownloadOptions { url, dest: zip_path.clone(), proxy, sha256: None },
+            |received, total| {
+                if let Some(t) = v.book.lock().unwrap().get_mut(task_id) {
+                    t.payload["received"] = serde_json::json!(received);
+                    if let Some(t2) = total { t.payload["totalSize"] = serde_json::json!(t2); }
+                }
+            },
+        ).await;
+        if let Err(e) = dl { set(taskqueue::Status::Error, Some(e.clone()), serde_json::json!({})); let _ = std::fs::remove_dir_all(&stage); return Err(e); }
+        let ex = godot_workshop::extract::unzip(&zip_path, &stage);
+        let _ = std::fs::remove_file(&zip_path);
+        if let Err(e) = ex { set(taskqueue::Status::Error, Some(e.clone()), serde_json::json!({})); return Err(e); }
+        // 嗅探分界
+        let cfgs = assets::find_plugin_cfgs(&stage);
+        let project_root = std::path::PathBuf::from(&project_path);
+        let out = if !cfgs.is_empty() {
+            // 插件链路:源目录直接子项挪进 addons/
+            let addons_dir = project_root.join("addons");
+            let _ = std::fs::create_dir_all(&addons_dir);
+            let mut dir_names: Vec<String> = Vec::new();
+            for src in assets::locate_sources(&stage) {
+                let Ok(rd) = std::fs::read_dir(&src) else { continue };
+                for e in rd.flatten() {
+                    let dest = addons_dir.join(e.file_name());
+                    let sp = e.path();
+                    if sp.is_dir() {
+                        let _ = std::fs::remove_dir_all(&dest);
+                        if godot_workshop::fsutil::move_sync(&sp, &dest).is_ok() {
+                            dir_names.push(e.file_name().to_string_lossy().into_owned());
+                        }
+                    } else if e.file_name() == ".import" || e.file_name().to_string_lossy().ends_with(".gdignore") {
+                        // 单文件资产不移动
+                    } else {
+                        let _ = std::fs::remove_file(&dest);
+                        if std::fs::copy(&sp, &dest).is_ok() { removed_single(&mut dir_names, e.file_name()); }
+                    }
+                }
+            }
+            if dir_names.is_empty() {
+                set(taskqueue::Status::Error, Some("压缩包中未找到插件目录".into()), serde_json::json!({}));
+                let _ = std::fs::remove_dir_all(&stage);
+                return Err("压缩包中未找到插件目录".into());
+            }
+            // 自动启用(设置 autoEnablePlugin != false)
+            let auto = {
+                let appstate = app2.state::<AppState>();
+                let st = appstate.store.lock().unwrap();
+                st.get("godot/settings").and_then(|s| s.get("autoEnablePlugin").and_then(|v| v.as_bool())).unwrap_or(true)
+            } && auto_enable.unwrap_or(true);
+            let mut enabled = false;
+            if auto {
+                let ini_path = project_root.join("project.godot");
+                if let Ok(text) = std::fs::read_to_string(&ini_path) {
+                    let next = assets::set_plugin_enabled(&text, &dir_names, true);
+                    let _ = std::fs::write(&ini_path, next);
+                    enabled = true;
+                }
+            }
+            let record = serde_json::json!({
+                "_id": format!("godot/asset/{project_id}/{asset_id}"),
+                "assetId": asset_id, "projectId": project_id,
+                "title": title, "versionString": version_string,
+                "kind": "addon", "dirNames": dir_names, "enabled": enabled,
+                "installedAt": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64,
+            });
+            let _ = app2.state::<AppState>().store.lock().unwrap().put(&record);
+            Ok(serde_json::json!({ "title": title, "versionString": version_string, "dirNames": record["dirNames"], "enabled": enabled, "kind": "addon" }))
+        } else {
+            // 素材链路:顶层条目并入项目根(strip_top_dir 时先剥掉唯一顶层目录)
+            let mut root = stage.clone();
+            let top: Vec<std::path::PathBuf> = std::fs::read_dir(&stage).map(|rd| rd.flatten().map(|e| e.path()).collect()).unwrap_or_default();
+            if strip_top_dir.unwrap_or(false) && top.len() == 1 && top[0].is_dir() {
+                root = top[0].clone();
+            }
+            let moved = godot_workshop::fsutil::copy_recursive(&root, &project_root).is_ok();
+            if !moved {
+                set(taskqueue::Status::Error, Some("素材写入项目失败".into()), serde_json::json!({}));
+                let _ = std::fs::remove_dir_all(&stage);
+                return Err("素材写入项目失败".into());
+            }
+            let installed_paths = assets::collect_files(&root);
+            let top_entries: Vec<String> = std::fs::read_dir(&root).map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+            let record = godot_workshop::assets::asset_record(&asset_id, &project_id, &title, &version_string, &top_entries, &installed_paths, &project_path);
+            let _ = app2.state::<AppState>().store.lock().unwrap().put(&record);
+            let _ = std::fs::remove_dir_all(&stage);
+            Ok(serde_json::json!({ "title": title, "versionString": version_string, "dirNames": top_entries, "enabled": false, "kind": "asset" }))
+        };
+        let _ = std::fs::remove_dir_all(&stage);
+        match out {
+            Ok(addon) => { set(taskqueue::Status::Done, None, serde_json::json!({})); Ok(addon) }
+            Err(e) => Err(e),
+        }
+    }
+    .await;
+    Ok(match result {
+        Ok(addon) => serde_json::json!({ "ok": true, "addon": addon }),
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    })
+}
+
+fn removed_single(_names: &mut Vec<String>, _f: std::ffi::OsString) {}
+
+#[tauri::command]
+fn run_export(
+    app: AppHandle,
+    state: State<AppState>,
+    versions: State<Versions>,
+    project_id: String,
+    preset_name: String,
+    output_path: Option<String>,
+) -> Value {
+    let st = state.store.lock().unwrap();
+    let Some(proj) = st.get(&project_id) else { return serde_json::json!({ "ok": false, "error": "项目不存在" }); };
+    let (Some(path), Some(name)) = (
+        proj.get("path").and_then(|v| v.as_str()).map(String::from),
+        proj.get("name").and_then(|v| v.as_str()).map(String::from),
+    ) else { return serde_json::json!({ "ok": false, "error": "项目信息不完整" }); };
+    let exe = proj.get("versionId").and_then(|v| v.as_str())
+        .and_then(|vid| st.get(vid))
+        .and_then(|ver| ver.get("exePath").and_then(|e| e.as_str()).map(String::from));
+    drop(st);
+    let Some(exe) = exe else { return serde_json::json!({ "ok": false, "error": "项目未绑定已安装引擎" }); };
+    let output = output_path.unwrap_or_else(|| format!("{name}_export.bin"));
+    let task_id = versions.book.lock().unwrap().push("export", serde_json::json!({ "projectId": project_id, "projectName": name, "preset": preset_name, "log": String::new() }));
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        let v = app2.state::<Versions>();
+        let set = |st: taskqueue::Status, err: Option<String>, patch: Value| {
+            if let Some(t) = v.book.lock().unwrap().get_mut(task_id) {
+                t.status = st; t.error = err;
+                if let (Some(o), Some(p)) = (t.payload.as_object_mut(), patch.as_object()) { for (k, val) in p { o.insert(k.clone(), val.clone()); } }
+            }
+            emit_snapshot(&app2);
+        };
+        set(taskqueue::Status::Running, None, serde_json::json!({}));
+        let child = std::process::Command::new(&exe)
+            .args(["--headless", "--path", &path, "--export-release", &preset_name, &output])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn();
+        let mut child = match child {
+            Ok(c) => c,
+            Err(e) => { set(taskqueue::Status::Error, Some(format!("启动导出失败:{e}")), serde_json::json!({})); return; }
+        };
+        export_children().lock().unwrap().insert(task_id, child.id());
+        if let Some(mut out) = child.stdout.take() {
+            use std::io::Read;
+            let mut buf = [0u8; 4096];
+            let mut tail: Vec<String> = Vec::new();
+            loop {
+                match out.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        for line in String::from_utf8_lossy(&buf[..n]).lines() {
+                            tail.push(line.to_string());
+                        }
+                        if tail.len() > 20 { tail = tail.split_off(tail.len() - 20); }
+                        if let Some(t) = v.book.lock().unwrap().get_mut(task_id) { t.payload["log"] = serde_json::json!(tail.join("\n")); }
+                    }
+                }
+            }
+        }
+        let status = child.wait();
+        export_children().lock().unwrap().remove(&task_id);
+        match status {
+            Ok(s) if s.success() => set(taskqueue::Status::Done, None, serde_json::json!({ "output": output })),
+            Ok(_) | Err(_) => {
+                let canceled = v.book.lock().unwrap().get_mut(task_id).map(|t| t.cancel_requested).unwrap_or(false);
+                if canceled { set(taskqueue::Status::Canceled, None, serde_json::json!({})); }
+                else { set(taskqueue::Status::Error, Some("导出进程非零退出".into()), serde_json::json!({})); }
+            }
+        }
+    });
+    serde_json::json!({ "ok": true, "taskId": task_id.to_string() })
+}
+
+fn export_children() -> &'static std::sync::Mutex<std::collections::HashMap<u64, u32>> {
+    static M: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<u64, u32>>> = std::sync::OnceLock::new();
+    M.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+#[tauri::command]
+fn cancel_export_task(versions: State<Versions>, id: String) -> Value {
+    let tid: u64 = id.parse().unwrap_or(0);
+    if let Ok(map) = export_children().lock() {
+        if let Some(pid) = map.get(&tid) {
+            #[cfg(windows)]
+            { let _ = std::process::Command::new("taskkill").args(["/PID", &pid.to_string(), "/F", "/T"]).output(); }
+            #[cfg(not(windows))]
+            { unsafe { libc_kill(*pid as i32, 9); } }
+        }
+    }
+    let ok = versions.book.lock().unwrap().cancel(tid);
+    serde_json::json!({ "ok": ok })
+}
+
+#[cfg(not(windows))]
+unsafe fn libc_kill(pid: i32, sig: i32) {
+    std::mem::forget(pid);
+    let _ = sig;
+    // 非 Windows 取消在 T5 用 nix/libc crate 落地
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -434,7 +715,7 @@ fn main() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets, create_project, uninstall_addon])
+        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets, create_project, uninstall_addon, install_asset, run_export, cancel_export_task])
         .run(tauri::generate_context!())
         .expect("tauri 应用启动失败");
 }
