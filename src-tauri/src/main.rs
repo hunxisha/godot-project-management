@@ -340,6 +340,72 @@ fn prune_backups(state: State<AppState>, keep_per_project: Option<u64>, older_th
 }
 
 #[tauri::command]
+fn create_project(state: State<AppState>, name: String, parent_dir: String, renderer: String,
+                  version_tag: Option<String>, version_id: Option<String>, git_init: Option<bool>) -> Value {
+    let mut st = state.store.lock().unwrap();
+    match godot_workshop::projects::create_project_files(Path::new(&parent_dir), &name, &renderer, version_tag.as_deref(), git_init.unwrap_or(false)) {
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+        Ok((dir, git)) => {
+            let id = godot_workshop::projects::project_doc_id(&dir);
+            let text = std::fs::read_to_string(dir.join("project.godot")).unwrap_or_default();
+            let (pname, cfg, ev, _icon, _pl) = godot_workshop::projects::parse_project_godot_text(&text);
+            let versions = st.all_docs("godot/version/");
+            let vid = version_id.or_else(|| godot_workshop::projects::match_version(&(cfg, ev.clone()), &versions));
+            let now_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+            let project = serde_json::json!({
+                "id": id, "path": dir.to_string_lossy(), "name": if pname.is_empty() { name } else { pname },
+                "configVersion": cfg, "engineVersion": ev, "versionId": vid,
+                "favorite": false, "openCount": 0, "addedAt": now_ms,
+            });
+            let res = st.put(&project);
+            let git_json = git.map(|(i, e, c)| serde_json::json!({ "initialized": i, "error": e, "committed": c }));
+            if res.get("ok") == Some(&serde_json::json!(true)) {
+                let mut out = serde_json::json!({ "ok": true, "project": st.get(&id) });
+                if let Some(g) = git_json { out["git"] = g; }
+                out
+            } else {
+                serde_json::json!({ "ok": false, "error": "项目文件已生成,登记失败" })
+            }
+        }
+    }
+}
+
+#[tauri::command]
+fn uninstall_addon(state: State<AppState>, project_id: String, dir_name: String, asset_id: Option<String>) -> Value {
+    let mut st = state.store.lock().unwrap();
+    let Some(proj) = st.get(&project_id) else { return serde_json::json!({ "ok": false, "error": "项目不存在" }); };
+    let Some(path) = proj.get("path").and_then(|v| v.as_str()) else { return serde_json::json!({ "ok": false, "error": "项目缺少路径" }); };
+    let mut removed_any = false;
+    // 素材:按安装清单逐文件删除
+    if let Some(aid) = &asset_id {
+        let doc_id = format!("godot/asset/{project_id}/{aid}");
+        if let Some(doc) = st.get(&doc_id) {
+            if doc.get("kind").and_then(|v| v.as_str()) == Some("asset") {
+                if let Some(paths) = doc.get("installedPaths").and_then(|v| v.as_array()) {
+                    if let Some(root) = doc.get("destRoot").and_then(|v| v.as_str()) {
+                        for rel in paths.iter().filter_map(|x| x.as_str()) {
+                            let f = Path::new(root).join(rel);
+                            if f.is_file() { let _ = std::fs::remove_file(&f); removed_any = true; }
+                        }
+                    }
+                }
+                st.remove(&doc);
+            }
+        }
+    }
+    // 插件:回收站 addons/<dir>
+    let addon_dir = Path::new(path).join("addons").join(&dir_name);
+    if addon_dir.is_dir() {
+        if let Err(e) = godot_workshop::fsutil::delete_to_trash(&addon_dir) {
+            return serde_json::json!({ "ok": false, "error": e });
+        }
+        removed_any = true;
+    }
+    if !removed_any { return serde_json::json!({ "ok": false, "error": "未找到可卸载内容" }); }
+    serde_json::json!({ "ok": true })
+}
+
+#[tauri::command]
 fn list_export_presets(state: State<AppState>, project_id: String) -> Value {
     let st = state.store.lock().unwrap();
     let Some(proj) = st.get(&project_id) else { return serde_json::json!({ "ok": false, "error": "项目不存在" }); };
@@ -368,7 +434,7 @@ fn main() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets])
+        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets, create_project, uninstall_addon])
         .run(tauri::generate_context!())
         .expect("tauri 应用启动失败");
 }

@@ -236,3 +236,156 @@ enabled=PackedStringArray("res://addons/foo/plugin.cfg", "res://addons/bar/plugi
         std::fs::remove_dir_all(&base).ok();
     }
 }
+
+// ---------- 新建项目 ----------
+
+/// 渲染器选项 → (feature, method, mobileMethod)
+pub fn renderer_opts(renderer: &str) -> (&'static str, &'static str, &'static str) {
+    match renderer {
+        "mobile" => ("Mobile", "mobile", "mobile"),
+        "gl_compatibility" => ("GL Compatibility", "gl_compatibility", "gl_compatibility"),
+        _ => ("Forward Plus", "forward_plus", "mobile"),
+    }
+}
+
+/// Windows 非法文件名字符过滤(与 Node 版同一字符集)
+pub fn sanitize_name(name: &str) -> String {
+    name.chars()
+        .filter(|c| !matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'))
+        .filter(|c| !c.is_control())
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+/// 生成 project.godot 文本(与 Node 版逐行一致)
+pub fn godot_ini(name: &str, version_str: &str, renderer: &str) -> String {
+    let (feature, method, mobile) = renderer_opts(renderer);
+    let name_clean = name.replace('"', "");
+    format!(
+        "; Engine configuration file.\n; It's best edited using the editor UI and not directly,\n; since the parameters that go here are not all obvious.\n;\n; Format:\n;   [section] ; section goes between []\n;   param=value ; assign values to parameters\n\nconfig_version=5\n\n[application]\n\nconfig/name=\"{name_clean}\"\nconfig/features=PackedStringArray(\"{version_str}\", \"{feature}\")\nconfig/icon=\"res://icon.svg\"\n\n[rendering]\n\nrenderer/rendering_method=\"{method}\"\nrenderer/rendering_method.mobile=\"{mobile}\"\n"
+    )
+}
+
+/// 从已装版本 tag 提取 major.minor(兜底 4.3)
+pub fn version_str_from_tag(tag: &str) -> String {
+    let t = tag.trim_start_matches('v');
+    // Node 正则 ^v?(\d+\.\d+) 语义:两段都必须是纯数字
+    let b: Vec<&str> = t.split('.').collect();
+    if b.len() >= 2 {
+        let major: String = b[0].chars().take_while(|c| c.is_ascii_digit()).collect();
+        let minor: String = b[1].chars().take_while(|c| c.is_ascii_digit()).collect();
+        if !major.is_empty() && !minor.is_empty() {
+            return format!("{major}.{minor}");
+        }
+    }
+    "4.3".to_string()
+}
+
+pub const GITIGNORE: &str = include_str!("../assets/gitignore");
+pub const GITATTRIBUTES: &str = include_str!("../assets/gitattributes");
+pub const EDITORCONFIG: &str = include_str!("../assets/editorconfig");
+pub const ICON_SVG: &str = include_str!("../assets/icon.svg");
+
+/// git init + 首次提交;git 不可用/提交失败不影响项目创建
+pub fn init_git_repo(project_dir: &Path) -> (bool, Option<String>, bool) {
+    let run = |args: &[&str]| -> Result<String, String> {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(project_dir)
+            .output()
+            .map_err(|e| format!("git 不可用:{e}"))?;
+        if out.status.success() {
+            Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+        } else {
+            Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        }
+    };
+    let _ = std::fs::write(project_dir.join(".gitignore"), GITIGNORE);
+    let _ = std::fs::write(project_dir.join(".gitattributes"), GITATTRIBUTES);
+    if let Err(e) = run(&["init"]) {
+        return (false, Some(e), false);
+    }
+    let _ = run(&["add", "."]);
+    match run(&["commit", "-m", "Initial commit"]) {
+        Ok(_) => (true, None, true),
+        Err(e) => (true, Some(e), false),
+    }
+}
+
+/// 新建项目(文件层;登记走 add_project 编排)。返回 (dir, git 结果)
+pub fn create_project_files(
+    parent_dir: &Path,
+    name: &str,
+    renderer: &str,
+    version_tag: Option<&str>,
+    git_init: bool,
+) -> Result<(PathBuf, Option<(bool, Option<String>, bool)>), String> {
+    let safe = sanitize_name(name);
+    if safe.is_empty() || safe == "." || safe == ".." {
+        return Err("项目名称无效".into());
+    }
+    let project_dir = parent_dir.join(&safe);
+    if project_dir.exists() {
+        return Err(format!("目录已存在:{safe}"));
+    }
+    std::fs::create_dir_all(&project_dir).map_err(|e| format!("创建目录失败:{e}"))?;
+    let vs = version_str_from_tag(version_tag.unwrap_or(""));
+    std::fs::write(project_dir.join("project.godot"), godot_ini(name, &vs, renderer))
+        .map_err(|e| format!("写 project.godot 失败:{e}"))?;
+    std::fs::write(project_dir.join("icon.svg"), ICON_SVG).map_err(|e| format!("写图标失败:{e}"))?;
+    std::fs::write(project_dir.join(".editorconfig"), EDITORCONFIG).map_err(|e| format!("写 editorconfig 失败:{e}"))?;
+    let git = if git_init { Some(init_git_repo(&project_dir)) } else { None };
+    Ok((project_dir, git))
+}
+
+#[cfg(test)]
+mod create_tests {
+    use super::*;
+
+    #[test]
+    fn name_sanitize_and_version_extract() {
+        assert_eq!(sanitize_name("  My:Game? "), "MyGame");
+        assert_eq!(sanitize_name("普通名字"), "普通名字", "中文不受影响");
+        assert_eq!(sanitize_name("a/b\\c|d*e"), "abcde");
+        assert_eq!(version_str_from_tag("4.3.2-stable"), "4.3");
+        assert_eq!(version_str_from_tag("v4.4-dev6"), "4.4");
+        assert_eq!(version_str_from_tag(""), "4.3", "兜底 4.3");
+    }
+
+    #[test]
+    fn ini_matches_node_shape() {
+        let ini = godot_ini("Demo", "4.3", "forward_plus");
+        assert!(ini.contains("config/name=\"Demo\""));
+        assert!(ini.contains("config/features=PackedStringArray(\"4.3\", \"Forward Plus\")"));
+        assert!(ini.contains("renderer/rendering_method=\"forward_plus\""));
+        assert!(ini.contains("renderer/rendering_method.mobile=\"mobile\""));
+        let ini2 = godot_ini("X", "3.6", "gl_compatibility");
+        assert!(ini2.contains("\"GL Compatibility\"") && ini2.contains("gl_compatibility"));
+    }
+
+    #[test]
+    fn create_files_and_git() {
+        let base = std::env::temp_dir().join(format!(
+            "gpm-create-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        let (dir, git) = create_project_files(&base, "Test Game", "forward_plus", Some("4.3.2-stable"), false).unwrap();
+        assert!(dir.join("project.godot").is_file());
+        assert!(dir.join("icon.svg").is_file());
+        assert_eq!(std::fs::read_to_string(dir.join(".editorconfig")).unwrap(), EDITORCONFIG);
+        assert!(git.is_none(), "未要求 git 时不初始化");
+        // git 路径(git 可用时走完三态之一)
+        let (dir2, git2) = create_project_files(&base, "Git Game", "mobile", Some("4.3-stable"), true).unwrap();
+        let (initialized, _err, committed) = git2.unwrap();
+        assert!(dir2.join(".gitignore").is_file());
+        if initialized {
+            assert!(dir2.join(".git").exists(), "git 可用则目录存在;committed={committed}");
+        }
+        // 重复名拒绝
+        assert!(create_project_files(&base, "Test Game", "forward_plus", None, false).is_err());
+        std::fs::remove_dir_all(&base).ok();
+    }
+}
