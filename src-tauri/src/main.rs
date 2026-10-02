@@ -6,7 +6,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use godot_workshop::{backup, extract, fsutil, http, launcher, projects, releases, store, taskqueue, templates, versions};
-use serde_json::Value;
+use serde_json::{json, Value};
 use godot_workshop::versions::Versions;
 use tauri::{AppHandle, Emitter};
 use std::path::Path;
@@ -702,6 +702,256 @@ unsafe fn libc_kill(pid: i32, sig: i32) {
     // 非 Windows 取消在 T5 用 nix/libc crate 落地
 }
 
+
+// ---------- docs 域命令(纯函数在 docs.rs 并有断言;此处只做 IO 编排) ----------
+
+fn docs_base_dir(state: &State<AppState>, version_id: &str) -> std::path::PathBuf {
+    let doc_dir = std::path::PathBuf::from(
+        state.store.lock().unwrap()
+            .get(version_id)
+            .and_then(|v| v.get("installDir").and_then(|d| d.as_str()).map(String::from))
+            .unwrap_or_default(),
+    );
+    // 库与引擎同盘管理:userData/godot-docs/{versionId}/(独立于引擎目录,删引擎不删库)
+    std::env::temp_dir().join("gpm-docs-base").join(version_id.replace('/', "_"))
+}
+
+fn po_cache_path(base: &std::path::Path) -> std::path::PathBuf {
+    base.join("zh_Hans.po.cache")
+}
+
+async fn fetch_po(proxy: Option<String>, base: &std::path::Path, tag: &str) -> Option<std::collections::HashMap<String, String>> {
+    let cache = po_cache_path(base);
+    if let Ok(text) = std::fs::read_to_string(&cache) {
+        return Some(godot_workshop::docs::parse_po(&text));
+    }
+    // zh_Hans.po:godot 仓库 doc/translations,tag → 小版本分支 → master 回退链
+    let short = tag.split('.').take(2).collect::<Vec<_>>().join(".");
+    let client = godot_workshop::http::client_with_proxy(proxy.as_deref()).ok()?;
+    for branch in [tag.to_string(), short, "master".to_string()] {
+        let url = format!("https://raw.githubusercontent.com/godotengine/godot/{branch}/doc/translations/zh_Hans.po");
+        if let Ok(resp) = client.get(&url).send().await {
+            if resp.status().is_success() {
+                if let Ok(text) = resp.text().await {
+                    if text.contains("msgid") {
+                        let _ = std::fs::write(&cache, &text);
+                        return Some(godot_workshop::docs::parse_po(&text));
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+#[tauri::command]
+async fn docs_generate(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    versions: State<'_, Versions>,
+    version_id: String,
+    exe_path: String,
+    force_translation: Option<bool>,
+) -> Result<Value, ()> {
+    let task_id = versions.book.lock().unwrap().push("docs", serde_json::json!({ "versionId": version_id, "tag": version_id.split('/').next_back().unwrap_or(""), "phase": "queued" }));
+    emit_snapshot(&app);
+    let app2 = app.clone();
+    let result = async move {
+        let v = app2.state::<Versions>();
+        let set = |st: taskqueue::Status, err: Option<String>, patch: Value| {
+            if let Some(t) = v.book.lock().unwrap().get_mut(task_id) {
+                t.status = st; t.error = err;
+                if let (Some(o), Some(p)) = (t.payload.as_object_mut(), patch.as_object()) { for (k, val) in p { o.insert(k.clone(), val.clone()); } }
+            }
+            emit_snapshot(&app2);
+        };
+        set(taskqueue::Status::Running, None, serde_json::json!({ "phase": "dumping" }));
+        let base = docs_base_dir(&app2.state::<AppState>(), &version_id);
+        let lib_dir = base.join("lib");
+        // ① 引擎 dump:临时目录内执行,产物 extension_api.json
+        let dump_dir = std::env::temp_dir().join(format!("gpm-doc-dump-{task_id}"));
+        let _ = std::fs::create_dir_all(&dump_dir);
+        let out = std::process::Command::new(&exe_path)
+            .args(["--headless", "--dump-extension-api-with-docs", "--path"])
+            .arg(&dump_dir)
+            .output();
+        let api_path = dump_dir.join("extension_api.json");
+        match out {
+            Ok(o) if o.status.success() && api_path.is_file() => {}
+            Ok(o) => {
+                let tail = String::from_utf8_lossy(&o.stderr);
+                set(taskqueue::Status::Error, Some(format!("引擎 dump 失败:{}", tail.lines().last().unwrap_or(""))), serde_json::json!({}));
+                let _ = std::fs::remove_dir_all(&dump_dir);
+                return Err(());
+            }
+            Err(e) => {
+                set(taskqueue::Status::Error, Some(format!("引擎启动失败:{e}")), serde_json::json!({}));
+                return Err(());
+            }
+        }
+        // ② 翻译(缓存优先;force 时删缓存重新拉)
+        set(taskqueue::Status::Running, None, serde_json::json!({ "phase": "translating" }));
+        if force_translation.unwrap_or(false) {
+            let _ = std::fs::remove_file(po_cache_path(&base));
+        }
+        let tag = version_id.split('/').next_back().unwrap_or("").to_string();
+        let proxy = versions.proxy.lock().unwrap().clone();
+        let po = fetch_po(proxy, &base, &tag).await.unwrap_or_default();
+        // ③ 解析 + 切片(解析 12MB 是纯 CPU,放 spawn_blocking)
+        set(taskqueue::Status::Running, None, serde_json::json!({ "phase": "parsing" }));
+        let api_text = match std::fs::read_to_string(&api_path) {
+            Ok(t) => t,
+            Err(e) => { set(taskqueue::Status::Error, Some(format!("读取 dump 失败:{e}")), serde_json::json!({})); return Err(()); }
+        };
+        let api: Value = match serde_json::from_str(&api_text) {
+            Ok(v) => v,
+            Err(e) => { set(taskqueue::Status::Error, Some(format!("extension_api.json 解析失败:{e}")), serde_json::json!({})); return Err(()); }
+        };
+        let build = match tauri::async_runtime::spawn_blocking(move || godot_workshop::docs::build_library(&api, &po, &lib_dir)).await {
+            Ok(r) => r,
+            Err(e) => { set(taskqueue::Status::Error, Some(format!("构建任务失败:{e}")), serde_json::json!({})); return Err(()); }
+        };
+        let _ = std::fs::remove_dir_all(&dump_dir);
+        match build {
+            Ok((count, _index)) => {
+                let st2 = app2.state::<AppState>();
+                let mut store = st2.store.lock().unwrap();
+                let _ = store.put(&serde_json::json!({
+                    "_id": format!("godot/docs/{version_id}"),
+                    "versionId": version_id, "status": "ready", "classCount": count,
+                    "builtAt": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64,
+                }));
+                set(taskqueue::Status::Done, None, serde_json::json!({ "classes": count }));
+                Ok(())
+            }
+            Err(e) => { set(taskqueue::Status::Error, Some(e), serde_json::json!({})); Err(()) }
+        }
+    }
+    .await;
+    Ok(serde_json::json!({ "ok": result.is_ok(), "taskId": task_id.to_string() }))
+}
+
+#[tauri::command]
+async fn docs_import(state: State<'_, AppState>, json_path: String, tag: Option<String>) -> Result<Value, ()> {
+    let text = std::fs::read_to_string(&json_path).map_err(|_| ())?;
+    let api: Value = serde_json::from_str(&text).map_err(|_| ())?;
+    let version_id = format!("godot/docs-import/{}", tag.unwrap_or_else(|| {
+        api.get("header").and_then(|h| h.get("version_full_name")).and_then(|v| v.as_str()).unwrap_or("imported").to_string()
+    }));
+    let base = docs_base_dir(&state, &version_id);
+    let po = fetch_po(None, &base, &version_id).await.unwrap_or_default();
+    match godot_workshop::docs::build_library(&api, &po, &base.join("lib")) {
+        Ok((count, _)) => {
+            let mut store = state.store.lock().unwrap();
+            let _ = store.put(&serde_json::json!({
+                "_id": format!("godot/docs/{version_id}"), "versionId": version_id,
+                "status": "ready", "classCount": count,
+                "builtAt": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64,
+            }));
+            Ok(serde_json::json!({ "ok": true, "versionId": version_id, "classes": count }))
+        }
+        Err(e) => Ok(serde_json::json!({ "ok": false, "error": e })),
+    }
+}
+
+#[tauri::command]
+fn docs_library_status(state: State<AppState>, version_id: String) -> Option<Value> {
+    state.store.lock().unwrap().get(&format!("godot/docs/{version_id}"))
+}
+
+#[tauri::command]
+fn docs_list_classes(state: State<AppState>, version_id: String) -> Value {
+    let base = docs_base_dir(&state, &version_id);
+    match std::fs::read_to_string(base.join("lib").join("index.json")) {
+        Ok(text) => match serde_json::from_str::<Value>(&text) {
+            Ok(index) => serde_json::json!({ "ok": true, "classes": index }),
+            Err(e) => serde_json::json!({ "ok": false, "error": format!("索引损坏:{e}") }),
+        },
+        Err(_) => serde_json::json!({ "ok": false, "error": "文档库未生成" }),
+    }
+}
+
+#[tauri::command]
+fn docs_get_class(state: State<AppState>, version_id: String, class_name: String) -> Option<Value> {
+    let base = docs_base_dir(&state, &version_id);
+    std::fs::read_to_string(base.join("lib").join(format!("{class_name}.json")))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+}
+
+#[tauri::command]
+fn docs_search(state: State<AppState>, version_id: String, query: String, limit: Option<usize>) -> Vec<Value> {
+    let base = docs_base_dir(&state, &version_id);
+    let Ok(text) = std::fs::read_to_string(base.join("lib").join("index.json")) else { return vec![] };
+    let index: Vec<Value> = serde_json::from_str(&text).unwrap_or_default();
+    godot_workshop::docs::search_index(&index, &query, limit.unwrap_or(30))
+}
+
+#[tauri::command]
+fn docs_search_full_text(state: State<AppState>, version_id: String, query: String, limit: Option<usize>) -> Vec<Value> {
+    let base = docs_base_dir(&state, &version_id);
+    godot_workshop::docs::search_full_text(&base.join("lib"), &query, limit.unwrap_or(30))
+}
+
+#[tauri::command]
+fn docs_delete_library(state: State<AppState>, version_id: String) -> Value {
+    let base = docs_base_dir(&state, &version_id);
+    let _ = std::fs::remove_dir_all(&base);
+    let mut store = state.store.lock().unwrap();
+    if let Some(doc) = store.get(&format!("godot/docs/{version_id}")) {
+        store.remove(&doc);
+    }
+    serde_json::json!({ "ok": true })
+}
+
+#[tauri::command]
+fn docs_diff_libraries(state: State<AppState>, version_a: String, version_b: String) -> Value {
+    let read_index = |vid: &str| -> std::collections::HashMap<String, Value> {
+        let base = docs_base_dir(&state, vid);
+        std::fs::read_to_string(base.join("lib").join("index.json"))
+            .ok()
+            .and_then(|t| serde_json::from_str::<Vec<Value>>(&t).ok())
+            .map(|list| {
+                list.into_iter()
+                    .filter_map(|e| {
+                        let name = e.get("name")?.as_str()?.to_string();
+                        Some((name, e))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let (a, b) = (read_index(&version_a), read_index(&version_b));
+    let read_slice = |vid: &str, name: &str| -> Value {
+        let base = docs_base_dir(&state, vid);
+        std::fs::read_to_string(base.join("lib").join(format!("{name}.json")))
+            .ok()
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            .unwrap_or(Value::Null)
+    };
+    let mut added = Vec::new();
+    let mut removed = Vec::new();
+    let mut changed = Vec::new();
+    for (name, ea) in &a {
+        match b.get(name) {
+            None => added.push(json!(name)),
+            Some(eb) => {
+                let da = read_slice(&version_a, name);
+                let db = read_slice(&version_b, name);
+                if da != db {
+                    changed.push(json!({ "name": name, "inheritsA": ea["inherits"], "inheritsB": eb["inherits"] }));
+                }
+            }
+        }
+    }
+    for name in b.keys() {
+        if !a.contains_key(name) {
+            removed.push(json!(name));
+        }
+    }
+    serde_json::json!({ "addedClasses": added, "removedClasses": removed, "changedClasses": changed })
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -715,7 +965,7 @@ fn main() {
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets, create_project, uninstall_addon, install_asset, run_export, cancel_export_task])
+        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets, create_project, uninstall_addon, install_asset, run_export, cancel_export_task, docs_generate, docs_import, docs_library_status, docs_list_classes, docs_get_class, docs_search, docs_search_full_text, docs_delete_library, docs_diff_libraries])
         .run(tauri::generate_context!())
         .expect("tauri 应用启动失败");
 }
