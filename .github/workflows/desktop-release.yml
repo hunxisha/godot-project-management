@@ -1,14 +1,8 @@
-# 桌面版三平台打包与发布草稿(设计见 docs/desktop-app-plan.md §5)。
+# 桌面版 2.0(Tauri)三平台打包与发布草稿。
 #
-# 触发:
-#   - 推送 desktop-v* tag(如 desktop-v1.0.0)→ 三平台 matrix 构建 + 建 **草稿** Release 并附产物
-#   - workflow_dispatch 手动触发 → 只出 artifact 不发布,用于发版前试打包
-#
-# 为什么不用 electron-builder 自带的 publish:① v1.0 不做自动更新,update-info(latest.yml)无用;
-# ② 只有 publish 配置而没有 repository 时会触发上游 computeChannelNames 空配置解引用报错(u26.15.3 实测);
-# ③ 本仓库既有发布流程就是 gh CLI,口径统一。
-#
-# 版本号取自 desktop/package.json(桌面版独立版本线),与插件 zpx 版本号无关。
+# 触发:desktop-v* tag → 三平台 matrix 构建 + 建草稿 Release;workflow_dispatch 只出 artifact。
+# 与 1.x(Electron)工作流的差异:electron-builder → cargo tauri build(bundler 配置在
+# src-tauri/tauri.conf.json);产物路径改为 src-tauri/target/release/bundle/。
 name: desktop-release
 
 on:
@@ -23,13 +17,12 @@ permissions:
 jobs:
   build:
     strategy:
-      # 单平台失败不拖累其他平台,已成功的产物照常上传便于排查
       fail-fast: false
       matrix:
         include:
-          - { os: windows-latest, args: '--win' }
-          - { os: macos-latest, args: '--mac' }
-          - { os: ubuntu-latest, args: '--linux' }
+          - { os: windows-latest, args: '' }
+          - { os: macos-latest, args: '' }
+          - { os: ubuntu-latest, args: '' }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -41,27 +34,36 @@ jobs:
 
       - run: npm ci
 
-      - name: 构建渲染层并同步桌面版静态资源
-        run: npm run build:desktop
+      # Tauri 在 Linux 依赖 GTK/WebKitGTK 系统库(官方前置清单)
+      - name: 安装 Tauri Linux 系统依赖
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
 
-      - name: 打包(免签名,不做 publish)
-        working-directory: desktop
-        run: npx electron-builder --config electron-builder.cjs ${{ matrix.args }} --publish never
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 构建渲染层(beforeBuildCommand 的显式版,产物进 src-ztools/dist)
+        run: npm run build
+
+      - name: cargo tauri build(免签名)
+        run: npx tauri build
         env:
-          # 免签名起步:禁止 electron-builder 自动发现本机签名证书
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.os }}
-          # 逐架构列出:排除 windows 的「多架构合并安装包」与 blockmap(前者与分架构包重复,后者仅自动更新用)
-          path: |
-            desktop/release/*-x64-setup.exe
-            desktop/release/*-arm64-setup.exe
-            desktop/release/*.dmg
-            desktop/release/*.AppImage
-            desktop/release/*.deb
           if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
 
   release:
     needs: build
@@ -82,7 +84,6 @@ jobs:
         run: |
           REPO="${{ github.repository }}"
           VER="${TAG#desktop-}"
-          # 发布说明随代码维护(desktop/RELEASE_NOTES.md),每次发版前更新它
           if ! gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
             gh release create "$TAG" -R "$REPO" --draft --title "桌面版 $VER" \
               --notes-file desktop/RELEASE_NOTES.md

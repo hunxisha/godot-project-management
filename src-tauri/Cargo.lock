@@ -1380,7 +1380,7 @@ dependencies = [
 
 [[package]]
 name = "godot-workshop"
-version = "1.0.1"
+version = "2.0.0"
 dependencies = [
  "futures-util",
  "md5",

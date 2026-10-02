@@ -50,6 +50,27 @@
   清 `.part`),属两宿主共用的能力层,故插件版与桌面版行为一致
 - 断言总数 2,019 → **2,062** 项
 
+## 桌面版 2.0.0
+
+**宿主换新：Electron → Tauri 2**。同一套渲染层与能力语义换到系统 WebView + Rust 核心，
+闲置内存占用从 ~200MB（私有）/~350MB（任务管理器）量级显著下降；安装体积同步缩小。
+
+### 架构
+
+- 能力层 30 个 Node 模块（7,596 行）以 Rust 重写：JSON 文档库（与 1.x 同格式，迁移=拷 db.json）、
+  断点续传下载（SHA-256 全文件校验）、安全解压（zip-slip 防护）、备份（zip/快照/恢复/保留策略）、
+  引擎下载与安装、导出模板、headless 导出、市场嗅探安装、文档库（po 翻译查表/索引打分/全文检索/跨版本 diff）
+- **双端逐字节 diff 验收**：同一 extension_api.json 跑 Electron 与 Rust 两条管线，五个产物文件字节级一致
+- **真实下载验收**：GitHub 归档 → 中途截断 → 续传 → 完成后解压出引擎可执行
+- 渲染层 Vue 零改动换宿主（阶段 A 数据层 async 化为前提）；Tauri 垫片按 34+ 命令映射，
+  未移植能力如实报错而非假成功
+
+### 工程
+
+- Rust 侧 46 组测试（含双端 diff 与真网下载验收）随 CI 的 cargo test 强制执行；渲染层 2,062 项断言保持全绿
+- `npm run dev:tauri / build:tauri` 本地开发与打包；三平台产物经 `desktop-release.yml` 的
+  cargo tauri build matrix 产出（免签名延续）
+
 ## 桌面版 1.0.0
 
 首次发布：把「Godot 工坊」从 ZTools 插件发育为独立桌面应用，Windows / macOS / Linux 三平台可装即用，
