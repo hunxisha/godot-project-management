@@ -199,6 +199,39 @@ fn uninstall_export_templates(exe_path: String, tag: String) -> Value {
 }
 
 #[tauri::command]
+fn scan_project_tree(state: State<AppState>, project_id: String, opts: Option<Value>) -> Value {
+    let root = match project_root_of(&state, &project_id) { Ok(r) => r, Err(e) => return serde_json::json!({ "ok": false, "error": e }) };
+    let o = opts.unwrap_or_else(|| serde_json::json!({}));
+    let list = |key: &str| -> Vec<String> {
+        o.get(key).and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+            .unwrap_or_default()
+    };
+    let scan = godot_workshop::inspectfs::ScanOpts {
+        include_cache: o.get("includeCache").and_then(|v| v.as_bool()).unwrap_or(false),
+        exts: list("exts"),
+        skip_dirs: list("skipDirs"),
+        max_entries: o.get("maxEntries").and_then(|v| v.as_u64())
+            .map(|n| n as usize).unwrap_or(godot_workshop::inspectfs::DEFAULT_MAX_ENTRIES),
+    };
+    godot_workshop::inspectfs::scan_json(&root, &scan)
+}
+
+/// 4 个原语共用:projectId → 项目根(与 list_export_presets 同一取法)。
+fn project_root_of(state: &State<AppState>, project_id: &str) -> Result<std::path::PathBuf, String> {
+    let st = state.store.lock().unwrap();
+    let p = st.get(project_id)
+        .and_then(|d| d.get("path").and_then(|v| v.as_str()).map(String::from));
+    match p {
+        Some(s) => {
+            let pb = std::path::PathBuf::from(&s);
+            if pb.is_dir() { Ok(pb) } else { Err("项目目录已不存在".into()) }
+        }
+        None => Err("项目不存在".into()),
+    }
+}
+
+#[tauri::command]
 fn launch_project(state: State<AppState>, project_id: String, action: String) -> Value {
     let mut st = state.store.lock().unwrap();
     let Some(proj) = st.get(&project_id) else {
@@ -1147,7 +1180,7 @@ fn main() {
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets, create_project, uninstall_addon, install_asset, run_export, cancel_export_task, docs_generate, docs_import, docs_library_status, docs_list_classes, docs_get_class, docs_search, docs_search_full_text, docs_delete_library, docs_diff_libraries, fetch_releases_cmd, cancel_task, dismiss_task, search_assets, list_featured_cmd, list_all_assets_cmd, list_new_assets_cmd, list_recently_updated_cmd, list_project_assets_cmd, restore_backup])
+        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, scan_project_tree, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets, create_project, uninstall_addon, install_asset, run_export, cancel_export_task, docs_generate, docs_import, docs_library_status, docs_list_classes, docs_get_class, docs_search, docs_search_full_text, docs_delete_library, docs_diff_libraries, fetch_releases_cmd, cancel_task, dismiss_task, search_assets, list_featured_cmd, list_all_assets_cmd, list_new_assets_cmd, list_recently_updated_cmd, list_project_assets_cmd, restore_backup])
         .run(tauri::generate_context!())
         .expect("tauri 应用启动失败");
 }

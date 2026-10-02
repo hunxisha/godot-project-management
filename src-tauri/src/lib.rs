@@ -4,6 +4,7 @@ pub mod backup;
 pub mod docs;
 pub mod extract;
 pub mod fsutil;
+pub mod inspectfs;
 pub mod launcher;
 pub mod templates;
 pub mod http;
