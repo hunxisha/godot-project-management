@@ -44,6 +44,9 @@ function section(t) { console.log(`\n=== ${t} ===`) }
 const DB = new Map()
 global.window = { ztools: { db: { get: (id) => (DB.get(id) ? { ...DB.get(id) } : null) } } }
 const F = require(path.join(LIB, 'inspectfs.js'))
+// 备份名里的时间戳由 fsutil.stampSec() 产生。测试要**预测**「下一个备份名」(同秒碰撞、
+// 半截备份清理两类断言都靠它),所以直接复用同一个函数,而不是自己拼一份时间格式。
+const U = require(path.join(LIB, 'fsutil.js'))
 
 const WORK = fs.mkdtempSync(path.join(os.tmpdir(), 'gpm-inspectfs-'))
 
@@ -283,14 +286,17 @@ async function main() {
   const w1 = F.writeProjectText('godot/project/p1', 'cfg.txt', 'NEW\n')
   ok(w1.ok === true, '写入成功', JSON.stringify(w1))
   ok(fs.readFileSync(path.join(TREE, 'cfg.txt'), 'utf8') === 'NEW\n', '内容已替换')
-  ok(/\.gpm-bak-\d{8}_\d{4}_\d{2}\.txt$/.test(String(w1.backupRel)),
-    'backupRel 形如 cfg.gpm-bak-YYYYMMDD_HHmm_ss.txt', w1.backupRel)
+  // 备份名以 marker **收尾**:`cfg.txt.gpm-bak-<时间戳>`,而不是把原扩展名留在最后。
+  // `<base>.gpm-bak-<ts>.txt` 那种形态仍以 .txt 结尾 —— Godot 会当真导入它,
+  // scanProjectTree 会把它数成一份真实资源,导出预设 `filter include *` 甚至能把它打进发布包。
+  ok(/^cfg\.txt\.gpm-bak-\d{8}_\d{4}_\d{2}$/.test(String(w1.backupRel)),
+    'backupRel 形如 cfg.txt.gpm-bak-YYYYMMDD_HHmm_ss(marker 收尾,不保留原扩展名)', w1.backupRel)
   ok(fs.readFileSync(path.join(TREE, w1.backupRel), 'utf8') === 'OLD\n', '备份文件里是原内容')
   ok(F.writeProjectText('godot/project/p1', 'sub/deep/new.txt', 'A').error === '目标目录不存在',
     '不自动建目录(避免 typo 路径变成新文件)')
   ok(F.writeProjectText('godot/project/p1', 'cfg.txt', 'X', { backup: false }).ok === true, 'backup:false 时仍可写')
-  ok(fs.readdirSync(TREE).filter((n) => /^cfg\.gpm-bak-.*\.txt$/.test(n)).length === 1,
-    'backup:false 这次不再产生新备份', String(fs.readdirSync(TREE).filter((n) => n.startsWith('cfg.gpm-bak'))))
+  ok(fs.readdirSync(TREE).filter((n) => /^cfg\.txt\.gpm-bak-/.test(n)).length === 1,
+    'backup:false 这次不再产生新备份', String(fs.readdirSync(TREE).filter((n) => n.startsWith('cfg.txt.gpm-bak'))))
   ok(F.writeProjectText('godot/project/p1', '../evil.txt', 'X').error === '非法路径', '越界写 → 非法路径')
   ok(F.writeProjectText('godot/project/p1', 'scene', 'X').error === '不能覆盖目录', '目标是目录 → 拒绝')
   ok(F.writeProjectText('godot/project/none', 'a.txt', 'X').error === '项目不存在', '未知项目 → 项目不存在')
@@ -307,12 +313,68 @@ async function main() {
   ok(fs.readFileSync(path.join(TREE, 'cfg.txt'), 'utf8') === 'X', '被拒绝的写入不改磁盘内容')
   // backupRel 必须保留 rel 的目录前缀(项目相对路径,调用方要能直接 readProjectText 回来核对)。
   const c2 = F.writeProjectText('godot/project/p1', 'scene/new.txt', 'B')
-  ok(/^scene\/new\.gpm-bak-\d{8}_\d{4}_\d{2}\.txt$/.test(String(c2.backupRel)),
-    '多级 rel 的 backupRel 带 scene/ 前缀(仍是项目相对路径)', JSON.stringify(c2))
+  ok(/^scene\/new\.txt\.gpm-bak-\d{8}_\d{4}_\d{2}$/.test(String(c2.backupRel)),
+    '多级 rel 的 backupRel 带 scene/ 前缀且 marker 收尾(仍是项目相对路径)', JSON.stringify(c2))
   ok(fs.readFileSync(path.join(TREE, c2.backupRel), 'utf8') === 'A', '多级备份里是上一次的原文')
   ok(fs.readFileSync(path.join(TREE, 'scene/new.txt'), 'utf8') === 'B', '覆盖写第二次的落点正确')
   ok(fs.readdirSync(path.join(TREE, 'scene')).filter((n) => n.startsWith('.gpm-tmp-')).length === 0,
     '子目录写入同样不留 .gpm-tmp-* 残骸')
+
+  // ---------- R-1:备份不保留原扩展名(.gd 专项)----------
+  // 这是计划级修正:旧命名让 player.gd 的备份仍以 .gd 结尾,于是
+  // ① Godot 把备份当真当一个脚本导入(多出幻影资源、还占 .gd 这个名字),
+  // ② scanProjectTree 的 ext 分组把它数进 gd 资源数,体检结论虚高,
+  // ③ 导出预设 `filter include *` 可能把它一起打进发布包。marker 收尾后三者都消失。
+  fs.writeFileSync(path.join(TREE, 'player.gd'), 'extends Node\n', 'utf8')
+  const wGd = F.writeProjectText('godot/project/p1', 'player.gd', 'extends Node2D\n')
+  ok(wGd.ok === true && /^player\.gd\.gpm-bak-\d{8}_\d{4}_\d{2}$/.test(String(wGd.backupRel)),
+    '.gd 的备份名为 player.gd.gpm-bak-<时间戳>', JSON.stringify(wGd))
+  ok(path.extname(String(wGd.backupRel)) !== '.gd',
+    '备份的 extname 不再是 .gd(引擎与导出预设都看不见它)', path.extname(String(wGd.backupRel)))
+  const scanGd = F.scanProjectTree('godot/project/p1', { exts: ['gd'] })
+  ok((scanGd.files || []).some((f) => f.rel === 'player.gd') &&
+    (scanGd.files || []).every((f) => f.rel !== wGd.backupRel),
+    'scanProjectTree(exts:gd) 只数到原脚本,备份不计入 gd 资源',
+    JSON.stringify((scanGd.files || []).map((f) => f.rel)))
+  ok(fs.readFileSync(path.join(TREE, wGd.backupRel), 'utf8') === 'extends Node\n',
+    'marker 收尾后备份内容仍是原文件原文')
+
+  // ---------- R-7:backupRel 的前缀取自**解析结果**,不照抄调用方的 rel ----------
+  // rel 允许 './a/b.txt'、'a//b.txt'(resolveRel 已归一)。照原文切前缀会返回 './a/…',
+  // 既破坏本模块「对外只有 rel 一个键、rel 一律规范正斜杠」的契约,也让渲染层
+  // tree.find(f => f.rel === backupRel) 永远找不到刚建好的那份备份。
+  fs.writeFileSync(path.join(TREE, 'dot.txt'), 'D1\n', 'utf8')
+  const wDot = F.writeProjectText('godot/project/p1', './dot.txt', 'D2\n')
+  ok(wDot.ok === true && /^dot\.txt\.gpm-bak-\d{8}_\d{4}_\d{2}$/.test(String(wDot.backupRel)),
+    "rel 写成 './dot.txt' → backupRel 不带 ./ 前缀", wDot.backupRel)
+  const scanDot = F.scanProjectTree('godot/project/p1')
+  ok((scanDot.files || []).some((f) => f.rel === wDot.backupRel),
+    'backupRel 与 scanProjectTree 的 rel 同形(渲染层按 rel 找得到这份备份)', JSON.stringify(wDot))
+  fs.writeFileSync(path.join(TREE, 'scene/deep2.txt'), 'E1\n', 'utf8')
+  const wSlash = F.writeProjectText('godot/project/p1', './scene//deep2.txt', 'E2\n')
+  ok(wSlash.ok === true && /^scene\/deep2\.txt\.gpm-bak-\d{8}_\d{4}_\d{2}$/.test(String(wSlash.backupRel)),
+    "rel 写成 './scene//deep2.txt' → 前缀归一为 scene/", wSlash.backupRel)
+
+  // ---------- R-2:同一秒内的第二次备份不覆盖第一份 ----------
+  // stampSec 只到秒,同秒改两次必然撞同一个名字。直接 copy 到同名就是把第一份备份
+  // (用户上一次的退路)悄悄销毁 —— 比不备份更危险:用户还以为能还原到上一版。
+  fs.writeFileSync(path.join(TREE, 'dup.txt'), 'V1\n', 'utf8')
+  const d1 = F.writeProjectText('godot/project/p1', 'dup.txt', 'V2\n')
+  const d2 = F.writeProjectText('godot/project/p1', 'dup.txt', 'V3\n')
+  ok(/^dup\.txt\.gpm-bak-\d{8}_\d{4}_\d{2}$/.test(String(d1.backupRel)),
+    '没有碰撞时备份名保持规范形状(uniquePath 不改正常名)', d1.backupRel)
+  ok(String(d2.backupRel) !== String(d1.backupRel),
+    '同秒两次写入 → 第二次另起名字,不覆写第一次的备份', JSON.stringify({ a: d1.backupRel, b: d2.backupRel }))
+  // uniquePath 是按**最后一个点**切扩展名的,换名后缀落在 `dup.txt` 与 marker 之间
+  // (`dup.txt_2.gpm-bak-<ts>`),不是接在名字末尾 —— 用 startsWith('dup.txt.gpm-bak-') 会漏掉它,
+  // 于是「只剩一份」的假象会盖住真正的覆写。marker 收尾也让这份备份的 extname 仍是 .gpm-bak-…,
+  // 换名后依旧不被 Godot / exts 过滤看见。
+  const dupBaks = fs.readdirSync(TREE).filter((n) => /^dup\.txt(_\d+)?\.gpm-bak-\d{8}_\d{4}_\d{2}$/.test(n))
+  ok(dupBaks.length === 2, '目录里两份备份都在(不是覆写成一)', dupBaks.join(','))
+  ok(fs.readFileSync(path.join(TREE, d1.backupRel), 'utf8') === 'V1\n' &&
+    fs.readFileSync(path.join(TREE, d2.backupRel), 'utf8') === 'V2\n',
+    '两份备份各自存着当时那一版原文(V1 / V2)', JSON.stringify({ a: d1.backupRel, b: d2.backupRel }))
+  ok(fs.readFileSync(path.join(TREE, 'dup.txt'), 'utf8') === 'V3\n', '两次写入都正确落到了目标')
 
   // 原子性的**过程**断言:上面所有断言只看结果文件,一个 `fs.writeFileSync(abs)` 的直写实现
   // 也能全绿 —— 但直写会在写到一半时崩掉(断电/空间不足)把原文件留在半截状态,
@@ -321,7 +383,7 @@ async function main() {
   const calls = []
   const realWrite = fs.writeFileSync
   const realRename = fs.renameSync
-  fs.writeFileSync = (...a) => { calls.push(['write', a[0]]); return realWrite(...a) }
+  fs.writeFileSync = (...a) => { calls.push(['write', a[0], a[2]]); return realWrite(...a) }
   fs.renameSync = (...a) => { calls.push(['rename', a[0], a[1]]); return realRename(...a) }
   let probe
   try {
@@ -342,6 +404,20 @@ async function main() {
   ok(calls.every((c) => !(c[0] === 'write' && c[1] === cfgAbs)),
     '全程没有一次 writeFileSync 直接打到目标路径')
 
+  // ---------- R-8:钉住「绝不用 fsutil.tempPath」这条红线 ----------
+  // fsutil.tempPath(dir, id, false) 给文件加的是 `.zip` 后缀。上面四条过程断言只看
+  // 「basename 以 .gpm-tmp- 开头 / 同目录 / rename 的两侧」——换成 tempPath 生成的
+  // `cfg.txt.zip` 之类名字,那四条照样全绿,而 rename 之后目标内容会被 .zip 名字带歪。
+  // 所以额外钉死:临时名以**目标真实扩展名**结尾,且绝不以 .zip 结尾。
+  ok(!!wTmp && String(wTmp[1]).endsWith(path.extname(cfgAbs)),
+    '临时文件用目标真实扩展名结尾', wTmp && wTmp[1])
+  ok(!!wTmp && !String(wTmp[1]).endsWith('.zip'),
+    '临时名不是 fsutil.tempPath 的 .zip 形态(红线:这里不能用它)', wTmp && wTmp[1])
+  // ---------- R-9(结构侧):临时写入必须独占创建 ----------
+  const tmpOpts = wTmp && wTmp[2]
+  ok(!!tmpOpts && String(tmpOpts.flag) === 'wx',
+    "临时文件用 flag:'wx' 写(名字可预测,同名已存在时必须失败而不是跟随/复用)", JSON.stringify(tmpOpts))
+
   // 失败路径:让 rename 抛一次。原语红线是「不抛异常」,且失败必须 ① 报 '写入失败'
   // ② 原文件保持旧内容 ③ rmQuiet 清掉临时文件(否则用户项目里满是 .gpm-tmp-*)。
   const beforeFail = fs.readFileSync(cfgAbs, 'utf8')
@@ -357,23 +433,122 @@ async function main() {
   ok(fs.readdirSync(TREE).filter((n) => n.startsWith('.gpm-tmp-')).length === 0,
     '失败的写入由 rmQuiet 清掉临时文件', String(fs.readdirSync(TREE).filter((n) => n.startsWith('.gpm-tmp-'))))
 
-  // 备份失败必须**停在覆写之前**:备份是这次修改唯一的退路,备份没成却照样写盘,
-  // 就等于把用户的原文件直接销毁了(工具页的「改坏了能还原」承诺当场失效)。
-  const bakBefore = fs.readdirSync(TREE).filter((n) => /^cfg\.gpm-bak-.*\.txt$/.test(n)).length
-  const realCopy = fs.copyFileSync
-  fs.copyFileSync = () => { throw Object.assign(new Error('simulated EACCES'), { code: 'EACCES' }) }
-  let wBakFail
+  // ---------- R-9:临时名可预测 → 必须独占创建(flag wx)----------
+  // 临时名是 `.gpm-tmp-<Date.now()>-<base><ext>`,项目里任何人都能预置同名文件
+  // (最坏情形:一条指向 ~/.ssh/id_rsa 的同名符号链接)。包含闸只审过最终 abs,**没审 tmp**;
+  // 普通写入会跟随它,于是这次改的其实是别人的文件。wx 让「同名已存在」直接失败 ——
+  // 宁可这条 rel 写不成,也不写到别人名下。
+  const wxBefore = fs.readFileSync(cfgAbs, 'utf8')
+  let wxPlanted = false
+  fs.writeFileSync = (p, ...rest) => {
+    const b = path.basename(String(p))
+    // 第一次打到 .gpm-tmp-* 的写入:抢在它前面把那个名字占掉,再让真实写入去撞它。
+    if (!wxPlanted && b.startsWith('.gpm-tmp-')) { wxPlanted = true; realWrite(String(p), 'PRE-PLANTED-BY-OTHER\n') }
+    return realWrite(p, ...rest)
+  }
+  let wWx
   try {
-    wBakFail = F.writeProjectText('godot/project/p1', 'cfg.txt', 'MUST-NOT-LAND')
+    wWx = F.writeProjectText('godot/project/p1', 'cfg.txt', 'WX-MUST-NOT-LAND')
+  } finally {
+    fs.writeFileSync = realWrite
+  }
+  ok(wxPlanted === true, '探针确实抢占了本次的临时文件名(断言不是空跑)', String(wxPlanted))
+  ok(wWx.ok === false && wWx.error === '写入失败', '临时名被预占 → 写入失败(不静默复用同名路径)', JSON.stringify(wWx))
+  ok(fs.readFileSync(cfgAbs, 'utf8') === wxBefore, '被 wx 挡掉的写没碰原文件')
+  const wxTmp = fs.readdirSync(TREE).filter((n) => n.startsWith('.gpm-tmp-'))
+  ok(wxTmp.length === 0, 'wx 失败后同样由 rmQuiet 收掉残骸', wxTmp.join(','))
+
+  // ---------- R-4:备份失败的两条清理语义(确定性复现,不看秒)----------
+  // 备份是这次修改唯一的退路:① 失败必须停在覆写之前;② 失败清理只能删**自己刚写的那个**。
+  // 旧写法把 copyFileSync mock 成「立刻抛」——它从没产出过半截文件,清理分支根本没事做;
+  // 而「上一份同名备份是否被误删」只在前后几节恰好同秒时才撞上,是时间相关性巧合、不是回归保护。
+  // 这里:先把**当前秒算得出的那个备份名**占成哨兵(内容=可核对的哨兵字节),
+  //       再让 copy 真的写出半截 HALF 才失败 —— 两条语义各自都有确定的失败形态。
+  // 用独立文件 bf.txt:它的备份历史完全由本节制造,不与上面各节的计数互相干扰。
+  fs.writeFileSync(path.join(TREE, 'bf.txt'), 'BF-ORIG\n', 'utf8')
+  const bfAbs = path.join(TREE, 'bf.txt')
+  const bakNames = () => fs.readdirSync(TREE).filter((n) => /^bf\.txt(_\d+)?\.gpm-bak-\d{8}_\d{4}_\d{2}$/.test(n)).sort()
+  const predicted = `bf.txt.gpm-bak-${U.stampSec()}`
+  const sentinelAbs = path.join(TREE, predicted)
+  const readSafe = (p) => { try { return fs.readFileSync(p, 'utf8') } catch (e) { return '<文件不存在>' } }
+  const realCopy = fs.copyFileSync
+  // 真 copyFileSync 失败前往往已经写了一半,所以 mock 也先落半截:清理分支必须有活干。
+  const halfThenThrow = (src, dest, ...rest) => {
+    realWrite(String(dest), 'HALF')
+    throw Object.assign(new Error('simulated ENOSPC'), { code: 'ENOSPC' })
+  }
+
+  // ① 备份名已被「上一份真备份」占着:新的半截备份必须写到别处,哨兵一个字节都不能动。
+  fs.writeFileSync(sentinelAbs, 'SENTINEL-PREV-BACKUP\n', 'utf8')
+  fs.copyFileSync = halfThenThrow
+  let wBakFailA
+  try {
+    wBakFailA = F.writeProjectText('godot/project/p1', 'bf.txt', 'MUST-NOT-LAND')
   } finally {
     fs.copyFileSync = realCopy
   }
-  ok(wBakFail.ok === false && wBakFail.error === '备份失败', '备份失败 → 备份失败(不继续覆写)', JSON.stringify(wBakFail))
-  ok(fs.readFileSync(cfgAbs, 'utf8') === beforeFail, '备份失败时原文件原封不动')
-  ok(fs.readdirSync(TREE).filter((n) => /^cfg\.gpm-bak-.*\.txt$/.test(n)).length === bakBefore,
-    '备份失败不留半截备份', String(fs.readdirSync(TREE).filter((n) => n.startsWith('cfg.gpm-bak'))))
+  const sentinelAfterA = readSafe(sentinelAbs)
+  ok(wBakFailA.ok === false && wBakFailA.error === '备份失败', '备份失败 → 备份失败(不继续覆写)', JSON.stringify(wBakFailA))
+  ok(fs.existsSync(sentinelAbs) && sentinelAfterA === 'SENTINEL-PREV-BACKUP\n',
+    '上一份同名备份既没被覆写也没被清理误删(哨兵字节完好)', sentinelAfterA)
+  ok(readSafe(bfAbs) === 'BF-ORIG\n', '备份失败时原文件原封不动')
+  ok(bakNames().length === 1 && bakNames()[0] === predicted,
+    '半截备份(HALF)被清掉,目录里只剩哨兵那一份', bakNames().join(','))
   ok(fs.readdirSync(TREE).filter((n) => n.startsWith('.gpm-tmp-')).length === 0,
     '备份失败同样不留 .gpm-tmp-* 残骸')
+
+  // ② 备份名空着:半截备份必须当场清干净(半份备份比没有备份更危险 —— 用户会拿它还原)。
+  fs.rmSync(sentinelAbs)
+  fs.copyFileSync = halfThenThrow
+  let wBakFailB
+  try {
+    wBakFailB = F.writeProjectText('godot/project/p1', 'bf.txt', 'MUST-NOT-LAND')
+  } finally {
+    fs.copyFileSync = realCopy
+  }
+  const namesAfterB = bakNames()
+  ok(wBakFailB.ok === false && wBakFailB.error === '备份失败', '备份名空着时同样报备份失败', JSON.stringify(wBakFailB))
+  ok(namesAfterB.length === 0, '自己刚写的半截备份没留在盘上', namesAfterB.join(','))
+  ok(readSafe(bfAbs) === 'BF-ORIG\n', '② 里原文件同样没被碰')
+
+  // ---------- R-3:stat 问不到 / 目标不是普通文件 → 拒写,绝不「当作不存在」裸写 ----------
+  // 原实现 `catch (e) { /* 原文件不存在 */ }` 把 EACCES / ELOOP / EIO 也当成「没有原文件」:
+  // 不备份 → 直接 rename 覆写 → 用户唯一的退路当场没了(比不写更糟)。
+  // 只有 ENOENT(真的不存在)才走「新建文件、无需备份」分支。
+  const cfgBeforeR3 = fs.readFileSync(cfgAbs, 'utf8')
+  const cfgBakCount = () => fs.readdirSync(TREE).filter((n) => /^cfg\.txt(_\d+)?\.gpm-bak-\d{8}_\d{4}_\d{2}$/.test(n)).length
+  const r3BakBefore = cfgBakCount()
+  const realStat = fs.statSync
+  fs.statSync = (p, ...rest) => {
+    if (String(p) === cfgAbs) throw Object.assign(new Error('simulated EACCES'), { code: 'EACCES' })
+    return realStat(p, ...rest)
+  }
+  let wStatFail
+  try {
+    wStatFail = F.writeProjectText('godot/project/p1', 'cfg.txt', 'BLIND-WRITE')
+  } finally {
+    fs.statSync = realStat
+  }
+  ok(wStatFail.ok === false && wStatFail.error === '写入失败',
+    'statSync 非 ENOENT 失败 → 写入失败(不得当作「原文件不存在」裸写)', JSON.stringify(wStatFail))
+  ok(fs.readFileSync(cfgAbs, 'utf8') === cfgBeforeR3, 'stat 失败时原文件完好')
+  ok(cfgBakCount() === r3BakBefore, 'stat 失败时没产生备份,也没留下临时残骸')
+
+  // 目标是非普通文件(FIFO / socket / 设备):statSync 成功、既不是目录也不是普通文件。
+  // 把它当「可备份的普通文件」→ copyFileSync 读一个没人写的 FIFO 会把 preload 线程挂死
+  // (整个插件界面冻结);当「不存在」→ rename 覆到一个特殊文件上。两边都只能拒。
+  const fakeStat = { isDirectory: () => false, isFile: () => false, isSymbolicLink: () => false, size: 0, mtimeMs: 0 }
+  fs.statSync = (p, ...rest) => (String(p) === cfgAbs ? fakeStat : realStat(p, ...rest))
+  let wNotFile
+  try {
+    wNotFile = F.writeProjectText('godot/project/p1', 'cfg.txt', 'FIFO-WRITE')
+  } finally {
+    fs.statSync = realStat
+  }
+  ok(wNotFile.ok === false && wNotFile.error === '写入失败',
+    '非普通文件(FIFO/socket)→ 写入失败(既不 copy 备份也不覆写)', JSON.stringify(wNotFile))
+  ok(fs.readFileSync(cfgAbs, 'utf8') === cfgBeforeR3 && cfgBakCount() === r3BakBefore,
+    '非普通文件那条既没改原文件也没产生备份')
 
   // 写必须走 resolveInside(真实路径闸),而不是只有字面闸的 resolveRel:
   // 项目内一条指向项目外的链接,resolveRel 看着完全合法,fs 却会把写落到链接目标上 ——
@@ -403,15 +578,21 @@ async function main() {
   section('5b. resolveInside 文件系统根前缀')
   const FSROOT = path.parse(TREE).root // Windows 'C:\\';POSIX '/'
   const rootReal = (() => { try { return fs.realpathSync(FSROOT) } catch (e) { return '' } })()
-  // 挑一个**确定存在、且自身不是符号链接**的根内目录:readdirSync 顺序不保证,
-  // 而 dangling symlink 会让 realpathSync 抛异常 —— 那报的是 '路径无法解析',与本节要测的
-  // 前缀拼接无关,却会让断言在别的机器上假失败。lstatSync 不跟随链接,正好用来筛掉它。
+  // 挑一个**确定存在、realpath 也问得到、且自身不是符号链接**的根内目录。
+  // 只筛 lstat 不够:NTFS junction 的 lstat 报 isSymbolicLink() === false(它是 reparse point
+  // 而非 symlink,readdir 顺序又不保证),而 'System Volume Information' 这类受保护目录的
+  // realpathSync 直接抛 EPERM → resolveInside 返回 '路径无法解析' → 本节在别的机器/别的卷上
+  // 假失败(与要测的前缀拼接毫无关系)。所以这里**用 realpathSync(candidate) 亲自走一遍**,
+  // 问不到真实路径的候选一律不选;一个都选不出来时走 skipAssert(可见,不记 PASS)。
   const someDir = (() => {
     try {
       return fs.readdirSync(FSROOT).find((n) => {
+        const cand = path.join(FSROOT, n)
         try {
-          const st = fs.lstatSync(path.join(FSROOT, n))
-          return st.isDirectory() && !st.isSymbolicLink()
+          const st = fs.lstatSync(cand)
+          if (!st.isDirectory() || st.isSymbolicLink()) return false
+          fs.realpathSync(cand) // ← 真正的筛选条件:这一条 realpath 问得到才用
+          return true
         } catch (e) { return false }
       }) || ''
     } catch (e) { return '' }
@@ -423,10 +604,14 @@ async function main() {
     const r2 = tryResolveInside(FSROOT, `${someDir}/gpm-not-here.txt`)
     ok(!r2.error && typeof r2.abs === 'string',
       '项目根为文件系统根时,根内**尚未存在**的路径也放行(新建文件不被挡)', JSON.stringify(r2))
-    const r3 = tryResolveInside(FSROOT, '../escape-from-root')
-    ok(r3.error === '非法路径', '文件系统根下越界仍拒(sep 修复没把闸拆掉)', JSON.stringify(r3))
+    // 这里**不**再断言 `tryResolveInside(FSROOT, '../escape-from-root')` 挡得住:
+    // 文件系统根没有父目录,'../' 形态在 resolveRel 的字面闸就被拒了,根本走不到包含比较 ——
+    // 那条断言在旧代码、新代码、甚至把包含比较整段删掉的情况下都同样绿,
+    // 因此它**不是**「修复没把闸拆宽」的证据,已按 review 撤下(撤下它不减少任何覆盖)。
+    // 真正钉住包含比较的是第 3 节与第 5 节的符号链接组(读侧 + 写侧,各查磁盘没被碰)。
   } else {
-    skipAssert('文件系统根断言本机未执行(无法 realpath/列根目录)', `${rootReal || 'realpath 失败'} ${someDir || '找不到根内目录'}`)
+    skipAssert('文件系统根断言本机未执行(无法 realpath 根目录,或找不到 realpath 问得到的根内目录)',
+      `${rootReal || 'realpath 根目录失败'} ${someDir || '没有 realpath 问得到的候选目录'}`)
   }
 
   console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)

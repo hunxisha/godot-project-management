@@ -11,7 +11,7 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const { getDoc } = require('./store')
-const { walkFiles, makeExcluder, stampSec, rmQuiet } = require('./fsutil')
+const { walkFiles, makeExcluder, stampSec, rmQuiet, uniquePath } = require('./fsutil')
 
 const DEFAULT_MAX_BYTES = 1024 * 1024
 const DEFAULT_MAX_ENTRIES = 200000
@@ -124,8 +124,30 @@ function readProjectText(projectId, rel, opts) {
 }
 
 /**
+ * rel → **目录前缀**(规范正斜杠、带尾斜杠;项目根下的文件返回 '')。
+ * 与 resolveRel 用同一套切段归一(`./`、重复斜杠、反斜杠都吃掉),所以这里产出的前缀
+ * 与 scanProjectTree 给出的 rel **同形** —— 对外只有 rel 这一个键,渲染层就是按 rel 找文件的。
+ * (刻意不用 path.relative:它没在 sandbox.d.ts 里声明,不值得为一段字符串拼接扩大沙箱声明面。)
+ * @param {unknown} rel
+ * @returns {string}
+ */
+function relDirPrefix(rel) {
+  const stack = []
+  for (const p of String(rel == null ? '' : rel).replace(/\\/g, '/').split('/')) {
+    if (!p || p === '.') continue
+    if (p === '..') return '' // 越界早被 resolveRel 拒了,这里只是防御性收口
+    stack.push(p)
+  }
+  stack.pop() // 最后一段是文件名,不属于前缀
+  return stack.length ? `${stack.join('/')}/` : ''
+}
+
+/**
  * 写项目内文本文件:**同目录临时文件 + rename** 原子落盘,默认先把原文件备份成
- * `<名>.gpm-bak-<stampSec><扩展>`。不自动创建目录(避免把 typo 路径变成新文件)。
+ * `<名><扩展>.gpm-bak-<stampSec>`(marker 收尾,例:`player.gd.gpm-bak-20260301_1200_00`)。
+ * 备份名**不保留原扩展名收尾**:否则 `player.gpm-bak-<ts>.gd` 仍以 .gd 结尾,Godot 会把它
+ * 当真当一个脚本导入、scanProjectTree 会把它数成一份真实 .gd 资源、
+ * 导出预设 `filter include *` 甚至能把它一起打进发布包。不自动创建目录(避免把 typo 路径变成新文件)。
  * 注意:fsutil.tempPath 对文件会加 `.zip` 后缀,这里不能用它。
  *
  * 闸用 resolveInside 而不是 resolveRel:写是**动物件**的一翼。项目内一条指向项目外的
@@ -151,9 +173,18 @@ function writeProjectText(projectId, rel, text, opts) {
   let exists = false
   try {
     const st = fs.statSync(abs)
-    isDir = st.isDirectory()
-    exists = !isDir
-  } catch (e) { /* 原文件不存在 */ }
+    if (st.isDirectory()) isDir = true
+    else if (st.isFile()) exists = true
+    // stat 问得到、但既不是目录也不是**普通文件**(FIFO / socket / 设备文件):
+    // 当「普通文件」去 copyFileSync,读一个没人写的 FIFO 会把 preload 线程挂死(整个界面冻结);
+    // 当「不存在」去 rename,就是把名字覆到特殊文件上。两边都只能拒。
+    else return { ok: false, error: '写入失败' }
+  } catch (e) {
+    // **只有 ENOENT** 才是「原文件不存在」(那是新建文件,本来就不需要备份)。
+    // EACCES / ELOOP / EIO 意味着文件在、只是我们问不到它:当成不存在就等于不备份直接覆写,
+    // 把用户唯一的退路烧掉 —— 比这次干脆不写更糟。
+    if (!e || e.code !== 'ENOENT') return { ok: false, error: '写入失败' }
+  }
   if (isDir) return { ok: false, error: '不能覆盖目录' }
   const dir = path.dirname(abs)
   // 缺父目录一律拒绝而不是 mkdir -p:否则一个拼错的 rel 会在项目里静默长出垃圾目录树。
@@ -161,29 +192,35 @@ function writeProjectText(projectId, rel, text, opts) {
 
   const ext = path.extname(abs)
   const base = path.basename(abs, ext)
+  // 临时名以目标**真实扩展名**结尾(与 fsutil.tempPath 的 .zip 形态区分开)。
+  // flag 'wx' = 独占创建:临时名 `.gpm-tmp-<毫秒>-<base><ext>` 是可预测的,而包含闸只审过最终
+  // abs、没审 tmp —— 项目里预置一个同名文件(最坏是同名符号链接指向项目外)时,普通写入会
+  // 跟随它把内容落到别人名下;wx 让「名字已被占」当场失败,宁可这次不写。
   const tmp = path.join(dir, `.gpm-tmp-${Date.now()}-${base}${ext}`)
   let backupRel
   if (exists && o.backup !== false) {
-    const bak = `${base}.gpm-bak-${stampSec()}${ext}`
-    const bakAbs = path.join(dir, bak)
-    // stampSec 只到秒:同一秒内第二次备份会撞同名(那是既有行为)。
-    // 但失败清理必须只删**自己刚建的那个**:否则同名备份是上一轮留下的真备份,
-    // 无脑 rmQuiet 等于把用户上一次修改的退路删掉了 —— 比半截备份更糟。
-    const bakPreExisted = fs.existsSync(bakAbs)
+    const bak = `${base}${ext}.gpm-bak-${stampSec()}`
+    // stampSec 只到秒 → 同一秒内第二次改同一个文件必然撞同一个名字,copy 上去就是把**上一次的
+    // 备份**(用户以为还能还原到那一版)静默销毁。uniquePath 在没有碰撞时原样返回,
+    // 碰撞时退到 `<bak>_2` 这类没人占的名字。
+    const bakAbs = uniquePath(path.join(dir, bak))
     try {
       fs.copyFileSync(abs, bakAbs)
     } catch (e) {
       // copyFileSync 可能已经写了半截:半份备份比没有备份更危险(用户会拿它还原)。
-      if (!bakPreExisted) rmQuiet(bakAbs)
+      // 这里的删除是**无条件安全**的 —— bakAbs 由 uniquePath 挑出来,挑的时候那个名字还不存在,
+      // 所以那个路径上若有东西,一定是这次刚写出来的半截。
+      // (旧实现在此靠 `bakPreExisted` 守卫跳过清理,那是为了「撞名时不删上一份真备份」;
+      //  那种撞名现在由 uniquePath 直接换名避开,守卫反而算错了对象 —— 它查的是碰撞前的名字,
+      //  于是清理被跳过、半截备份留在盘上。测试第 5 节 ① 钉住这一点。)
+      rmQuiet(bakAbs)
       return { ok: false, error: '备份失败' }
     }
-    // backupRel 保留 rel 的目录前缀:对外只有 rel 这一个键,绝对路径不外泄。
-    const norm = String(rel).replace(/\\/g, '/')
-    const i = norm.lastIndexOf('/')
-    backupRel = (i < 0 ? '' : norm.slice(0, i + 1)) + bak
+    // backupRel 回的是**真实落盘的那个名字**(换名后可能与 bak 不同)+ 规范化的目录前缀。
+    backupRel = relDirPrefix(rel) + path.basename(bakAbs)
   }
   try {
-    fs.writeFileSync(tmp, text, 'utf8')
+    fs.writeFileSync(tmp, text, { encoding: 'utf8', flag: 'wx' })
     fs.renameSync(tmp, abs)
   } catch (e) {
     // 失败路径一律清临时文件:原文件此刻还是旧的,磁盘上不该留下 .gpm-tmp-* 残骸。
