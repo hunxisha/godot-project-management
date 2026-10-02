@@ -645,8 +645,12 @@ async function main() {
   // ---------- 6b. 删除必须过真实路径闸(resolveInside),不得退回字面闸 ----------
   // 上面那组里 '../evil' 靠**文本**就能挡住,换成项目内的链接就挡不住了:
   // rel 里没有 `..`、没有盘符,resolveRel 放行,落点却在项目外。
-  // 所以这组断言是「实现有没有真的用 resolveInside」的唯一证据 ——
-  // 把实现改回 resolveRel,两条都会红(一条是 failed 里没了这一项,一条是项目外文件被删走)。
+  // 所以这组断言是「实现有没有真的用 resolveInside」的唯一证据。
+  // 把实现改回 resolveRel 时,真正跑红的是**这一节的第一条**与**第三条**:链接被当成合法项删走了 ——
+  // 它不进 failed(得到 ok:true, moved:1),而「链接本身也还在」和 6e 的残骸核对同时对不上。
+  // 「项目外文件被删走」那条**不是**本机的判据:实测 PowerShell 把 junction **自己**送进回收站,
+  // 链接指向的 victim.txt 并没被带走,所以它在变异下照样绿。留着它是因为 POSIX 的
+  // rmSync(recursive) 跟随真实落点、语义未必相同 —— 它是**兜底网**,不是证据(别拿它当变异跑红的证据)。
   section('6b. 删除穿过项目内符号链接指向项目外 → 拒绝')
   const OUT2 = path.join(WORK, 'trash-outside')
   fs.mkdirSync(OUT2, { recursive: true })
@@ -727,6 +731,103 @@ async function main() {
   const t12 = F.movePathsToTrash('godot/project/t1', ['sub2'])
   ok(t12.ok === true && t12.moved === 1 && !fs.existsSync(path.join(trashRoot, 'sub2')),
     '清空后的目录本身也是合法删除对象(不留空壳)')
+
+  // ---------- F-3:rels 不是数组一律按空清单处理(不抛、更不逐字符删)----------
+  // 旧写法 `for (const raw of rels || [])` 有两个洞:{} / 42 直接 TypeError(违反本模块
+  // 「读 / 写 / 删原语都不抛异常」的红线),而**字符串**更可恶 —— 它可迭代,于是被**按字符**拆开:
+  // 'a.txt' → 'a' / '.' / 't' / 'x' / 't'。两个兄弟原语(readProjectText / writeProjectText)
+  // 收的都是单个 rel 字符串,把同一个串手滑传给批量接口是真实形态,而项目根上任何单字符名字的文件
+  // ('a'、'x' 这类)都会被这一下送进回收站 —— 所以这里除了形状断言,还额外钉住磁盘上那个 'a' 没被碰。
+  const nearRoot = makeTree('trashproj-near', { 'a': 'SINGLE-CHAR', 'a.txt': 'A2' })
+  DB.set('godot/project/t8', { _id: 'godot/project/t8', id: 't8', path: nearRoot, name: 'NEAR' })
+  for (const [shapeLabel, shapeVal] of [['{}', {}], ['42', 42], ["'a.txt'", 'a.txt'], ['undefined', undefined]]) {
+    const rBad = tryTrash('godot/project/t8', shapeVal)
+    ok(!String(rBad.error || '').startsWith('threw') && rBad.ok === true && rBad.moved === 0 &&
+      (!rBad.failed || rBad.failed.length === 0),
+      `rels 为 ${shapeLabel} → 按空清单处理(ok:true, moved:0, 不抛)`, JSON.stringify(rBad))
+  }
+  ok(fs.existsSync(path.join(nearRoot, 'a')) && fs.existsSync(path.join(nearRoot, 'a.txt')),
+    "传字符串时项目根上的单字符文件 'a' 仍在盘上(没有按字符迭代去删它)")
+
+  // ---------- 6f. 批次跑完后按磁盘实况复核(review F-1)----------
+  // 旧实现在批**前**逐项 stat、批**后**把 fsutil.trashPaths 没报错一律当成功,于是两个方向都会谎报:
+  //   · ['sub','sub/c.txt'] —— 父目录整棵先进回收站,随后 PowerShell 对**已消失**的 sub/c.txt
+  //     报错 → 明明点名的两样都没了,却回「1 项失败」;换成 ['sub/c.txt','sub'] 又回 ok:true。
+  //     **结果依赖输入顺序**是工具页最坏的形态(同一批人点同样的文件,提示可能不一样)。
+  //   · 反向:Windows 侧 execSync 退出 0 并不保证盘上真没了 —— 谎报成功会被计入 moved。
+  // 复核后两条都以「existsSync 还在不在」为准,两个顺序必须给出同一个结果。
+  section('6f. 批量复核:父目录连带子文件 / 谎报成功(以磁盘为准)')
+  const nestA = makeTree('trashproj-nest-a', { 'sub/d.txt': 'D' })
+  DB.set('godot/project/t3', { _id: 'godot/project/t3', id: 't3', path: nestA, name: 'NEST-A' })
+  const nestB = makeTree('trashproj-nest-b', { 'sub/d.txt': 'D' })
+  DB.set('godot/project/t4', { _id: 'godot/project/t4', id: 't4', path: nestB, name: 'NEST-B' })
+  const r13 = F.movePathsToTrash('godot/project/t3', ['sub', 'sub/d.txt'])
+  ok(r13.ok === true && r13.moved === 2 && r13.failed.length === 0,
+    "['sub','sub/c.txt'] 父在前 → ok:true, moved:2, failed 空(连带走的不算失败)", JSON.stringify(r13))
+  ok(fs.readdirSync(nestA).length === 0, '父在前这批确实把项目清空了(记成功有盘可据,不是凭空)',
+    fs.readdirSync(nestA).join(','))
+  const r14 = F.movePathsToTrash('godot/project/t4', ['sub/d.txt', 'sub'])
+  ok(r14.ok === true && r14.moved === 2 && r14.failed.length === 0,
+    '同一批换个输入顺序(子在前)→ 与父在前逐字一致(结果不再依赖顺序)', JSON.stringify(r14))
+  ok(fs.readdirSync(nestB).length === 0, '子在前这批同样清空了项目', fs.readdirSync(nestB).join(','))
+
+  // 反向复核:底层**报成功却没删掉**(execSync 正常返回 / unlinkSync 不抛)也算失败。
+  // 探针按**文件名**匹配(见 6c 的注释:路径进了两层 JSON.stringify,反斜杠被翻倍)。
+  const fakeRoot = makeTree('trashproj-fake', { 'fake.txt': 'F' })
+  DB.set('godot/project/t5', { _id: 'godot/project/t5', id: 't5', path: fakeRoot, name: 'FAKE' })
+  const fakeAbs = path.join(fakeRoot, 'fake.txt')
+  const realExecLied = cp.execSync
+  const realUnlinkLied = fs.unlinkSync
+  let lied = 0
+  cp.execSync = (...a) => { if (String(a[0]).includes('fake.txt')) { lied++; return Buffer.alloc(0) } return realExecLied(...a) }
+  fs.unlinkSync = (p, ...rest) => { if (String(p).includes('fake.txt')) { lied++; return } return realUnlinkLied(p, ...rest) }
+  let r15
+  try {
+    r15 = F.movePathsToTrash('godot/project/t5', ['fake.txt'])
+  } finally {
+    cp.execSync = realExecLied
+    fs.unlinkSync = realUnlinkLied
+  }
+  ok(lied === 1, '谎报探针确实命中 fake.txt(断言不是空跑)', String(lied))
+  ok(r15.ok === false && r15.moved === 0 &&
+    r15.failed.some((f) => f.rel === 'fake.txt' && f.error === '移入回收站失败'),
+    '底层报成功而文件仍在盘上 → 复核把它补进 failed(不信 execSync 的退出码)', JSON.stringify(r15))
+  ok(fs.existsSync(fakeAbs), '被复核揪出来的那一项确实还在原地(没被谎报成已删)')
+
+  // ---------- 6g. 同一个绝对路径点名两次 → 去重后再交批量(review F-2)----------
+  // 旧实现 items 按 rels 逐条 push、moved 用 `items.length - failedAbs.size`,而 failedAbs 是**去重**
+  // 集合:['dup','dup'] 全部失败时 items.length=2、failedAbs.size=1 → moved:1「成功了一项」,
+  // 可盘上一个字节都没少;failed 里同一个 rel 出现两条,moved + failed.length 也超过点名数。
+  // 按解析后的绝对路径去重(沿用首次出现的 rel 串回报),'./g.txt' 与 'g.txt' 也算同一个。
+  section('6g. 重复点名同一路径 → 按绝对路径去重')
+  const dupRoot = makeTree('trashproj-dup', { 'dupd.txt': 'D1', 'keep.txt': 'K' })
+  DB.set('godot/project/t6', { _id: 'godot/project/t6', id: 't6', path: dupRoot, name: 'DUP' })
+  const dupdAbs = path.join(dupRoot, 'dupd.txt')
+  const keepAbs = path.join(dupRoot, 'keep.txt')
+  const realExecDup = cp.execSync
+  const realUnlinkDup = fs.unlinkSync
+  let dupTries = 0
+  cp.execSync = (...a) => { if (String(a[0]).includes('dupd.txt')) { dupTries++; throw new Error('simulated recycle-bin failure') } return realExecDup(...a) }
+  fs.unlinkSync = (p, ...rest) => { if (String(p).includes('dupd.txt')) { dupTries++; throw new Error('simulated EPERM') } return realUnlinkDup(p, ...rest) }
+  let r16
+  try {
+    r16 = F.movePathsToTrash('godot/project/t6', ['dupd.txt', 'dupd.txt'])
+  } finally {
+    cp.execSync = realExecDup
+    fs.unlinkSync = realUnlinkDup
+  }
+  ok(dupTries === 1, '同一个 abs 只交给批量一次(探针命中次数即去重证据)', String(dupTries))
+  ok(r16.ok === false && r16.moved === 0 && r16.failed.length === 1 &&
+    r16.failed[0].rel === 'dupd.txt' && r16.failed[0].error === '移入回收站失败',
+    '全部失败时 moved:0 且 failed 只有一条(旧算法这里报 moved:1)', JSON.stringify(r16))
+  ok(fs.existsSync(dupdAbs) && fs.existsSync(keepAbs), '去重这批没删成:被点名的与未点名的都还在原地')
+  const dupRoot2 = makeTree('trashproj-dup2', { 'g.txt': 'G' })
+  DB.set('godot/project/t7', { _id: 'godot/project/t7', id: 't7', path: dupRoot2, name: 'DUP2' })
+  const r17 = F.movePathsToTrash('godot/project/t7', ['g.txt', './g.txt', 'g.txt'])
+  ok(r17.ok === true && r17.moved === 1 && r17.failed.length === 0,
+    "同一文件的三种 rel 写法('g.txt' / './g.txt' / 重复)只计一次 moved(不是 3)", JSON.stringify(r17))
+  ok(fs.readdirSync(dupRoot2).length === 0, '去重不影响删除效果:那个文件是真的没了',
+    fs.readdirSync(dupRoot2).join(','))
 
   // ---------- 6e. 残骸核对:fixture 里只剩预期文件 ----------
   // 顺带钉住「删除只动点名项」:b.txt 与被拒绝的链接都还在,被拒的父目录没被顺手建/删。

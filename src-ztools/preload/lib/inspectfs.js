@@ -275,13 +275,33 @@ function scanProjectTree(projectId, opts) {
  * 单个失败**不中断其余**,失败项原样返回 { rel, error } —— 调用方据此提示「N 项成功、M 项失败」;
  * ok 仅在零失败时为 true,moved 只计真正成功的那几项。空清单不是错误(→ ok:true, moved:0)。
  *
+ * rels **必须是数组**:不是数组(含字符串)一律按空清单处理。兄弟原语 readProjectText /
+ * writeProjectText 收的是单个 rel 字符串,把同一个串手滑传进这个批量接口是真实形态,而字符串可迭代 ——
+ * 按 `for (const raw of rels)` 会把它**拆成字符**('a.txt' → 'a' / '.' / 't' / 'x' / 't'),
+ * 项目根上任何单字符名字的文件都会被这一下送进回收站;`{}` / 数字则会直接抛 TypeError,
+ * 违反本模块「读 / 写 / 删原语都不抛异常」的红线。
+ *
+ * 计数与复核的三条约定:
+ *   · **按解析后的绝对路径去重**:同一个文件被点名两次('g.txt' 与 './g.txt' 也是同一个)只交批量一次,
+ *     回报沿用**首次出现**的那个 rel 串。不去重时 moved 会算歪 —— 失败集合是去重的、items 不是,
+ *     ['x','x'] 全失败也报 moved:1,而盘上什么都没少,且同一个 rel 在 failed 里出现两遍。
+ *   · **批次跑完后按磁盘实况复核**,fsutil.trashPaths 的回报不再作为计数依据(两个方向都会谎报):
+ *     批前逐项 stat、批后「没抛异常就算成功」在 ['sub','sub/c.txt'] 上是错的 —— 父目录整棵先走,
+ *     随后对**已消失**的 sub/c.txt 报错 → 点名的两样都没了却回「1 项失败」;换成 ['sub/c.txt','sub']
+ *     又回 ok:true,**结果依赖输入顺序**。反向也成立:Windows 侧 execSync 退出 0 不等于盘上真没了。
+ *     复核只看 existsSync:还在盘上的一律记 '移入回收站失败',已经不在的一律计入 moved
+ *     (被连带带走的子文件算成功,因为它本来就是用户点名要删的东西)。
+ *     残留盲区:父目录无检索权限时 existsSync 也返回 false,那一项会被计成成功 —— 与只信回报相比仍严格更好。
+ *   · 对外**只有 rel 一个键**(fsutil 回的是绝对路径,不外泄)。failed 的 rel 刻意分两种形态:
+ *     闸拒绝的项回报**调用方原样**的串(那一项根本没碰到盘,归一化后对不回用户点名的哪一条),
+ *     trash / 复核阶段的失败回报归一后的 rel。Rust 侧 Task 7 同样镜像这两态。
+ *
  * 闸用 resolveInside,与 writeProjectText 同一道:删除是读/写/删三翼里最重的一翼 ——
  * resolveRel 只看 rel 的字面形态,项目内一条指向项目外的链接(资产站 zip 解压带进来的形态)
  * 在它看来完全合法,而 PowerShell / rmSync 会跟随真实落点,把**别人家的一棵树**送进回收站。
- * fsutil.trashPaths 回的是失败项的**绝对路径**,这里按 abs→rel 映射回去:对外只有 rel 一个键。
  * 错误串一律取闸的原话('非法路径' / '路径无法解析';闸的 '目标目录不存在' 在删除侧够不着,
  * 因为项目根总是那个已存在的祖先,缺失形态统一由 stat 收敛到 '文件不存在'),
- * '项目不存在' 只来自 projectRoot,'移入回收站失败' 来自 trashPaths:
+ * '项目不存在' 只来自 projectRoot,'移入回收站失败' 来自复核:
  * Node 的 EPERM 英文串既不稳定也无处对照(Rust 侧 Task 7 逐字镜像同一批串)。
  * @param {string} projectId
  * @param {string[]} rels
@@ -292,9 +312,12 @@ function movePathsToTrash(projectId, rels) {
   if (!root) return { ok: false, error: '项目不存在' }
   /** @type {{path: string, isDir: boolean, rel: string}[]} */
   const items = []
+  /** 已交给批量的绝对路径:同一个 abs 点名两次只删一次、只计一次(见 JSDoc 的去重约定) */
+  const queuedAbs = new Set()
   /** @type {{rel: string, error: string}[]} */
   const failed = []
-  for (const raw of rels || []) {
+  const list = Array.isArray(rels) ? rels : []
+  for (const raw of list) {
     const rel = typeof raw === 'string' ? raw.replace(/\\/g, '/') : ''
     const g = resolveInside(root, rel)
     const abs = g.abs
@@ -303,11 +326,18 @@ function movePathsToTrash(projectId, rels) {
     if (!abs) { failed.push({ rel: String(raw), error: g.error || '非法路径' }); continue }
     let st
     try { st = fs.statSync(abs) } catch (e) { failed.push({ rel, error: '文件不存在' }); continue }
+    if (queuedAbs.has(abs)) continue // 重复点名:沿用首次那条 rel
+    queuedAbs.add(abs)
     items.push({ path: abs, isDir: st.isDirectory(), rel })
   }
-  const failedAbs = new Set(trashPaths(items.map((i) => ({ path: i.path, isDir: i.isDir }))))
-  for (const i of items) if (failedAbs.has(i.path)) failed.push({ rel: i.rel, error: '移入回收站失败' })
-  return { ok: failed.length === 0, moved: items.length - failedAbs.size, failed }
+  trashPaths(items.map((i) => ({ path: i.path, isDir: i.isDir })))
+  // 复核以盘为准(见 JSDoc):报失败但其实没了 → 计成功;报成功但其实还在 → 补失败。
+  let moved = 0
+  for (const i of items) {
+    if (fs.existsSync(i.path)) { failed.push({ rel: i.rel, error: '移入回收站失败' }); continue }
+    moved++
+  }
+  return { ok: failed.length === 0, moved, failed }
 }
 
 module.exports = { projectRoot, resolveRel, resolveInside, DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES, scanProjectTree, readProjectText, writeProjectText, movePathsToTrash }
