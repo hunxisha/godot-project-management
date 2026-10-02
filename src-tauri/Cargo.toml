@@ -6,7 +6,7 @@ authors = ["hunxisha"]
 edition = "2021"
 rust-version = "1.77"
 
-# 桌面版 2.0(Tauri)与 1.x(Electron)走同一条 desktop-v* 版本线,见 docs/tauri-migration-plan.md
+# 桌面版沿用 desktop-v* 版本线(1.x 起至今),见 docs/tauri-migration-plan.md
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

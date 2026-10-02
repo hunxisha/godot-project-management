@@ -384,7 +384,7 @@ export interface Services {
 
 /**
  * 渲染层看到的 services 视图:所有数据方法统一为 Promise 返回(Tauri 2 的 IPC 只有异步,
- * 阶段 A 见 docs/tauri-migration-plan.md §7)。Electron 门面返回普通值也满足本视图
+ * 阶段 A 见 docs/tauri-migration-plan.md §7)。ZTools 同步门面返回普通值也满足本视图
  * —— `await` 对普通值与 Promise 等价,两端共用同一份渲染层。
  * 订阅(watch*)是「注册回调→返回取消函数」的事件通道,无需异步;currentPlatform
  * 是注入的平台常量。二者保持同步签名。

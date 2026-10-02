@@ -1,5 +1,5 @@
-// JSON 文档库:对齐 ZTools 宿主 db / Electron 版 dbdoc.js 的 CouchDB 风格语义。
-// 契约(lib/store.js 与 dbdoc.js 逐条对应,tests 节同款断言):
+// JSON 文档库:对齐 ZTools 宿主 db 的 CouchDB 风格语义。
+// 契约(与 lib/store.js 逐条对应,tests 节同款断言):
 //   get(id)         → 文档深拷贝;不存在 None
 //   put(doc)        → 成功 {"ok":true,"id","rev"};失败 {"error":true,"name","message"}
 //                     更新须 _rev 匹配否则 conflict;新建不得带 _rev;无 _id 报 bad_request
@@ -7,7 +7,7 @@
 //   all_docs(prefix)→ 按 _id 前缀过滤、按 _id 排序的深拷贝数组
 // 持久化:写穿(临时文件 + 原子改名),写入前把旧文件轮转为 .bak(上一代);
 // 主文件损坏回滚 .bak,两者全坏则空库起步并把坏件留作 .corrupt。
-// 文件格式与 Electron 版一致(用户迁移 = 拷一个 db.json)。
+// 文件格式与已退役的 1.x 桌面版一致(老用户迁移 = 拷一个 db.json)。
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;

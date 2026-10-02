@@ -19,7 +19,7 @@ const docs = require('./lib/docs')
 /**
  * 门面实现:仍以同步的 Services 接口为唯一权威做编译期校验。
  * 渲染层的 window.services 视图是 AsyncServices(数据方法为 Promise 返回)——
- * Electron 门面返回普通值,`await` 对普通值与 Promise 等价,两端共用同一渲染层;
+ * 同步门面返回普通值,`await` 对普通值与 Promise 等价,两端共用同一渲染层;
  * Tauri 宿主(T2+)同一位替换成真正的异步实现。因此这里的 any 是**有意的边界转换**,
  * 不等于放弃校验(impl 本身仍被 Services 逐方法强检)。
  * @type {import('../../src/types/services').Services}

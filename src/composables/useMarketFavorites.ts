@@ -2,8 +2,8 @@
 //
 // 从 MarketplaceView.vue 抽出。抽出来的直接原因是这里踩过一个只有宿主才能暴露的坑:
 //
-//   **跨层调用必须传纯数据。** `window.services.*` 是 contextBridge 暴露的,
-//   它克隆不了 Vue 的响应式对象(Proxy)。把资产对象原样传过去,Electron 会直接抛
+//   **跨层调用必须传纯数据。** `window.services.*` 是宿主经 contextBridge 暴露的,
+//   它克隆不了 Vue 的响应式对象(Proxy)。把资产对象原样传过去,宿主会直接抛
 //   `An object could not be cloned.` —— 点击在进入 preload 之前就失败了,
 //   于是既不写库、也没有任何线索。表现就是「点收藏没反应」,而取消收藏、
 //   安装(传的是新建的纯对象)都正常。

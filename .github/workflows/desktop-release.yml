@@ -1,8 +1,8 @@
 # 桌面版 2.0(Tauri)三平台打包与发布草稿。
 #
 # 触发:desktop-v* tag → 三平台 matrix 构建 + 建草稿 Release;workflow_dispatch 只出 artifact。
-# 与 1.x(Electron)工作流的差异:electron-builder → cargo tauri build(bundler 配置在
-# src-tauri/tauri.conf.json);产物路径改为 src-tauri/target/release/bundle/。
+# 打包走 cargo tauri build(bundler 配置在 src-tauri/tauri.conf.json),
+# 产物在 src-tauri/target/release/bundle/;发布说明取 src-tauri/RELEASE_NOTES.md。
 name: desktop-release
 
 on:
@@ -86,7 +86,7 @@ jobs:
           VER="${TAG#desktop-}"
           if ! gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
             gh release create "$TAG" -R "$REPO" --draft --title "桌面版 $VER" \
-              --notes-file desktop/RELEASE_NOTES.md
+              --notes-file src-tauri/RELEASE_NOTES.md
           fi
           find dist -type f -print0 | xargs -0 gh release upload "$TAG" -R "$REPO" --clobber
           echo "产物已附到草稿 Release($TAG);请在 GitHub 上核对后手动发布。"

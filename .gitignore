@@ -7,13 +7,6 @@ graphify-out/
 /docs/
 /design/
 
-# 桌面版构建产物(sync-vendor 同步 / electron-builder 输出)
-/desktop/renderer/
-/desktop/vendor/
-/desktop/release/
-# electron-builder 会在 desktop/ 跑一次空 npm install(应用本身零运行时依赖)
-/desktop/node_modules/
-/desktop/package-lock.json
 # Tauri(Rust)构建产物与前端脚手架生成物
 /src-tauri/target/
 /src-tauri/gen/

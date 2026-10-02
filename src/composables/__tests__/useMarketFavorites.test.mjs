@@ -1,7 +1,7 @@
 // useMarketFavorites 回归测试。
 //
 // 这个组合式函数存在的直接原因是踩过一个**只有宿主能暴露**的坑:
-// 收藏按钮点了没反应,不写库也不报错。诊断出来是 Electron contextBridge 的
+// 收藏按钮点了没反应,不写库也不报错。诊断出来是 contextBridge 的
 // `An object could not be cloned.` —— 传进去的是 Vue 的响应式资产对象(Proxy)。
 // 安装按钮之所以正常,是因为它传的是新建的纯对象。
 //

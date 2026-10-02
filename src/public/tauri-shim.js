@@ -1,5 +1,5 @@
-// Tauri 宿主垫片:在 Vue 主包之前加载(index.html 同步脚本),构造与 ZTools/Electron
-// 宿主同形的 window.ztools + window.services。命令与 src-tauri 的 34 条一一对应;
+// Tauri 宿主垫片:在 Vue 主包之前加载(index.html 同步脚本),构造与 ZTools
+// 宿主同形的 window.ztools + window.services。命令与 src-tauri 一一对应;
 // 未移植方法如实报错(而不是静默假成功)。
 // 平台/主题是唯一保持同步的读取(来自 webview 自身能力,无需 IPC)。
 ;(function () {
@@ -53,7 +53,7 @@
     shellOpenPath: (p) => invoke('plugin:opener|open_path', { path: p }).catch(() => {}),
     shellShowItemInFolder: (p) => invoke('plugin:opener|reveal_item_in_dir', { path: p }).catch(() => {}),
     onPluginEnter: (cb) => {
-      // 桌面版启动即落在概览页(与 Electron 垫片同语义)
+      // 桌面版启动即落在概览页
       setTimeout(() => cb({ code: 'godot', payload: '' }), 0)
     },
     setSubInput: () => true,
