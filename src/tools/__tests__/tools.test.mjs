@@ -55,6 +55,25 @@ function tree(specs) {
   }))
 }
 
+/**
+ * 各检查器共用的 ctx 工厂:specs 走上面那个 tree(),trunc 控制截断标记。
+ *
+ * 放在 tree() **下面**而不是 brief 说的「`const T = await import(...)` 之后」:
+ * 它调 tree(),挨着读才看得出夹具是同一份(函数声明提升,位置只影响可读性)。
+ * readText 只认 texts 里显式给的字符串,其余一律 `{ skipped: true }` ——
+ * 与宿主原语同形(缺文件 / 超 maxBytes / 二进制都是「读不到」,不是「读出错」),
+ * 检查器必须把它当「跳过」而不是「断链」(Tasks 9/10 审查钉的三态口径)。
+ */
+function makeCtx(specs, { trunc = false, texts = {} } = {}) {
+  return {
+    projectId: 'godot/project/p',
+    root: 'E:/proj',
+    truncated: trunc,
+    tree: tree(specs),
+    readText: async (rel) => (typeof texts[rel] === 'string' ? { text: texts[rel] } : { skipped: true })
+  }
+}
+
 async function main() {
   // ---------- 1. treeUtils ----------
   section('1. treeUtils')
@@ -244,6 +263,38 @@ async function main() {
   const canon = T.countSteps(CANON)
   ok(canon.actual === 1 && canon.expected === 2 && canon.declared === canon.expected,
     '规范最小场景 declared === expected(load_steps=2 = 1 ext + 0 sub + 1)', JSON.stringify(canon))
+
+  // ---------- 3. size 检查器 ----------
+  // 为什么存在:这是用户在工具页上看到的第一批数字。「源文件体积」必须**不含** .godot,
+  // 否则缓存一膨胀,界面就说你的项目变大了;大文件条目只该在 20MB 以上出现(噪声控制)。
+  section('3. size:项目体积与大文件')
+  const S1 = await T.runSize(makeCtx([
+    ['project.godot', 100],
+    ['scene/main.tscn', 500],
+    ['.godot/imported/a.stex', 9 * 1024 * 1024],
+    ['assets/bg.png', 6 * 1024 * 1024],
+    ['assets/hero.png', 50 * 1024 * 1024],
+    ['addons/one/plugin.cfg', 20]
+  ]))
+  ok(S1.length >= 2, '至少给出总体积 + 缓存两条', S1.length)
+  const total = S1.find((f) => f.id === 'size:total')
+  ok(!!total && total.severity === 'info', '总体积是 info', JSON.stringify(total))
+  ok(/MB|KB/.test(total.title), '总体积用可读单位', total.title)
+  ok(total.detail.includes('png') && total.detail.includes('assets'), 'detail 带类型与目录前 3 名', total.detail)
+  // 这条钉住「源文件口径 = noCache」:实现改成 `sumBytes(ctx.tree)` 时这里必须红
+  // (缓存 9MB 混进源体积 → 数字与条数同时虚高,而 /MB|KB/ 与 detail 的两条断言照样绿)。
+  ok(total.title.includes('56.0 MB') && total.title.includes('5 个'),
+    '源文件体积不含 .godot 缓存(56.0 MB · 5 个,含缓存会是 65.0 MB · 6 个)', total.title)
+  const cacheLine = S1.find((f) => f.id === 'size:cache')
+  ok(!!cacheLine && cacheLine.rel === '.godot', '缓存体积单独一条并指向 .godot')
+  const big = S1.filter((f) => String(f.id).startsWith('size:big:'))
+  ok(big.length === 1 && big[0].rel === 'assets/hero.png', '只对 >=20MB 的单文件出条目', JSON.stringify(big.map((f) => f.rel)))
+  ok(big[0].title.includes('50.0 MB'), '大文件条目带体积', big[0].title)
+  const t = await T.runSize(makeCtx([['a.png', 10]], { trunc: true }))
+  ok(t.some((f) => f.severity === 'warn' && f.title.includes('部分')), '截断时先报「只基于部分文件」', JSON.stringify(t.map((f) => f.title)))
+  const e = await T.runSize(makeCtx([]))
+  ok(e.every((f) => f.severity === 'info'), '空树不报 error/warn(没什么可查)', JSON.stringify(e.map((f) => f.severity)))
+  ok(!e.some((f) => f.id === 'size:cache'), '无缓存时不出缓存条目')
 }
 main().catch((e) => {
   // 断言里不该抛错;真抛了(比如实现返回了 undefined)也要以退出码 1 收口,不能让 CI 看到绿。
