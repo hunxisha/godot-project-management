@@ -62,8 +62,31 @@
     hideMainWindow: () => {},
   }
 
-  // ---------- window.services(54 条走 invoke 的命令 + 其余如实占位;watchX 走事件通道) ----------
+  // ---------- window.services(invoke 桥接的 services 映射 + 其余如实占位;watchX 走事件通道) ----------
   const ok = (data) => data
+  // ---------- 工具页四原语的调用护栏(F-2 / F-3)----------
+  // 契约:这四条映射**永不**把 IPC 的裸 rejection 交给渲染层,一律收敛成 { ok:false, error },
+  // 且 error 取自 JS 原语的那批串(见 src-ztools/preload/lib/inspectfs.js),渲染层不必按宿主分支。
+  // 三类失败各有归属:
+  //   · 参数形态不对(空/非串 projectId、非串 rel、非串 text)→ 守卫在 **invoke 之前**就地返回,
+  //     用的是原语同一句话;真 Tauri 侧这些形态会在边界反序列化阶段裸拒绝,所以必须在这里挡。
+  //   · Tauri **反序列化阶段**的拒绝(invalid args / deserialize)→ '参数不合法'(垫片专属,
+  //     不进 JS↔Rust 原语契约,Rust 侧无需镜像)。
+  //   · 其余(命令没注册、IPC 通道断了、原语里 panic)→ 该操作自己的失败句,
+  //     绝不冒充「参数不合法」;两类都会 console.warn 出真实原因,不把原因丢进 catch 的黑洞。
+  const guarded = (label, failText) => (p) => p.catch((e) => {
+    const why = String((e && e.message) || e || '')
+    console.warn('[tauri-shim]', label, why)
+    return { ok: false, error: /invalid args|deserial/i.test(why) ? '参数不合法' : failText }
+  })
+  // projectId 不是非空串 → JS 原语的 projectRoot() 拿不到根 → '项目不存在'
+  const badProject = (id) => (typeof id !== 'string' || !id ? { ok: false, error: '项目不存在' } : null)
+  // rel 不是非空串 → JS 的 resolveRel() 拒 → '非法路径'
+  const badRel = (rel) => (typeof rel === 'string' && rel ? null : { ok: false, error: '非法路径' })
+  // maxBytes 只把**正安全整数**传出去,其余(0 / 负数 / 小数 / 字符串 / undefined)一律折成 null,
+  // 让命令层回落默认限额 —— 与 JS 原语 `o.maxBytes && o.maxBytes > 0 ? … : DEFAULT`
+  // (inspectfs.js:118)同归一,而不是把它变成一次 IPC 边界的裸拒绝。
+  const toMaxBytes = (v) => (Number.isSafeInteger(v) && v > 0 ? v : null)
   window.services = {
     currentPlatform: () => (IS_WIN ? 'windows' : IS_MAC ? 'macos' : 'linux'),
     fetchReleases: (force) => invoke('fetch_releases_cmd', { force: !!force, proxy: null }).catch(() => []),
@@ -95,21 +118,41 @@
     // ---------- 工具页原语(spec §5.4;rel 一律正斜杠相对路径) ----------
     // 参数名必须用**驼峰**传进 invoke(maxBytes / skipDirs / maxEntries):写成下划线会被
     // Tauri 静默反序列化成 None,限额直接失效(命令层拿不到就等于用户没设限)。
-    scanProjectTree: (projectId, opts) => invoke('scan_project_tree', { projectId, opts: opts || null }),
-    readProjectText: (projectId, rel, opts) => invoke('read_project_text', { projectId, rel, maxBytes: (opts && opts.maxBytes) || null }),
-    writeProjectText: (projectId, rel, text, opts) => invoke('write_project_text', {
-      projectId, rel, text,
-      backup: !opts || opts.backup !== false
-    }),
+    // 这条不靠注释自觉:src-tauri/tests/inspectfs_parity.rs 的 shim 段会 eval 本文件、
+    // 逐键钉住四条映射实际发出的命令名与 payload 键名,键名一改测试就红。
+    scanProjectTree: (projectId, opts) => {
+      const bad = badProject(projectId)
+      if (bad) return Promise.resolve(bad)
+      return guarded('scanProjectTree', '遍历失败')(invoke('scan_project_tree', { projectId, opts: opts || null }))
+    },
+    readProjectText: (projectId, rel, opts) => {
+      const bad = badProject(projectId) || badRel(rel)
+      if (bad) return Promise.resolve(bad)
+      return guarded('readProjectText', '读取失败')(invoke('read_project_text', { projectId, rel, maxBytes: toMaxBytes(opts && opts.maxBytes) }))
+    },
+    writeProjectText: (projectId, rel, text, opts) => {
+      // 判定顺序与原语一致:先看根、再看 rel、最后才看内容(项目不存在优先于内容不是文本)
+      const bad = badProject(projectId) || badRel(rel)
+      if (bad) return Promise.resolve(bad)
+      if (typeof text !== 'string') return Promise.resolve({ ok: false, error: '内容不是文本' })
+      return guarded('writeProjectText', '写入失败')(invoke('write_project_text', {
+        projectId, rel, text,
+        backup: !opts || opts.backup !== false
+      }))
+    },
     // rels 必须归成**真数组**再传:Rust 侧签名是 `rels: Vec<String>`,非数组入参在 Tauri
     // **反序列化阶段**就被拒(promise rejection),而 JS 原语把非数组当空清单回
-    // { ok:true, moved:0 }(见 inspectfs.js:319) —— 两端形态必须一致,所以这里先过滤成
-    // 字符串数组,再把边界拒绝收敛成与原语同形的 { ok:false, error },渲染层永远收不到裸 rejection。
-    // '参数不合法' 是**垫片专属**文案,不在 JS↔Rust 原语的错误串契约里(Rust 侧无需镜像)。
-    movePathsToTrash: (projectId, rels) => invoke('move_paths_to_trash', {
-      projectId,
-      rels: Array.isArray(rels) ? rels.filter((r) => typeof r === 'string') : []
-    }).catch(() => ({ ok: false, error: '参数不合法' })),
+    // { ok:true, moved:0 }(见 inspectfs.js:319) —— 两端形态必须一致,所以这里先过滤成字符串数组。
+    // 兜底句 '移入回收站失败' 取自 JS↔Rust 契约里已有的那条(复核阶段的失败串);
+    // '参数不合法' 只留给**反序列化拒绝**,见上面 guarded() 的三类归属。
+    movePathsToTrash: (projectId, rels) => {
+      const bad = badProject(projectId)
+      if (bad) return Promise.resolve(bad)
+      return guarded('movePathsToTrash', '移入回收站失败')(invoke('move_paths_to_trash', {
+        projectId,
+        rels: Array.isArray(rels) ? rels.filter((r) => typeof r === 'string') : []
+      }))
+    },
     addProject: (inputPath) => invoke('add_project', { inputPath }),
     scanProjects: (rootDir) => invoke('scan_projects', { rootDir }),
     createProject: (o) => invoke('create_project', { name: o.name, parentDir: o.parentDir, renderer: o.renderer, versionTag: o.versionTag, versionId: o.versionId, gitInit: !!o.gitInit }),

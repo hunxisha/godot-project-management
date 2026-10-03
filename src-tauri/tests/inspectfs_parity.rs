@@ -23,6 +23,18 @@
 //! * `movePathsToTrash` / `trash_json`:空清单、闸拒绝(rel 原样回报)、缺失项(rel 归一回报)、
 //!   重复点名、**非数组入参**(JS 视为空清单 ↔ Rust 的 `Vec<String>` 只能收到数组,故与空清单
 //!   同形 —— 这条正是 tauri-shim 里 `Array.isArray` 归一的依据)。
+//! * **Rust 侧的 opts 走真反序列化路径**:`ScanOpts::from_json`(命令层 main.rs:205 用的就是它),
+//!   键名 `includeCache` / `exts` / `skipDirs` / `maxEntries` 与 `maxBytes` 的 payload 取值都按
+//!   shim 实际发出的那份 JSON 走 —— 手搭结构体字面量等于把「键名对不对」整层排除在对照之外。
+//! * **scan 的序列化由 `scan_json` 本尊产出**(不再手搭 `{ok,files,truncated}` 信封):
+//!   `rel`/`size`/`mtimeMs`/`ext` 任一改名、或「空清单 + 根不可读」那条兜底变了,这里立刻红。
+//! * **垫片层 `src/public/tauri-shim.js`**(见 `cmp_shim` 的期望表):把真垫片的文本 eval 进
+//!   stub 好的 `window.__TAURI__`,钉住四条映射**实际发出的命令名与 payload 键名**。
+//!   这是本任务唯一那个隐形坑的钉子 —— 键名写成 `max_bytes` 会被 Tauri 当成没传,
+//!   限额静默回落到 1MB,而只调 Rust 库函数的对照是**看不见**这件事的。
+//!   同一处还钉住:坏参数在 invoke **之前**被守卫挡下、拒绝按「反序列化问题 / 别的原因」分类、
+//!   四条映射都不许把裸 rejection 漏给渲染层、每条被收敛的拒绝都要 console.warn 出真实原因。
+//!   JS 侧那句错误串出自**原语**,桌面侧那句出自**垫片守卫**,`SHIM_VS_JS` 逐条比两句是否同形。
 //!
 //! # 刻意排除(按规则,不是漏掉)
 //! 1. **`mtimeMs` 的数值**:JS 是 `Math.round(st.mtimeMs)`、Rust 是整数截断,备份名里的
@@ -39,8 +51,9 @@
 //!    一边失败会假红)。移入回收站的**复核计数逻辑**由两侧各自的单测钉住
 //!    (`inspectfs.rs::trash_reports_failures_without_interrupting` 与 `inspectfs.test.js` 第 6 节),
 //!    这里只比对不碰盘的闸与形态。
-//! 6. `'参数不合法'`(tauri-shim 的兜底文案)是**垫片专属**,不在 JS↔Rust 原语契约里,
-//!    Rust 侧无需镜像,故不进本对照。
+//! 6. `'参数不合法'`(垫片对**反序列化拒绝**的专属文案)不与 Rust 对照 —— Rust 侧无需镜像它。
+//!    但它并非无人看管:shim 段用注入的 invalid-args 拒绝钉住「这类 rejection → 这句」,
+//!    并钉住「通道断 / 命令没注册 → 各自的操作失败句」,两类不许互相冒充(F-2)。
 //! 7. **`maxEntries` 截断那一例只比 `truncated` 与条数**:两端遍历顺序不同(栈式 DFS vs 递归 DFS),
 //!    截断时**留下的到底是哪几条**本就不同,比它等于比随机数。
 //!
@@ -52,7 +65,7 @@
 #![cfg(test)]
 
 use godot_workshop::inspectfs::{
-    collect_tree, read_text_json, scan_json, trash_json, write_text_json, ScanOpts, TreeEntry, DEFAULT_MAX_BYTES,
+    read_text_json, scan_json, trash_json, write_text_json, ScanOpts, DEFAULT_MAX_BYTES,
 };
 use serde_json::{json, Value};
 use std::fs;
@@ -62,6 +75,13 @@ use std::path::Path;
 const TARGET_CONTENT: &[u8] = b"OLD-W\n";
 /// 超过 `DEFAULT_MAX_BYTES` 的文件,用来比对 truncated + bytes。
 const BIG_BYTES: usize = 1024 * 1024 + 4096;
+
+/// 读用例的 `maxBytes`:走的是**shim 实际发出的那份 payload** 的取值路径 —— 键名驼峰,
+/// 取不到就是 `None`,命令层再 `unwrap_or(DEFAULT_MAX_BYTES)`(main.rs:215)。
+/// 于是「shim 把 maxBytes 写成 max_bytes」在这侧的表现与真 Tauri 一致:静默回落到 1MB 默认。
+fn max_bytes_from(payload: &Value) -> u64 {
+    payload.get("maxBytes").and_then(|v| v.as_u64()).unwrap_or(DEFAULT_MAX_BYTES)
+}
 
 /// 固定相对布局(正斜杠)。`collect_tree` 是栈式 DFS、`walkFiles` 是递归 DFS,
 /// 两端**顺序必然不同**,所以对照一律在排序之后做。
@@ -203,15 +223,10 @@ fn norm_value(v: &Value) -> Value {
     }
 }
 
-/// Rust 侧的 scan 结果,形状与 `scan_json` / JS `scanProjectTree` 一致。
-fn rust_scan(root: &Path, opts: &ScanOpts) -> Value {
-    let (files, truncated) = collect_tree(root, opts);
-    let arr: Vec<Value> = files
-        .iter()
-        .map(|e: &TreeEntry| json!({ "rel": e.rel, "size": e.size, "mtimeMs": e.mtime_ms, "ext": e.ext }))
-        .collect();
-    json!({ "ok": true, "files": arr, "truncated": truncated })
-}
+// Rust 侧的 scan 结果:**直接调 `scan_json`**(命令层 main.rs:207 返回的就是它)。
+// 早先这里手搭过一遍 `{ok, files:[…], truncated}` 信封,那等于把「序列化器」这一层
+// 排除在对照之外 —— `rel`/`size`/`mtimeMs`/`ext` 任一改名、或「空且根不可读」那条兜底
+// 变了,对照都照样绿。现在这些键名与兜底都由 `scan_json` 本尊产出,改一个就红。
 
 // ---------------------------------------------------------------------------
 // JS 侧脚本:同一个 node 进程里 stub window.ztools.db.get 后 require 真原语。
@@ -280,7 +295,145 @@ out.disk.w = top(cfg.roots.w);
 out.disk.t = top(cfg.roots.t);
 out.disk.tree = top(cfg.roots.tree);
 
-process.stdout.write(JSON.stringify(out));
+// ---------- 坏参数在 **JS 原语**这一侧的返回(F-3 的权威半边)----------
+// 这几句必须在装垫片**之前**问:下面的 shim 段会把 window.ztools 换成 Tauri 版(异步 db),
+// 真原语就没有同步可读的根了。
+out.jsOnly.scanBadId = F.scanProjectTree(null);
+out.jsOnly.readBadRel = F.readProjectText('tree', null);
+
+// ---------- shim 段(F-1b / F-2 / F-3 的钉子)----------
+// 把**真** src/public/tauri-shim.js 的文本 eval 进一个 stub 好的 window.__TAURI__,
+// 记录四条映射实际发出的「命令名 + payload 键名 + 值的形态」,并按 Rust 命令签名的规矩校验:
+//   · 键名写成下划线 → 命令层没有那个参数 → 等价于「限额没传」= 静默回落 1MB;
+//   · 类型不对 → 边界反序列化裸拒绝(与真 Tauri 同形);命令没注册 / 通道断了 → 另一种拒绝。
+// 期望表写在 Rust 侧(cmp_shim),这里只如实记账,不由脚本自己下结论。
+(async () => {
+  const PID = 'godot/project/x';
+  const shimSrc = fs.readFileSync(path.join(cfg.repo, 'src', 'public', 'tauri-shim.js'), 'utf8');
+  // src-tauri/src/main.rs 四条命令的参数表;键名是 Tauri 认的**驼峰**形态。
+  // 结尾 '!' = 签名里非 Option(缺了就是 invalid args),'?' = Option<T>(缺了就是 None)。
+  const CMD_ARGS = {
+    scan_project_tree: { projectId: 'string!', opts: 'any?' },
+    read_project_text: { projectId: 'string!', rel: 'string!', maxBytes: 'uint?' },
+    write_project_text: { projectId: 'string!', rel: 'string!', text: 'string!', backup: 'bool?' },
+    move_paths_to_trash: { projectId: 'string!', rels: 'array!' },
+  };
+  const CMD_OK = {
+    scan_project_tree: { ok: true, files: [], truncated: false },
+    read_project_text: { ok: true, text: 'STUB', bytes: 5, truncated: false },
+    write_project_text: { ok: true },
+    move_paths_to_trash: { ok: true, moved: 0, failed: [] },
+  };
+  const snap = (v) => (v === null ? 'null' : v === undefined ? 'undefined'
+    : Array.isArray(v) ? 'array:' + v.length
+      : typeof v === 'object' ? 'object:' + Object.keys(v).sort().join(',')
+        : typeof v + ':' + String(v));
+  const snakeIn = (o, pre, acc) => {
+    for (const k of Object.keys(o)) {
+      if (k.indexOf('_') >= 0) acc.push(pre + k);
+      const v = o[k];
+      if (v && typeof v === 'object') snakeIn(v, pre + k + '.', acc);
+    }
+    return acc;
+  };
+  const checkArgs = (cmd, p) => {
+    const spec = CMD_ARGS[cmd];
+    if (!spec) return 'Command ' + cmd + ' not found';
+    for (const k of Object.keys(spec)) {
+      const kind = spec[k];
+      const v = p[k];
+      if (v === undefined || v === null) {
+        if (kind.endsWith('!')) return 'invalid args `' + k + '` for command `' + cmd + '`: missing required argument';
+        continue;
+      }
+      const t = typeof v;
+      const good = kind.startsWith('string') ? t === 'string'
+        : kind.startsWith('uint') ? (t === 'number' && Number.isSafeInteger(v) && v >= 0)
+          : kind.startsWith('bool') ? t === 'boolean'
+            : kind.startsWith('array') ? (Array.isArray(v) && v.every((x) => typeof x === 'string'))
+              : true;
+      if (!good) return 'invalid args `' + k + '` for command `' + cmd + '`: invalid type ' + t;
+    }
+    return null;
+  };
+  const shim = { loaded: false, calls: [], warns: [], results: [], unhandled: [] };
+  let pendingLabel = null;
+  let fault = null; // 'args' | 'ipc' | null:一次性注入的拒绝,用来验 F-2 的分类归属
+  const invokeStub = (cmd, payload) => {
+    const p = payload || {};
+    const spec = CMD_ARGS[cmd];
+    shim.calls.push({
+      label: pendingLabel, cmd,
+      keys: Object.keys(p).sort(),
+      unknown: Object.keys(p).filter((k) => !spec || !(k in spec)).sort(),
+      snake: snakeIn(p, '', []),
+      vals: Object.fromEntries(Object.entries(p).map(([k, v]) => [k, snap(v)])),
+    });
+    if (fault === 'args') return Promise.reject(new Error('invalid args `projectId` for command `' + cmd + '`: deserialization error'));
+    if (fault === 'ipc') return Promise.reject(new Error('channel closed'));
+    if (!spec) return Promise.reject(new Error('Command ' + cmd + ' not found'));
+    const bad = checkArgs(cmd, p);
+    if (bad) return Promise.reject(new Error(bad));
+    return Promise.resolve(JSON.parse(JSON.stringify(CMD_OK[cmd])));
+  };
+  if (typeof globalThis.navigator === 'undefined') {
+    Object.defineProperty(globalThis, 'navigator', { value: { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }, configurable: true });
+  }
+  const prevZ = global.window.ztools;
+  const prevWarn = console.warn;
+  console.warn = (...a) => shim.warns.push({
+    label: pendingLabel,
+    text: a.map((x) => (x instanceof Error ? String(x.message) : String(x))).join(' '),
+  });
+  try {
+    global.window.__TAURI__ = {
+      core: { invoke: invokeStub },
+      event: { listen: () => Promise.resolve(() => {}) },
+      dialog: {},
+      opener: {},
+    };
+    (0, eval)(shimSrc);
+    shim.loaded = true;
+  } catch (e) {
+    shim.loadError = String((e && e.message) || e);
+  }
+  const S = global.window.services || {};
+  const call = async (label, fn) => {
+    pendingLabel = label;
+    try {
+      const r = await fn();
+      shim.results.push({ label, value: r === undefined ? '__undefined__' : r });
+    } catch (e) {
+      shim.unhandled.push(label + ': 逃逸的裸 rejection ' + String((e && e.message) || e));
+    }
+    pendingLabel = null;
+  };
+  // (1) 正常入参:钉住**发出去的命令名与键名**(本任务唯一那个隐形坑)
+  await call('scan.good', () => S.scanProjectTree(PID, { includeCache: true, exts: ['gd'], skipDirs: ['tmp'], maxEntries: 3 }));
+  await call('read.capped', () => S.readProjectText(PID, 'sub/child.gd', { maxBytes: 4 }));
+  await call('read.zero', () => S.readProjectText(PID, 'sub/child.gd', { maxBytes: 0 }));
+  await call('read.neg', () => S.readProjectText(PID, 'sub/child.gd', { maxBytes: -5 }));
+  await call('write.good', () => S.writeProjectText(PID, 'a.txt', 'NEW', { backup: false }));
+  await call('trash.good', () => S.movePathsToTrash(PID, ['a.txt', 'sub/b.txt']));
+  await call('trash.notArray', () => S.movePathsToTrash(PID, 'a.txt'));
+  // (2) 坏参数:JS 侧由原语给串,桌面侧必须由**守卫**在 IPC 之前给同一句
+  await call('scan.badId', () => S.scanProjectTree(null));
+  await call('read.badRel', () => S.readProjectText(PID, null));
+  await call('write.badText', () => S.writeProjectText(PID, 'a.txt', 123));
+  // (3) 拒绝分类:反序列化拒绝 → '参数不合法';通道断 / 命令没注册 → 各自的操作失败句
+  for (const f of ['args', 'ipc']) {
+    fault = f;
+    await call('scan.' + f, () => S.scanProjectTree(PID));
+    await call('read.' + f, () => S.readProjectText(PID, 'a.txt', { maxBytes: 4 }));
+    await call('write.' + f, () => S.writeProjectText(PID, 'a.txt', 'NEW'));
+    await call('trash.' + f, () => S.movePathsToTrash(PID, ['a.txt']));
+  }
+  fault = null;
+  console.warn = prevWarn;
+  global.window.ztools = prevZ;
+  out.shim = shim;
+  process.stdout.write(JSON.stringify(out));
+})().catch((e) => { console.error('shim 段跑挂:', (e && e.stack) || e); process.exit(1); });
 "#;
 
 /// 比对一份 scan 结果:排序后比 rel 序列,再比每个 rel 的 size/ext、truncated 与条数。
@@ -387,6 +540,232 @@ fn key_set(v: &Value) -> Vec<String> {
     k
 }
 
+// ---------------------------------------------------------------------------
+// shim 段的期望表(F-1b / F-2 / F-3)。
+// 期望写在这**一侧**,node 脚本只负责如实记账:这样「把 tauri-shim.js 里的一个键名改掉」
+// 必然让对照变红,而不是靠脚本自己自觉。
+// ---------------------------------------------------------------------------
+
+/// label → 应发出的命令名与 payload 键名(逐字节驼峰;写成 `max_bytes` 就是「没传」)。
+const SHIM_SENT: &[(&str, &str, &[&str])] = &[
+    ("scan.good", "scan_project_tree", &["opts", "projectId"]),
+    ("read.capped", "read_project_text", &["maxBytes", "projectId", "rel"]),
+    ("read.zero", "read_project_text", &["maxBytes", "projectId", "rel"]),
+    ("read.neg", "read_project_text", &["maxBytes", "projectId", "rel"]),
+    ("write.good", "write_project_text", &["backup", "projectId", "rel", "text"]),
+    ("trash.good", "move_paths_to_trash", &["projectId", "rels"]),
+    ("trash.notArray", "move_paths_to_trash", &["projectId", "rels"]),
+];
+
+/// payload 某个键**发出时的形态**(JS 侧 `snap()`):钉住限额值真带出去了,也钉住
+/// 0 / 负数这类非正整数折成 `null`(= 让命令层回落默认),与 JS 原语 inspectfs.js:118 同归一。
+const SHIM_VALS: &[(&str, &str, &str)] = &[
+    ("scan.good", "opts", "object:exts,includeCache,maxEntries,skipDirs"),
+    ("read.capped", "maxBytes", "number:4"),
+    ("read.zero", "maxBytes", "null"),
+    ("read.neg", "maxBytes", "null"),
+    ("write.good", "backup", "boolean:false"),
+    ("trash.notArray", "rels", "array:0"),
+];
+
+/// 守卫必须在 **IPC 之前**挡下的坏参数:这些 label 不该留下任何 invoke 记录。
+const SHIM_GUARDED: &[&str] = &["scan.badId", "read.badRel", "write.badText"];
+
+/// label → 期望的 `{ ok, error }`。ok:true 的那几条期望不带 error。
+const SHIM_RESULT: &[(&str, bool, &str)] = &[
+    ("scan.good", true, ""),
+    ("read.capped", true, ""),
+    ("read.neg", true, ""),
+    ("write.good", true, ""),
+    ("trash.good", true, ""),
+    ("trash.notArray", true, ""),
+    ("scan.badId", false, "项目不存在"),
+    ("read.badRel", false, "非法路径"),
+    ("write.badText", false, "内容不是文本"),
+    ("scan.args", false, "参数不合法"),
+    ("read.args", false, "参数不合法"),
+    ("write.args", false, "参数不合法"),
+    ("trash.args", false, "参数不合法"),
+    ("scan.ipc", false, "遍历失败"),
+    ("read.ipc", false, "读取失败"),
+    ("write.ipc", false, "写入失败"),
+    ("trash.ipc", false, "移入回收站失败"),
+];
+
+/// 每条被收敛的拒绝都必须把**真实原因** console.warn 出来(F-2:原因不许只丢进 catch 的黑洞,
+/// 也不许一律说成「参数不合法」)。`label` → 应出现在 warn 文本里的原因片段。
+const SHIM_WARN: &[(&str, &str)] = &[
+    ("scan.args", "invalid args"),
+    ("read.args", "invalid args"),
+    ("write.args", "invalid args"),
+    ("trash.args", "invalid args"),
+    ("scan.ipc", "channel closed"),
+    ("read.ipc", "channel closed"),
+    ("write.ipc", "channel closed"),
+    ("trash.ipc", "channel closed"),
+];
+
+/// F-3 的跨宿主对照:同一批坏参数,**JS 侧的那句出自原语、桌面侧的那句出自垫片守卫**,
+/// 两句必须逐字相同 —— 渲染层不该按宿主分支写文案。
+const SHIM_VS_JS: &[(&str, &str)] = &[
+    ("scan.badId", "scanBadId"),
+    ("read.badRel", "readBadRel"),
+    ("write.badText", "writeNotText"),
+];
+
+fn shim_method(label: &str) -> &'static str {
+    match label.split('.').next().unwrap_or_default() {
+        "scan" => "scanProjectTree",
+        "read" => "readProjectText",
+        "write" => "writeProjectText",
+        "trash" => "movePathsToTrash",
+        _ => "?",
+    }
+}
+
+/// 双端对照的**垫片层**:命令名 / payload 键名 / 值形态 / 守卫 / 拒绝分类 / 是否漏出裸 rejection。
+/// 返回通过项数(只在**这一项真的没产生 diff** 时记账)。
+fn cmp_shim(js: &Value, diffs: &mut Vec<String>, notes: &mut Vec<String>) -> usize {
+    let mut passes = 0usize;
+    let shim = &js["shim"];
+    if shim["loaded"].as_bool() != Some(true) {
+        diffs.push(format!(
+            "shim 段没能把 src/public/tauri-shim.js 装起来:{}/(没有 loadError 就说明 node 侧没跑到 shim 段)",
+            shim["loadError"].as_str().unwrap_or("")
+        ));
+        return 0;
+    }
+    let arr = |k: &str| -> Vec<Value> { shim[k].as_array().cloned().unwrap_or_default() };
+    let (calls, results, warns, unhandled) = (arr("calls"), arr("results"), arr("warns"), arr("unhandled"));
+    let find_call = |label: &str| -> Option<&Value> { calls.iter().find(|c| c["label"].as_str() == Some(label)) };
+    let find_result = |label: &str| -> Option<&Value> {
+        results.iter().find(|r| r["label"].as_str() == Some(label)).map(|r| &r["value"])
+    };
+    let str_list = |v: &Value, k: &str| -> Vec<String> {
+        v[k].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).map(String::from).collect()).unwrap_or_default()
+    };
+
+    for (label, cmd, keys) in SHIM_SENT {
+        let before = diffs.len();
+        match find_call(label) {
+            None => diffs.push(format!("shim[{label}] 没发出任何 invoke(命令应为 {cmd})")),
+            Some(c) => {
+                let got_cmd = c["cmd"].as_str().unwrap_or_default();
+                if got_cmd != *cmd {
+                    diffs.push(format!("shim[{label}] 命令名不对:期望 {cmd} / 实发 {got_cmd}"));
+                }
+                let got = str_list(c, "keys");
+                let want: Vec<String> = keys.iter().map(|s| s.to_string()).collect();
+                if got != want {
+                    diffs.push(format!("shim[{label}] payload 键名不对:期望 {want:?} / 实发 {got:?}"));
+                }
+            }
+        }
+        if diffs.len() == before { passes += 1; }
+    }
+
+    // 总闸:任何一条 invoke 都不许带下划线键名(= 命令层收不到),也不许带签名里没有的键
+    let before = diffs.len();
+    for c in &calls {
+        let label = c["label"].as_str().unwrap_or("?").to_string();
+        let snake = str_list(c, "snake");
+        if !snake.is_empty() {
+            diffs.push(format!(
+                "shim[{label}] 发出了带下划线的键 {snake:?}:Tauri 会把命令层那个参数当成没传(限额静默失效)"
+            ));
+        }
+        let unknown = str_list(c, "unknown");
+        if !unknown.is_empty() {
+            diffs.push(format!("shim[{label}] 发出了命令层没有的键 {unknown:?}(签名见 main.rs 的四条命令)"));
+        }
+    }
+    if diffs.len() == before { passes += 1; }
+
+    for (label, key, want) in SHIM_VALS {
+        let before = diffs.len();
+        let got = find_call(label).and_then(|c| c["vals"].get(*key)).and_then(|v| v.as_str()).map(String::from);
+        if got.as_deref() != Some(*want) {
+            diffs.push(format!("shim[{label}] 的 {key} 发出去是 {got:?},期望 {want:?}"));
+        }
+        if diffs.len() == before { passes += 1; }
+    }
+
+    for label in SHIM_GUARDED {
+        let before = diffs.len();
+        if let Some(c) = find_call(label) {
+            diffs.push(format!(
+                "shim[{label}] 守卫没挡住,还是发了 invoke({})—— 坏参数该在 IPC 之前按 JS 原语的串拒掉",
+                c["cmd"].as_str().unwrap_or_default()
+            ));
+        }
+        if diffs.len() == before { passes += 1; }
+    }
+
+    for (label, ok, err) in SHIM_RESULT {
+        let before = diffs.len();
+        match find_result(label) {
+            None => diffs.push(format!("shim[{label}] 没有返回记录(映射没跑,或抛了裸 rejection)")),
+            Some(v) => {
+                let got_ok = v["ok"].as_bool().unwrap_or(false);
+                let got_err = v["error"].as_str().unwrap_or_default();
+                if got_ok != *ok || got_err != *err {
+                    diffs.push(format!("shim[{label}] 返回不对:期望 {{ok:{ok},error:{err:?}}} / 实发 {v}"));
+                }
+            }
+        }
+        if diffs.len() == before { passes += 1; }
+    }
+
+    let before = diffs.len();
+    if !unhandled.is_empty() {
+        diffs.push(format!(
+            "垫片把裸 rejection 漏给了渲染层({} 条):{} —— 四条映射一律该收敛成 {{ok:false,error}}",
+            unhandled.len(),
+            Value::Array(unhandled)
+        ));
+    }
+    if diffs.len() == before { passes += 1; }
+
+    for (label, reason) in SHIM_WARN {
+        let before = diffs.len();
+        let method = shim_method(label);
+        let hit = warns.iter().any(|w| {
+            w["label"].as_str() == Some(label)
+                && w["text"].as_str()
+                    .map(|t| t.contains("[tauri-shim]") && t.contains(method) && t.contains(reason))
+                    .unwrap_or(false)
+        });
+        if !hit {
+            diffs.push(format!(
+                "shim[{label}] 没把真实原因 console.warn 出来(文本该含 '[tauri-shim] {method}' 与 {reason:?})"
+            ));
+        }
+        if diffs.len() == before { passes += 1; }
+    }
+
+    for (label, js_key) in SHIM_VS_JS {
+        let before = diffs.len();
+        let j = &js["jsOnly"][js_key];
+        let je = j["error"].as_str();
+        let se = find_result(label).and_then(|v| v["error"].as_str());
+        if j["ok"].as_bool() != Some(false) || je.is_none() {
+            diffs.push(format!("jsOnly[{js_key}] 不再是原语给的那句错误串:{j}"));
+        } else if se != je {
+            diffs.push(format!(
+                "shim[{label}] 与 JS 原语不同句:JS({js_key}) {je:?} / 桌面 {se:?} —— JS 侧出自原语、桌面侧出自垫片守卫,渲染层不该按宿主分支"
+            ));
+        }
+        if diffs.len() == before { passes += 1; }
+    }
+
+    notes.push(format!(
+        "  NOTE  shim 段记账:invoke {} 次、console.warn {} 条;命令名与 payload 键名按驼峰钉死(F-1b),\n\
+         \x20     坏参数在 IPC 之前被守卫挡下、拒绝按「参数问题 / 别的原因」分类(F-2 / F-3)",
+        calls.len(), warns.len()
+    ));
+    passes
+}
+
 /// 双端逐节对照。返回 (通过的对照项数, 可见跳过项数, 差异清单, 说明清单)。
 fn compare(js: &Value, rs: &Value, links: &Links) -> (usize, usize, Vec<String>, Vec<String>) {
     let mut diffs: Vec<String> = Vec::new();
@@ -404,12 +783,16 @@ fn compare(js: &Value, rs: &Value, links: &Links) -> (usize, usize, Vec<String>,
     }
 
     for name in ["def", "cache", "exts", "skip", "max3", "noRoot", "noDir"] {
+        // 记账只在**这一项没产生 diff** 时进行:早先无条件 passes += 1,于是红了也照样
+        // 打印「45 项通过」,标题数字成了装饰品(现在由末尾的下限断言兜住)。
+        let before = diffs.len();
         cmp_scan(name, &js["scan"][name], &rs["scan"][name], &mut diffs, &mut notes);
-        passes += 1;
+        if diffs.len() == before { passes += 1; }
     }
     for name in ["tiny", "big", "nul", "capped", "zero", "missing", "dirAsRel", "escape", "dotdot", "absRel", "emptyRel", "noRoot"] {
+        let before = diffs.len();
         cmp_json(&format!("read[{name}]"), &js["read"][name], &rs["read"][name], &mut diffs);
-        passes += 1;
+        if diffs.len() == before { passes += 1; }
     }
     // 排除项 2:非 UTF-8 无 NUL —— 钉住两端当前形态,而不是放过
     if js["read"]["notutf"]["text"].is_string() && rs["read"]["notutf"]["skippedBinary"].is_boolean() {
@@ -419,12 +802,15 @@ fn compare(js: &Value, rs: &Value, links: &Links) -> (usize, usize, Vec<String>,
         diffs.push(format!("read[notutf] 的「已知刻意分歧」不再成立,需要重新判定:JS {} / Rust {}", js["read"]["notutf"], rs["read"]["notutf"]));
     }
     // 包含闸的链接用例:两端各自判定,任一边没链接都会在这里露出来
-    cmp_json("read[thruLink]", &js["read"]["thruLink"], &rs["read"]["thruLink"], &mut diffs);
-    if links.junction && js["meta"]["hasLink"].as_bool() == Some(true) {
-        passes += 1;
-    } else {
-        skips += 1;
-        notes.push(format!("  SKIP  read[thruLink] 没能真跑:链接不可用({})", links.why));
+    {
+        let before = diffs.len();
+        cmp_json("read[thruLink]", &js["read"]["thruLink"], &rs["read"]["thruLink"], &mut diffs);
+        if links.junction && js["meta"]["hasLink"].as_bool() == Some(true) && diffs.len() == before {
+            passes += 1;
+        } else {
+            skips += 1;
+            notes.push(format!("  SKIP  read[thruLink] 没能真跑:链接不可用({})", links.why));
+        }
     }
     if !links.dangling {
         skips += 1;
@@ -433,8 +819,9 @@ fn compare(js: &Value, rs: &Value, links: &Links) -> (usize, usize, Vec<String>,
         passes += 1;
     }
     for name in ["fresh", "existing", "noBackup", "ontoDir", "missingParent", "illegal", "after"] {
+        let before = diffs.len();
         cmp_json(&format!("write[{name}]"), &js["write"][name], &rs["write"][name], &mut diffs);
-        passes += 1;
+        if diffs.len() == before { passes += 1; }
     }
     // P-1 的跨宿主钉子:无备份时两端都**没有** backupRel 这个键(而不是给 null)
     for name in ["fresh", "noBackup"] {
@@ -452,12 +839,16 @@ fn compare(js: &Value, rs: &Value, links: &Links) -> (usize, usize, Vec<String>,
         diffs.push(format!("write[非字符串] 的 '内容不是文本' 不再成立: {}", js["jsOnly"]["writeNotText"]));
     }
     for name in ["empty", "gates", "dupMissing"] {
+        let before = diffs.len();
         cmp_json(&format!("trash[{name}]"), &js["trash"][name], &rs["trash"][name], &mut diffs);
-        passes += 1;
+        if diffs.len() == before { passes += 1; }
     }
     // 垫片归一的依据:JS 收非数组 = 空清单;Rust 的 Vec<String> 只能收到数组
-    cmp_json("trash[非数组入参 ↔ Rust 空清单]", &js["jsOnly"]["trashNotArray"], &rs["trash"]["empty"], &mut diffs);
-    passes += 1;
+    {
+        let before = diffs.len();
+        cmp_json("trash[非数组入参 ↔ Rust 空清单]", &js["jsOnly"]["trashNotArray"], &rs["trash"]["empty"], &mut diffs);
+        if diffs.len() == before { passes += 1; }
+    }
     if js["jsOnly"]["trashNoRoot"].get("error").and_then(|e| e.as_str()) == Some("项目不存在") {
         notes.push("  NOTE  trash[无根] 的 '项目不存在' 出自 JS 原语的提前返回;Rust 同串在命令层(main.rs),按 P-2 由 bin 断言钉".into());
         passes += 1;
@@ -465,22 +856,30 @@ fn compare(js: &Value, rs: &Value, links: &Links) -> (usize, usize, Vec<String>,
         diffs.push(format!("trash[无根] 的 '项目不存在' 不再成立: {}", js["jsOnly"]["trashNoRoot"]));
     }
     for name in ["w", "t", "tree"] {
+        let before = diffs.len();
         cmp_json(&format!("disk[{name}] 落盘后果"), &js["disk"][name], &rs["disk"][name], &mut diffs);
-        passes += 1;
+        if diffs.len() == before { passes += 1; }
     }
+
+    // ---------- 垫片层(F-1b / F-2 / F-3):命令名 + payload 键名 + 守卫 + 拒绝分类 ----------
+    passes += cmp_shim(js, &mut diffs, &mut notes);
 
     (passes, skips, diffs, notes)
 }
 
 /// Rust 侧:与 JS 脚本逐条同形的用例集。
 fn rust_side(tree: &Path, w: &Path, t: &Path, has_link: bool) -> Value {
-    let def = ScanOpts::default();
+    // F-1(a):opts 走**真反序列化路径** `ScanOpts::from_json`(命令层 main.rs:205 用的就是它),
+    // 不再手搭结构体字面量。手搭的话,shim 与 Rust 之间的那批驼峰键名(includeCache / skipDirs /
+    // maxEntries)就没有任何一处被验过 —— 键名写错照样全绿,而这正是本任务存在的理由。
+    let opts = |v: Value| ScanOpts::from_json(&v);
+    let def = opts(json!({}));
     let mut scan_map = serde_json::Map::new();
-    scan_map.insert("def".into(), rust_scan(tree, &def));
-    scan_map.insert("cache".into(), rust_scan(tree, &ScanOpts { include_cache: true, ..def.clone() }));
-    scan_map.insert("exts".into(), rust_scan(tree, &ScanOpts { exts: vec!["gd".into(), "MD".into()], ..def.clone() }));
-    scan_map.insert("skip".into(), rust_scan(tree, &ScanOpts { skip_dirs: vec!["tmp".into()], ..def.clone() }));
-    scan_map.insert("max3".into(), rust_scan(tree, &ScanOpts { max_entries: 3, ..def.clone() }));
+    scan_map.insert("def".into(), scan_json(tree, &def));
+    scan_map.insert("cache".into(), scan_json(tree, &opts(json!({ "includeCache": true }))));
+    scan_map.insert("exts".into(), scan_json(tree, &opts(json!({ "exts": ["gd", "MD"] }))));
+    scan_map.insert("skip".into(), scan_json(tree, &opts(json!({ "skipDirs": ["tmp"] }))));
+    scan_map.insert("max3".into(), scan_json(tree, &opts(json!({ "maxEntries": 3 }))));
     scan_map.insert("noRoot".into(), scan_json(Path::new(""), &def));
     scan_map.insert("noDir".into(), scan_json(&tree.join("no-such-dir-at-all"), &def));
 
@@ -490,9 +889,10 @@ fn rust_side(tree: &Path, w: &Path, t: &Path, has_link: bool) -> Value {
     read_map.insert("big".into(), rd("big.txt", DEFAULT_MAX_BYTES));
     read_map.insert("nul".into(), rd("nul.bin", DEFAULT_MAX_BYTES));
     read_map.insert("notutf".into(), rd("notutf.dat", DEFAULT_MAX_BYTES));
-    read_map.insert("capped".into(), rd("sub/child.gd", 4));
+    // capped / zero 的限额同样从「shim 发出的那份 payload」里取(键名 maxBytes),见 max_bytes_from
+    read_map.insert("capped".into(), rd("sub/child.gd", max_bytes_from(&json!({ "maxBytes": 4 }))));
     // maxBytes:0 → 两端都回落默认限额(JS `o.maxBytes && o.maxBytes > 0`,Rust `if max_bytes > 0`)
-    read_map.insert("zero".into(), rd("sub/child.gd", 0));
+    read_map.insert("zero".into(), rd("sub/child.gd", max_bytes_from(&json!({ "maxBytes": 0 }))));
     read_map.insert("missing".into(), rd("nope.txt", DEFAULT_MAX_BYTES));
     read_map.insert("dirAsRel".into(), rd("sub", DEFAULT_MAX_BYTES));
     read_map.insert("escape".into(), rd("../outside-secret", DEFAULT_MAX_BYTES));
@@ -619,5 +1019,8 @@ fn js_and_rust_inspectfs_agree_on_one_fixture_tree() {
         ));
     }
     assert!(all.is_empty(), "双端语义漂移({} 处):\n{}", all.len(), all.join("\n  ---\n"));
+    // 标题数字得**被强制**,不能只是装饰:对照项一旦少到这个下限以下,说明有整节被静默
+    // 摘掉(键集合元对照之外的形态),那这轮「绿」就没有意义了。
+    assert!(passes >= 40, "对照项只剩 {passes} 个(下限 40):有整节被静默摘掉或跳过,这轮的绿不可信");
     println!("  PASS  双端对照通过 {passes} 项,可见跳过 {skips} 项(链接没建成时不为它记账)");
 }
