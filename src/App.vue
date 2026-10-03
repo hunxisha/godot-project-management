@@ -10,6 +10,7 @@ import AddonsView from './views/AddonsView.vue'
 import DocsView from './views/DocsView.vue'
 import DocSearchPalette from './components/docs/DocSearchPalette.vue'
 import BackupsView from './views/BackupsView.vue'
+import ToolsView from './views/ToolsView.vue'
 import SettingsView from './views/SettingsView.vue'
 import { notify } from './services/bridge'
 import type { BackupTask, DocsTask, DownloadTask, ExportTask } from './types/godot'
@@ -337,6 +338,8 @@ function gotoCreateBackup(id: string) {
           @navigate="tab = $event"
           @backup-project="gotoCreateBackup"
         />
+        <!-- 工具页:体检进度只活在本页的汇总条里(P0a 不接全局任务栏 taskqueue) -->
+        <ToolsView v-else-if="tab === 'tools'" @navigate="tab = $event" />
         <SettingsView v-else />
       </KeepAlive>
     </main>
