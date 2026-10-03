@@ -12,7 +12,7 @@ preload 领域层的回归测试。在 Node 中桩掉 `window.ztools.db`，**req
 | `fsutil.test.js` | 文件系统工具（`fsutil.js`）：名称/路径处理、取消令牌与 lock 语义、**分片让出的三级降级链**、递归收集与复制、预估 |
 | `http.test.js` | 网络层（`http.js`）：文本/JSON、重定向、代理校验与 CONNECT 隧道、下载进度、**取消必须了结 promise** |
 | `install.test.js` | 下载安装编排（`install.js`）：串行队列、状态机、取消、失败路径（`http` / `extract` / `store` 打桩） |
-| `services.test.js` | 服务面契约：`window.services` 的 47 个方法 与 `src/env.d.ts` 的 `interface Services` 必须逐项一致 |
+| `services.test.js` | 服务面契约：`window.services` 的方法集 与 `src/types/services.ts` 的 `interface Services` 必须逐项一致（方法数**不写死**，以本测试第 1 节的实际输出为准——写死的数字正是上次烂掉的地方） |
 
 ## 运行
 
@@ -90,4 +90,17 @@ GPM_TEST_TRASH=1 npm run test:preload     # Windows PowerShell: $env:GPM_TEST_TR
 
 被删对象位于本次运行的临时工作目录内（默认 `os.tmpdir()` 下新建的 `gpm-backup-test-*`），
 不影响仓库内容。
+
+## 性能基准同样默认关闭（GPM_PERF_FILES）
+
+工具页的「1 万文件全量体检 < 10s」验收口径由 `src/tools/__tests__/perf.test.mjs` 复测：
+它在 `os.tmpdir()` 下造指定数目真实文件的 Godot 项目树、把 `window.services` 接到本目录的
+`inspectfs.js` 真实原语、用 CI 同一份 `usetools.mjs` bundle 跑 `runAll()` 并打印毫秒数，
+**跑完自删夹具并核实目录已不存在**。它会写盘上万文件，所以与 `GPM_TEST_TRASH` 同规约——
+默认不跑，也不挂 `npm test` / `test:renderer`，需要时显式开启：
+
+```bash
+node src/composables/__tests__/build-bundle.mjs                                   # 先产 bundle
+GPM_PERF_FILES=10000 node src/tools/__tests__/perf.test.mjs                       # PowerShell: $env:GPM_PERF_FILES=10000; node …
+```
 

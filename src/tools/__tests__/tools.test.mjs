@@ -389,7 +389,10 @@ async function main() {
   // 「条数 + id」,而 F-4 那两条只查 detail,标题写成「缓存体积异常」也能全绿。
   // cache 走的是 truncatedFinding 的 title 覆盖(默认标题讲「以下结论只基于部分文件」,
   // 而 cache 截断时一个结论都不下),所以这里钉它自己那句里的「截断」。
-  ok(String(truncEmpty[0].title).includes('截断'), 'cache 截断那条的标题点明「截断」', truncEmpty[0].title)
+  // 修复轮 1(F-4.1):[0] 先判存在再取字段 —— 回归返回 [] 时旧写法抛 TypeError 打断整个 harness,
+  // 拿不到 FAIL 汇总(与同轮 !!st && 的修法一致;上一条「条数 + id」断言会同时红,不缺线索)。
+  ok(!!truncEmpty[0] && String(truncEmpty[0].title).includes('截断'),
+    'cache 截断那条的标题点明「截断」', truncEmpty[0] && truncEmpty[0].title)
   // 第二个复现:3 KB 缓存 ÷ 100 B 可见源 = 30 倍 → 旧实现照样报 cache:bloat/warn,
   // 而分母只是被截断后剩下的一小块源;cacheMax 同样只是子集里的最大值。
   const truncCache = await T.runCache(makeCtx(
@@ -398,8 +401,9 @@ async function main() {
     '截断时不报体积/膨胀/陈旧(倍数与最新时间都算自部分清单)', JSON.stringify(truncCache.map((f) => `${f.id}/${f.severity}`)))
   // 审查 F-4:截断文案不许建议「用 skipDirs / exts 缩小范围」—— 过滤出来的清单同样不完整,
   // 却不会被标记 truncated,下一轮就会把用户其实有的文件报成丢失。
-  ok(!/skipDirs|exts/.test(String(truncCache[0].detail)),
-    'cache 截断文案不给过滤建议', truncCache[0].detail)
+  // 修复轮 1(F-4.1):同样先判 [0] 存在,回归时 FAIL 而不是把 harness 打断。
+  ok(!!truncCache[0] && !/skipDirs|exts/.test(String(truncCache[0].detail)),
+    'cache 截断文案不给过滤建议', truncCache[0] && truncCache[0].detail)
 
   // ---------- 5. brokenRefs 检查器 ----------
   // 为什么存在:P0a 唯一的 error 级结论。两种假阳性都比漏报更伤信任 ——
@@ -465,6 +469,45 @@ async function main() {
   ok(skipUser.length === 0, 'user:// 与绝对路径不参与判定')
   const unreadable = await T.runBrokenRefs(makeCtx(base, { texts: {} }))
   ok(unreadable.length === 0, '读不到文本(二进制/超限)的场景文件跳过,不报假断链')
+
+  // ---------- 6. outcomeOf:体检结论判定(修复轮 1,审查 F-1) ----------
+  // 为什么存在:「体检完成 · 未发现问题」曾直接在 ToolsView.vue 的 computed 里判,而扫描失败
+  // **不会**清空 results —— useTools.ts:146-153 置 error、清 tree、复位 truncated 后返回,
+  // runAll 拿到 false 直接早退,results 原样留着。可达序列:全量跑一轮全绿 → 项目目录被移走/改名
+  // → 再跑一轮 → 红色「项目目录无法读取」旁边并排打出「体检完成 · 未发现问题 · 3 项已检查 · 0 文件」。
+  // 判据抽成 outcomeOf(src/tools/outcome.ts)后,这四路迁移第一次被 harness 钉住;(d) 就是那条矛盾。
+  section('6. outcomeOf:体检结论判定')
+  const mkResult = (id, toolOk = true, findings = []) => ({
+    toolId: id, ok: toolOk, findings, scannedFiles: 10, ms: 1, ...(toolOk ? {} : { error: '检查失败' })
+  })
+  const ZERO = { error: 0, warn: 0, info: 0 }
+  const ALL3 = { size: mkResult('size'), cache: mkResult('cache'), brokenRefs: mkResult('brokenRefs') }
+  // (a) 每个注册工具都有 ok:true 结论、零发现、无 error → all-clean
+  const oA = T.outcomeOf(ALL3, 3, ZERO, '')
+  ok(oA.kind === 'allClean' && oA.showAllClean === true && oA.error === '',
+    'outcomeOf(a):全部跑成且零结论 → 「体检完成 · 未发现问题」', JSON.stringify(oA))
+  // (b) 还有一个工具没跑过 → 不算 all-clean(「完成」不许在没完成时说)
+  const oB = T.outcomeOf({ size: mkResult('size'), cache: mkResult('cache') }, 3, ZERO, '')
+  ok(oB.kind !== 'allClean' && oB.showAllClean === false,
+    'outcomeOf(b):一个工具还没跑 → 不宣布体检完成', JSON.stringify(oB))
+  // (c) 一个工具 ok:false → 不算 all-clean,且失败被点名(failedToolIds 就是那排红卡片的账)
+  const oC = T.outcomeOf({ ...ALL3, cache: mkResult('cache', false) }, 3, ZERO, '')
+  ok(oC.showAllClean === false && oC.kind === 'partial' && oC.failedToolIds.join(',') === 'cache',
+    'outcomeOf(c):单工具失败 → 不干净并点名失败工具', JSON.stringify(oC))
+  // (d) F-1 本体:结论明明全绿,但 error 非空(目录移走后的失败扫描,results 是上一轮陈迹)
+  //     → 必须**不是** all-clean,失败横幅是唯一出口。修复前(naive:判据不看 error)这条 RED。
+  const oD = T.outcomeOf(ALL3, 3, ZERO, '项目目录无法读取')
+  ok(oD.showAllClean === false && oD.kind === 'failed' && oD.error === '项目目录无法读取',
+    'outcomeOf(d):扫描失败 + 陈旧全绿结论 → 不宣布体检完成,失败原样上浮', JSON.stringify(oD))
+  // 既有行为一并钉住(从视图 computed 原样搬来,防抽取时弄丢):
+  // (e) 有扫描/检查在途 → 不宣布完成(那是上一轮的状态,这一轮还没跑完)
+  const oE = T.outcomeOf(ALL3, 3, ZERO, '', true)
+  ok(oE.kind === 'running' && oE.showAllClean === false,
+    'outcomeOf(e):在跑的一轮期间不宣布「体检完成」', JSON.stringify(oE))
+  // (f) 一份结论都没有(刚切项目/没选项目)→ idle,与 (a) 的「跑完且没问题」区分开
+  const oF = T.outcomeOf({}, 3, ZERO, '')
+  ok(oF.kind === 'idle' && oF.showAllClean === false,
+    'outcomeOf(f):什么都没跑 → idle 而不是「未发现问题」', JSON.stringify(oF))
 }
 main().catch((e) => {
   // 断言里不该抛错;真抛了(比如实现返回了 undefined)也要以退出码 1 收口,不能让 CI 看到绿。

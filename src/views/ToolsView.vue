@@ -8,6 +8,7 @@ import ToolCard from '../components/tools/ToolCard.vue'
 import FindingList from '../components/tools/FindingList.vue'
 import SummaryBar from '../components/tools/SummaryBar.vue'
 import { isSupported } from '../tools/registry'
+import { outcomeOf } from '../tools/outcome'
 import { useTools } from '../composables/useTools'
 
 const emit = defineEmits<{ (e: 'navigate', tab: string): void }>()
@@ -30,19 +31,14 @@ const openTool = computed(() => t.tools.value.find((x) => x.id === open.value) |
 const openFindings = computed(() => (open.value ? t.findingsOf(open.value) : []))
 
 /**
- * 「全部工具都跑成功、一条结论都没有」= 项目干净。
- * 这一行必须显式存在:调度器在切项目时返回空结果集(不报错),跑完一轮全绿之后如果页面
- * 什么都不说,用户分不清「体检跑完且没问题」和「刚切了项目、什么都还没跑」——
- * 两种状态下卡片、汇总条、横幅长得一模一样。失败的工具不算干净(ok:false 有自己的红卡片)。
+ * 体检结论横幅的唯一判据(审查 F-1):「体检完成 · 未发现问题」与「项目目录无法读取」
+ * 该怎么说、说不说,全部由 outcomeOf 决定,这一页只渲染它的返回值 —— 判据曾写在本文件里,
+ * Node harness 跑不到 .vue,「扫描失败 + 陈旧全绿结论」并排显示的矛盾只能靠肉眼发现。
+ * (纯函数与它的四路断言见 src/tools/outcome.ts 与 tools.test.mjs 第 6 节。)
  */
-const allClean = computed(() => {
-  const rs = Object.values(t.results.value)
-  return !busy.value &&
-    rs.length > 0 &&
-    rs.length === t.tools.value.length &&
-    rs.every((r) => r.ok) &&
-    t.counts.value.error + t.counts.value.warn + t.counts.value.info === 0
-})
+const outcome = computed(() =>
+  outcomeOf(t.results.value, t.tools.value.length, t.counts.value, t.error.value, busy.value)
+)
 
 /** 再点一次同一张卡片的「结果」= 收起 */
 function toggleResult(id: string) {
@@ -80,13 +76,14 @@ function toggleResult(id: string) {
       :running="busy"
       :has-project="!!t.projectId.value"
       :progress="t.progress.value"
-      :all-clean="allClean"
+      :all-clean="outcome.showAllClean"
       @run-all="t.runAll()"
     />
 
-    <!-- 扫描失败只上浮这一条口径(检查器不各出一行),所以错误横幅是唯一的失败出口 -->
-    <p v-if="t.error.value" class="err-line">
-      <Icon name="alert" :size="12" /> {{ t.error.value }}
+    <!-- 扫描失败只上浮这一条口径(检查器不各出一行),所以错误横幅是唯一的失败出口;
+         文案与显隐同样来自 outcome(审查 F-1:横幅与「未发现问题」不许同时出现) -->
+    <p v-if="outcome.error" class="err-line">
+      <Icon name="alert" :size="12" /> {{ outcome.error }}
     </p>
 
     <EmptyState

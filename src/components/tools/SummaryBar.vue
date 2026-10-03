@@ -17,7 +17,7 @@ const props = defineProps<{
   hasProject: boolean
   /** useTools 的进度文案(空串表示没有进度可显示) */
   progress: string
-  /** 全部工具都跑成且零结论:视图算好喂进来,组件不认识 useTools,也认不出「切项目清空」与「跑完没问题」的区别 */
+  /** 全部工具都跑成且零结论:由 outcomeOf(src/tools/outcome.ts)算好喂进来;组件不认识 useTools,判据也不在视图里 */
   allClean: boolean
 }>()
 const emit = defineEmits<{ (e: 'run-all'): void }>()
