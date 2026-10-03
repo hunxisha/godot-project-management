@@ -394,7 +394,11 @@ fn write_at(
     Value::Object(out)
 }
 
-/// 批量移入回收站(Windows)/ 永久删除(其他平台);单个失败**不中断其余**。
+/// 批量移入回收站;单个失败**不中断其余**。
+/// 删除一律交 `fsutil::delete_to_trash`(src-tauri/src/fsutil.rs:52-57):它对**所有平台**都调
+/// `trash::delete`,没有按 OS 分叉的那条分支 —— 于是这一句 JS/Rust 两侧共用的文档不再声称
+/// 「其他平台永久删除」(旧措辞与代码不符)。能不能还原取决于 `trash` crate 的平台后端。
+/// 渲染层按 OS 分叉的那句「非 Windows 是永久删除」是**保守措辞**,不是本函数的行为描述。
 /// 计数**以磁盘实况为准**,不信删除调用自己的回报(D-5)。
 pub fn trash_json(root: &Path, rels: &[String]) -> Value {
     trash_json_with(root, rels, &crate::fsutil::delete_to_trash)

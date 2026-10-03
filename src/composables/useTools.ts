@@ -405,6 +405,14 @@ export function useTools() {
       if (projectId.value === pid) fixResults.value = { ...fixResults.value, [f.id]: o }
       return o
     }
+    // ⓪ 重入闸(放在所有分支最前面):改写/删除通道是**逐个 await** 的循环,第二次 applyFix
+    //    能从两次 await 之间插进来,于是两份清单同时改盘(后一份的 rel 可能已被前一份删掉)、
+    //    fixing 被后一次的 finally 提前复位、两份回执互相覆盖。
+    //    这里既不调原语也**不写回执** —— 压根没执行的东西记进账本就是假账。
+    if (fixing.value !== '') {
+      const why = '上一次修复还在执行中'
+      return { ...base, error: why, message: why }
+    }
     if (!pid) return done({ error: '还没有添加项目', message: '还没有添加项目' })
     // ① 管线执行不了的两种情形:service 为 null(既有能力/只报告/payload 认不出)、清单为空。
     //    两种都必须带着原因回来,不能静默什么都不做(spec §5.3 规则 3 的反面就是「点了没反应」)。
@@ -493,10 +501,18 @@ export function useTools() {
 
   const counts = computed(() => {
     const c = { error: 0, warn: 0, info: 0, fixable: 0 }
+    const isWin = hostIsWindows()
     for (const r of Object.values(results.value)) {
       for (const f of r.findings) {
         c[f.severity] += 1
-        if (f.fix && f.fix.kind !== 'none') c.fixable += 1
+        // 「可修复」的口径必须是 planFix 自己的判定,而不是 fix.kind !== 'none':
+        // kind 为 existing 的结论是一次跳转、payload 认不出或缺新内容的结论执行不了,
+        // 把它们数进去就等于 SummaryBar 报「可修复 5」而面板上只有 1 个按钮点得动。
+        // tree 传空数组有两个理由:可执行性本来就与清单无关(fixPlan 的 Important 3 约束,
+        // 否则这条计数会随清单新鲜度漂移),而 planFix 里那趟 O(tree) 的体积建表若为每条结论
+        // 重做一遍,10 万文件的项目会把一个 computed 变成 findings × tree 的二次方。
+        const plan = planFix(f, [], isWin)
+        if (plan.service !== null && !plan.empty) c.fixable += 1
       }
     }
     return c

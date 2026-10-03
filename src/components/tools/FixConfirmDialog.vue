@@ -37,6 +37,14 @@ watch(
 
 /** 清单里没有体积的那些(不臆造数字,原语会自己去问磁盘) */
 const unknownCount = computed(() => props.plan.items.filter((i) => typeof i.size !== 'number').length)
+/**
+ * 渲染上限,与 PruneDialog.vue:87/191 同一口径(B5 孤儿资产一次点几千上万个文件时,
+ * 逐条铺满 DOM 会让确认框本身变成卡顿源)。只裁**画出来的行**:上面的条数、合计体积与
+ * 确认按钮的数字仍按完整 plan.items 算 —— 预览的账必须还是完整的账。
+ */
+const RENDER_CAP = 200
+const shownItems = computed(() => props.plan.items.slice(0, RENDER_CAP))
+const omittedCount = computed(() => props.plan.items.length - shownItems.value.length)
 /** 有没有可执行的东西:判据就是 planFix 给的两个字段,这里不再补一条自己的规则 */
 const executable = computed(() => props.plan.service !== null && !props.plan.empty)
 const canRun = computed(() => executable.value && !props.busy && !props.outcome && checked.value)
@@ -75,13 +83,17 @@ const canRun = computed(() => executable.value && !props.busy && !props.outcome 
             <span v-if="unknownCount" class="fx-dim">(其中 {{ unknownCount }} 个不在本次文件清单里,体积未知)</span>
           </div>
 
-          <!-- 完整清单逐条列出(spec §5.3 规则 3「必须列出将影响的完整文件清单」)。
+          <!-- 清单逐条列出(spec §5.3 规则 3「必须列出将影响的完整文件清单」),超过上限只裁行数
+               并点名还剩多少 —— 条数与合计体积用的是完整 items,不是裁过的 shownItems。
                key 带序号:同一个 rel 被点名两次也各占一行,不能让 Vue 撞 key 复用 DOM。 -->
           <div class="fx-list">
-            <div v-for="(it, i) in plan.items" :key="`${it.rel}#${i}`" class="fx-item">
+            <div v-for="(it, i) in shownItems" :key="`${it.rel}#${i}`" class="fx-item">
               <span class="mono fx-rel" :title="it.rel">{{ it.rel }}</span>
               <span class="fx-size mono">{{ typeof it.size === 'number' ? fmtBytes(it.size) : '—' }}</span>
               <span v-if="it.note" class="fx-dim fx-note-line">{{ it.note }}</span>
+            </div>
+            <div v-if="omittedCount > 0" class="fx-item fx-dim">
+              另有 {{ omittedCount }} 个文件未列出(上面的条数与合计仍按完整清单计)
             </div>
           </div>
 

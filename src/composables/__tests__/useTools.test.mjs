@@ -749,6 +749,107 @@ async function main() {
   ok(boomMsg === '' && !!oNoWin && oNoWin.ok === true && oNoWin.verb === '永久删除' && /永久删除/.test(oNoWin.message),
     '缺省 isWin 不抛异常,并退回非 Windows 的「永久删除」口径', `${boomMsg}|${oNoWin && oNoWin.verb}|${oNoWin && oNoWin.message}`)
   restore()
+
+  // ---------- Fix round 1:审查 Important 1/2(执行侧)+ Minor 1/2 ----------
+  // §24~28 已钉住「只交 rel、如实回报、改盘才重扫」。这一批钉四件同类的账:
+  //   ①(Important 2)预览条数与**真正发出的写次数**同源 —— 上一轮 items 去重、files 不去重,
+  //     确认框写「确认改写 1 个文件」而这里循环了两次,ok 还拿未去重的 files.length 当比数;
+  //   ②(Important 1)越界/绝对 rel 必须**原样**送到原语面前 —— 改写成项目内名字就是绕过 resolveRel;
+  //   ③(Minor 1)删除/改写都是逐个 await 的循环,第二次 applyFix 能插在两次 await 之间进来,
+  //     于是两份清单同时改盘,后一份的 rel 可能已被前一份删掉,回执还各说各的;
+  //   ④(Minor 2)counts.fixable 说「可修复 N」,N 必须是本管线真能执行的条数,否则 SummaryBar
+  //     报「可修复 5」而面板上只有 1 个按钮点得动(existing 是跳转、none 只报告、payload 认不出)。
+  section('29. applyFix 的执行清单与预览同源(重复点名只写一次 / 越界串原样送闸)')
+  const dupWriteLog = []
+  const rawRelLog = []
+  global.window.services.movePathsToTrash = (pid, rels) => {
+    rawRelLog.push(rels)
+    return { ok: true, moved: rels.length, failed: [] }
+  }
+  global.window.services.writeProjectText = (pid, rel, text) => {
+    dupWriteLog.push({ rel, text })
+    return { ok: true, backupRel: `${rel}.gpm-bak-x` }
+  }
+  const tP = M.useTools()
+  await tP.load()
+  await tP.runTool('size')
+  const oDup = await tP.applyFix(
+    { id: 'fmt:dup', severity: 'info', title: '行尾空白', fix: { kind: 'rewrite', label: '格式化', payload: { files: [{ rel: 'a.gd', text: 'FIRST' }, { rel: './a.gd', text: 'SECOND' }] } } },
+    { isWin: true })
+  ok(dupWriteLog.length === 1 && dupWriteLog[0].text === 'FIRST',
+    '同一个 rel 点名两次只发一次写(预览说 1 个文件,盘上就只写 1 次)', JSON.stringify(dupWriteLog))
+  ok(oDup.ok === true && oDup.written.length === 1 && oDup.failed.length === 0,
+    'ok 的比数是去重后的那份清单(未去重时 written 永远追不上 files.length)', JSON.stringify([oDup.ok, oDup.written, oDup.failed]))
+  await tP.applyFix(
+    { id: 'uid:abs', severity: 'warn', title: '孤儿 .uid', fix: { kind: 'trash', label: '移入回收站', payload: ['/etc/passwd', 'C:\\Windows\\x'] } },
+    { isWin: true })
+  ok(rawRelLog.length === 1 && rawRelLog[0].length === 2 &&
+    rawRelLog[0][0] === '/etc/passwd' && rawRelLog[0][1] === 'C:\\Windows\\x',
+    '绝对路径/带盘符的 rel **原样**交给原语(渲染层不改写成项目内路径,越界判断是 resolveRel 的活)', JSON.stringify(rawRelLog))
+  restore()
+
+  section('30. applyFix 重入:上一次还在 await 期间不许进来第二次')
+  // 桩故意返回**手动 resolve** 的 promise:未修复时第二次调用会走到同一个 await 上并且永远不返回
+  // (它的 resolve 还没被交给测试),所以这里用 Promise.race 观察「挡回 / 卡住」而不是直接 await ——
+  // 直接 await 在未修复的代码上会把整个 harness 挂死,连失败都报不出来。
+  const releases = []
+  const holdLog = []
+  global.window.services.movePathsToTrash = (pid, rels) => {
+    holdLog.push(rels.join(','))
+    return new Promise((resolve) => {
+      releases.push(() => resolve({ ok: true, moved: rels.length, failed: [] }))
+    })
+  }
+  const tRe = M.useTools()
+  await tRe.load()
+  await tRe.runTool('size')
+  const firstP = tRe.applyFix(
+    { id: 'uid:r1', severity: 'warn', title: 't', fix: { kind: 'trash', label: '移入回收站', payload: ['scene/main.tscn'] } },
+    { isWin: true })
+  await tick()
+  ok(tRe.fixing.value === 'uid:r1' && holdLog.length === 1,
+    '前置条件成立:第一次修复真的卡在 await 上(同步桩复现不出竞态,与 F-1 同一取舍)', `${tRe.fixing.value}|${holdLog.length}`)
+  const blockedP = tRe.applyFix(
+    { id: 'uid:r2', severity: 'warn', title: 't', fix: { kind: 'trash', label: '移入回收站', payload: ['.godot/imported/a.stex'] } },
+    { isWin: true })
+  const raced = await Promise.race([
+    blockedP.then((o) => ['done', o]),
+    new Promise((resolve) => setTimeout(() => resolve(['hang', null]), 30))
+  ])
+  ok(raced[0] === 'done' && raced[1].ok === false && /上一次修复还在执行中/.test(raced[1].message),
+    '第二次被挡回并说清为什么没动(未修复时它自己卡在 await 上)', JSON.stringify(raced))
+  ok(holdLog.length === 1, '挡回的那一次一个原语都没调(两份清单同时在改盘就是互相踩)', JSON.stringify(holdLog))
+  while (releases.length) releases.shift()()
+  const oFirst = await firstP
+  // 回执这条要放在**两次调用都尘埃落定之后**再查:未修复时第二次是走完整个删除循环才写回执的,
+  // 在 await 之前查它永远缺席,断言就咬不住。
+  ok(tRe.fixResults.value['uid:r2'] === undefined,
+    '挡回的不写回执:压根没执行的东西记进回执就是假账', JSON.stringify(Object.keys(tRe.fixResults.value)))
+  ok(oFirst.ok === true && !!tRe.fixResults.value['uid:r1'] && tRe.fixing.value === '',
+    '第一次照常执行完、记账并复位 fixing(挡回不等于把在途那次也弄坏)', JSON.stringify([oFirst.ok, tRe.fixing.value]))
+  restore()
+
+  section('31. counts.fixable 只数 planFix 判为可执行的结论')
+  const tCx = M.useTools()
+  await tCx.load()
+  tCx.registerTool({
+    id: 'fxmix', name: '修复口径', summary: 's', phase: 'P0', needs: [],
+    run: async () => [
+      { id: 'fxmix:1', severity: 'warn', title: 't', fix: { kind: 'trash', label: '移入回收站', payload: ['scene/main.tscn'] } },
+      { id: 'fxmix:2', severity: 'warn', title: 't', fix: { kind: 'existing', label: '去项目页清理', service: 'cleanProjectCache' } },
+      { id: 'fxmix:3', severity: 'info', title: 't', fix: { kind: 'none', label: '只报告' } },
+      { id: 'fxmix:4', severity: 'warn', title: 't', rel: 'project.godot', fix: { kind: 'rewrite', label: '改写配置' } },
+      { id: 'fxmix:5', severity: 'warn', title: 't', fix: { kind: 'trash', label: '移入回收站', payload: { nope: 1 } } },
+      { id: 'fxmix:6', severity: 'warn', title: 't', fix: { kind: 'trash', label: '移入回收站', payload: [] } }
+    ]
+  })
+  await tCx.runTool('fxmix')
+  ok(tCx.counts.value.fixable === 1,
+    '六条里只有第一条真能由本管线执行:existing 是跳转、none 只报告、缺内容/认不出/空清单都执行不了',
+    JSON.stringify(tCx.counts.value))
+  ok(tCx.counts.value.warn === 5 && tCx.counts.value.info === 1,
+    '严重度计数不受 fixable 口径影响', JSON.stringify([tCx.counts.value.warn, tCx.counts.value.info]))
+  restore()
 }
 main().then(() => {
   console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)

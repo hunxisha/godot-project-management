@@ -598,12 +598,83 @@ async function main() {
       FTR, true)
     ok(p.service === null && !!p.reason,
       `${kind} → service:null(既有能力仍是一次跳转,不是第二次执行)`, `${p.service}/${p.reason}`)
-    ok(!/移入回收站|永久删除|改写/.test(p.verb), `${kind} 的动词不许冒充删除或改写`, p.verb)
+    ok(p.verb === '', `${kind} 不可执行,动词必须是空串而不是「跳转处理」这类谎话`, p.verb)
     ok(p.items.length === 0 && p.empty === true, `${kind} 不列受影响文件清单`, JSON.stringify(p.items))
   }
 
   const noFix = T.planFix({ id: 'size:x', severity: 'info', title: 't' }, FTR, true)
   ok(noFix.service === null && !!noFix.reason, '压根没有 fix 字段也不抛,照样给出原因', `${noFix.service}/${noFix.reason}`)
+
+  // ---------- Fix round 1:审查 Important 1/2/3 + Minor 3 ----------
+  // Important 1 的教训(实测取证,修复前):payload="/etc/passwd" 且清单里真有 etc/passwd 时,
+  // normalizeRel 只镜像了 resolveRel 的「含 ..」一条拒绝,把前导斜杠吃掉后交出 rels=["etc/passwd"]
+  // —— 一道本该回 '非法路径' 的闸看到的是**改写后的项目内名字**,于是它在项目里照删,
+  // 而预览的 note 说的是「不在清单里,仍会交给原语」,把这次改写彻底藏了起来。
+  // 归一因此必须是**忠实镜像**:四条拒绝(前导 /、盘符、.. 段、最终空段)一条都不能少,
+  // 归一失败时把**原样**那串交给原语,并在预览里写明被拒。
+  const ABS_TREE = tree([['etc/passwd', 7], ['C:/Windows/x', 7], ['evil', 7]])
+  const rejected = [
+    ['/etc/passwd', '前导斜杠'],
+    ['C:\\Windows\\x', '盘符'],
+    ['..\\..\\evil', '.. 段'],
+    ['./', '归一后空段']
+  ]
+  for (const [raw, why] of rejected) {
+    const p = T.planFix(fTrash([raw]), ABS_TREE, true)
+    ok(p.rels.length === 1 && p.rels[0] === raw,
+      `越界(${why}):原样交给原语,不改写成项目内路径(绕过 resolveRel 的闸)`, JSON.stringify(p.rels))
+    ok(p.items.length === 1 && p.items[0].rel === raw && p.items[0].size === undefined,
+      `越界(${why}):预览列的是原样那串,且不领清单里那条项目内文件的体积`, JSON.stringify(p.items))
+    ok(/拒绝|非法路径/.test(p.items[0].note || ''),
+      `越界(${why}):预览写明原语会拒,而不是静默摆一个像正常文件的条目`, p.items[0].note)
+  }
+  // 反向也要钉住:忠实镜像 ≠ 什么都不归一。分隔符归一与 ./ 折叠是 resolveRel 自己也会做的事
+  // (它 path.join(root, ...stack)),这里跟着归一才不会把同一个文件点成两条。
+  const sane = T.planFix(fTrash(['sub\\dir\\f.gd']), ABS_TREE, true)
+  ok(sane.rels.join(',') === 'sub/dir/f.gd', '正常的反斜杠 rel 照常归一成正斜杠(不是越界)', JSON.stringify(sane.rels))
+
+  // Important 2:预览条数与执行条数是**同一趟去重**的产物。修复前 items 走 toItems(去重)、
+  // files 直接用原始数组(不去重),于是确认框写「确认改写 1 个文件」而盘上落两次写。
+  const dupRw = T.planFix(
+    {
+      id: 'fmt:dup', severity: 'info', title: 't',
+      fix: { kind: 'rewrite', label: '格式化', payload: { files: [{ rel: 'a.gd', text: 'FIRST' }, { rel: './a.gd', text: 'SECOND' }] } }
+    },
+    tree([['a.gd', 3]]), true)
+  ok(dupRw.items.length === 1 && dupRw.files.length === dupRw.items.length,
+    '同一个 rel 被点名两次:items 与 files 等长(预览说 1 个就只写 1 次)', `${dupRw.items.length}/${dupRw.files.length}`)
+  ok(dupRw.files[0].rel === dupRw.items[0].rel && dupRw.files[0].text === 'FIRST',
+    '重复 rel 的新内容沿用首次那条(与 rels、两个宿主原语的「首次优先」同口径)', `${dupRw.files[0].rel}|${dupRw.files[0].text}`)
+  ok(dupRw.bytes === 3, '去重后的体积也只算一次(3 B 而不是 6 B)', dupRw.bytes)
+  ok(rwMulti.items.length === rwMulti.files.length &&
+    rwMulti.items.every((it, i) => it.rel === rwMulti.files[i].rel),
+    '多文件改写:items 与 files 同序同键(确认框里的数字就是执行的那份清单)', `${rwMulti.items.length}/${rwMulti.files.length}`)
+
+  // Important 3:writeProjectText 对「磁盘上不存在的目标」走 ENOENT 分支当新建、**不产生备份**
+  // (inspectfs.js:185-188、203),所以清单外的改写项统一承诺「已备份、可随时还原」是假话。
+  const RW_GHOST_F = {
+    id: 'ini:ghost', severity: 'warn', title: 't',
+    fix: { kind: 'rewrite', label: '改写', payload: { files: [{ rel: 'project.godot', text: 'A' }, { rel: 'new/cfg.tres', text: 'B' }] } }
+  }
+  const rwGhost = T.planFix(RW_GHOST_F, tree([['project.godot', 100]]), true)
+  ok(rwGhost.items[0].note === undefined, '清单内的改写项不额外说明(那一项确实会先备份再替换)', JSON.stringify(rwGhost.items[0]))
+  ok(/新建/.test(rwGhost.items[1].note || '') && /备份/.test(rwGhost.items[1].note || ''),
+    '清单外的改写项逐条说明「会新建文件,没有备份可还原」', rwGhost.items[1].note)
+  ok(/新建/.test(rwGhost.warn) && /备份/.test(rwGhost.warn) && !/随时还原/.test(rwGhost.warn),
+    '有清单外的项时 warn 换成两段都如实的句子(不再统一承诺随时还原)', rwGhost.warn)
+  // 措辞可以查树,**可执行性不行**:否则 counts.fixable 与确认框会随「清单新不新鲜」漂移。
+  const rwGhostNoTree = T.planFix(RW_GHOST_F, [], true)
+  ok(rwGhostNoTree.empty === false && rwGhostNoTree.service === rwGhost.service &&
+    rwGhostNoTree.items.length === rwGhost.items.length,
+    'empty/service/条数与 tree 无关(只有措辞与 note 查树)', `${rwGhostNoTree.empty}/${rwGhostNoTree.service}/${rwGhostNoTree.items.length}`)
+  ok(/gpm-bak/.test(rw.warn) && rw.items[0].note === undefined,
+    '改写项全在清单里时保持原承诺,不误伤正常路径(反向钉住上一条改动的范围)', `${rw.warn}|${rw.items[0].note}`)
+
+  // Minor 3:不可执行的计划根本没有动词可渲染(FixConfirmDialog 在 !executable 分支只渲染 reason,
+  // applyFix 也在 service===null 处短路),所以硬填「移入回收站」在非 Windows 上还是一句谎话。
+  ok(junk.verb === '', 'payload 认不出 → service:null 同时 verb 空(不给执行不了的计划配动词)', junk.verb)
+  ok(rwNoText.verb === '', 'rewrite 缺新内容 → verb 空', rwNoText.verb)
+  ok(noFix.verb === '', '压根没有 fix → verb 空', noFix.verb)
 }
 main().catch((e) => {
   // 断言里不该抛错;真抛了(比如实现返回了 undefined)也要以退出码 1 收口,不能让 CI 看到绿。

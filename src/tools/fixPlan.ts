@@ -1,12 +1,15 @@
-// 修复动作的安全边界(spec §5.3 四条硬规则)—— 「这条结论能不能修、修的时候说什么话」
+// 修复动作的安全边界(spec §5.3 四条硬规则)—— 「这条修复能不能执行、执行时说什么话」
 // 的全部判据收在这个纯函数里。FixConfirmDialog 只渲染它的返回值,useTools.applyFix 只照它给的
 // rel 清单调原语;判据留在组件里就会说错话,而 Node harness 跑不到 .vue(与 outcomeOf 同一先例)。
 //
-// 为什么「动词按平台分叉」必须是判据而不是文案:
-//   `movePathsToTrash` 在 Windows 走 PowerShell 的 SendToRecycleBin(**可还原**),
-//   在 macOS/Linux 走 `fs.rmSync` / `fs.unlinkSync`(**真删,不可还原**),
-//   见 src-ztools/preload/lib/fsutil.js:205-219 与 lib/inspectfs.js:274 的注释。
-//   同一个 kind 在两个平台是两件不同的事,所以 UI 不许在它上面统一说「移入回收站」。
+// 平台事实(逐处核实过,别凭印象写):
+//   · ZTools/Electron 宿主**按 OS 分叉** —— src-ztools/preload/lib/fsutil.js:205-219 的
+//     trashPath():process.platform==='win32' 走 PowerShell 的 SendToRecycleBin(可还原),
+//     否则目录走 fs.rmSync(recursive)、文件走 fs.unlinkSync(**真删**)。
+//   · Tauri 宿主**没有 OS 分叉** —— src-tauri/src/fsutil.rs:52-57 的 delete_to_trash() 在
+//     所有平台都调 trash::delete。于是「非 Windows = 永久删除」在 Tauri 侧是保守而非事实。
+//   · 结论:UI 的措辞按 OS 分叉(取两个宿主里更可怕的那一句说),**真正的可还原性由宿主决定**;
+//     所以这里只保证「绝不把不可还原说成可还原」,不保证反向精确。
 // 红线:纯函数。不碰 window、不碰 DOM,`isWin` 由调用方传(视图侧用 bridge.isWindows())。
 import type { TreeEntry } from '../types/godot'
 import type { Finding, FixKind } from './types'
@@ -25,7 +28,8 @@ export interface FixPlanItem {
 }
 
 export interface FixPlan {
-  /** 「移入回收站」/「永久删除」/「改写文件」—— 按平台与 kind 定,确认框的按钮与回执共用它 */
+  /** 「移入回收站」/「永久删除」/「改写文件」—— 按平台与 kind 定,确认框的按钮与回执共用它;
+   *  service 为 null(本管线执行不了)时**一定是空串**,不给永不执行的计划配动词 */
   verb: string
   /** 一句风险说明(可撤销性、备份去向、不可还原) */
   warn: string
@@ -37,9 +41,9 @@ export interface FixPlan {
   service: FixService
   /** 为什么不能执行(service 为 null 或 empty 时必有;绝不出现「点了没反应」) */
   reason: string
-  /** 要交给 movePathsToTrash 的 rel 清单(与 items 同序同集合,已归一去重) */
+  /** 要交给 movePathsToTrash 的 rel 清单(与 items 同序同集合,同一趟去重) */
   rels: string[]
-  /** 要交给 writeProjectText 的内容(逐文件,原语自己负责 .gpm-bak- 备份) */
+  /** 要交给 writeProjectText 的内容(与 items **同序同键同长度**:预览说几个就写几个,原语自己负责 .gpm-bak- 备份) */
   files: { rel: string; text: string }[]
   /** items 里**已知**体积之和(清单外的不计入,不臆造) */
   bytes: number
@@ -47,14 +51,25 @@ export interface FixPlan {
   kind: FixKind | 'missing'
 }
 
-/** 与 resolveRel(inspectfs.js:37-50)同规则的归一:反斜杠→正斜杠、吃掉 `./` 与空段;越界返回空串 */
+/** 与 resolveRel(inspectfs.js:37-50)逐条同规则的**忠实镜像**:四条拒绝一律回空串。
+ *
+ * 归一在这里少挡一条,越界串就会被「改写」成一个看起来合法的项目内路径,而那道闸收到的
+ * 已经是改写后的串 —— 它照删/照写,预览却什么都没警告(实测 payload="/etc/passwd" 曾交出
+ * rels=["etc/passwd"])。渲染层的职责是把原样那串送到闸前,不是替闸做判断。
+ * 反斜杠→正斜杠、折叠 `./` 与空段是 resolveRel 自己也会做的(path.join(root, ...stack)),
+ * 跟着归一才不会把同一个文件点成两条。
+ */
 function normalizeRel(rel: string): string {
+  const norm = String(rel).replace(/\\/g, '/')
+  if (norm.startsWith('/')) return ''
+  if (/^[a-zA-Z]:/.test(norm)) return ''
   const stack: string[] = []
-  for (const p of String(rel).replace(/\\/g, '/').split('/')) {
+  for (const p of norm.split('/')) {
     if (!p || p === '.') continue
     if (p === '..') return ''
     stack.push(p)
   }
+  if (!stack.length) return ''
   return stack.join('/')
 }
 
@@ -124,34 +139,72 @@ function rewriteFiles(payload: unknown): { rel: string; text: string }[] | null 
   return null
 }
 
-/** items/rels/bytes 一起算:归一 + 去重(沿用首次那条 rel),体积只算清单里查得到的 */
-function toItems(rels: string[], sizeOf: Map<string, number>): { items: FixPlanItem[]; keys: string[]; bytes: number } {
+/** toItems 的输入:一条 rel,rewrite 通道额外带上它的新内容 */
+interface FixSource {
+  rel: string
+  text?: string
+}
+
+const REJECT_NOTE = '路径越界或是绝对路径,原语会回「非法路径」拒绝'
+const OUTSIDE_NOTE = '不在本次文件清单中,仍会交给原语并如实回报'
+// 删除通道说「原语会如实回报」就够了(盘上没这个文件时它回「文件不存在」);
+// 改写通道必须换一句:writeProjectText 对不存在的目标是**新建文件**,而新建不产生备份
+// (inspectfs.js:185-188 的 ENOENT 分支 + :203 的 `if (exists && ...)`)——
+// 继续说「原文件已备份」就是在给用户一条没有退路的承诺。
+const NEWFILE_NOTE = '文件清单里没有它:改写会新建文件,没有备份可还原'
+
+/**
+ * items / rels / files / bytes **一起算**,一趟去重(审查 Important 2:分两趟算,预览就能说出
+ * 「确认改写 1 个文件」而盘上落两次写)。三个产物同序同键同长度,结构上不可能再分叉。
+ *
+ * 重复 rel 一律**首次优先**:rels 沿用首次那条原始串,两个宿主的 trash 也是按 abs 去重后
+ * 沿用首次那条 rel(inspectfs.js:329、src-tauri/src/inspectfs.rs:407),text 跟同一个口径 ——
+ * 若改成后者覆盖前者,预览与执行仍同源,但会和上面两处原语的报数口径不一致。
+ *
+ * @param wording 只有 rewrite 通道需要「清单外 = 会新建」这句措辞;它不改可执行性,只改文案。
+ */
+function toItems(
+  sources: FixSource[],
+  sizeOf: Map<string, number>,
+  wording: 'trash' | 'rewrite'
+): { items: FixPlanItem[]; keys: string[]; files: { rel: string; text: string }[]; bytes: number; createdNew: boolean } {
   const items: FixPlanItem[] = []
   const keys: string[] = []
+  const files: { rel: string; text: string }[] = []
   const seen = new Set<string>()
   let bytes = 0
-  for (const raw of rels) {
+  let createdNew = false
+  for (const s of sources) {
+    const raw = String(s.rel)
     const norm = normalizeRel(raw)
-    // 越界/空段:原样交给原语,由它回「非法路径」(inspectfs.js:326 的闸前失败态)。
-    // 在这里悄悄丢掉就是「预览说 1 项、盘上删了 0 项」的口径分叉。
-    const key = norm || String(raw)
+    // 归一失败(越界/绝对/盘符/空段)= 把**原样**那串交下去,由 resolveRel 回 '非法路径'。
+    // 在这里改成「看起来合法」的项目内路径,就等于替用户绕过那道闸,而且预览看不出来。
+    const key = norm || raw
     if (seen.has(key)) continue
     seen.add(key)
     const size = sizeOf.get(key)
-    if (typeof size === 'number') bytes += size
-    keys.push(key)
     const item: FixPlanItem = { rel: key }
-    if (typeof size === 'number') item.size = size
-    else item.note = norm ? '不在本次文件清单中,仍会交给原语并如实回报' : '路径越界,原语会拒绝'
+    if (!norm) item.note = REJECT_NOTE
+    else if (typeof size === 'number') {
+      item.size = size
+      bytes += size
+    } else {
+      item.note = wording === 'rewrite' ? NEWFILE_NOTE : OUTSIDE_NOTE
+      if (wording === 'rewrite') createdNew = true
+    }
+    keys.push(key)
+    // 带 text 的那一类(rewrite)与 items 逐条对应;trash 不带 text,files 留空。
+    if (typeof s.text === 'string') files.push({ rel: key, text: s.text })
     items.push(item)
   }
-  return { items, keys, bytes }
+  return { items, keys, files, bytes, createdNew }
 }
 
 /**
  * 一条结论该怎么修、修之前要向用户承诺什么。
  * @param f   检查器产出的结论(fix.kind / fix.payload 是唯一入口)
- * @param tree 当前文件清单:只用来查体积,不参与「能不能修」的判定(清单项可以不在树里)
+ * @param tree 当前文件清单:只用来查体积与**措辞**(清单外的改写项要说「会新建、没备份」),
+ *             不参与「能不能执行」的判定 —— 那种判定会让 counts.fixable 与确认框随清单新鲜度漂移
  * @param isWin Windows 才有回收站;其余平台原语是真删,文案必须跟着变
  */
 export function planFix(f: Finding, tree: TreeEntry[], isWin: boolean): FixPlan {
@@ -166,12 +219,15 @@ export function planFix(f: Finding, tree: TreeEntry[], isWin: boolean): FixPlan 
   if (kind === 'trash') {
     const rels = trashRels(f?.fix?.payload, f?.rel)
     if (rels === null) {
+      // 执行不了的计划一律不给动词:确认框在这种分支只渲染 reason(FixConfirmDialog 的
+      // !executable 支),applyFix 也在 service===null 处短路 —— 留着「移入回收站」只会
+      // 在非 Windows 上挂一句谎话在一个永不执行的计划上。
       return {
-        verb: '移入回收站', warn: '', items: [], empty: true, service: null, kind,
+        verb: '', warn: '', items: [], empty: true, service: null, kind,
         reason: '这条结论的修复数据认不出来,不能执行', rels: [], files: [], bytes: 0
       }
     }
-    const r = toItems(rels, sizeOf)
+    const r = toItems(rels.map((x) => ({ rel: x })), sizeOf, 'trash')
     // 动词与风险句按平台分叉:这是 spec §5.3 规则 1 的**唯一破口**,必须如实说明而不是粉饰。
     const verb = isWin ? '移入回收站' : '永久删除'
     const warn = isWin
@@ -192,25 +248,30 @@ export function planFix(f: Finding, tree: TreeEntry[], isWin: boolean): FixPlan 
   }
 
   if (kind === 'rewrite') {
-    const files = rewriteFiles(f?.fix?.payload)
-    if (files === null) {
+    const sources = rewriteFiles(f?.fix?.payload)
+    if (sources === null) {
       return {
-        verb: '改写文件', warn: '', items: [], empty: true, service: null, kind,
+        verb: '', warn: '', items: [], empty: true, service: null, kind,
         reason: '改写动作缺少要写入的新内容,拒绝执行(不写空文件覆掉原文件)', rels: [], files: [], bytes: 0
       }
     }
-    const r = toItems(files.map((x) => x.rel), sizeOf)
+    const r = toItems(sources, sizeOf, 'rewrite')
     // 备份名以原扩展名**之后**收尾(player.gd.gpm-bak-<stamp>),这是原语刻意的设计,
-    // 见 inspectfs.js:147-153 —— 文案照它说,别写成「<原名>.bak」那种根本不会出现的形态。
+    // 见 inspectfs.js:147-153、204 —— 文案照它说,别写成「<原名>.bak」那种根本不会出现的形态。
+    // createdNew 时换第二句:清单外的目标走 ENOENT 分支当新建,**没有备份**,
+    // 统一承诺「可随时还原」就是在骗用户。
+    const warn = r.createdNew
+      ? '清单里有的文件会先复制成「原名.gpm-bak-时间戳」备份再原子替换;清单里没有的那些会被新建,新建没有备份可还原。'
+      : '改写前会先把原文件复制成「原名.gpm-bak-时间戳」备份,再原子替换,可随时还原。'
     return {
       verb: '改写文件',
-      warn: '改写前会先把原文件复制成「原名.gpm-bak-时间戳」备份,再原子替换,可随时还原。',
+      warn,
       items: r.items,
       empty: r.items.length === 0,
       service: 'writeProjectText',
       reason: r.items.length === 0 ? '没有要改写的文件' : '',
       rels: [],
-      files,
+      files: r.files,
       bytes: r.bytes,
       kind
     }
@@ -218,12 +279,11 @@ export function planFix(f: Finding, tree: TreeEntry[], isWin: boolean): FixPlan 
 
   // existing:复用既有能力(如清缓存)。按 spec §5.3 与「重叠功能只读 + 跳转」的取舍,
   // 它仍是一次跳转,不是在本页第二次执行同一件事 —— 所以 service 必须是 null。
-  // none / 没有 fix:只报告。
-  const verb = kind === 'existing' ? '跳转处理' : '仅报告'
+  // none / 没有 fix:只报告。三种都执行不了,动词一律留空(见上面 trash 分支的理由)。
   const reason = kind === 'existing'
     ? `「${label || '该操作'}」由既有能力完成,工具页只跳转,不在这里重复执行一次`
     : kind === 'none'
       ? '这条结论只提供报告,没有自动修复动作'
       : '这条结论没有提供修复动作'
-  return { verb, warn: '', items: [], empty: true, service: null, reason, rels: [], files: [], bytes: 0, kind }
+  return { verb: '', warn: '', items: [], empty: true, service: null, reason, rels: [], files: [], bytes: 0, kind }
 }
