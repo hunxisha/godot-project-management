@@ -111,6 +111,56 @@ async function main() {
   ok(T.fmtBytes(-5) === '0 B' && T.fmtBytes(NaN) === '0 B', 'fmtBytes 对负数/NaN 不崩')
   ok(T.fmtMs(900) === '900 ms' && T.fmtMs(2500) === '2.5 s', 'fmtMs 可读')
   ok(T.dirOf('a/b/c.txt') === 'a/b/' && T.dirOf('c.txt') === '', 'dirOf 含尾斜杠、根目录返回空串')
+
+  // ---------- 2. sceneRefs 解析器 ----------
+  // 为什么存在:断链检查(唯一 P0 错误级结论)全靠这三个函数。解析器多吐一条引用就是
+  // 误报「缺文件」,少吐一条就是漏报;resToRel 归一不稳会让断链判据整体失真。
+  section('2. sceneRefs')
+  const SCENE = `gd_scene load_steps=4 format=3 uid="uid://abc"
+
+[ext_resource type="Script" path="res://player.gd" id="1_x"]
+[ext_resource type="Texture2D" uid="uid://tex1" path="res://assets/bg.png" id="2_y"]
+[ext_resource type="PackedScene" path="res://sub/missing.tscn" id="3_z"]
+[ext_resource type="AudioStream" path="user://cfg/sample.ogg" id="4_w"]
+[ext_resource type="Shader" path="C:\\\\abs\\\\bad.shader" id="5_v"]
+
+[sub_resource type="RectangleShape2D" id="1_a"]
+[node name="Root" type="Node2D"]
+`
+  const refs = T.parseExtResources(SCENE)
+  ok(refs.length === 5, '解析出 5 条 ext_resource', refs.length)
+  ok(refs[0].path === 'res://player.gd' && refs[0].id === '1_x', '取到 path 与 id')
+  ok(refs[1].uid === 'uid://tex1' && refs[1].type === 'Texture2D', '取到 uid 与 type')
+  ok(refs.every((r) => !String(r.path).includes('\n')), 'path 不吞行')
+  ok(T.parseExtResources('[ext_resource type="Script"]').length === 1, '只有 type 也出一条(path 空)')
+  ok(T.parseExtResources('').length === 0, '空文本零引用')
+  ok(T.parseExtResources('[node name="x" ]').length === 0, 'node 段不算引用')
+  ok(T.parseExtResources('[gd_scene load_steps=2]').length === 0, '文件头不算引用')
+  ok(T.parseExtResources('[ext_resource type="Texture2D" path="res://a.png" id="1_a"] tail').length === 1, '行尾有杂字也能取')
+  // 缺字段一律给空串而不是 undefined:断链检查会对 uid 直接 startsWith, undefined 会抛。
+  ok(refs[0].uid === '' && refs[2].uid === '' && refs[4].id === '5_v', '缺字段出空串(字段恒为字符串)')
+  // Godot 的文本格式允许 value 里出现 `]`(罕见):按 key 抓值才不会把 path 截断。
+  const bracket = T.parseExtResources('[ext_resource type="Texture2D" path="res://a]b.png" id="1_a"]')
+  ok(bracket.length === 1 && bracket[0].path === 'res://a]b.png', 'path 里含 ] 也不被截', JSON.stringify(bracket))
+  // CRLF 的 .tscn(被别的编辑器改写过)不能留下尾随 \r —— 否则 rel 永远查不到,断链误报。
+  const crlf = T.parseExtResources('[ext_resource type="Script" path="res://a.gd" id="1_a"]\r\n[ext_resource type="Script" path="res://b.gd" id="2_b"]\r\n')
+  ok(crlf.length === 2 && crlf.every((r) => !r.path.includes('\r')), 'CRLF 行不留尾随 \\r', JSON.stringify(crlf.map((r) => r.path)))
+
+  ok(T.resToRel('res://a/b.png') === 'a/b.png', 'res:// → rel')
+  ok(T.resToRel('res://x') === 'x', '根下文件也认')
+  // 反斜杠归一成正斜杠:tree 的 rel 只会是正斜杠,不归一就永远对不上。
+  ok(T.resToRel('res://dir\\sub\\f.png') === 'dir/sub/f.png', 'Windows 反斜杠归一', T.resToRel('res://dir\\sub\\f.png'))
+  ok(T.resToRel('res://') === null, '裸 res:// 无意义')
+  ok(T.resToRel('user://x') === null, 'user:// 不解析')
+  ok(T.resToRel('C:\\a') === null, '绝对路径不解析')
+  ok(T.resToRel('') === null && T.resToRel(null) === null, '空串/null 不解析')
+
+  const steps = T.countSteps(SCENE)
+  ok(steps.declared === 4, 'load_steps 读得到', steps.declared)
+  ok(steps.actual === 6, '实际 = 5 ext + 1 sub', steps.actual)
+  ok(T.countSteps('format=3').declared === 0, '缺 load_steps 记 0(不臆造)')
+  ok(T.countSteps('').declared === 0 && T.countSteps('').actual === 0, '空文本 0/0')
+  ok(T.countSteps('[node name="A" parent="."]').actual === 0, 'node 段不计入 actual')
 }
 main().catch((e) => {
   // 断言里不该抛错;真抛了(比如实现返回了 undefined)也要以退出码 1 收口,不能让 CI 看到绿。
