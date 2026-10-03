@@ -2,20 +2,28 @@
 // §3.1 #3(配置校验)/ #5(UID)/ #6(孤儿资产),台账 Ruling B2。
 //
 // ⚠ 与仓库里另外两份 project.godot 解析器**并存**,这是刻意付出的代价(台账 Ruling B2),
-//   靠 godotIni.test.mjs 的断言钉住,别让分叉悄悄扩大:
-//     · src-ztools/preload/lib/projects.js:30  parseProjectGodot
-//     · src-tauri/src/projects.rs:11           parse_project_godot_text(与上面逐条对齐)
-//   那两份只抽 name / config_version / icon / config_features / editor_plugins.enabled 五个字段,
-//   其余整行丢弃;而工具页(B8 配置校验、B3 引用索引)要的是**全量、文件序、带行号、
-//   重复键不合并**的一份文档 + 归不进键值的行(problems)。判定逻辑留在 preload 就没法在 Node 里
-//   单测(spec 待确认 #3 的默认口径也是渲染层新写)。已知分叉点(测试里以 [分叉] 标注):
-//     · 键名:那两份用 `^\s*([\w./]+)\s*=` 挑键,键名带 `-`/`#`/引号的行被静默丢掉;
-//       本模块按**第一个 `=`** 切,键名原样保留。
-//     · 值:那两份吃掉尾部逗号(`replace(/,\s*$/,'')`),本模块的 raw 是 `=` 右侧原样。
-//     · config_version:那两份 `parseInt(v,10)||0` 且**不看段名**(`5x` 读成 5、段内同名键会被冒领);
+//   靠 godotIni.test.mjs 的断言钉住,别让分叉悄悄扩大。两份孪生各引各的:
+//     · src-ztools/preload/lib/projects.js:26-67  parseProjectGodot(JSDoc :25-29,函数体 :30 起)
+//     · src-tauri/src/projects.rs:10-45           parse_project_godot_text(同一语义的两端实现)
+//   它们只抽 name / config_version / config/icon / config/features / editor_plugins.enabled
+//   五个字段就返回,其余整行丢弃,既没有行号也没有「这行我没看懂」的回报;而工具页
+//   (B8 配置校验、B3 引用索引)要的是**全量、文件序、带行号、重复键不合并**的一份文档 +
+//   归不进键值的行(problems)。判定逻辑留在 preload 就没法在 Node 里单测
+//   (spec 待确认 #3 的默认口径也是「渲染层新写」)。逐条分叉(测试里以 [分叉] 标注):
+//     · 键名筛选:preload 用 `^[\w./]+` 挑键(projects.js:47),键名带 `-`/`#`/引号的行**整行静默丢掉**;
+//       Rust 用 `split_once('=')`(projects.rs:24)与本模块一样按第一个 `=` 切,但只留那五个键。
+//     · 尾部逗号:两份都对 value 做 `trim_end_matches(',')` / `replace(/,\s*$/,'')`,
+//       本模块的 raw 只 trim 两端、不吃尾逗号(判「写成什么」要靠原文)。
+//     · config_version:两份都**不看段名**(段内的同名键会冒领项目版本号);preload 用
+//       `parseInt(v,10)||0`,`5x` 读成 5,而 Rust 的 `value.parse::<u32>()` 给 0 —— 两份彼此也不一致。
 //       本模块只认 section 为空串的顶层那条,非裸整数一律 0 并进 problems。
-//     · 引号:那两份的 unquote 只剥外层引号不解转义;本模块 getIni 剥一层并解码 \n \t \r \" \\。
-//     · 多行块:那两份逐行匹配,`move_left={` 之后的块内容会被逐行丢掉;本模块按配平吃整块。
+//     · 引号:两份的 unquote(projects.js:74 / projects.rs:47)只剥外层引号、不解转义;
+//       本模块 getIni 剥一层并解码 \n \t \r \" \\。
+//     · 段头:两份都不 trim 括号内空白(projects.js:42 的 `\[(.+)\]`、projects.rs:20 的切片),
+//       所以 `[ display ]` 会让 `editor_plugins` 判定落空;本模块 trim 段头内空气(判据 3)。
+//     · 多行块:两份都没有「块」概念 —— `move_left={` 之后不含 `=` 的行被逐行丢弃,
+//       含 `=` 的行(如 `"physical_keycode=-1, string=\"a]b\""`)则被当成新的键值行收下,
+//       键名是那半截带引号的文本;本模块按配平吃整块(判据 4)。
 //
 // 红线:纯函数,不碰 window / services / vue / DOM —— 读文件交给调用方(B3 的 readText)。
 // 每个函数对 undefined / 非字符串输入都不许抛错(与 treeUtils.ts 同一口径)。

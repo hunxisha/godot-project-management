@@ -13,15 +13,18 @@
 // 本轮按判据 2 执行 —— `.import` 一律不算来源(foo.png.import 里就有 source_file="res://foo.png",
 // 每个带导入元数据的资产都会被自己「引用」)。回写 spec 由台账记一笔。
 //
-// 判据 4 的 uid:// 形状(逐行核实 godotengine/godot 的 core/io/resource_uid.cpp,不是凭印象):
-//   · 编码表 uuid_characters 是 a–y 再补 0–8 —— **没有大写,没有 `-`/`_`**;
-//   · 同文件注释自陈 char_count / base 两个常量各差 1,所以 'z' 与 '9' 引擎自己永不写出(GH-83843,
-//     兼容性原因不修);
-//   · 解码端 text_to_id 只接受「小写字母」与「数字」两种字符,其余一律 INVALID_ID;
-//     id_to_text 对负数给的是 `uid://<invalid>`,那也不是 uid 串;
-//   · 长度上限 13(例 uid://d4n4ub6itg400)。
+// 判据 4 的 uid:// 形状(核实自 godotengine/godot 的 core/io/resource_uid.cpp,master 版
+// 2026-10-04 用 gh api 取的原文逐行读过,不是凭印象):
+//   · 编码表 uuid_characters(:51)= a–y 再补 0–8 —— **没有大写,没有 `-`/`_`**;
+//   · :42-45 的注释自陈 char_count / base 两个常量各差 1,所以 'z' 与 '9' 引擎自己永不写出
+//     (GH-83843,兼容性原因不修);
+//   · 解码端 text_to_id(:92,字符分类在 :102-104)只接受「小写字母」与「数字」两种字符,
+//     其余一律 INVALID_ID;id_to_text 对负数给的是 `uid://<invalid>`(:57),那也不是 uid 串;
+//   · 长度上限 13(:53 max_uuid_number_length,同注释给的例子 uid://d4n4ub6itg400)。
 // 于是正则取 `\buid://[0-9a-z]+`:它是引擎**解码端接受集**(小写字母 + 数字)的精确形状 ——
-// 收窄到 a–y/0–8 会把引擎认得下来的合法输入判成不是 uid,放宽到大写则会把引擎拒掉的串当成引用。
+// 收窄到 a–y/0–8 会把引擎认得的合法输入判成不是 uid,放宽到大写则会把引擎拒掉的串当成引用。
+// 同一形状在 addUid 里还有第二道锚定校验(UID_TOKEN):扫描正则与校验各挡一半,
+// 变异取证证明「只放宽其中一道」不会改变结果(两道都放宽才会红)。
 import type { ToolContext } from './types'
 import { iniResPaths, parseGodotIni, stringLiterals } from './parsers/godotIni'
 import { parseExtResources, resToRel } from './parsers/sceneRefs'
@@ -128,7 +131,8 @@ export async function buildRefIndex(ctx: ToolContext): Promise<RefIndex> {
       continue
     }
 
-    /** 判据 5:来源提到自己**不计进 to** —— 否则一个场景永远「被自己引用」,而 .tscn 是猎物。 */
+    // 判据 5:来源提到自己**不计进 to**(add 里丢),也不进 from 的目标清单 ——
+    // 否则一个场景永远「被自己引用」,而 .tscn/.tres/.gd 都是孤儿工具的猎物。
     const targets: string[] = []
     const add = (target: string, via: RefSite['via'], line?: number) => {
       if (target === rel) return
