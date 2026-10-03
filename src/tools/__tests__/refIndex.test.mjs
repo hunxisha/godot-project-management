@@ -91,6 +91,20 @@ const TSCN_SELF = [
   '[ext_resource type="PackedScene" path="res://scene/main.tscn" id="2_m"]'
 ].join('\n')
 
+// 场景把路径写在**非 [ext_resource] 行**上的形态:node 属性的字符串值、Resource("res://…"),
+// 以及手写/合并冲突产物「段头与属性挤在同一行」。B5 的猎物正是这类按需加载的 json/tres。
+const TSCN_PROP = [
+  'gd_scene load_steps=2 format=3 uid="uid://bprop1"',
+  '',
+  '[ext_resource type="Texture2D" uid="uid://btex007" path="res://assets/bg.png" id="1_p"]',
+  '',
+  '[node name="Root" type="Node2D"]',
+  'dialogue = "res://data/keep.json"',
+  'resource = Resource("res://data/keep2.tres")',
+  '',
+  '[node name="P" type="Node2D"] script = "res://scripts/oneline.gd"'
+].join('\n')
+
 // .gd:注释里的引用与死代码里的引用**也要收**(保守方向,见判据 4)
 const GD_PLAYER = [
   'extends Node',
@@ -366,6 +380,55 @@ async function main() {
     '判据 1 接口:from 的目标是**去重后**的 rel(一处引用与四处引用都算「它引用了这个」)',
     JSON.stringify(dup.from.get('dup.gd')))
 
+  // 判据 4 加严:场景(.tscn/.tres)也走字面量通道。只给场景 ext_resource 一条通道的话,
+  // `[node]` 段里的 `dialogue = "res://data/keep.json"` 与 `Resource("res://…")` 全都看不见 ——
+  // 而这些恰恰是孤儿工具最容易端上来的东西。§6 的钉法是「一句提及即引用」,方向宁多勿少。
+  const propIdx = await T.buildRefIndex(makeCtx([
+    ['scene/prop.tscn', 600], ['data/keep.json', 100], ['data/keep2.tres', 80], ['assets/bg.png', 8000]
+  ], {
+    texts: {
+      'scene/prop.tscn': TSCN_PROP,
+      'data/keep.json': '{}'
+    }
+  }).ctx)
+  ok(sitesOf(propIdx, 'data/keep.json').join('|') === 'scene/prop.tscn:literal',
+    '判据 4:场景的字符串属性 dialogue = "res://…" 成为站点(via:literal)',
+    sitesOf(propIdx, 'data/keep.json').join('|'))
+  ok(pathsOf(propIdx, 'data/keep.json')[0] === `scene/prop.tscn@literal@${lineOf(TSCN_PROP, 'dialogue =')}`,
+    '判据 4:场景字面量站点带 1-based 行号(证据要指得到那一行)', pathsOf(propIdx, 'data/keep.json')[0])
+  ok(sitesOf(propIdx, 'data/keep2.tres').join('|') === 'scene/prop.tscn:literal',
+    '判据 4:`Resource("res://…")` 写在场景属性里同样收(读不到的目标照样进索引,判据 8)',
+    sitesOf(propIdx, 'data/keep2.tres').join('|'))
+  ok(sitesOf(propIdx, 'scripts/oneline.gd').join('|') === 'scene/prop.tscn:literal',
+    '判据 4:跳过条件严格只认 [ext_resource 行(段头与属性挤同一行的畸形照收)',
+    sitesOf(propIdx, 'scripts/oneline.gd').join('|'))
+  ok((propIdx.to.get('assets/bg.png') || []).length === 1,
+    '判据 4:一条 ext_resource 只产**一条**站点(字面量通道跳过该行,否则每个场景引用静默翻倍)',
+    JSON.stringify(propIdx.to.get('assets/bg.png')))
+  ok((propIdx.from.get('scene/prop.tscn') || []).join('|') ===
+    'assets/bg.png|data/keep.json|data/keep2.tres|scripts/oneline.gd',
+    '判据 4:场景的 from 里 ext_resource 与字面量目标并存,顺序 = 出现顺序',
+    JSON.stringify(propIdx.from.get('scene/prop.tscn')))
+  ok(propIdx.sourcesScanned === 3 && propIdx.readFailures.length === 1 &&
+    propIdx.readFailures[0].rel === 'data/keep2.tres' && propIdx.partial === true,
+    '判据 4 不放宽判据 1:场景多收引用不等于多读文件(png 仍不读,读不到的 tres 走 readFailures)',
+    JSON.stringify({ s: propIdx.sourcesScanned, f: propIdx.readFailures, p: propIdx.partial }))
+  // 逐行扫的代价(不整篇扫):GDScript 里一个不配对的引号会把后半篇全吞掉,而漏掉的正是引用。
+  // 主夹具每行引号都配对,所以这条单独钉 —— 整篇扫时下面两条 res:// 一条都收不到。
+  const strayQ = [
+    'extends Node',
+    'var broken = "这里少了收尾引号',
+    'const A = preload("res://x/keep1.png")',
+    'const B = "res://x/keep2.png"'
+  ].join('\n')
+  const sqIdx = await T.buildRefIndex(makeCtx([['stray.gd', 200]], { texts: { 'stray.gd': strayQ } }).ctx)
+  ok(sitesOf(sqIdx, 'x/keep1.png').join('|') === 'stray.gd:literal' &&
+    sitesOf(sqIdx, 'x/keep2.png').join('|') === 'stray.gd:literal',
+    '判据 4 逐行扫:一个不配对的引号不吃掉后半篇(整篇扫这两条都会丢 → 报成孤儿)',
+    `${sitesOf(sqIdx, 'x/keep1.png').join('|')} || ${sitesOf(sqIdx, 'x/keep2.png').join('|')}`)
+  ok(pathsOf(sqIdx, 'x/keep2.png')[0] === `stray.gd@literal@${lineOf(strayQ, 'const B =')}`,
+    '判据 4 逐行扫:行号照常给出(半截引号不改变行计数)', pathsOf(sqIdx, 'x/keep2.png')[0])
+
   // ---------- 6. 判据 5:自引用丢弃 ----------
   section('6. 判据 5:from === to 的自引用丢弃')
   // 不丢弃的话,一个场景永远「被自己引用」,而 .tscn/.tres/.gd 都是孤儿工具的猎物 —— 全灭。
@@ -434,9 +497,13 @@ async function main() {
     'uids:正文里的 uid:// 也收(注释里的算 —— 与 literal 通道同一保守方向)',
     JSON.stringify(idx.uids.get('scripts/player.gd')))
   // 核实过的形状(见 refIndex.ts 头注:引擎解码只认小写字母与数字,z/9 因 GH-83843 永不出现)
-  ok(!mu.includes('BAD') && !JSON.stringify(idx.uids).includes('UID') &&
-    !JSON.stringify(idx.uids).includes('<invalid>'),
-    'uids:大写与 uid://<invalid> 都不算 uid 串(引擎 text_to_id 对这些给 INVALID_ID)', mu)
+  // 注意要摊平整张表来查:JSON.stringify(Map) 恒为 '{}'、而 mu 只是 main.tscn 那一列,
+  // 拿它们做 includes 判断是**空断言**(夹具里 uid://BAD 与 uid://<invalid> 都在 player.gd)。
+  const allUids = [...idx.uids.values()].flat()
+  ok(!allUids.some((u) => /[A-Z]/.test(u)) && !allUids.some((u) => u.includes('<invalid>')) &&
+    allUids.includes('uid://crazy1'),
+    'uids:大写与 uid://<invalid> 都不算 uid 串(引擎 text_to_id 对这些给 INVALID_ID)',
+    JSON.stringify(allUids))
   ok([...idx.uids.keys()].every((k) => READS.includes(k)),
     'uids 的键只有白名单来源', JSON.stringify([...idx.uids.keys()]))
 

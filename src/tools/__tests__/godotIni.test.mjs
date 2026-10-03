@@ -5,7 +5,7 @@
 // 每条断言上方的注释写清「这条规则为什么存在」(多数钉的是 Godot 实际写盘的形态),改规则前先读。
 //
 // ⚠ 台账 Ruling B2 让本解析器与 preload 的 src-ztools/preload/lib/projects.js:26
-//   (Rust 孪生 src-tauri/src/projects.rs:11)**并存**。下面标了 [分叉] 的断言钉的是
+//   (Rust 孪生 src-tauri/src/projects.rs:10)**并存**。下面标了 [分叉] 的断言钉的是
 //   「我们这一份的行为与那份不同」的那些点 —— 分叉是刻意付出的代价,但只能停在已写明的
 //   差异上,别让它悄悄扩大。
 //
@@ -187,6 +187,20 @@ async function main() {
     '判据 5:块未闭合到文件尾,已吃到的行整体留作值(证据不丢)', JSON.stringify(bad.values))
   ok(bad.problems.length === 1 && bad.problems[0].line === 1 && /未闭合/.test(bad.problems[0].reason),
     '判据 5:同时在 problems 里记一条「多行块未闭合」', JSON.stringify(bad.problems))
+  // 判据 4 加严:起始行**停在字符串里**的行不得进块模式。scanBalance 把 inString 跨行传递,
+  // 于是 `b=[ "x ]` 之后每一行的引号都跟「错的那一个」配对,c= 与 d= 两条真键被吞进 b 的值里 ——
+  // 丢的是 res:// 引用(B5 会把 y.png/z.png 报成孤儿),而 getIni 仍把那两个键读得出来(裸值规则),
+  // 同一页两个结论互相打脸。畸形本身要记,但不能靠吃键来记。
+  const oddQ = T.parseGodotIni('[a]\nb=[ "x ]\nc="res://y.png"\nd="res://z.png"')
+  ok(oddQ.values.length === 3 && oddQ.values.map((v) => v.key).join(',') === 'b,c,d',
+    '判据 4 加严:起始行引号不配对 → 本行按单行值保留,后续键不再被吃掉', JSON.stringify(oddQ.values))
+  ok(T.iniResPaths(oddQ).map((p) => p.path).join('|') === 'res://y.png|res://z.png',
+    '判据 4 加严:被吞掉的那两条 res:// 现在收得到(修复的正是在「丢引用」这一侧)',
+    JSON.stringify(T.iniResPaths(oddQ)))
+  ok(oddQ.problems.length === 1 && oddQ.problems[0].line === 2 &&
+    /引号/.test(oddQ.problems[0].reason) && !/未闭合/.test(oddQ.problems[0].reason),
+    '判据 4 加严:另记一条独立 problem,不冒用「多行块未闭合」的文案(B8 的结论要说是同一件事)',
+    JSON.stringify(oddQ.problems))
 
   // ---------- 4. 判据 6:散落行的两种 reason ----------
   section('4. 散落行:缺 = 与段头不闭合要分得开')
@@ -248,8 +262,10 @@ async function main() {
   ok(tabbed.values.length === 1 && tabbed.values[0].raw.includes('\t"deadzone"'),
     '判据 8:行首 tab 缩进的续行照吃(块内原文保持制表符)', JSON.stringify(tabbed.values))
   const empt = docOf('[s]', 'k=', 'q=""')
-  ok(empt.values[0]?.raw === '' && T.getIni(empt, 's/k') === '' && !T.getIniBool(empt, 's/k'),
-    '判据 8:`key=` 空值 → raw 与 getIni 都是空串,不是 undefined', JSON.stringify(empt.values[0]))
+  ok(empt.values[0]?.raw === '' && T.getIni(empt, 's/k') === '' &&
+    T.getIniBool(empt, 's/k') === undefined,
+    '判据 8:`key=` 空值 → raw 与 getIni 都是空串,不是 undefined;getIniBool 按「取不到一律 undefined」给 undefined',
+    JSON.stringify(empt.values[0]))
   ok(empt.values[1]?.raw === '""' && T.getIni(empt, 's/q') === '',
     '判据 8:`key=""` → 剥一层外层引号得空串', JSON.stringify(empt.values[1]))
   // 「另存为 UTF-8 带 BOM」的 project.godot 是真会出现的形态(记事本 / 某些编辑器),
@@ -350,6 +366,13 @@ async function main() {
     'broken=PackedStringArray("a"',
     'half=[ "a ]',
     'nested=["a", ["b"]]')
+  // 夹具的每条键都必须**真的成为一条 value**。`half=[ "a ]` 在旧实现里把紧跟的 nested 整行吞进
+  // 自己的块,于是下面「nested → undefined」是因为**键不见了**而通过 —— 伪装成通过的断言最危险。
+  ok(lst.values.length === 13 &&
+    lst.values.map((v) => v.key).join('|') ===
+    'feat|empty|arr|arrEmpty|arrOne|dict|objs|varr|bare|quoted|broken|half|nested',
+    '夹具 13 个键全在 values 里(被上一行的块吃掉的键会让下面的 undefined 断言平凡为真)',
+    `${lst.values.length}/${lst.values.map((v) => v.key).join('|')}`)
   ok(T.getIniList(lst, 'l/feat')?.join('|') === '4.3|Forward Plus',
     'getIniList:PackedStringArray("a","b") → 字面量数组(顺序保留)',
     JSON.stringify(T.getIniList(lst, 'l/feat')))
@@ -420,6 +443,24 @@ async function main() {
     JSON.stringify(T.iniResPaths(blockRp)))
   ok(T.iniResPaths(real).every((p) => typeof p.line === 'number' && p.line >= 1),
     'iniResPaths:每条都带 1-based 行号')
+  // 编辑器外**手改**的 project.godot 会把值写成不带引号的裸串(Godot 自己写盘带引号,但本项目
+  // 的常见场景就是手写 / 合并冲突后手补)。getIni 按判据 8 认它是裸串,那么 iniResPaths 也必须认它:
+  // 否则 B8 说「主场景 = res://main.tscn」、B5 在同一页说「没人引用它」→ 用户真会删。
+  const unq = T.parseGodotIni(
+    '[application]\nrun/main_scene=res://scene/main.tscn\n[autoload]\nGS=res://autoload/gs.gd\n')
+  ok(T.iniResPaths(unq).map((p) => `${p.fullKey}@${p.line}=${p.path}`).join('|') ===
+    'application/run/main_scene@2=res://scene/main.tscn|autoload/GS@4=res://autoload/gs.gd',
+    'iniResPaths:不带引号的 res:// 值也收(fullKey 与 line 同规则)',
+    JSON.stringify(T.iniResPaths(unq)))
+  ok(T.getIni(unq, 'application/run/main_scene') === 'res://scene/main.tscn' &&
+    T.iniResPaths(unq).some((p) => p.path === 'res://scene/main.tscn'),
+    'iniResPaths 与 getIni 不对同一个值给相反结论(配置证据与引用证据必须同口径)',
+    `${T.getIni(unq, 'application/run/main_scene')}/${JSON.stringify(T.iniResPaths(unq).map((p) => p.path))}`)
+  const unqBad = docOf('[t]', 'n=1280', 'b=true', 'arr=PackedStringArray("4.3", "Forward Plus")',
+    'u=user://save.dat', 'ref=$GameState', 'note=see res://x/y.png', 'empty=', 'neg=-1')
+  ok(T.iniResPaths(unqBad).length === 0,
+    'iniResPaths:裸值只有「整串就是路径」才算数(1280 / true / 数组 / user:// / $单例 / 半路提及都不是)',
+    JSON.stringify(T.iniResPaths(unqBad)))
 
   // ---------- 12. 防御:undefined / 非字符串不得抛错 ----------
   section('12. 不抛错红线')

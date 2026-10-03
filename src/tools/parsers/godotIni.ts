@@ -21,9 +21,12 @@
 //       本模块 getIni 剥一层并解码 \n \t \r \" \\。
 //     · 段头:两份都不 trim 括号内空白(projects.js:42 的 `\[(.+)\]`、projects.rs:20 的切片),
 //       所以 `[ display ]` 会让 `editor_plugins` 判定落空;本模块 trim 段头内空气(判据 3)。
-//     · 多行块:两份都没有「块」概念 —— `move_left={` 之后不含 `=` 的行被逐行丢弃,
-//       含 `=` 的行(如 `"physical_keycode=-1, string=\"a]b\""`)则被当成新的键值行收下,
-//       键名是那半截带引号的文本;本模块按配平吃整块(判据 4)。
+//     · 多行块:两份都没有「块」概念,块内行最终都留不住 —— 不含 `=` 的行:preload 的
+//       `^\s*([\w./]+)\s*=`(projects.js:47)匹配不到、Rust 的 `split_once('=')` 给 None
+//       (projects.rs:24),都是整行跳过。含 `=` 的行(如块里的 `"physical_keycode=-1, string=\"a]b\""`):
+//       preload **同样**匹配不到(键位以 `"` 开头,`[\w./]` 里没有引号),整行丢掉;Rust 会切成
+//       key=`"physical_keycode`,但对那五个键之外的键名直接 `_ => {}`(projects.rs:41)丢弃。
+//       本模块按配平吃整块(判据 4)。
 //
 // 红线:纯函数,不碰 window / services / vue / DOM —— 读文件交给调用方(B3 的 readText)。
 // 每个函数对 undefined / 非字符串输入都不许抛错(与 treeUtils.ts 同一口径)。
@@ -68,6 +71,7 @@ const REASON_NO_EQ = '这一行没有 = 号,归不进 key=value'
 const REASON_BAD_HEAD = '段头不闭合:缺少右方括号 ]'
 const REASON_NO_KEY = '= 号前没有键名'
 const REASON_OPEN_BLOCK = '多行块未闭合:到文件尾括号仍未配平'
+const REASON_ODD_QUOTE = '括号块的起始行有半个引号,本行按单行值保留(不吞掉后续行)'
 const REASON_BAD_VERSION = 'config_version 不是裸整数'
 
 /** 解码集:简报钉死的这五种;`\u`/`\x` 之类一律原样留着(不猜引擎的转义表) */
@@ -158,20 +162,28 @@ export function parseGodotIni(text: string): IniDoc {
     // 判据 4:`=` 右侧以 `{` 或 `[` 开头**且本行括号未配平** → 整块都是这一条的值
     if (raw[0] === '{' || raw[0] === '[') {
       let st = scanBalance(raw, { braces: 0, brackets: 0, inString: false })
-      while (!isBalanced(st)) {
-        // 判据 5:吃到文件尾仍未配平 → 记 problem,但已吃到的行**整体**留作值(别丢证据)
-        if (i + 1 >= lines.length) {
-          problems.push({ line: no, text: line, reason: REASON_OPEN_BLOCK })
-          break
+      // 判据 4 的闸:起始行**停在字符串里**(手改坏的行,如 `b=[ "x ]`)就不进块模式。
+      // inString 是跨行传递的,进了块就等于把后面每一行的引号都跟「错的那一个」配对:
+      // 真键 c=/d= 被吞成 b 的值 ⇒ 它们的 res:// 全消失(B5 报孤儿),而 problems 里只有一句
+      // 「块未闭合」—— 证据没丢在磁盘上,却丢在结论里。这种行按单行值留着 + 记一条独立 problem。
+      if (st.inString) {
+        problems.push({ line: no, text: line, reason: REASON_ODD_QUOTE })
+      } else {
+        while (!isBalanced(st)) {
+          // 判据 5:吃到文件尾仍未配平 → 记 problem,但已吃到的行**整体**留作值(别丢证据)
+          if (i + 1 >= lines.length) {
+            problems.push({ line: no, text: line, reason: REASON_OPEN_BLOCK })
+            break
+          }
+          i++
+          endLine = i + 1
+          raw += '\n' + lines[i]
+          // 状态跨行传递:这一行没关掉的字符串,下一行仍然在字符串里(否则引号内外会算反)
+          st = scanBalance(lines[i], st)
         }
-        i++
-        endLine = i + 1
-        raw += '\n' + lines[i]
-        // 状态跨行传递:这一行没关掉的字符串,下一行仍然在字符串里(否则引号内外会算反)
-        st = scanBalance(lines[i], st)
+        // 块到文件尾时 split 出来的那个空行是排版不是值的内容
+        raw = raw.replace(/\s+$/, '')
       }
-      // 块到文件尾时 split 出来的那个空行是排版不是值的内容
-      raw = raw.replace(/\s+$/, '')
     }
     values.push({ section, key, raw, line: no, endLine })
   }
@@ -266,18 +278,31 @@ export function stringLiterals(raw: string): string[] {
 }
 
 /**
- * 文档里所有 `res://` 字面量(给 B3 的引用索引;保留 `res://` 前缀,归一成 rel 是调用方的事)。
+ * 文档里所有 `res://` 路径(给 B3 的引用索引;保留 `res://` 前缀,归一成 rel 是调用方的事)。
  * 每个 value 都过 stringLiterals,所以多行块里的路径同样收得到。
+ *
+ * **不带引号的值也收**(判据 8 的镜像):Godot 自己写盘一律带引号,但编辑器外手改 / 合并冲突
+ * 后手补就是 `run/main_scene=res://main.tscn`。getIni 按判据 8 把这种值原样当裸串返回,
+ * 那么这里也必须认它 —— 否则 B8 在同一页说「主场景 = res://main.tscn」、B5 说「没人引用它」,
+ * 而 §6「孤儿资产误判」的失败模式是用户真去删那个文件。判定仍走 resPathLiteral:
+ * 只有**整串就是路径**才算(`1280` / `true` / `PackedStringArray(...)` / `user://` / `$单例` 都不是)。
  */
 export function iniResPaths(doc: IniDoc): IniResPath[] {
   const out: IniResPath[] = []
   if (!doc || !Array.isArray(doc.values)) return out
   for (const v of doc.values) {
     if (!v || typeof v.raw !== 'string') continue
+    const line = typeof v.line === 'number' ? v.line : 0
     for (const lit of scanLiterals(v.raw).items) {
       const path = resPathLiteral(lit)
       if (path === null) continue
-      out.push({ path, fullKey: fullKeyOf(v), line: typeof v.line === 'number' ? v.line : 0 })
+      out.push({ path, fullKey: fullKeyOf(v), line })
+    }
+    // 不含引号 ⇒ asQuotedLiteral 必为 null(它要求首字符是 `"`),即这确实是判据 8 的裸值形态;
+    // 带引号的值走上面那条通道,不重复收。
+    if (v.raw.indexOf('"') < 0) {
+      const path = resPathLiteral(v.raw.trim())
+      if (path !== null) out.push({ path, fullKey: fullKeyOf(v), line })
     }
   }
   return out

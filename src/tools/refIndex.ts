@@ -148,6 +148,26 @@ export async function buildRefIndex(ctx: ToolContext): Promise<RefIndex> {
       if (UID_TOKEN.test(u) && !found.includes(u)) found.push(u)
     }
 
+    /**
+     * 逐行抓引号字面量(判据 4 的 literal 通道,场景与非场景共用一份规则)。
+     * **注释与死代码里的字符串也算引用** —— 孤儿工具会把「没人引用」的东西摆到删除按钮旁边,
+     * 而注释里的 preload("res://x.tscn") 至少说明人还记得它在用;方向是保守的:
+     * 宁可少报孤儿,也不误删。
+     * 逐行扫(不整篇扫):GDScript 里一个不配对的引号会把后半篇全吞掉,那样漏的是引用、
+     * 报出来的是「孤儿」—— 危险的正是这一侧。
+     * skipExtResourceLines:场景的 `[ext_resource path="res://…"]` 已由 parseExtResources 收成
+     * via:'ext_resource' 站点,再扫一遍会让每个场景引用**静默翻倍**(B5 数「引用处数」就错了)。
+     */
+    const addLiteralSites = (rows: string[], skipExtResourceLines: boolean) => {
+      for (let i = 0; i < rows.length; i++) {
+        if (skipExtResourceLines && rows[i].trim().startsWith('[ext_resource')) continue
+        for (const lit of stringLiterals(rows[i])) {
+          const target = resToRel(lit)
+          if (target !== null) add(target, 'literal', i + 1)
+        }
+      }
+    }
+
     if (ext === 'tscn' || ext === 'tres') {
       // 判据 4 通道一:.tscn/.tres 走 parseExtResources(sceneRefs.ts:22),目标一律过 resToRel(判据 8)
       const refs = parseExtResources(text)
@@ -163,6 +183,11 @@ export async function buildRefIndex(ctx: ToolContext): Promise<RefIndex> {
         if (target !== null) add(target, 'ext_resource', aligned ? heads[i] : undefined)
         addUid(ref.uid)
       })
+      // 判据 4 通道四:场景里**非 ext_resource 行**的字符串属性同样是引用。只给场景 ext_resource
+      // 一条通道时,`[node]` 段的 `dialogue = "res://data/keep.json"` 与 `Resource("res://…")`
+      // 全都看不见 —— 而被按需加载的 json/tres 恰恰是孤儿工具最容易端上删除按钮的东西(§6:
+      // 一句提及即引用,收集侧宁多勿少)。
+      addLiteralSites(rows, true)
     } else if (rel === 'project.godot') {
       // 判据 4 通道二:project.godot 交给 B2 的解析器,autoload 的 `*` 前缀已由它剥掉
       for (const p of iniResPaths(parseGodotIni(text))) {
@@ -170,18 +195,8 @@ export async function buildRefIndex(ctx: ToolContext): Promise<RefIndex> {
         if (target !== null) add(target, 'ini', p.line)
       }
     } else {
-      // 判据 4 通道三:其余白名单文件抓引号字面量。**注释与死代码里的字符串也算引用** ——
-      // 孤儿工具会把「没人引用」的东西放到删除按钮旁边,而注释里的 preload("res://x.tscn")
-      // 至少说明人还记得它在用;方向是保守的:宁可少报孤儿,也不误删。
-      // 逐行扫(不整篇扫):GDScript 里一个不配对的引号会把后半篇全吞掉,那样漏的是引用、
-      // 报出来的是「孤儿」—— 危险的正是这一侧。
-      const rows = text.split(/\r?\n/)
-      for (let i = 0; i < rows.length; i++) {
-        for (const lit of stringLiterals(rows[i])) {
-          const target = resToRel(lit)
-          if (target !== null) add(target, 'literal', i + 1)
-        }
-      }
+      // 判据 4 通道三:其余白名单文件(.gd/.cs/.gdshader/.json/.gdextension/根级 cfg)
+      addLiteralSites(text.split(/\r?\n/), false)
     }
 
     // 判据 4 尾巴:uid:// 串在白名单文件的**原文**里也要收(B4 拿它比对 .uid 边文与资源内 uid=;
