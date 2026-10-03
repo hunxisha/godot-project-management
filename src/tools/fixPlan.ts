@@ -43,7 +43,11 @@ export interface FixPlan {
   reason: string
   /** 要交给 movePathsToTrash 的 rel 清单(与 items 同序同集合,同一趟去重) */
   rels: string[]
-  /** 要交给 writeProjectText 的内容(与 items **同序同键同长度**:预览说几个就写几个,原语自己负责 .gpm-bak- 备份) */
+  /**
+   * 要交给 writeProjectText 的内容。
+   * rewrite 通道:与 items **同序同键同长度** —— 预览说几个就写几个,原语自己负责 .gpm-bak- 备份。
+   * trash 通道:恒为空数组(items 照样有行),要动的东西在 rels 里。
+   */
   files: { rel: string; text: string }[]
   /** items 里**已知**体积之和(清单外的不计入,不臆造) */
   bytes: number
@@ -145,7 +149,8 @@ interface FixSource {
   text?: string
 }
 
-const REJECT_NOTE = '路径越界或是绝对路径,原语会回「非法路径」拒绝'
+/** 导出给确认框:摘要行要按它把「会被拒绝」与「只是体积未知」分开计数 */
+export const REJECT_NOTE = '路径越界或是绝对路径,原语会回「非法路径」拒绝'
 const OUTSIDE_NOTE = '不在本次文件清单中,仍会交给原语并如实回报'
 // 删除通道说「原语会如实回报」就够了(盘上没这个文件时它回「文件不存在」);
 // 改写通道必须换一句:writeProjectText 对不存在的目标是**新建文件**,而新建不产生备份
@@ -155,10 +160,11 @@ const NEWFILE_NOTE = '文件清单里没有它:改写会新建文件,没有备�
 
 /**
  * items / rels / files / bytes **一起算**,一趟去重(审查 Important 2:分两趟算,预览就能说出
- * 「确认改写 1 个文件」而盘上落两次写)。三个产物同序同键同长度,结构上不可能再分叉。
+ * 「确认改写 1 个文件」而盘上落两次写)。items 与 keys 逐条对应同键;files 只收带 text 的那一类,
+ * 所以 rewrite 通道下它与 items 同序同键同长度,trash 通道下它是空的 —— 三者不可能再分叉。
  *
  * 重复 rel 一律**首次优先**:rels 沿用首次那条原始串,两个宿主的 trash 也是按 abs 去重后
- * 沿用首次那条 rel(inspectfs.js:329、src-tauri/src/inspectfs.rs:407),text 跟同一个口径 ——
+ * 沿用首次那条 rel(inspectfs.js:329、src-tauri/src/inspectfs.rs:411),text 跟同一个口径 ——
  * 若改成后者覆盖前者,预览与执行仍同源,但会和上面两处原语的报数口径不一致。
  *
  * @param wording 只有 rewrite 通道需要「清单外 = 会新建」这句措辞;它不改可执行性,只改文案。
@@ -167,13 +173,14 @@ function toItems(
   sources: FixSource[],
   sizeOf: Map<string, number>,
   wording: 'trash' | 'rewrite'
-): { items: FixPlanItem[]; keys: string[]; files: { rel: string; text: string }[]; bytes: number; createdNew: boolean } {
+): { items: FixPlanItem[]; keys: string[]; files: { rel: string; text: string }[]; bytes: number; createdNew: boolean; listed: number } {
   const items: FixPlanItem[] = []
   const keys: string[] = []
   const files: { rel: string; text: string }[] = []
   const seen = new Set<string>()
   let bytes = 0
   let createdNew = false
+  let listed = 0
   for (const s of sources) {
     const raw = String(s.rel)
     const norm = normalizeRel(raw)
@@ -188,6 +195,7 @@ function toItems(
     else if (typeof size === 'number') {
       item.size = size
       bytes += size
+      listed += 1
     } else {
       item.note = wording === 'rewrite' ? NEWFILE_NOTE : OUTSIDE_NOTE
       if (wording === 'rewrite') createdNew = true
@@ -197,7 +205,7 @@ function toItems(
     if (typeof s.text === 'string') files.push({ rel: key, text: s.text })
     items.push(item)
   }
-  return { items, keys, files, bytes, createdNew }
+  return { items, keys, files, bytes, createdNew, listed }
 }
 
 /**
@@ -258,11 +266,14 @@ export function planFix(f: Finding, tree: TreeEntry[], isWin: boolean): FixPlan 
     const r = toItems(sources, sizeOf, 'rewrite')
     // 备份名以原扩展名**之后**收尾(player.gd.gpm-bak-<stamp>),这是原语刻意的设计,
     // 见 inspectfs.js:147-153、204 —— 文案照它说,别写成「<原名>.bak」那种根本不会出现的形态。
-    // createdNew 时换第二句:清单外的目标走 ENOENT 分支当新建,**没有备份**,
-    // 统一承诺「可随时还原」就是在骗用户。
-    const warn = r.createdNew
-      ? '清单里有的文件会先复制成「原名.gpm-bak-时间戳」备份再原子替换;清单里没有的那些会被新建,新建没有备份可还原。'
-      : '改写前会先把原文件复制成「原名.gpm-bak-时间戳」备份,再原子替换,可随时还原。'
+    // 三档措辞:清单外目标走 ENOENT 分支当**新建**,新建不产生备份(:185-188 + :203),
+    // 所以只要有一个清单外项就不能再统一承诺「可随时还原」;而一个清单内项都没有时,
+    // 连「有的文件会先备份」这句都会指向根本不存在的备份,只能说新建那一半。
+    const warn = !r.createdNew
+      ? '改写前会先把原文件复制成「原名.gpm-bak-时间戳」备份,再原子替换,可随时还原。'
+      : r.listed === 0
+        ? '这些文件都不在本次文件清单里:改写会直接新建文件,新建没有备份可还原。'
+        : '清单里有的文件会先复制成「原名.gpm-bak-时间戳」备份再原子替换;清单里没有的那些会被新建,新建没有备份可还原。'
     return {
       verb: '改写文件',
       warn,

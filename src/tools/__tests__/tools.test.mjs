@@ -669,6 +669,17 @@ async function main() {
     'empty/service/条数与 tree 无关(只有措辞与 note 查树)', `${rwGhostNoTree.empty}/${rwGhostNoTree.service}/${rwGhostNoTree.items.length}`)
   ok(/gpm-bak/.test(rw.warn) && rw.items[0].note === undefined,
     '改写项全在清单里时保持原承诺,不误伤正常路径(反向钉住上一条改动的范围)', `${rw.warn}|${rw.items[0].note}`)
+  // 混合句里的「清单里有的文件会先复制成…备份」在**一个清单内项都没有**时指向不存在的备份,
+  // 所以 warn 分三档而不是两档:全在清单 / 混合 / 全不在清单。
+  const rwAllGhost = T.planFix(
+    { id: 'ini:ghost2', severity: 'warn', title: 't', fix: { kind: 'rewrite', label: '改写', payload: { files: [{ rel: 'new/a.tres', text: 'A' }, { rel: 'new/b.tres', text: 'B' }] } } },
+    tree([['project.godot', 100]]),
+    true
+  )
+  ok(/都不在本次文件清单里/.test(rwAllGhost.warn) && !/复制成|原子替换|随时还原/.test(rwAllGhost.warn),
+    '改写项一个都不在清单里时,不提那份不会产生的备份', rwAllGhost.warn)
+  ok(rwAllGhost.items.every((it) => /新建/.test(it.note || '')) && rwAllGhost.bytes === 0,
+    '全清单外:逐条都带新建说明,合计体积不臆造', `${rwAllGhost.items.map((i) => !!i.note)}|${rwAllGhost.bytes}`)
 
   // Minor 3:不可执行的计划根本没有动词可渲染(FixConfirmDialog 在 !executable 分支只渲染 reason,
   // applyFix 也在 service===null 处短路),所以硬填「移入回收站」在非 Windows 上还是一句谎话。

@@ -10,6 +10,7 @@ import { computed, ref, watch } from 'vue'
 import Icon from '../Icon.vue'
 import { fmtBytes } from '../../tools/treeUtils'
 import type { FixPlan } from '../../tools/fixPlan'
+import { REJECT_NOTE } from '../../tools/fixPlan'
 import type { FixOutcome } from '../../composables/useTools'
 
 const props = defineProps<{
@@ -35,8 +36,12 @@ watch(
   }
 )
 
-/** 清单里没有体积的那些(不臆造数字,原语会自己去问磁盘) */
-const unknownCount = computed(() => props.plan.items.filter((i) => typeof i.size !== 'number').length)
+/**
+ * 没有体积的行分两种,摘要行得说清是哪种:被闸拒绝的那些(原语不会碰盘)与只是清单里查不到
+ * 体积的那些(原语会自己去问磁盘)。判据仍来自 planFix 的 note,这里只做不相交的计数。
+ */
+const rejectedCount = computed(() => props.plan.items.filter((i) => i.note === REJECT_NOTE).length)
+const unknownCount = computed(() => props.plan.items.filter((i) => typeof i.size !== 'number' && i.note !== REJECT_NOTE).length)
 /**
  * 渲染上限,与 PruneDialog.vue:87/191 同一口径(B5 孤儿资产一次点几千上万个文件时,
  * 逐条铺满 DOM 会让确认框本身变成卡顿源)。只裁**画出来的行**:上面的条数、合计体积与
@@ -81,6 +86,7 @@ const canRun = computed(() => executable.value && !props.busy && !props.outcome 
           <div class="fx-sum">
             将影响 <b>{{ plan.items.length }}</b> 个文件 · 合计约 <b>{{ fmtBytes(plan.bytes) }}</b>
             <span v-if="unknownCount" class="fx-dim">(其中 {{ unknownCount }} 个不在本次文件清单里,体积未知)</span>
+            <span v-if="rejectedCount" class="fx-dim">({{ rejectedCount }} 个路径非法,原语会拒绝)</span>
           </div>
 
           <!-- 清单逐条列出(spec §5.3 规则 3「必须列出将影响的完整文件清单」),超过上限只裁行数
