@@ -1,5 +1,7 @@
 // 工具页的状态与调度:选项目 → 扫一次树 → 按注册表跑检查器 → 存结果。
 // 关键不变量(spec §5.1):同一个项目的 tree 只扫一次,所有工具共享 ctx。
+// 它的孪生不变量(审查 F-1):一份 tree 只属于**发起它的那个项目**。扫描是真的异步 IPC,
+// 所以「tree 与 readText 同属一个项目」靠世代号 + 捕获的 pid 绑定,过期结果整份丢弃。
 //
 // 红线:这是渲染层组合式函数,只用 vue 的 ref/computed,不碰 DOM;能力一律走
 // window.services 契约(两端 JS 宿主与 Tauri 宿主同一份签名)。
@@ -24,6 +26,8 @@ const TEXT_LRU = 200
  * src-tauri/src/inspectfs.rs:511),而双端 parity 测试钉死了原语的文案不许动。
  * 所以在 UI 这一层归一成一个口径,别让用户看到两句其实同一件事的提示。
  * 除这两句之外的错误原文一律透传 —— 它们是各自的诊断信息,归一等于吞掉线索。
+ * 真实的透传样本如 '项目不存在'(shim 查不到项目根)、'非法路径'(rel 校验拒),
+ * 见 src/public/tauri-shim.js:83-85;测试的第 9 节就按这两句判透传那一路。
  */
 const SCAN_ERROR_ALIAS: Record<string, string> = {
   '项目目录已不存在': '项目目录无法读取',
@@ -51,13 +55,28 @@ export function useTools() {
   const results = ref<Record<string, ToolResult>>({})
   const tools = ref<Tool[]>([...BASE_TOOLS])
 
-  /** 宿主能力探测:方法不存在(旧宿主/未移植)就是不支持,而不是静默假成功 */
+  /**
+   * 宿主能力探测:方法不存在(旧宿主/未移植)就是不支持,而不是静默假成功。
+   * 这是**构造时快照**,理由:index.html 用 `<script src="/tauri-shim.js">` 这种阻塞式经典脚本
+   * 在模块入口之前把 window.services 建好,而 src/main.ts 在 window.services 缺失时直接拒绝挂载
+   * (显示启动错误而不是挂载),所以任何 useTools() 实例创建时能力都已定型,不存在「晚一点再探」。
+   */
   const caps: Record<Capability, boolean> = {
     tree: typeof window.services?.scanProjectTree === 'function',
     text: typeof window.services?.readProjectText === 'function',
     write: typeof window.services?.writeProjectText === 'function',
     trash: typeof window.services?.movePathsToTrash === 'function'
   }
+
+  /**
+   * 扫描世代号(审查 F-1):select() 与 invalidateTree() 各自 +1。
+   * ensureTree 在 await 之前记下当时的值,await 之后比对 —— 不一致就说明这份清单属于
+   * 上一个项目 / 上一次作废之前的目录,整份丢弃。桌面宿主的 scanProjectTree 是真的异步
+   * IPC(几百毫秒到几秒),「扫描在途时用户点了项目选择器」是常态而不是边角。
+   */
+  let scanGen = 0
+  /** 最近一次**发起**的扫描属于哪个世代:只有它有权复位 running/progress,免得迟到的旧扫描把正在扫的那次显示成空闲 */
+  let scanOwnedGen = -1
 
   const textCache = new Map<string, { text?: string; skipped?: boolean }>()
 
@@ -71,8 +90,8 @@ export function useTools() {
     }
   }
 
-  function selected(): WithId | undefined {
-    return projects.value.find((p) => p._id === projectId.value)
+  function selected(id = projectId.value): WithId | undefined {
+    return projects.value.find((p) => p._id === id)
   }
 
   /**
@@ -82,12 +101,22 @@ export function useTools() {
   async function ensureTree(force = false): Promise<boolean> {
     const pid = projectId.value
     if (!pid) { error.value = '还没有添加项目'; return false }
-    // 共享树的核心:TTL 内、非强制、清单非空 → 一律复用,不再扫
-    if (!force && tree.value.length && Date.now() - treeAt.value < TREE_TTL) return true
+    // 共享树的核心:TTL 内、非强制 → 一律复用,不再扫。
+    // 新鲜度标记只看 treeAt(只有成功那一路会置位,任何失败路径与 select() 都归零),
+    // **不看 tree.value.length**:Rust 侧对「空而可读」的根目录如实回 { ok:true, files:[] }
+    // (src-tauri/src/inspectfs.rs:509-512),按长度判这种项目永远命中不了 TTL ——
+    // 每个工具各重扫一遍,runAll 直接退化成 1+N 次目录遍历(审查 F-2a)。
+    if (!force && treeAt.value > 0 && Date.now() - treeAt.value < TREE_TTL) return true
     if (!caps.tree) { error.value = '当前宿主不支持文件扫描'; return false }
+    const gen = scanGen
+    scanOwnedGen = gen
     running.value = 'scan'
-    progress.value = '正在扫描文件清单…'
-    let r: ScanTreeResult
+    // 审查 M-8:progress 在 runAll 期间归 runAll 所有(它写的是「正在体检 i/n:工具名」)。
+    // 某个工具内部触发重扫时,这次扫描既不能覆盖那一行,收尾时也不能把它擦成空 ——
+    // 全量体检自己的那行「正在体检:准备文件清单…」由 runAll 写。
+    if (!allRunning.value) progress.value = '正在扫描文件清单…'
+    let r: ScanTreeResult | undefined
+    let thrownMsg = ''
     try {
       // 必须显式要 includeCache:原语默认**跳过** .godot,不带上它 cache 检查器永远只会报
       // 「清单里没有 .godot 条目」。同时**不许**传 exts/skipDirs/maxEntries 缩小范围:
@@ -96,18 +125,31 @@ export function useTools() {
       r = await window.services.scanProjectTree(pid, { includeCache: true })
     } catch (e) {
       // 原语本身抛异常(宿主实现出错)也只标失败,不让它把页面卡在「正在扫描」
-      error.value = scanErrorText((e as Error)?.message)
-      tree.value = []
-      treeAt.value = 0
-      return false
-    } finally {
-      running.value = ''
-      progress.value = ''
+      thrownMsg = scanErrorText((e as Error)?.message)
     }
-    if (!r.ok) {
-      error.value = scanErrorText(r.error)
+    // 审查 F-1:await 期间 select()/invalidateTree() 可能已经推进了世代号。这份清单属于
+    // **上一个项目**(或上一个已被作废的目录),写进当前状态就是跨项目串树:treeAt 一并刷新,
+    // 于是接下来整个 TTL 里所有检查器都复用这棵错树;而 ctx.readText 读的是当前项目的文本,
+    // brokenRefs 会拿 A 的场景去比 B 的清单,产出 error 级假阳性 —— 正是 R-A 要防的那一类。
+    // 处置:整份丢弃(不写 tree/treeAt/truncated/textCache,也不上浮它的错误),返回 false。
+    if (projectId.value !== pid || gen !== scanGen) {
+      if (scanOwnedGen === gen) {
+        // 只有「最近发起的那次扫描」才是自己人:后面已有新扫描时把进度让给它自己收
+        running.value = ''
+        if (!allRunning.value) progress.value = ''
+      }
+      return false
+    }
+    running.value = ''
+    // 审查 M-8:同上 —— runAll 的进度行「正在体检 i/n:工具名」由 runAll 自己收尾。
+    if (!allRunning.value) progress.value = ''
+    if (thrownMsg || !r || !r.ok) {
+      error.value = thrownMsg || scanErrorText(r?.error)
       tree.value = []
       treeAt.value = 0
+      // 审查 M-9:失败路径同样要复位 truncated。select() 已经懂这一手,扫描失败也一样 ——
+      // 残留的 true 会让接下来所有检查器一律「只出截断结论、不判定」,把结论静默吃掉。
+      truncated.value = false
       return false
     }
     error.value = ''
@@ -121,15 +163,21 @@ export function useTools() {
     return true
   }
 
-  /** 所有工具共用的一份上下文:tree 来自缓存,readText 走 LRU(spec §5.1) */
-  function ctx(): ToolContext {
+  /**
+   * 所有工具共用的一份上下文:tree 来自缓存,readText 走 LRU(spec §5.1)。
+   * @param pid 调用方当场选中的项目 id —— 审查 F-1:这里**捕获一次**并一路用它,
+   *   于是「A 的清单 + B 的文本」这种混搭配在构造上就不可能出现;文本缓存的键也带上它,
+   *   跨项目同名的 rel 不会互相命中。
+   */
+  function ctx(pid: string): ToolContext {
+    const root = selected(pid)?.path || ''
     return {
-      projectId: projectId.value,
-      root: selected()?.path || '',
+      projectId: pid,
+      root,
       tree: tree.value,
       truncated: truncated.value,
       readText: async (rel: string) => {
-        const k = `${projectId.value}|${rel}`
+        const k = `${pid}|${rel}`
         const hit = textCache.get(k)
         if (hit) {
           // 命中也要把它挪到队尾:这是 LRU 而不是 FIFO —— 不刷新最近使用顺序的话,
@@ -140,15 +188,23 @@ export function useTools() {
         }
         let v: { text?: string; skipped?: boolean }
         if (!caps.text) {
+          // 宿主压根没有读文本能力:这是**恒定**状态(caps 是构造时快照),按 skipped 缓存住,
+          // 不必每次重试。缺该能力的工具早在 isSupported 那一步就短路了,走到这里只可能是
+          // 一个没声明 text 需求的工具自己去读。
           v = { skipped: true }
         } else {
           try {
-            const r = await window.services.readProjectText(projectId.value, rel)
-            v = r.ok && typeof r.text === 'string' ? { text: r.text } : { skipped: true }
-          } catch (e) {
+            const rr = await window.services.readProjectText(pid, rel)
+            v = rr.ok && typeof rr.text === 'string' ? { text: rr.text } : { skipped: true }
+          } catch {
             // 与读文本原语的三态同形:给不出字符串就是「读不到」。单个文件读炸只跳过
-            // 这一个文件,不把整个工具拖成 ok:false(否则一个坏文件能让全项目断链体检报废)
-            v = { skipped: true }
+            // 这一个文件,不把整个工具拖成 ok:false(否则一个坏文件能让全项目断链体检报废)。
+            // 但审查 F-3:**失败的结果不进缓存** —— 一次 EACCES/临时 IO 错如果被缓存成
+            // skipped,这个文件在整个清单生命周期里再也不会被重试,而 brokenRefs 会静默跳过它
+            // 并回 ok:true + 零结论,UI 无法区分「真的没有断链」和「我什么都没读到」。
+            // 这里只把本次调用标成 skipped,下一次读会真的重试。
+            // (宿主明确回 ok:false 的二进制/超限/非法路径是**确定性**结果,照旧进缓存。)
+            return { skipped: true }
           }
         }
         if (textCache.size >= TEXT_LRU) textCache.delete(textCache.keys().next().value as string)
@@ -168,25 +224,49 @@ export function useTools() {
       return res
     }
     if (!(await ensureTree())) return null
+    // ensureTree 回 true 就意味着它刚校验过「项目没换、世代没动」,所以此刻的 projectId
+    // 与 tree.value 必然同属一个项目;把它捕获进 ctx,F-1 的保证就闭合到 readText 上。
+    const pid = projectId.value
+    const context = ctx(pid)
+    const scanned = context.tree.length
     running.value = id
     const started = Date.now()
     let res: ToolResult
     try {
-      res = { toolId: id, ok: true, findings: await t.run(ctx()), scannedFiles: tree.value.length, ms: Date.now() - started }
+      // 审查 M-5:R-B 的边界口径同样适用于工具返回值。registerTool 是公开出口,第三方工具
+      // (或 P1 的动态注册)完全可能 resolve(undefined);把 undefined 原样存进 results,
+      // 渲染期 counts 遍历 r.findings 就会抛 TypeError —— 一个坏工具炸掉整页。
+      const findings = await t.run(context)
+      res = { toolId: id, ok: true, findings: Array.isArray(findings) ? findings : [], scannedFiles: scanned, ms: Date.now() - started }
     } catch (e) {
       // 单工具失败只标它自己(spec §5.5)
-      res = { toolId: id, ok: false, error: (e as Error)?.message || '检查失败', findings: [], scannedFiles: tree.value.length, ms: Date.now() - started }
+      res = { toolId: id, ok: false, error: (e as Error)?.message || '检查失败', findings: [], scannedFiles: scanned, ms: Date.now() - started }
     }
     running.value = ''
-    results.value = { ...results.value, [id]: res }
+    // 审查 F-1 的残余路径:长工具跑完时项目可能已经被换掉。select() 清空 results 是有意的
+    // (结论按项目成立),不能把一个旧项目的结论补写进新项目的面板。
+    // 只比 projectId 不比世代号:工具在 run() 里自己调 invalidateTree(修完文件的正常姿势)
+    // 不该让它顺手丢掉自己刚产出的结论。
+    if (projectId.value === pid) results.value = { ...results.value, [id]: res }
     return res
   }
 
   /** 全量体检:强制重扫一次,再逐个跑;之间让出事件循环保证 UI 可交互 */
   async function runAll(): Promise<ToolResult[]> {
     allRunning.value = true
-    await ensureTree(true)
     const list = [...tools.value]
+    // 起手这行挂在**强制重扫**期间:ensureTree 在 runAll 里不碰 progress(审查 M-8),
+    // 之后每个工具把它换成「正在体检 i/n:工具名」。
+    progress.value = '正在体检:准备文件清单…'
+    // 审查 F-2b:强制重扫失败(目录被弹走 / 权限变了 / 宿主出错)时,这一轮体检**不成立**。
+    // 口径:立即停下、只上浮 error 里那一条(R-C 归一后的原因),不产 per-tool 行。
+    // 选「停下」而不是「给每工具记一条显式失败」:原因只有一个,摊成 N 张红卡片会让人
+    // 以为有 N 个问题,而且那 N 次重扫全都注定失败(1+N 次遍历)。
+    if (!(await ensureTree(true))) {
+      allRunning.value = false
+      progress.value = ''
+      return []
+    }
     const out: ToolResult[] = []
     for (let i = 0; i < list.length; i++) {
       const t = list[i]
@@ -202,6 +282,9 @@ export function useTools() {
   function select(id: string) {
     if (projectId.value === id) return
     projectId.value = id
+    // 审查 F-1:推进世代号 = 作废**所有在途扫描**。桌面宿主的 scanProjectTree 是真异步 IPC,
+    // 点选择器时那份扫描还在路上;不推进世代号,它就会把上一个项目的清单写进当前项目。
+    scanGen += 1
     // 换项目 = 三份缓存全部作废:树、结果、文本 LRU 都是按项目成立的
     tree.value = []
     treeAt.value = 0
@@ -232,7 +315,7 @@ export function useTools() {
   return {
     projects, projectId, tree, truncated, running, allRunning, progress, error, results, tools, caps,
     load, select, runTool, runAll, registerTool, findingsOf, counts,
-    /** 修完文件/外部改过项目后调用:下一次跑强制重扫 */
-    invalidateTree: () => { treeAt.value = 0; textCache.clear() }
+    /** 修完文件/外部改过项目后调用:下一次跑强制重扫(世代号同时作废在途的那次扫描,F-1) */
+    invalidateTree: () => { scanGen += 1; treeAt.value = 0; textCache.clear() }
   }
 }
