@@ -34,25 +34,44 @@ export function parseExtResources(text: string): ExtRef[] {
  * `res://a/b.png` → `a/b.png`;非 res://、裸 `res://`、空值返回 null。
  *
  * 反斜杠归成正斜杠:原语层给出的 rel 只会是正斜杠(inspectfs.js / Rust 两侧同形),
- * 不归一就永远对不上 —— 而且 `.replace` 只作用于 res:// 之后的部分,不受盘符影响。
+ * 不归一就永远对不上 —— 而且归一**不止**是换斜杠:切段后吃掉空段与 `.` 段
+ * (`res://./a` → `a`、`res://a//b` → `a/b`),`..` 越界判 null,与树 rel 的生产闸
+ * `resolveRel`(src-ztools/preload/lib/inspectfs.js:37-50)同规则。旧实现不归一,
+ * 交回 `./a`、`a//b` 这类在归一过的树里**永远查不到**的 rel,断链检查会误报缺文件。
  * `user://`(运行时可写目录)与绝对路径不在项目树里,判不了存在性,一律不解析。
  */
 export function resToRel(p: string): string | null {
   if (typeof p !== 'string' || !p.startsWith('res://')) return null
-  const rel = p.slice('res://'.length).replace(/\\/g, '/')
-  return rel && rel !== '/' ? rel : null
+  const rest = p.slice('res://'.length).replace(/\\/g, '/')
+  if (/^[a-zA-Z]:/.test(rest)) return null // res://C:/… 形态:树 rel 恒无盘符,同 resolveRel 的拒法
+  const stack: string[] = []
+  for (const seg of rest.split('/')) {
+    if (!seg || seg === '.') continue
+    if (seg === '..') return null
+    stack.push(seg)
+  }
+  return stack.length ? stack.join('/') : null
 }
 
 /**
- * load_steps 声明值 vs 实际(ext_resource + sub_resource 条数)。
- * 缺 load_steps 记 0:Godot 允许省略该键,臆造成 1 会把「声明与实际不符」变成误报。
+ * `.tscn/.tres` 头部的 load_steps 计数。**引擎不变式:`load_steps = ext_resource 数
+ * + sub_resource 数 + 1`**,+1 是资源文件自身。规范形:1 个 ext_resource 的场景头部
+ * 写 `gd_scene load_steps=2`;2 ext + 5 sub 的场景写 `load_steps=8`。所以三个字段是:
+ *   · `actual`   = ext + sub(纯引用条数,**不是**可比值 —— 拿它和 load_steps 直接比,
+ *                  对每一个引擎写出的场景都恰好差 1,场景体检会把全量真场景误报成不符)
+ *   · `expected` = actual + 1(头部应然值;判「声明与实际不符」必须比这个)
+ *   · `declared` = 头部读到的值;**0 表示 `load_steps` 属性缺失**(Godot 允许省略该键,
+ *                  臆造成 1 会造假阳性),调用方不得拿 0 当声明值去比对 —— 先判
+ *                  declared > 0 才比 declared === expected。
+ * (docs/tools-page-plan.md §3.2 #13 场景体检按本口径执行,旧文的「与实际条数不符」
+ * 等价式已随本轮修正。)
  */
-export function countSteps(text: string): { declared: number; actual: number } {
+export function countSteps(text: string): { declared: number; actual: number; expected: number } {
   const m = /\bload_steps=(\d+)/.exec(String(text || ''))
   let actual = 0
   for (const line of String(text || '').split(/\r?\n/)) {
     const t = line.trim()
     if (t.startsWith('[ext_resource') || t.startsWith('[sub_resource')) actual++
   }
-  return { declared: m ? Number(m[1]) : 0, actual }
+  return { declared: m ? Number(m[1]) : 0, actual, expected: actual + 1 }
 }

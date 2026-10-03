@@ -30,14 +30,28 @@ function ok(cond, label, extra) {
 }
 function section(t) { console.log(`\n=== ${t} ===`) }
 
-/** 造文件清单:[ [rel, size, mtimeOffsetDays?] ] */
+/**
+ * 造文件清单:[ [rel, size, mtimeOffsetDays?] ]
+ *
+ * ext 推导必须与原语两端逐字一致(只取**文件名 basename**,最后一个点在其后才截,统一小写):
+ *   · JS  端 src-ztools/preload/lib/inspectfs.js:263  `path.extname(rel).slice(1).toLowerCase()`
+ *   · Rust 端 src-tauri/src/inspectfs.rs:83-88        `ext_of(name)`,name 就是文件名
+ * 旧夹具对整个 rel 做 `rel.split('.').pop()`:'.gitignore' 得 'gitignore'、'scene/.hidden'
+ * 得 'hidden'、'v1.2/build' 得 '2/build',两端原语给的都是空串。真实 Godot 项目里
+ * .gitignore/.gdignore 满地都是,Tasks 11-13 还要在这份夹具上继续加断言 —— 推导先对上。
+ */
+function extOf(rel) {
+  const base = rel.slice(rel.lastIndexOf('/') + 1)
+  const i = base.lastIndexOf('.')
+  return i > 0 ? base.slice(i + 1).toLowerCase() : ''
+}
 function tree(specs) {
   const base = Date.UTC(2026, 0, 1)
   return specs.map(([rel, size, off = 0]) => ({
     rel,
     size,
     mtimeMs: base + off * 86400000,
-    ext: (rel.includes('.') ? rel.split('.').pop() : '').toLowerCase()
+    ext: extOf(rel)
   }))
 }
 
@@ -55,9 +69,27 @@ async function main() {
     ['assets/bg.png', 5000],
     ['addons/one/plugin.cfg', 20]
   ])
-  // 入参快照:rel + size 一起比,既抓「原地 sort 改了顺序」也抓「改写了元素」
-  const snapshot = () => T1.map((f) => `${f.rel}:${f.size}`).join('|')
+  // 入参快照:rel + size + mtimeMs + ext 四字段一起比 —— 既抓「原地 sort 改了顺序」也抓
+  // 「改写了元素的任何字段」。旧版只比 rel+size,`tree.forEach(f => { f.mtimeMs = 0 })`
+  // 这类污染完全溜得过(实测 55 条照全绿)。
+  const snapshot = () => T1.map((f) => `${f.rel}:${f.size}:${f.mtimeMs}:${f.ext}`).join('|')
   const T1_BEFORE = snapshot()
+
+  // 夹具自检(见文件头 extOf 注释):钉住「夹具与两端原语同口径」。改回旧推导
+  // (rel.split('.').pop())时这三条立刻变红。
+  ok(tree([['.gitignore', 5]])[0].ext === '', '夹具 ext:.gitignore 归空串(原语口径,非 gitignore)',
+    JSON.stringify(tree([['.gitignore', 5]])[0].ext))
+  ok(tree([['scene/.hidden', 5]])[0].ext === '' && tree([['v1.2/build', 5]])[0].ext === '',
+    '夹具 ext:basename 以 . 开头 / 点只在目录名里都给空串',
+    [tree([['scene/.hidden', 5]])[0].ext, tree([['v1.2/build', 5]])[0].ext].map((e) => JSON.stringify(e)).join(' / '))
+  ok(tree([['a.tar.gz', 5]])[0].ext === 'gz', '夹具 ext:多点文件名取最后一段',
+    JSON.stringify(tree([['a.tar.gz', 5]])[0].ext))
+  // 点文件的真实去向:与 LICENSE 一起并进 (无扩展名),而不是各自成 'gitignore' 组
+  const NOEXT = tree([['.gitignore', 5], ['.gdignore', 5], ['LICENSE', 5], ['a.tar.gz', 5]])
+  const noExtGroup = T.groupByExt(NOEXT).find((g) => g.ext === '(无扩展名)')
+  ok(noExtGroup?.count === 3 && noExtGroup?.bytes === 15 &&
+    T.groupByExt(NOEXT).find((g) => g.ext === 'gz')?.count === 1,
+    '点文件与无点文件合并进 (无扩展名) 组', JSON.stringify(T.groupByExt(NOEXT)))
 
   // isCache 是「缓存体积」与「源码体积」两条统计的唯一分界,必须按路径段判:
   // 子串匹配(rel.includes('.godot'))会把每个项目都有的 project.godot 误判成缓存。
@@ -84,6 +116,14 @@ async function main() {
   ok(byExt.every((g, i) => i === 0 || byExt[i - 1].bytes >= g.bytes), 'groupByExt 按体积降序')
   ok(T.groupByExt(T1, 2).length === 2 && T.groupByExt(T1, 2).map((g) => g.ext).join(',') === 'png,stex',
     '传 n 时截断且截的是头部(留最大的)', T.groupByExt(T1, 2).map((g) => g.ext).join(','))
+  // 统一 top-N 口径(审查 F-2):n 省略或 <= 0 → 返回整个降序清单,三个函数同规则。
+  // 旧行为分叉:groupByExt/groupByTopDir 用 `n ? slice : out`(0=全部、-1=悄悄丢最小
+  // 一组),topFiles 用 Math.max(0,n)(0/-1=全空)—— 下面六条把共享规则钉死。
+  ok(T.groupByExt(T1, 0).length === byExt.length, 'groupByExt n=0 返回整个降序清单(不是空组)',
+    T.groupByExt(T1, 0).length)
+  ok(T.groupByExt(T1, -1).length === byExt.length, 'groupByExt n<0 同返回全部(旧值丢最小一组→5)',
+    T.groupByExt(T1, -1).length)
+  ok(T.groupByExt(T1, 99).length === byExt.length, 'groupByExt n 超出组数返回全部')
   ok(T.groupByExt([tree([['LICENSE', 5]])[0]]).find((g) => g.ext === '(无扩展名)')?.count === 1,
     'ext 空串归入 (无扩展名)')
 
@@ -92,6 +132,10 @@ async function main() {
   ok(byDir.find((d) => d.dir === 'scene')?.count === 2, '顶层目录组同时给出条数')
   ok(byDir.find((d) => d.dir === '(根目录)')?.bytes === 100, '根目录文件归进 (根目录)', JSON.stringify(byDir))
   ok(byDir.every((g, i) => i === 0 || byDir[i - 1].bytes >= g.bytes), 'groupByTopDir 按体积降序')
+  ok(T.groupByTopDir(T.noCache(T1), 0).length === byDir.length, 'groupByTopDir n=0 返回整个降序清单(同规则)',
+    T.groupByTopDir(T.noCache(T1), 0).length)
+  ok(T.groupByTopDir(T.noCache(T1), -1).length === byDir.length, 'groupByTopDir n<0 同返回全部(旧值→4)',
+    T.groupByTopDir(T.noCache(T1), -1).length)
 
   const beforeTop = snapshot()
   const top = T.topFiles(T1, 3)
@@ -99,7 +143,12 @@ async function main() {
   // 降序取前 3 的第一名就是 assets/bg.png。以实现真实输出为准。
   ok(top.map((f) => f.rel).join('|') === 'assets/bg.png|.godot/imported/a.stex|scene/main.tscn',
     'topFiles 取前 n 且降序', JSON.stringify(top.map((f) => f.rel)))
-  ok(T.topFiles(T1, 0).length === 0, 'n=0 返回空数组')
+  // 口径从「n=0 → 空数组」改为与 group 函数一致:n<=0 返回整个清单(审查 F-2,
+  // 排名摘要里「0 个」无意义,静默空输出比全量更糟)。
+  ok(T.topFiles(T1, 0).length === T1.length, 'topFiles n=0 返回整个降序清单(与 group 函数同规则)',
+    T.topFiles(T1, 0).length)
+  ok(T.topFiles(T1, -1).length === T1.length, 'topFiles n<0 同返回全部(旧值→空数组)',
+    T.topFiles(T1, -1).length)
   ok(T.topFiles(T1, 99).length === T1.length, 'n 超过长度时返回全部,不报错')
   // 这条替代计划书里的 `JSON.stringify(T1) === JSON.stringify(T1)`(自己等于自己,恒真,
   // 实现改成 `tree.sort(...)` 也照样绿)。现在比的是调用前后的真实快照。
@@ -109,6 +158,18 @@ async function main() {
   ok(T.fmtBytes(0) === '0 B' && T.fmtBytes(1024) === '1.0 KB' && T.fmtBytes(1500000) === '1.4 MB',
     'fmtBytes 可读', [T.fmtBytes(0), T.fmtBytes(1024), T.fmtBytes(1500000)].join(' / '))
   ok(T.fmtBytes(-5) === '0 B' && T.fmtBytes(NaN) === '0 B', 'fmtBytes 对负数/NaN 不崩')
+  // 审查 F-3(旧代码实测全中):① 0<n<1 时 log 层数为负、Math.min 只钳上界 → u[-1]
+  // 出 "409.6 undefined";② .toFixed(1) 会把 1023.9xx 进位显示成 1024.0,层级却不进。
+  ok(!String(T.fmtBytes(0.4)).includes('undefined') && !String(T.fmtBytes(0.5)).includes('undefined'),
+    'fmtBytes 小数输入不出 undefined', [T.fmtBytes(0.4), T.fmtBytes(0.5)].join(' / '))
+  ok(T.fmtBytes(0.5) === '1 B', 'fmtBytes(0.5) 落在 B 层四舍五入', T.fmtBytes(0.5))
+  ok(T.fmtBytes(1048575) === '1.0 MB' && T.fmtBytes(1073741823) === '1.0 GB' && T.fmtBytes(2 ** 40 - 1) === '1.0 TB',
+    'fmtBytes 显示值进位到 1024.0 时升一级(旧实测 1024.0 KB/MB/GB)',
+    [T.fmtBytes(1048575), T.fmtBytes(1073741823), T.fmtBytes(2 ** 40 - 1)].join(' / '))
+  ok(T.fmtBytes(1023.5) === '1.0 KB', 'fmtBytes B 层同理:1023.5 不再显示 "1024 B"', T.fmtBytes(1023.5))
+  // TB 是最高档,无级可升 —— 钉住这个饱和行为是刻意的,不是漏网(见 treeUtils 注释)。
+  ok(T.fmtBytes(2 ** 50 - 1) === '1024.0 TB', 'fmtBytes 顶档饱和为 1024.0 TB(上面没有 PB)',
+    T.fmtBytes(2 ** 50 - 1))
   ok(T.fmtMs(900) === '900 ms' && T.fmtMs(2500) === '2.5 s', 'fmtMs 可读')
   ok(T.dirOf('a/b/c.txt') === 'a/b/' && T.dirOf('c.txt') === '', 'dirOf 含尾斜杠、根目录返回空串')
 
@@ -154,13 +215,35 @@ async function main() {
   ok(T.resToRel('user://x') === null, 'user:// 不解析')
   ok(T.resToRel('C:\\a') === null, '绝对路径不解析')
   ok(T.resToRel('') === null && T.resToRel(null) === null, '空串/null 不解析')
+  // 审查 F-5 附带:旧实现不归一,`res://./a` 出 './a'、`res://a//b` 出 'a//b' —— 这类
+  // rel 在 scan 归一过的树里永远查不到,断链检查会误报。归一必须与 resolveRel
+  // (inspectfs.js:37-50)同规则:吃掉 './'、折叠重复斜杠、越界 '..' 判 null。
+  ok(T.resToRel('res://./a') === 'a', '开头的 ./ 被吃掉(与 resolveRel 同归一)', JSON.stringify(T.resToRel('res://./a')))
+  ok(T.resToRel('res://a//b') === 'a/b', '重复斜杠折叠', JSON.stringify(T.resToRel('res://a//b')))
+  ok(T.resToRel('res://sub/../a') === null, '越出项目的 .. 判 null(与 resolveRel 一致)', JSON.stringify(T.resToRel('res://sub/../a')))
 
   const steps = T.countSteps(SCENE)
   ok(steps.declared === 4, 'load_steps 读得到', steps.declared)
   ok(steps.actual === 6, '实际 = 5 ext + 1 sub', steps.actual)
+  // 引擎不变式:load_steps = ext + sub + 1(+1 是资源文件自身)。可比值是 expected,
+  // 不是 actual —— 旧代码拿 actual 当可比值,对每个引擎写出的场景都差 1(审查 F-1)。
+  ok(steps.expected === 7, '可比值 expected = actual + 1', steps.expected)
   ok(T.countSteps('format=3').declared === 0, '缺 load_steps 记 0(不臆造)')
+  ok(T.countSteps('format=3').actual === 0 && T.countSteps('format=3').expected === 1,
+    '缺属性时 expected 照常给(调用方须先看 declared 是否缺)', JSON.stringify(T.countSteps('format=3')))
   ok(T.countSteps('').declared === 0 && T.countSteps('').actual === 0, '空文本 0/0')
   ok(T.countSteps('[node name="A" parent="."]').actual === 0, 'node 段不计入 actual')
+  // 规范最小场景:一个 ext_resource 的 .tscn 头部就是 gd_scene load_steps=2。
+  // 这条是旧发布代码永远过不了的断言(actual 恒比 declared 少 1)。
+  const CANON = `gd_scene load_steps=2 format=3 uid="uid://c1"
+
+[ext_resource type="Script" path="res://a.gd" id="1_a"]
+
+[node name="Root" type="Node2D"]
+`
+  const canon = T.countSteps(CANON)
+  ok(canon.actual === 1 && canon.expected === 2 && canon.declared === canon.expected,
+    '规范最小场景 declared === expected(load_steps=2 = 1 ext + 0 sub + 1)', JSON.stringify(canon))
 }
 main().catch((e) => {
   // 断言里不该抛错;真抛了(比如实现返回了 undefined)也要以退出码 1 收口,不能让 CI 看到绿。

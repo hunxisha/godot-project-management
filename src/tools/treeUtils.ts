@@ -32,7 +32,20 @@ export function sumBytes(tree: TreeEntry[]): number {
 
 export interface ExtGroup { ext: string; bytes: number; count: number }
 
-/** 按扩展名聚合(体积降序);ext 为空串时归入 `(无扩展名)`。传 n 则只取前 n 组 */
+/**
+ * 三个 top-N 函数共用的截取规则(审查 F-2):**n 省略或 <= 0 → 返回整个降序清单**;
+ * n > 0 → 取前 n(n 超长自然得全量)。
+ *
+ * 为什么 0 不返回空:对体积排名来说「看 0 组」不是一个请求,静默给空数组比给全量
+ * 更糟(界面上会渲染出一块「什么都没有」的空白)。旧实现三处分叉 —— 两个 group 函数
+ * `n ? slice(0,n) : out`(0=全量、-1=悄悄丢最小一组)、topFiles `slice(0, Math.max(0,n))`
+ * (0/-1=空)—— 统一收敛到这一个实现,防止再各漂各的。
+ */
+function takeTop<T>(sorted: T[], n?: number): T[] {
+  return typeof n === 'number' && n > 0 ? sorted.slice(0, n) : sorted
+}
+
+/** 按扩展名聚合(体积降序);ext 为空串时归入 `(无扩展名)`。n 省略或 <= 0 → 返回全部组 */
 export function groupByExt(tree: TreeEntry[], n?: number): ExtGroup[] {
   const m = new Map<string, ExtGroup>()
   for (const f of tree) {
@@ -42,13 +55,12 @@ export function groupByExt(tree: TreeEntry[], n?: number): ExtGroup[] {
     g.count += 1
     m.set(k, g)
   }
-  const out = [...m.values()].sort((a, b) => b.bytes - a.bytes)
-  return n ? out.slice(0, n) : out
+  return takeTop([...m.values()].sort((a, b) => b.bytes - a.bytes), n)
 }
 
 export interface DirGroup { dir: string; bytes: number; count: number }
 
-/** 按顶层目录聚合(体积降序);根目录文件归入 `(根目录)`。传 n 则只取前 n 组 */
+/** 按顶层目录聚合(体积降序);根目录文件归入 `(根目录)`。n 省略或 <= 0 → 返回全部组 */
 export function groupByTopDir(tree: TreeEntry[], n?: number): DirGroup[] {
   const m = new Map<string, DirGroup>()
   for (const f of tree) {
@@ -59,13 +71,12 @@ export function groupByTopDir(tree: TreeEntry[], n?: number): DirGroup[] {
     g.count += 1
     m.set(k, g)
   }
-  const out = [...m.values()].sort((a, b) => b.bytes - a.bytes)
-  return n ? out.slice(0, n) : out
+  return takeTop([...m.values()].sort((a, b) => b.bytes - a.bytes), n)
 }
 
-/** 体积最大的前 n 个文件(降序)。不改动入参:先复制再排序 */
-export function topFiles(tree: TreeEntry[], n: number): TreeEntry[] {
-  return [...tree].sort((a, b) => b.size - a.size).slice(0, Math.max(0, n))
+/** 体积最大的前 n 个文件(降序);n 省略或 <= 0 → 返回整个清单(与 groupBy* 同规则)。不改动入参:先复制再排序 */
+export function topFiles(tree: TreeEntry[], n?: number): TreeEntry[] {
+  return takeTop([...tree].sort((a, b) => b.size - a.size), n)
 }
 
 /** rel 查表集:断链检查按 rel 判存在性,O(1) */
@@ -79,16 +90,41 @@ export function dirOf(rel: string): string {
   return i < 0 ? '' : rel.slice(0, i + 1)
 }
 
-/** 字节数 → 人类可读。负数 / NaN / Infinity 一律给 `0 B`,不在界面上显示 'NaN KB' */
+/**
+ * 字节数 → 人类可读(1024 进制)。负数 / NaN / Infinity 一律给 `0 B`,不在界面上显示 'NaN KB'。
+ *
+ * ⚠ 本应用里已有另一个字节格式化函数:`src/utils/format.ts:2` 的 `fmtSize`
+ * (资产页 / 备份页在用,输出整数风格,如 `1024 KB` / `3 MB`)。两者**刻意不同** ——
+ * 工具页计划书钉死的是「一位小数」口径(`1.0 KB` / `1.4 MB`)。是否全站统一成一份
+ * 文案属产品决策,留待终审由人拍板,本轮**不合并**(审查 F-4 裁决:只登记不合并)。
+ * 新代码请勿再写第三份。
+ */
 export function fmtBytes(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return '0 B'
   const u = ['B', 'KB', 'MB', 'GB', 'TB']
-  const i = Math.min(Math.floor(Math.log(n) / Math.log(1024)), u.length - 1)
-  const v = n / Math.pow(1024, i)
+  // 档位估算要双向钳制:下界 0(小数输入 log 为负,floor 出 -1,u[-1] 会印出
+  // "409.6 undefined" —— 旧代码只钳了上界),上界最后一档 TB。
+  let i = Math.min(Math.max(Math.floor(Math.log(n) / Math.log(1024)), 0), u.length - 1)
+  let v = n / Math.pow(1024, i)
+  // 显示进位则升一级:1048575 的档位估算是 KB、v=1023.999,`.toFixed(1)` 却印成
+  // "1024.0 KB"(B 档同理,1023.5 → "1024 B")。判据必须看**渲染值**而不是 v 本身 ——
+  // 单纯 `v >= 1024` 抓不到 1023.999。有更高档才升;顶档没有,接受 "1024.0 TB" 饱和。
+  const rendered = i === 0 ? Math.round(v) : Number(v.toFixed(1))
+  if (rendered >= 1024 && i < u.length - 1) {
+    i++
+    v = n / Math.pow(1024, i)
+  }
   return i === 0 ? `${Math.round(v)} B` : `${v.toFixed(1)} ${u[i]}`
 }
 
-/** 毫秒 → 人类可读(扫描耗时展示) */
+/**
+ * 毫秒 → 人类可读(扫描耗时展示,`900 ms` / `2.5 s`)。
+ *
+ * ⚠ 与 `src/utils/format.ts:37` 的 `fmtDuration`(项目卡片 / 备份列表在用,中文文案:
+ * `2.5 秒`、超过一分钟折算成 `1 分 05 秒`)是双胞胎,**输出刻意不同**:工具页计划书
+ * 钉的是紧凑英文单位串,且不做分钟折算(扫描耗时以秒为量级)。全站统一与否同 `fmtBytes`,
+ * 待终审决策,本轮不合并。
+ */
 export function fmtMs(n: number): string {
   if (!Number.isFinite(n) || n < 0) return '0 ms'
   return n < 1000 ? `${Math.round(n)} ms` : `${(n / 1000).toFixed(1)} s`
