@@ -4,8 +4,6 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import Icon from '../Icon.vue'
 import BBRich from './BBRich.vue'
-import DocTreePanel from './DocTreePanel.vue'
-import DocTreeDialog from './DocTreeDialog.vue'
 import { useDocs } from '../../composables/useDocs'
 import { copyText, notify, openExternal, showInFolder } from '../../services/bridge'
 import { onlineDocsUrl } from '../../utils/godotDocs'
@@ -20,6 +18,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'navigate', className: string, anchor?: string): void
   (e: 'anchor-done'): void
+  /** 交给 DocsView:切左栏到继承树视图并定位本类 */
+  (e: 'show-tree'): void
 }>()
 
 const detail = ref<DocClassDetail | null>(null)
@@ -36,12 +36,6 @@ const currentTag = computed(() => currentStatus.value?.tag)
 const chain = computed(() => inheritsChainOf(props.className))
 const derived = computed(() => derivedOf(props.className))
 const isFav = computed(() => favorites.value.includes(props.className))
-
-/** 右侧栏标签:目录 / 继承树 */
-const sideTab = ref<'toc' | 'tree'>('toc')
-/** 完整继承树弹层 */
-const treeDialogOpen = ref(false)
-
 
 /** 通知(NOTIFICATION_*)单独成节,其余常量与枚举并列 */
 const notifications = computed(() => detail.value?.constants.filter((c) => c.name.startsWith('NOTIFICATION_')) ?? [])
@@ -225,11 +219,11 @@ function signature(m: { name: string, returnType: string, params: { name: string
           </template>
           <span v-if="!chain.length" class="crumb-none">(根类,无父类)</span>
         </div>
-        <!-- 派生数:明细在右侧「继承树」标签里,头部只给提示 -->
+        <!-- 派生数:明细在左栏的继承树里,头部只给提示 -->
         <div v-if="derived.length" class="crumbs">
           <span class="crumb-label">派生:</span>
           <span class="derived-count">{{ derived.length }} 个</span>
-          <button class="tree-open-inline" @click="sideTab = 'tree'">在继承树中查看</button>
+          <button class="tree-open-inline" @click="emit('show-tree')">在继承树中查看</button>
         </div>
         <!-- 项目脚本类:显示来源文件,点击在文件管理器中定位 -->
         <div v-if="detail.sourceFile" class="crumbs">
@@ -386,18 +380,12 @@ function signature(m: { name: string, returnType: string, params: { name: string
 
       </div><!-- /panel-main -->
 
-      <!-- 右侧栏:目录 / 继承树 双标签(树不再挤在正文头部) -->
-      <aside class="side" :class="{ 'tree-mode': sideTab === 'tree' }">
-        <div class="side-tabs">
-          <button class="side-tab" :class="{ on: sideTab === 'toc' }" @click="sideTab = 'toc'">
-            <Icon name="layers" :size="11" /> 目录
-          </button>
-          <button class="side-tab" :class="{ on: sideTab === 'tree' }" @click="sideTab = 'tree'">
-            <Icon name="git-branch" :size="11" /> 继承树
-          </button>
+      <!-- 右侧栏:本页目录(继承树已搬进左栏导航,这里不再需要双标签) -->
+      <aside class="side">
+        <div class="side-title">
+          <Icon name="layers" :size="11" /> 目录
         </div>
-
-        <div v-if="sideTab === 'toc'" class="side-body">
+        <div class="side-body">
           <template v-if="toc.length">
             <template v-for="g in toc" :key="g.key">
               <div class="toc-group" :class="{ on: activeToc === g.key }">{{ g.label }}</div>
@@ -413,15 +401,6 @@ function signature(m: { name: string, returnType: string, params: { name: string
           </template>
           <div v-else class="side-empty">本页没有分节</div>
         </div>
-
-        <div v-else class="side-body">
-          <div class="tree-head">
-            <button class="tree-full" title="在弹层中打开完整继承树(可搜索)" @click="treeDialogOpen = true">
-              <Icon name="external" :size="11" /> 完整树
-            </button>
-          </div>
-          <DocTreePanel :current-class="className" @navigate="(n) => emit('navigate', n)" />
-        </div>
       </aside>
     </div><!-- /panel-grid -->
 
@@ -430,14 +409,6 @@ function signature(m: { name: string, returnType: string, params: { name: string
       <p>未在当前文档库中找到「{{ className }}」。</p>
       <p class="hint">它可能属于其他版本,或文档库尚未收录。</p>
     </div>
-
-    <!-- 完整继承树(弹层,可搜索跳转) -->
-    <DocTreeDialog
-      :open="treeDialogOpen"
-      :current-class="className"
-      @close="treeDialogOpen = false"
-      @navigate="(n) => emit('navigate', n)"
-    />
   </div>
 </template>
 
@@ -745,11 +716,6 @@ function signature(m: { name: string, returnType: string, params: { name: string
   align-items: start;
 }
 
-/* 树模式需要更宽(类名普遍较长),目录模式保持窄栏不抢正文 */
-.panel-grid:has(.side.tree-mode) {
-  --side-w: 250px;
-}
-
 .panel-main {
   min-width: 0;
 }
@@ -766,37 +732,17 @@ function signature(m: { name: string, returnType: string, params: { name: string
   padding-left: 12px;
 }
 
-.side-tabs {
+.side-title {
   display: flex;
-  gap: 3px;
+  align-items: center;
+  gap: 4px;
   padding-bottom: 7px;
   margin-bottom: 6px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-}
-
-.side-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 9px;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  background: none;
-  color: var(--text-3);
   font-size: 11.5px;
-  cursor: pointer;
-}
-
-.side-tab:hover {
-  color: var(--text);
-}
-
-.side-tab.on {
-  color: var(--brand);
-  font-weight: 600;
-  background: var(--brand-weak);
-  border-color: color-mix(in srgb, var(--brand) 30%, transparent);
+  font-weight: 700;
+  color: var(--text-3);
 }
 
 .side-body {
@@ -811,30 +757,6 @@ function signature(m: { name: string, returnType: string, params: { name: string
   padding: 12px 4px;
   font-size: 11.5px;
   color: var(--text-3);
-}
-
-.tree-head {
-  display: flex;
-  justify-content: flex-end;
-  padding-bottom: 6px;
-}
-
-.tree-full {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 2px 7px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text-3);
-  font-size: 10.5px;
-  cursor: pointer;
-}
-
-.tree-full:hover {
-  color: var(--brand);
-  border-color: color-mix(in srgb, var(--brand) 35%, transparent);
 }
 
 .derived-count {

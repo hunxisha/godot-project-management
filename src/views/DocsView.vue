@@ -1,9 +1,10 @@
 <!-- 文档页:引擎类参考浏览。无可用文档库时引导生成;有库时左列表右详情。
      生成任务进度在本页以卡片展示(全局任务栏由 App 负责)。 -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from '../components/Icon.vue'
 import DocClassPanel from '../components/docs/DocClassPanel.vue'
+import DocTreePanel from '../components/docs/DocTreePanel.vue'
 import DocDiffDialog from '../components/docs/DocDiffDialog.vue'
 import { useDocs } from '../composables/useDocs'
 import { notify, pickFile } from '../services/bridge'
@@ -31,6 +32,14 @@ const selected = ref('')
 const anchor = ref<string | null>(null)
 /** 侧栏过滤 */
 const filter = ref('')
+/** 侧栏想要哪种视图。真正生效的见 showTree */
+const navView = ref<'list' | 'tree'>('list')
+const treeEl = ref<InstanceType<typeof DocTreePanel> | null>(null)
+/**
+ * 树视图是否真的铺开:过滤中强制回列表 —— 成员名匹配(见 memberMatchNames)与
+ * 「类名命中优先、其次成员名命中」的排序分组都是列表语义,塞进树里没有对应物。
+ */
+const showTree = computed(() => navView.value === 'tree' && !filter.value.trim())
 /** 管理模式:显示全部版本的生成/删除操作 */
 const managing = ref(false)
 /** 窄窗(单栏布局)下是否停在列表 */
@@ -121,6 +130,16 @@ const historyItems = computed(() =>
 
 function openClass(name: string) {
   gotoClass(name)
+}
+
+/**
+ * 正文头部「在继承树中查看」:切到树视图并定位当前类。
+ * 有过滤词时先清掉 —— 用户明确要看树,留着搜索词只会让树出不来。
+ */
+function showInTree() {
+  filter.value = ''
+  navView.value = 'tree'
+  nextTick(() => treeEl.value?.revealCurrent())
 }
 
 const anchorKey = ref(0)
@@ -424,6 +443,21 @@ const PHASE_TEXT: Record<string, string> = {
           <input v-model="filter" class="filter-input" placeholder="过滤类名…" spellcheck="false">
         </div>
 
+        <div class="view-tabs">
+          <button class="view-tab" :class="{ on: !showTree }" @click="navView = 'list'">
+            <Icon name="list" :size="11" /> 列表
+          </button>
+          <button
+            class="view-tab"
+            :class="{ on: showTree }"
+            :disabled="!!filter.trim()"
+            :title="filter.trim() ? '过滤中只能看列表,清空过滤词后用继承树' : '按继承层级浏览全部类'"
+            @click="navView = 'tree'"
+          >
+            <Icon name="git-branch" :size="11" /> 继承树
+          </button>
+        </div>
+
         <div class="class-list">
           <div v-if="favoriteItems.length" class="list-group">收藏</div>
           <button
@@ -449,19 +483,32 @@ const PHASE_TEXT: Record<string, string> = {
             <span class="cls-name mono">{{ h.name }}</span>
           </button>
 
-          <div class="list-group">全部 <span class="cnt">{{ filtered.length }}</span></div>
-          <button
-            v-for="c in filtered"
-            :key="c.name"
-            class="cls-item"
-            :class="{ active: c.name === selected }"
-            @click="openClass(c.name)"
-          >
-            <span class="cls-name mono">{{ c.name }}</span>
-            <span v-if="memberMatchNames.has(c.name)" class="cls-member-hit" title="成员名匹配">成员</span>
-            <span v-else-if="c.inherits" class="cls-inherits mono">{{ c.inherits }}</span>
-          </button>
-          <div v-if="!filtered.length" class="list-empty">没有匹配「{{ filter }}」的类</div>
+          <!--
+            树用 v-show、列表用 v-if,这个分工是有意的:
+            树只渲染「已展开路径」上的行(几十行量级),常驻挂载几乎不要钱,却能让用户
+            手动铺开的分支在「列表 ↔ 树」来回切之后还在;而扁平列表在 1075 类库里是上千个
+            按钮,藏在树视图后面继续渲染就是白付的钱,所以它该跟着 v-if 卸掉。
+          -->
+          <div v-show="showTree">
+            <div class="list-group">继承树 <span class="cnt">{{ classes.length }}</span></div>
+            <DocTreePanel ref="treeEl" :current-class="selected" @navigate="openClass" />
+          </div>
+
+          <template v-if="!showTree">
+            <div class="list-group">全部 <span class="cnt">{{ filtered.length }}</span></div>
+            <button
+              v-for="c in filtered"
+              :key="c.name"
+              class="cls-item"
+              :class="{ active: c.name === selected }"
+              @click="openClass(c.name)"
+            >
+              <span class="cls-name mono">{{ c.name }}</span>
+              <span v-if="memberMatchNames.has(c.name)" class="cls-member-hit" title="成员名匹配">成员</span>
+              <span v-else-if="c.inherits" class="cls-inherits mono">{{ c.inherits }}</span>
+            </button>
+            <div v-if="!filtered.length" class="list-empty">没有匹配「{{ filter }}」的类</div>
+          </template>
         </div>
       </aside>
 
@@ -505,6 +552,7 @@ const PHASE_TEXT: Record<string, string> = {
           :class-name="selected"
           :anchor="anchor"
           @navigate="onNavigate"
+          @show-tree="showInTree"
           @anchor-done="anchor = null"
         />
         <div v-else class="detail-empty">
@@ -789,6 +837,45 @@ const PHASE_TEXT: Record<string, string> = {
   background: none;
   color: var(--text);
   font-size: 12.5px;
+}
+
+.view-tabs {
+  display: flex;
+  gap: 3px;
+  margin: 0 10px 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.view-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-3);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.view-tab:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.view-tab.on {
+  color: var(--brand);
+  background: var(--brand-weak);
+  border-color: color-mix(in srgb, var(--brand) 22%, transparent);
+  font-weight: 600;
+}
+
+/* 过滤中树视图不可用:置灰而不是「点了没反应」,原因写在 title 里 */
+.view-tab:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .class-list {
