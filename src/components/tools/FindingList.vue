@@ -1,11 +1,27 @@
 <script setup lang="ts">
 // 通用结论列表:任何检查器产出的 Finding[] 都按「错误 / 警告 / 提示」三段渲染。
 // 这里不认识具体工具,也不做折叠/忽略(P0a 没有 ignore-per-id,不要在这里加)。
+//
+// 修复动作同理:能不能修、动词叫什么、为什么不能修,全部由父组件用 planFix 算好后从
+// `plans` 喂进来,执行结果从 `fixState` 喂进来 —— 本组件只做渲染与「把这条结论交出去」,
+// 不加任何判据(spec §5.3 的判据只许住在 src/tools/fixPlan.ts 里)。
 import { computed } from 'vue'
 import { showInFolder } from '../../services/bridge'
 import type { Finding, Severity } from '../../tools/types'
+import type { FixPlan } from '../../tools/fixPlan'
+import type { FixOutcome } from '../../composables/useTools'
 
-const props = defineProps<{ findings: Finding[]; root: string }>()
+const props = defineProps<{
+  findings: Finding[]
+  root: string
+  /** 按 finding id 存好的修复预告(planFix 的产物);缺项就退回「只当建议显示」 */
+  plans: Record<string, FixPlan>
+  /** 按 finding id 存好的执行回执(useTools.applyFix 记账);缺项表示这条还没执行过 */
+  fixState: Record<string, FixOutcome>
+  /** 有修复在途或别的扫描在跑:按钮冻结,不让两个动盘的动作叠在一起 */
+  busy: boolean
+}>()
+const emit = defineEmits<{ (e: 'fix', f: Finding): void }>()
 
 const ORDER: Severity[] = ['error', 'warn', 'info']
 const TEXT: Record<Severity, string> = { error: '错误', warn: '警告', info: '提示' }
@@ -44,7 +60,29 @@ function reveal(rel?: string) {
         </div>
         <div v-if="f.detail" class="detail">{{ f.detail }}</div>
         <div v-if="f.related && f.related.length" class="related">相关:{{ f.related.join('、') }}</div>
-        <div v-if="f.fix" class="fix">建议:{{ f.fix.label }}（P0b 起支持一键操作）</div>
+        <div v-if="f.fix" class="fix">
+          <span class="fix-label">建议:{{ f.fix.label }}</span>
+          <!-- 可执行 → 一个真正的动作(点开确认框);不可执行 → 把「为什么」说出来,不摆空按钮 -->
+          <button
+            v-if="plans[f.id] && plans[f.id].service && !plans[f.id].empty"
+            class="btn small"
+            :disabled="busy"
+            :title="`先看清要动哪些文件,再确认${plans[f.id].verb}`"
+            @click="emit('fix', f)"
+          >
+            {{ plans[f.id].verb }}
+          </button>
+          <span v-else-if="plans[f.id]" class="fix-na">{{ plans[f.id].reason }}</span>
+        </div>
+        <!-- 执行回执:成败都显示,失败项逐条带原语的中文原因(spec §5.3 规则 4) -->
+        <div v-if="fixState[f.id]" :class="['fix-res', fixState[f.id].ok ? 'ok' : 'bad']">
+          <span>{{ fixState[f.id].message }}</span>
+          <span
+            v-for="(x, xi) in fixState[f.id].failed"
+            :key="`${f.id}#fx${xi}`"
+            class="fix-res-fail mono"
+          >{{ x.rel }}:{{ x.error }}</span>
+        </div>
       </div>
     </section>
     <p v-if="!groups.length" class="empty">没有发现问题。</p>
@@ -113,6 +151,40 @@ function reveal(rel?: string) {
 .fix {
   font-size: 12px;
   line-height: 1.6;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+/* 建议行:文案 + 可选的一键动作,窄面板里换行而不是撑破卡片 */
+.fix {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.fix-na {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.fix-res {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.fix-res.ok {
+  color: var(--ok);
+}
+
+.fix-res.bad {
+  color: var(--danger);
+}
+
+.fix-res-fail {
   color: var(--text-2);
   overflow-wrap: anywhere;
 }

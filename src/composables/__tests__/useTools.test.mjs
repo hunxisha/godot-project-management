@@ -23,6 +23,9 @@
 //   M-5(第 21 节)工具返回值在边界归一成数组;M-8(第 22 节)runAll 的进度行不被
 //   扫描收尾擦掉;M-9(第 23 节)扫描失败路径复位 truncated。
 //
+// 第 24~28 节是 P0b-B1 的修复动作管线 applyFix:只把 rel 交给原语、原语的 ok:false / failed[]
+// 如实上浮、改过磁盘必 invalidateTree、什么都没改成的失败**不**重扫、缺能力时一个原语都不碰。
+//
 // 用法:
 //   node src/composables/__tests__/build-bundle.mjs && node src/composables/__tests__/useTools.test.mjs
 import { existsSync } from 'node:fs'
@@ -76,6 +79,10 @@ function restore() {
   global.window.services.scanProjectTree = BASE_SCAN
   global.window.services.readProjectText = BASE_READ
   global.window.ztools.db.allDocs = BASE_ALLDOCS
+  // B1 起还有两个修复桩:基线状态是「宿主压根没有」(caps 探不到),
+  // 不删掉的话第 6/13 节那种「缺能力降级」用例会被后面新加的桩反向喂饱。
+  delete global.window.services.movePathsToTrash
+  delete global.window.services.writeProjectText
 }
 
 let pass = 0
@@ -597,6 +604,150 @@ async function main() {
   await tT.runTool('size')
   ok(tT.truncated.value === false, '扫描抛异常时同样复位 truncated', String(tT.truncated.value))
   ok(tT.error.value === '宿主炸了', '异常消息也走 R-C 出口(未知原因原样透传)', tT.error.value)
+  restore()
+
+  // ---------- 以下是 Task B1:修复动作管线 applyFix(spec §5.3) ----------
+  // 为什么值得单测:P0b 的 6 个新检查器里有 4 个会**改用户的磁盘**。调度层承担四件事
+  // ① 只把 rel 交给原语(包含闸与绝对路径拼接归 inspectfs.js,渲染层一拼就绕过它);
+  // ② 原语的 ok:false / failed[] 不许被美化成成功(TrashResult 的复核语义在 :284-297);
+  // ③ 改过磁盘必须 invalidateTree,否则 60s TTL 会让下一次体检拿着「已经删掉的文件」出结论;
+  // ④ 反之**什么都没改成的失败不许重扫**(白扫一次 10 万文件的遍历)。
+  // ②③④ 全是「看起来正常」的行为,只有计数桩抓得住。
+  const FIX_FINDING = {
+    id: 'uid:scene/main.tscn',
+    severity: 'warn',
+    title: '孤儿 .uid',
+    fix: { kind: 'trash', label: '移入回收站', payload: ['scene/main.tscn'] }
+  }
+
+  section('24. applyFix 成功:只交 rel、成功后强制重扫')
+  const trashLog = []
+  global.window.services.movePathsToTrash = (pid, rels) => {
+    trashLog.push({ pid, rels })
+    return { ok: true, moved: rels.length, failed: [] }
+  }
+  const tF = M.useTools()
+  await tF.load()
+  await tF.runTool('size') // 先把清单扫进来(applyFix 用 tree 解析预览体积)
+  const scanBeforeFix = scanCalls
+  const oK = await tF.applyFix(FIX_FINDING, { isWin: true })
+  ok(oK.ok === true && oK.moved === 1 && oK.failed.length === 0, '回收站成功回执', JSON.stringify(oK))
+  ok(trashLog.length === 1 && trashLog[0].rels.join(',') === 'scene/main.tscn',
+    '只把 rel 交给原语(渲染层不拼绝对路径,越界与符号链接由 resolveInside 把关)', JSON.stringify(trashLog))
+  ok(trashLog[0].pid === 'godot/project/p1', '调用带完整文档 id 而不是短 id', trashLog[0].pid)
+  ok(oK.verb === '移入回收站' && oK.message.includes('移入回收站') && !oK.message.includes('永久删除'),
+    '成功回执按平台动词说话(Windows 可还原,不提永久删除)', `${oK.verb}|${oK.message}`)
+  ok(oK.changed === true && oK.invalidated === true, '磁盘真的变了 → 标记 invalidated', `${oK.changed}/${oK.invalidated}`)
+  // 记账比对**字段**而不是引用:ref 的 Record 会给读出来的对象包一层 reactive 代理,
+  // `=== oK` 恒假(实现是对的,别把这条改成删掉记账的借口)。
+  const rec = tF.fixResults.value['uid:scene/main.tscn']
+  ok(!!rec && rec.ok === true && rec.moved === 1 && rec.findingId === FIX_FINDING.id,
+    '修复结果按 finding id 记账,UI 能回显并重跑该检查器', JSON.stringify(Object.keys(tF.fixResults.value)))
+  await tF.runTool('size')
+  ok(scanCalls === scanBeforeFix + 1, '成功修复后 invalidateTree:下一次 runTool 真的重扫(60s TTL 不许端着改过的旧清单)',
+    scanCalls - scanBeforeFix)
+
+  section('25. applyFix 如实回报失败(ok:false + failed[])')
+  global.window.services.movePathsToTrash = (pid, rels) => ({
+    ok: false, moved: Math.max(0, rels.length - 1), failed: [{ rel: 'scene/main.tscn', error: '移入回收站失败' }]
+  })
+  const tFxP = M.useTools()
+  await tFxP.load()
+  await tFxP.runTool('size')
+  const oP = await tFxP.applyFix(
+    { id: 'uid:multi', severity: 'warn', title: '孤儿 .uid', fix: { kind: 'trash', label: '移入回收站', payload: ['scene/main.tscn', '.godot/imported/a.stex'] } },
+    { isWin: true })
+  ok(oP.ok === false, '原语回 ok:false 时回执必须 ok:false(不把部分失败美化成成功)', JSON.stringify(oP))
+  ok(oP.moved === 1 && oP.failed.length === 1 && oP.failed[0].rel === 'scene/main.tscn',
+    '成功数与失败项原样带出(UI 据此写「N 项成功、M 项失败」)', JSON.stringify([oP.moved, oP.failed]))
+  ok(/1 项失败/.test(oP.message) && oP.message.includes('移入回收站失败'),
+    '失败条数与原语的中文原因原样上浮,不重译不吞掉', oP.message)
+  ok(oP.changed === true && oP.invalidated === true, '部分成功仍然改了磁盘 → 照样重扫', `${oP.changed}/${oP.invalidated}`)
+  const scanAfterPartial = scanCalls
+  await tFxP.runTool('size')
+  ok(scanAfterPartial + 1 === scanCalls, '部分成功后的下一次体检确实重扫', scanCalls - scanAfterPartial)
+  // 全失败:盘上什么都没少(复核语义见 inspectfs.js:292-293)→ 不重扫
+  global.window.services.movePathsToTrash = () => ({ ok: false, moved: 0, failed: [{ rel: 'scene/main.tscn', error: '文件不存在' }] })
+  await tFxP.runTool('cache') // 把上一次重扫用掉,TTL 重新变新鲜,下面的 0 增量才有意义
+  const scanBeforeDead = scanCalls
+  const oD = await tFxP.applyFix(FIX_FINDING, { isWin: true })
+  ok(oD.ok === false && oD.changed === false && oD.invalidated === false,
+    '一项都没删掉的失败:changed/invalidated 都是 false', JSON.stringify([oD.ok, oD.changed, oD.invalidated]))
+  ok(oD.message.includes('文件不存在'), '原语的中文原因照旧透传', oD.message)
+  await tFxP.runTool('size')
+  ok(scanCalls === scanBeforeDead, '什么都没改成的失败**不**触发重扫(白扫一遍 10 万文件的遍历)', scanCalls - scanBeforeDead)
+
+  section('26. applyFix 在能力缺失时一个原语都不碰')
+  delete global.window.services.movePathsToTrash
+  const tH = M.useTools()
+  await tH.load()
+  ok(tH.caps.trash === false && tH.caps.write === false, 'caps 探到宿主没有 trash/write 能力', JSON.stringify(tH.caps))
+  const trashCallsBefore = trashLog.length
+  const oN = await tH.applyFix(FIX_FINDING, { isWin: true })
+  ok(oN.ok === false && oN.error === '当前宿主不支持', '缺能力时结构化返回而不是抛异常', JSON.stringify(oN))
+  ok(trashLog.length === trashCallsBefore, '缺失的原语压根没被调用', trashLog.length - trashCallsBefore)
+  ok(oN.changed === false && oN.invalidated === false, '没执行 = 磁盘没变,不重扫', `${oN.changed}/${oN.invalidated}`)
+
+  section('27. applyFix 改写通道:逐文件调用 + 备份去向回执')
+  const writeLog = []
+  global.window.services.movePathsToTrash = (pid, rels) => ({ ok: true, moved: rels.length, failed: [] })
+  global.window.services.writeProjectText = (pid, rel, text) => {
+    writeLog.push({ pid, rel, text })
+    return rel === 'a.gd' ? { ok: true, backupRel: 'a.gd.gpm-bak-20260301_1200_00' } : { ok: false, error: '写入失败' }
+  }
+  const tI = M.useTools()
+  await tI.load()
+  await tI.runTool('size')
+  const oW = await tI.applyFix(
+    { id: 'format:1', severity: 'info', title: '行尾空白', fix: { kind: 'rewrite', label: '格式化', payload: { files: [{ rel: 'a.gd', text: 'x' }, { rel: 'b.gd', text: 'y' }] } } },
+    { isWin: true })
+  ok(writeLog.length === 2 && writeLog.every((w) => w.rel === 'a.gd' || w.rel === 'b.gd') && writeLog[0].text === 'x',
+    '逐文件调 writeProjectText,参数只有 rel + 新内容', JSON.stringify(writeLog.map((w) => w.rel)))
+  ok(oW.ok === false && oW.written.join(',') === 'a.gd' && oW.failed.length === 1 && oW.failed[0].error === '写入失败',
+    '一个改成一个、一个失败报一个(不把 ok:false 说成成功)', JSON.stringify([oW.ok, oW.written, oW.failed]))
+  ok(/gpm-bak/.test(oW.message) && oW.backups.join(',') === 'a.gd.gpm-bak-20260301_1200_00',
+    '可撤销提示:回执里带原语的备份去向(spec §5.3 规则 2/4)', `${oW.message}|${JSON.stringify(oW.backups)}`)
+  ok(oW.verb === '改写文件' && oW.service === 'writeProjectText', '改写通道的动词与服务名对上', `${oW.verb}|${oW.service}`)
+  ok(oW.changed === true && oW.invalidated === true, '改成过一个文件就要重扫(清单与文本 LRU 都过时了)', `${oW.changed}/${oW.invalidated}`)
+  global.window.services.writeProjectText = () => ({ ok: false, error: '备份失败' })
+  await tI.runTool('size')
+  const scanBeforeW = scanCalls
+  const oWF = await tI.applyFix(
+    { id: 'ini:1', severity: 'warn', title: '重复键', fix: { kind: 'rewrite', label: '改写配置', payload: { rel: 'project.godot', text: 'z' } } },
+    { isWin: true })
+  ok(oWF.ok === false && oWF.changed === false && oWF.written.length === 0,
+    '备份失败 = 原文件一个字节没动(原语正是这么保证的)', JSON.stringify([oWF.ok, oWF.changed, oWF.written]))
+  ok(oWF.message.includes('备份失败'), '失败原因用原语原话', oWF.message)
+  await tI.runTool('size')
+  ok(scanCalls === scanBeforeW, '改写全失败同样不触发重扫', scanCalls - scanBeforeW)
+
+  section('28. applyFix 的不可执行路径:既有能力 / 缺新内容 / 原语炸')
+  const writeCallsBefore = writeLog.length
+  const oE = await tI.applyFix(
+    { id: 'cache:1', severity: 'info', title: '缓存可清理', fix: { kind: 'existing', label: '去项目页清理', service: 'cleanProjectCache' } },
+    { isWin: true })
+  ok(oE.ok === false && oE.service === null, 'existing 不是可执行动作:service 为 null', JSON.stringify([oE.ok, oE.service]))
+  ok(/既有能力|跳转/.test(oE.message), '说不清「为什么不做」不算完 —— 回执必须给原因', oE.message)
+  ok(writeLog.length === writeCallsBefore && trashLog.length === trashCallsBefore,
+    '不可执行的修复一个原语都不碰(不重复执行既有能力)', `${writeLog.length}/${trashLog.length}`)
+  const oNT = await tI.applyFix(
+    { id: 'ini:2', severity: 'warn', title: '重复键', rel: 'project.godot', fix: { kind: 'rewrite', label: '改写配置' } },
+    { isWin: true })
+  ok(oNT.ok === false && oNT.service === null && /内容/.test(oNT.message),
+    'rewrite 没带新内容 → 拒执行并说明缺什么(不写空文件覆掉用户配置)', oNT.message)
+  ok(writeLog.length === writeCallsBefore, '这条路也没调原语', writeLog.length - writeCallsBefore)
+  global.window.services.movePathsToTrash = () => { throw new Error('宿主炸了') }
+  const oBoom = await tI.applyFix(FIX_FINDING, { isWin: true })
+  ok(oBoom.ok === false && oBoom.error === '宿主炸了' && oBoom.changed === false,
+    '原语抛异常也只标失败,不冒泡(工具页要能在结论里显示原因)', JSON.stringify([oBoom.ok, oBoom.error, oBoom.changed]))
+  global.window.services.movePathsToTrash = (pid, rels) => ({ ok: true, moved: rels.length, failed: [] })
+  // 缺省 isWin:测试桩宿主压根没有 ztools.isWindows,取平台口径那一步不许把整个修复炸掉,
+  // 也不许猜成 Windows —— 退回「永久删除」这个更保守的口径(宁可说得可怕,不可说得安心)。
+  let boomMsg = ''
+  let oNoWin = null
+  try { oNoWin = await tI.applyFix(FIX_FINDING) } catch (e) { boomMsg = (e && e.message) || 'throw' }
+  ok(boomMsg === '' && !!oNoWin && oNoWin.ok === true && oNoWin.verb === '永久删除' && /永久删除/.test(oNoWin.message),
+    '缺省 isWin 不抛异常,并退回非 Windows 的「永久删除」口径', `${boomMsg}|${oNoWin && oNoWin.verb}|${oNoWin && oNoWin.message}`)
   restore()
 }
 main().then(() => {

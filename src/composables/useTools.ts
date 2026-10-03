@@ -1,14 +1,19 @@
-// 工具页的状态与调度:选项目 → 扫一次树 → 按注册表跑检查器 → 存结果。
+// 工具页的状态与调度:选项目 → 扫一次树 → 按注册表跑检查器 → 存结果 → 按结论执行修复。
 // 关键不变量(spec §5.1):同一个项目的 tree 只扫一次,所有工具共享 ctx。
 // 它的孪生不变量(审查 F-1):一份 tree 只属于**发起它的那个项目**。扫描是真的异步 IPC,
 // 所以「tree 与 readText 同属一个项目」靠世代号 + 捕获的 pid 绑定,过期结果整份丢弃。
 //
+// 修复调度的不变量(spec §5.3,Task B1):渲染层只交 rel,绝对路径与越界/符号链接的包含闸
+// 归原语(inspectfs.js 的 resolveInside);原语回报的 ok/failed/moved 一律如实上浮;
+// 磁盘真变了才 invalidateTree(改过的清单不能让 60s TTL 端着,而什么都没改成的失败不配一次重扫)。
+//
 // 红线:这是渲染层组合式函数,只用 vue 的 ref/computed,不碰 DOM;能力一律走
 // window.services 契约(两端 JS 宿主与 Tauri 宿主同一份签名)。
 import { computed, ref } from 'vue'
-import { listDocs } from '../services/bridge'
+import { isWindows, listDocs } from '../services/bridge'
 import type { GodotProject, ScanTreeResult, TreeEntry } from '../types/godot'
 import type { Capability, Finding, Tool, ToolContext, ToolResult } from '../tools/types'
+import { planFix, type FixService } from '../tools/fixPlan'
 import { TOOLS as BASE_TOOLS, isSupported, toolById } from '../tools/registry'
 
 // 注册表跟着本模块一起导出:视图只要 useTools 这一处,就能同时拿到「有哪些工具」和「怎么跑」。
@@ -40,6 +45,57 @@ function scanErrorText(raw?: string): string {
   return SCAN_ERROR_ALIAS[msg] || msg
 }
 
+/**
+ * 一次修复的回执:成败、动了什么、哪几项失败、备份去哪了,全部在这里定好,
+ * FindingList / FixConfirmDialog 只渲染字段,不再自己判「这算不算成功」。
+ * message 里的失败原因是**原语原话**(inspectfs.js 的中文错误串),不重译、不改写。
+ */
+export interface FixOutcome {
+  findingId: string
+  /** 由 `${toolId}:${稳定键}` 的约定反推,供「重跑这个检查器」用;推不出时是空串 */
+  toolId: string
+  ok: boolean
+  /** 失败原因:宿主不支持 / 管线认不出这条修复 / 原语给的中文原因 */
+  error: string
+  service: FixService
+  /** planFix 定的动词(平台相关:Windows「移入回收站」、其他平台「永久删除」) */
+  verb: string
+  /** 交给原语的 rel 清单(相对路径,渲染层不拼绝对路径) */
+  rels: string[]
+  /** 回收站通道真正移走的项数(按磁盘复核,inspectfs.js:292-293) */
+  moved: number
+  /** 改写通道真正落盘成功的 rel */
+  written: string[]
+  /** 失败项:rel + 原语原话 */
+  failed: { rel: string; error: string }[]
+  /** 原语回报的备份 rel(spec §5.3 规则 4 的「可撤销提示」) */
+  backups: string[]
+  /** 磁盘是否真的变了:这是「要不要重扫」的唯一判据 */
+  changed: boolean
+  /** changed 且确实调了 invalidateTree(切了项目时不调,回执照样如实) */
+  invalidated: boolean
+  message: string
+  at: number
+}
+
+/** 失败项的一行汇总:`rel:原语原话`,多项用分号隔开 */
+function failedText(failed: { rel: string; error: string }[]): string {
+  return failed.map((x) => `${x.rel}:${x.error}`).join(';')
+}
+
+/**
+ * 平台口径取不到时退回 false(非 Windows 口径)。
+ * 方向是刻意选的:说不准就按「永久删除」说 —— 把可还原说成不可还原只是难听,
+ * 把不可还原说成可还原会让用户以为能撤回而真的删掉东西。
+ */
+function hostIsWindows(): boolean {
+  try {
+    return isWindows() === true
+  } catch {
+    return false
+  }
+}
+
 type WithId = GodotProject & { _id?: string }
 
 export function useTools() {
@@ -54,6 +110,10 @@ export function useTools() {
   const error = ref('')
   const results = ref<Record<string, ToolResult>>({})
   const tools = ref<Tool[]>([...BASE_TOOLS])
+  /** 正在执行的修复所属的 finding id(空串 = 没有修复在途) */
+  const fixing = ref('')
+  /** 按 finding id 记账的修复回执:结论面板要回显「已移入回收站 3 项 / 1 项失败」并据此重跑检查器 */
+  const fixResults = ref<Record<string, FixOutcome>>({})
 
   /**
    * 宿主能力探测:方法不存在(旧宿主/未移植)就是不支持,而不是静默假成功。
@@ -290,6 +350,7 @@ export function useTools() {
     treeAt.value = 0
     truncated.value = false
     results.value = {}
+    fixResults.value = {}
     textCache.clear()
     // error 同样按项目成立:扫描失败的横幅(「项目目录无法读取」)属于**上一个**项目,
     // 不清的话切到正常项目后它会一直挂着,直到下一次扫描成功才消失(Task 16 修复)。
@@ -298,6 +359,132 @@ export function useTools() {
 
   function registerTool(t: Tool) {
     if (!toolById(t.id) && !tools.value.some((x) => x.id === t.id)) tools.value = [...tools.value, t]
+  }
+
+  /**
+   * 修完文件/外部改过项目后调用:下一次跑强制重扫(世代号同时作废在途的那次扫描,F-1)。
+   * 提成具名函数是因为 applyFix 也要用它 —— 回执里的 invalidated 必须说的是「真的调过它」。
+   */
+  function invalidateTree() {
+    scanGen += 1
+    treeAt.value = 0
+    textCache.clear()
+  }
+
+  /**
+   * 执行一条结论的修复动作(spec §5.3)。
+   * 三道闸依次过:① planFix 认不认这条修复 ② 宿主有没有对应能力 ③ 原语自己的包含闸。
+   * **一个原语都不许在闸外被调用**,也不论哪一道闸都不抛异常 —— 工具页要把原因显示出来。
+   * @param opts.isWin 平台口径;省略时问 bridge(取不到按非 Windows 的保守口径)
+   */
+  async function applyFix(f: Finding, opts?: { isWin?: boolean }): Promise<FixOutcome> {
+    const pid = projectId.value
+    const isWin = typeof opts?.isWin === 'boolean' ? opts.isWin : hostIsWindows()
+    const plan = planFix(f, tree.value, isWin)
+    const base: FixOutcome = {
+      findingId: f.id,
+      toolId: f.id.includes(':') ? f.id.slice(0, f.id.indexOf(':')) : '',
+      ok: false,
+      error: '',
+      service: plan.service,
+      verb: plan.verb,
+      rels: plan.rels,
+      moved: 0,
+      written: [],
+      failed: [],
+      backups: [],
+      changed: false,
+      invalidated: false,
+      message: '',
+      at: Date.now()
+    }
+    // 回执按项目成立(与 runTool 同一口径):await 期间用户切了项目,就不把上一个项目的
+    // 修复结果写进现在这块面板(F-1 的延伸,不是新发明)。
+    const done = (patch: Partial<FixOutcome>): FixOutcome => {
+      const o: FixOutcome = { ...base, ...patch }
+      if (projectId.value === pid) fixResults.value = { ...fixResults.value, [f.id]: o }
+      return o
+    }
+    if (!pid) return done({ error: '还没有添加项目', message: '还没有添加项目' })
+    // ① 管线执行不了的两种情形:service 为 null(既有能力/只报告/payload 认不出)、清单为空。
+    //    两种都必须带着原因回来,不能静默什么都不做(spec §5.3 规则 3 的反面就是「点了没反应」)。
+    if (plan.service === null || plan.empty) {
+      const why = plan.reason || '这条结论不支持一键修复'
+      return done({ error: why, message: why })
+    }
+    // ② 能力缺失是状态不是异常:在调用任何原语之前短路(spec §5.4)
+    const need: Capability = plan.service === 'movePathsToTrash' ? 'trash' : 'write'
+    if (!caps[need]) return done({ error: '当前宿主不支持', message: '当前宿主不支持' })
+
+    fixing.value = f.id
+    try {
+      if (plan.service === 'movePathsToTrash') {
+        // 只交 rel(相对路径):绝对路径拼接与越界/符号链接的包含闸都在原语里,渲染层一拼就绕过它
+        const r = await window.services.movePathsToTrash(pid, plan.rels)
+        const failed = r?.failed || []
+        const moved = r?.moved || 0
+        // moved 才是「盘上真的少了东西」的依据(原语按磁盘复核,inspectfs.js:292-293),
+        // 单看 r.ok 会把「全失败」与「什么都没做」混成一种;单看 failed.length===0 又会被
+        // ok:false + error 的整批失败(如 '项目不存在')骗过去。
+        const changed = moved > 0
+        let message: string
+        if (failed.length) {
+          message = changed
+            ? `已${plan.verb} ${moved} 项,${failed.length} 项失败:${failedText(failed)}`
+            : `${plan.verb}失败,${failed.length} 项:${failedText(failed)}`
+        } else if (changed && r?.ok === true) {
+          message = `已${plan.verb} ${moved} 项`
+        } else {
+          message = r?.error || `${plan.verb}失败(磁盘上没有变化)`
+        }
+        // 成败只认原语自己的回报:r.ok 为真、一个失败项都没有、且真的移走过东西,才算成功。
+        // 「部分成功」在回执里是失败(ok:false)但 changed:true —— 盘上确实少了东西。
+        const ok = r?.ok === true && failed.length === 0 && changed
+        // ③ 改过磁盘才重扫:修完文件的下一次体检必须重新遍历,60s TTL 不许端着改过的旧清单。
+        //    反过来,一项都没动的失败**不**触发重扫(白扫一遍 10 万文件的遍历)。
+        const invalidated = changed && projectId.value === pid
+        if (invalidated) invalidateTree()
+        return done({
+          ok, error: ok ? '' : message, moved, failed, changed, invalidated, message
+        })
+      }
+
+      // 改写通道:逐文件调原语(格式化按文件给新内容),单个失败不中断其余,
+      // 与回收站通道同一种「如实报数」的口径。备份由原语负责(<原名>.gpm-bak-<时间戳>)。
+      const written: string[] = []
+      const failed: { rel: string; error: string }[] = []
+      const backups: string[] = []
+      for (const file of plan.files) {
+        try {
+          const r = await window.services.writeProjectText(pid, file.rel, file.text)
+          if (r?.ok) {
+            written.push(file.rel)
+            if (r.backupRel) backups.push(r.backupRel)
+          } else {
+            failed.push({ rel: file.rel, error: r?.error || '写入失败' })
+          }
+        } catch (e) {
+          failed.push({ rel: file.rel, error: (e as Error)?.message || '写入失败' })
+        }
+      }
+      const changed = written.length > 0
+      let message = written.length ? `已改写 ${written.length} 个文件` : '改写失败'
+      // 可撤销提示(spec §5.3 规则 4):备份去向要点名,多了只列前 3 个免得刷屏
+      if (backups.length) {
+        message += `,原文件已备份为 ${backups.slice(0, 3).join('、')}${backups.length > 3 ? ` 等 ${backups.length} 份` : ''}`
+      }
+      if (failed.length) message += `;${failed.length} 个失败:${failedText(failed)}`
+      const ok = failed.length === 0 && written.length === plan.files.length && changed
+      const invalidated = changed && projectId.value === pid
+      if (invalidated) invalidateTree()
+      return done({ ok, error: ok ? '' : message, written, failed, backups, changed, invalidated, message })
+    } catch (e) {
+      // 宿主实现抛异常(而不是回 ok:false)也只标失败:工具页要在结论里显示原因,不是崩掉面板
+      const msg = (e as Error)?.message || '修复失败'
+      return done({ error: msg, message: msg })
+    } finally {
+      fixing.value = ''
+    }
   }
 
   function findingsOf(id: string): Finding[] {
@@ -317,8 +504,9 @@ export function useTools() {
 
   return {
     projects, projectId, tree, truncated, running, allRunning, progress, error, results, tools, caps,
-    load, select, runTool, runAll, registerTool, findingsOf, counts,
+    fixing, fixResults,
+    load, select, runTool, runAll, registerTool, findingsOf, counts, applyFix,
     /** 修完文件/外部改过项目后调用:下一次跑强制重扫(世代号同时作废在途的那次扫描,F-1) */
-    invalidateTree: () => { scanGen += 1; treeAt.value = 0; textCache.clear() }
+    invalidateTree
   }
 }

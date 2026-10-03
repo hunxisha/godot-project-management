@@ -1,4 +1,4 @@
-// 工具页渲染层断言:tree 聚合纯函数 + .tscn 解析器 + 3 个 P0 检查器。
+// 工具页渲染层断言:tree 聚合纯函数 + .tscn 解析器 + 3 个 P0 检查器 + 体检结论判定 + 修复动作预告。
 //
 // 为什么合成一个文件:P0a 的六套逻辑都吃同一份「内存项目树」夹具,
 // 拆成六个文件就要六份 fixture —— 需要分开的是**函数**,不是文件。
@@ -508,6 +508,102 @@ async function main() {
   const oF = T.outcomeOf({}, 3, ZERO, '')
   ok(oF.kind === 'idle' && oF.showAllClean === false,
     'outcomeOf(f):什么都没跑 → idle 而不是「未发现问题」', JSON.stringify(oF))
+
+  // ---------- 7. planFix:修复动作预告(spec §5.3 四条硬规则,Task B1) ----------
+  // 为什么存在:四条硬规则里「删除进回收站 / 写前自动 .gpm-bak 备份 / 先 dry-run 再执行 /
+  // 可撤销提示」全是**文字层面**对用户的承诺。判据若写在组件里,Node harness 跑不到 .vue,
+  // 说错话只能靠肉眼发现 —— 最要命的一种是把 macOS/Linux 的删除说成「移入回收站」:
+  // fsutil.trashPath(见 src-ztools/preload/lib/fsutil.js:205-219)在那两个平台走
+  // fs.rmSync / fs.unlinkSync,是**真删且不可还原**,预览却告诉用户能还原。
+  // 判据抽成 planFix(src/tools/fixPlan.ts)后,FixConfirmDialog 只渲染、useTools 只照单执行。
+  section('7. planFix:修复动作预告(verb / warn / items / service)')
+  const FTR = tree([
+    ['orphan/a.png.uid', 40],
+    ['orphan/b.png', 1200],
+    ['.godot/imported/x.stex', 900]
+  ])
+  const fTrash = (payload, extra = {}) => ({
+    id: 'uid:test', severity: 'warn', title: '孤儿 .uid', fix: { kind: 'trash', label: '移入回收站', payload }, ...extra
+  })
+  const win = T.planFix(fTrash(['orphan/a.png.uid', 'orphan/b.png']), FTR, true)
+  ok(win.service === 'movePathsToTrash', 'trash → movePathsToTrash', win.service)
+  ok(win.verb === '移入回收站', 'Windows 的动词是「移入回收站」', win.verb)
+  ok(/回收站/.test(win.warn) && /还原/.test(win.warn), 'Windows 的警告句承诺可还原(spec §5.3 规则 4)', win.warn)
+  // 「永久删除」四个字在 Windows 上禁止出现:用户看到会以为不可回退,而实际可从回收站还原。
+  ok(!win.warn.includes('永久删除') && !win.verb.includes('永久删除'), 'Windows 文案不出「永久删除」', `${win.verb}|${win.warn}`)
+  ok(win.items.length === 2 && win.items[0].rel === 'orphan/a.png.uid' && win.items[0].size === 40,
+    'items 由 payload + 清单解析出 rel 与体积(dry-run 预览)', JSON.stringify(win.items))
+  ok(win.bytes === 1240 && win.empty === false, 'bytes 合计两个已知体积(40+1200)', `${win.bytes}/${win.empty}`)
+  ok(win.rels.join(',') === 'orphan/a.png.uid,orphan/b.png', 'rels 就是交给原语的那串相对路径', JSON.stringify(win.rels))
+
+  const mac = T.planFix(fTrash(['orphan/a.png.uid']), FTR, false)
+  ok(mac.verb === '永久删除', '非 Windows 的动词必须写「永久删除」(宿主那里是真删)', mac.verb)
+  ok(/永久删除/.test(mac.warn) && !/随时还原|可恢复|可从回收站/.test(mac.warn),
+    '非 Windows 明示永久删除且不给还原承诺', mac.warn)
+  ok(mac.service === 'movePathsToTrash', '非 Windows 仍走同一个原语(平台语义由宿主决定,文案由 planFix 决定)', mac.service)
+
+  // 体积不许臆造:payload 点名清单里没有的文件时 size 必须缺席 —— 原语会自己去问磁盘并如实
+  // 报「文件不存在」(inspectfs.js:328)。这里填个 0 就等于预览说「0 B」、原语随后报错,两处口径分叉。
+  const ghost = T.planFix(fTrash(['orphan/a.png.uid', 'gone/c.png']), FTR, true)
+  ok(ghost.items.length === 2 && ghost.items[1].rel === 'gone/c.png' && ghost.items[1].size === undefined,
+    '清单里没有的 rel 不臆造体积', JSON.stringify(ghost.items))
+  ok(!!ghost.items[1].note, '清单外的 rel 带一条说明(预览里看得见,不是静默)', ghost.items[1].note)
+  ok(ghost.rels.includes('gone/c.png') && ghost.bytes === 40,
+    '未知体积的 rel 照样交给原语(由它回报),bytes 只计已知的那项', `${JSON.stringify(ghost.rels)}/${ghost.bytes}`)
+
+  // 归一与去重必须与 resolveRel(inspectfs.js:37-50)同规则:预览说 1 项、原语删 2 项,
+  // 就是「先 dry-run 再执行」这条硬规则的破口(原语按 abs 去重,但预览的条数与体积要同口径)。
+  const dup = T.planFix(fTrash(['orphan/b.png', './orphan\\b.png', 'orphan/b.png']), FTR, true)
+  ok(dup.items.length === 1 && dup.bytes === 1200 && dup.rels.length === 1,
+    '重复点名(./ 前缀与反斜杠)归一后只留一条', JSON.stringify(dup.rels))
+
+  const byRel = T.planFix(
+    { id: 'uid:one', severity: 'warn', title: 't', rel: 'orphan/a.png.uid', fix: { kind: 'trash', label: '移入回收站' } },
+    FTR, true)
+  ok(byRel.service === 'movePathsToTrash' && byRel.rels.join(',') === 'orphan/a.png.uid',
+    'payload 缺席时退回主证据 rel(检查器只写 rel 也能一键修复)', JSON.stringify(byRel.rels))
+
+  const noList = T.planFix(fTrash([]), FTR, true)
+  ok(noList.empty === true && !!noList.reason, '空清单 → empty 并说明原因(不静默什么都不做)', `${noList.empty}/${noList.reason}`)
+
+  const junk = T.planFix(fTrash({ nope: 1 }), FTR, true)
+  ok(junk.service === null && !!junk.reason, '认不出的 payload → service:null + 说明为什么不能执行', `${junk.service}/${junk.reason}`)
+
+  const rw = T.planFix(
+    { id: 'ini:test', severity: 'warn', title: 't', fix: { kind: 'rewrite', label: '改写 project.godot', payload: { rel: 'project.godot', text: '[application]\n' } } },
+    tree([['project.godot', 100]]), true)
+  ok(rw.service === 'writeProjectText', 'rewrite → writeProjectText', rw.service)
+  ok(rw.verb === '改写文件', 'rewrite 的动词是「改写文件」', rw.verb)
+  ok(/gpm-bak/.test(rw.warn), 'rewrite 的警告句必须点名自动备份 .gpm-bak-(原语写死的行为,inspectfs.js:204)', rw.warn)
+  ok(rw.items.length === 1 && rw.items[0].rel === 'project.godot' && rw.items[0].size === 100,
+    'rewrite 预览同样列出受影响文件', JSON.stringify(rw.items))
+  ok(rw.files.length === 1 && rw.files[0].text === '[application]\n' && rw.files[0].rel === 'project.godot',
+    '新内容带在 files 里(调度层不自己造文本)', JSON.stringify(rw.files))
+
+  const rwMulti = T.planFix(
+    { id: 'format:test', severity: 'info', title: 't', fix: { kind: 'rewrite', label: '格式化', payload: { files: [{ rel: 'a.gd', text: 'x' }, { rel: 'b.gd', text: 'y' }] } } },
+    tree([['a.gd', 3], ['b.gd', 4]]), true)
+  ok(rwMulti.service === 'writeProjectText' && rwMulti.items.length === 2 && rwMulti.bytes === 7,
+    '多文件改写(格式化)一次预告两个文件(逐文件 .bak 由原语负责)', `${rwMulti.service}/${rwMulti.items.length}/${rwMulti.bytes}`)
+
+  const rwNoText = T.planFix(
+    { id: 'ini:x', severity: 'warn', title: 't', rel: 'project.godot', fix: { kind: 'rewrite', label: '改写' } },
+    tree([['project.godot', 100]]), true)
+  ok(rwNoText.service === null && /内容/.test(rwNoText.reason),
+    'rewrite 没带新内容 → 拒执行并说明缺什么(不写空文件)', rwNoText.reason)
+
+  for (const kind of ['none', 'existing']) {
+    const p = T.planFix(
+      { id: 'cache:x', severity: 'info', title: 't', fix: { kind, label: '去项目页清理', service: 'cleanProjectCache' } },
+      FTR, true)
+    ok(p.service === null && !!p.reason,
+      `${kind} → service:null(既有能力仍是一次跳转,不是第二次执行)`, `${p.service}/${p.reason}`)
+    ok(!/移入回收站|永久删除|改写/.test(p.verb), `${kind} 的动词不许冒充删除或改写`, p.verb)
+    ok(p.items.length === 0 && p.empty === true, `${kind} 不列受影响文件清单`, JSON.stringify(p.items))
+  }
+
+  const noFix = T.planFix({ id: 'size:x', severity: 'info', title: 't' }, FTR, true)
+  ok(noFix.service === null && !!noFix.reason, '压根没有 fix 字段也不抛,照样给出原因', `${noFix.service}/${noFix.reason}`)
 }
 main().catch((e) => {
   // 断言里不该抛错;真抛了(比如实现返回了 undefined)也要以退出码 1 收口,不能让 CI 看到绿。

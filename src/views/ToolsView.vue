@@ -1,21 +1,32 @@
 <script setup lang="ts">
 // 工具页(项目体检):选项目 → 一次扫描共享给所有检查器 → 卡片列表 + 通用结论面板。
 // 页面不认识任何具体工具:卡片与结论全部由注册表驱动,加检查器不改这一页(spec §2.1)。
+// 修复动作也只有「装配」这一层在这里:判据在 planFix、执行在 useTools.applyFix,
+// 视图负责把两者接起来并在修完之后重跑那一个检查器(spec §5.3)。
 import { computed, onMounted, ref } from 'vue'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import ToolCard from '../components/tools/ToolCard.vue'
 import FindingList from '../components/tools/FindingList.vue'
+import FixConfirmDialog from '../components/tools/FixConfirmDialog.vue'
 import SummaryBar from '../components/tools/SummaryBar.vue'
 import { isSupported } from '../tools/registry'
 import { outcomeOf } from '../tools/outcome'
+import { planFix, type FixPlan } from '../tools/fixPlan'
+import { isWindows } from '../services/bridge'
 import { useTools } from '../composables/useTools'
+import type { Finding } from '../tools/types'
+import type { FixOutcome } from '../composables/useTools'
 
 const emit = defineEmits<{ (e: 'navigate', tab: string): void }>()
 
 const t = useTools()
 /** 当前展开结论的工具 id(空串 = 全部收起) */
 const open = ref('')
+/** 当前要点开确认框的那条结论(null = 框关着) */
+const fixFinding = ref<Finding | null>(null)
+const fixBusy = ref(false)
+const fixOutcome = ref<FixOutcome | null>(null)
 
 onMounted(() => {
   void t.load()
@@ -25,10 +36,37 @@ onMounted(() => {
 const ranCount = computed(() => Object.keys(t.results.value).length)
 /** 有任何扫描/检查在途:冻结按钮,避免两个 run 互相把 running 状态写乱 */
 const busy = computed(() => t.allRunning.value || t.running.value !== '')
+/** 修复在途,或修复刚把清单作废、正要重扫:这段时间冻结论面板上的所有动作 */
+const anyBusy = computed(() => busy.value || t.fixing.value !== '')
 /** 结论面板里的 rel 要拼成绝对路径才能「打开所在目录」;根路径来自项目记录 */
 const rootPath = computed(() => t.projects.value.find((p) => p._id === t.projectId.value)?.path || '')
 const openTool = computed(() => t.tools.value.find((x) => x.id === open.value) || null)
 const openFindings = computed(() => (open.value ? t.findingsOf(open.value) : []))
+
+/**
+ * 只有 Windows 有回收站:同一个 fix.kind 在两个平台是两件不同的事(fsutil.trashPath
+ * 在非 Windows 走 fs.rmSync/unlinkSync,真删)。这里只**喂参数给判据**,判据本身在 planFix。
+ * 取不到平台时 bridge 会抛,退回 false —— 说不准就按更保守的那句说。
+ */
+const winHost = computed(() => {
+  try {
+    return isWindows() === true
+  } catch {
+    return false
+  }
+})
+
+/** 面板里每条结论的修复预告(视图只调纯函数,不自己判能不能修) */
+const plansById = computed<Record<string, FixPlan>>(() => {
+  const out: Record<string, FixPlan> = {}
+  for (const f of openFindings.value) out[f.id] = planFix(f, t.tree.value, winHost.value)
+  return out
+})
+
+/** 确认框要渲染的那份预告;没选中结论时用一条「没有 fix 字段」的结论走同一条判据,不另立文案 */
+const fixPlan = computed<FixPlan>(() =>
+  planFix(fixFinding.value || { id: '', severity: 'info', title: '' }, t.tree.value, winHost.value)
+)
 
 /**
  * 体检结论横幅的唯一判据(审查 F-1):「体检完成 · 未发现问题」与「项目目录无法读取」
@@ -43,6 +81,43 @@ const outcome = computed(() =>
 /** 再点一次同一张卡片的「结果」= 收起 */
 function toggleResult(id: string) {
   open.value = open.value === id ? '' : id
+}
+
+/** 点结论上的修复按钮:每次都开一张干净的框(上一次的回执不许跟到下一条结论) */
+function openFix(f: Finding) {
+  fixFinding.value = f
+  fixOutcome.value = null
+}
+
+/**
+ * 确认框点「确认」之后的执行:applyFix 负责闸与调原语,这里只负责
+ * ① 把在途状态告诉框;② 真改了磁盘就重跑**这一个**检查器 —— 结论得跟上刚动过的文件。
+ * applyFix 自己不抛异常(失败一律回结构化回执),所以只有「重跑检查器」那一步需要单独兜:
+ * 那一步炸了不能把已经如实落盘的修复动作说成失败。
+ */
+async function runFix() {
+  if (!fixFinding.value) return
+  fixBusy.value = true
+  try {
+    const o = await t.applyFix(fixFinding.value, { isWin: winHost.value })
+    fixOutcome.value = o
+    // applyFix 成功时已经 invalidateTree,这一次 runTool 拿到的必然是重扫后的清单
+    if (o.changed && open.value) {
+      try {
+        await t.runTool(open.value)
+      } catch {
+        /* 重跑失败只影响结论新旧,不改变修复回执本身 */
+      }
+    }
+  } finally {
+    fixBusy.value = false
+  }
+}
+
+function closeFix() {
+  if (fixBusy.value) return
+  fixFinding.value = null
+  fixOutcome.value = null
 }
 </script>
 
@@ -114,8 +189,26 @@ function toggleResult(id: string) {
 
       <section v-if="openTool && openFindings.length" class="detail card">
         <h3>{{ openTool.name }} · {{ openFindings.length }} 条结论</h3>
-        <FindingList :findings="openFindings" :root="rootPath" />
+        <FindingList
+          :findings="openFindings"
+          :root="rootPath"
+          :plans="plansById"
+          :fix-state="t.fixResults.value"
+          :busy="anyBusy"
+          @fix="openFix"
+        />
       </section>
+
+      <!-- 修复确认框:执行前先看清「要动哪些文件」,勾了确认才落地(spec §5.3 规则 3) -->
+      <FixConfirmDialog
+        :open="!!fixFinding"
+        :plan="fixPlan"
+        :title="fixFinding ? fixFinding.title : ''"
+        :busy="fixBusy || t.fixing.value !== ''"
+        :outcome="fixOutcome"
+        @confirm="runFix"
+        @close="closeFix"
+      />
     </template>
   </div>
 </template>

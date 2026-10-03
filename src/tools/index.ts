@@ -3,6 +3,7 @@
 // (`../tools/treeUtils`),否则会把无关模块一起拖进视图的 chunk。
 export * from './treeUtils'
 export * from './outcome'
+export * from './fixPlan'
 export * from './parsers/sceneRefs'
 export { run as runSize } from './inspectors/size'
 export { run as runCache } from './inspectors/cache'
