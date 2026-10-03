@@ -290,8 +290,36 @@ async function main() {
   const big = S1.filter((f) => String(f.id).startsWith('size:big:'))
   ok(big.length === 1 && big[0].rel === 'assets/hero.png', '只对 >=20MB 的单文件出条目', JSON.stringify(big.map((f) => f.rel)))
   ok(big[0].title.includes('50.0 MB'), '大文件条目带体积', big[0].title)
+  ok(!S1.some((f) => f.id === 'size:bigTail'), '一个没漏列时不出「未列出」条', JSON.stringify(S1.map((f) => f.id)))
+  // 审查 F-5:实现是 `topFiles(src, 20).filter(f => f.size >= BIG_FILE)` —— 先砍到前 20 名
+  // 再筛阈值。21 个超标文件时只列得下 20 个,而 size:total 说「21 个」,界面上完全看不出
+  // 少了谁。20 行上限本身是对的(刷屏控制),要补的是**从未过滤的 src 算出差额并报出去**。
+  const MANY = Array.from({ length: 21 }, (_, i) => [`big/f${String(i + 1).padStart(2, '0')}.png`, (21 + i) * 1024 * 1024])
+  const S2 = await T.runSize(makeCtx(MANY))
+  const listed = S2.filter((f) => String(f.id).startsWith('size:big:'))
+  ok(listed.length === 20, '21 个超标文件仍只列 20 行(上限是刻意的)', listed.length)
+  ok(!listed.some((f) => f.rel === 'big/f01.png'), '排在第 21 名的文件没被列出', listed.length)
+  const tail = S2.find((f) => f.id === 'size:bigTail')
+  ok(!!tail && tail.severity === 'info' && tail.title.includes('另有 1 个'),
+    '未列出的差额单独成条(info)', JSON.stringify(tail && tail.title))
+  ok(!!tail && tail.title.includes('20MB'), '「未列出」条点名 20MB 阈值', tail && tail.title)
+  ok(S2.find((f) => f.id === 'size:total').title.includes('21 个'),
+    '源文件条数按全量算(21 个,不是砍完前 20 名再数)', S2.find((f) => f.id === 'size:total').title)
   const t = await T.runSize(makeCtx([['a.png', 10]], { trunc: true }))
   ok(t.some((f) => f.severity === 'warn' && f.title.includes('部分')), '截断时先报「只基于部分文件」', JSON.stringify(t.map((f) => f.title)))
+  // 审查 F-6:全套断言此前没有一条把 `truncated` 当 **id** 查 —— truncatedFinding 里把
+  // toolId 传错、或干脆写死成一个共享 id,都能一路绿。而 id 是渲染层折叠与将来
+  // 「忽略这条」记忆的 key,三个检查器共用一个 key 就会互相顶掉(裁决 1 的测试缺口)。
+  ok(t.some((f) => f.id === 'size:truncated'), 'size 的截断条目 id 是自己的 size:truncated', JSON.stringify(t.map((f) => f.id)))
+  // 审查 F-4:截断文案不许建议「用 skipDirs / exts 缩小范围后重跑」。过滤出来的清单同样
+  // 不完整,可原语只在 maxEntries 上限处才标 truncated —— 照着这条建议做,下一轮
+  // brokenRefs 就会把用户其实有的文件报成「不存在」(假 error 全量复活,还是 error 级)。
+  // 只准给安全动作:提高 maxEntries / 完整重扫。
+  const sizeTrunc = t.find((f) => f.id === 'size:truncated')
+  ok(!!sizeTrunc && !/skipDirs|exts/.test(String(sizeTrunc.detail)),
+    'size 截断文案不给 skipDirs/exts 建议', sizeTrunc && sizeTrunc.detail)
+  ok(!!sizeTrunc && /maxEntries|完整重扫/.test(String(sizeTrunc.detail)),
+    'size 截断文案给的是安全动作(提高 maxEntries / 完整重扫)', sizeTrunc && sizeTrunc.detail)
   const e = await T.runSize(makeCtx([]))
   ok(e.every((f) => f.severity === 'info'), '空树不报 error/warn(没什么可查)', JSON.stringify(e.map((f) => f.severity)))
   ok(!e.some((f) => f.id === 'size:cache'), '无缓存时不出缓存条目')
@@ -322,16 +350,48 @@ async function main() {
   ok(st.detail.includes('scene/main.tscn'), 'detail 点出具体源文件', st.detail)
   ok(String(st.id).startsWith('cache:stale:'), 'stale 条目 id 稳定可折叠', st.id)
 
+  // 审查 F-3:mtimeMs === 0 是宿主「取不到 metadata」的哨兵(src-tauri/src/inspectfs.rs:90-95
+  // `md.modified().ok()...unwrap_or(0)`,JS 端 pre-1970 也折成 0),不是「1970-01-01 修改过」。
+  // 旧实现把它当真实时间 → cacheMax=0 → 每个源文件都「比缓存新」→ 再新鲜的缓存也永远
+  // 报「缓存可能已过期」。夹具:与 fresh 同形,只把 .godot 条目的 mtime 覆成 0。
+  const unknownCtx = makeCtx([
+    ['project.godot', 100, 1], ['scene/main.tscn', 500, 1], ['.godot/imported/a.stex', 900, 5]
+  ])
+  unknownCtx.tree.forEach((f) => { if (T.isCache(f.rel)) f.mtimeMs = 0 })
+  const unknownMtime = await T.runCache(unknownCtx)
+  ok(unknownMtime.every((f) => f.severity === 'info'), '缓存 mtime 全为 0(未知) → 不报过期',
+    JSON.stringify(unknownMtime.map((f) => `${f.id}/${f.severity}`)))
+  ok(!unknownMtime.some((f) => String(f.id).startsWith('cache:stale:')),
+    '缓存侧没有有效 mtime → 整个陈旧判定跳过', JSON.stringify(unknownMtime.map((f) => f.id)))
+
   const none = await T.runCache(makeCtx([['project.godot', 100, 1]]))
-  ok(none.some((f) => f.severity === 'info' && f.title.includes('还没有')), '无缓存 → info(不是错误)')
-  ok(none.length === 1, '无缓存时只有一条,不再叠加体积/陈旧', JSON.stringify(none.map((f) => f.id)))
+  // 审查 F-2:「清单里没有」是对这份列表的观察,「这个项目还没有 .godot 缓存」是对磁盘事实的
+  // 断言 —— 清单里没有证明不了磁盘上没有(宿主没带 .godot、用了 exts 过滤,都会长空)。
+  ok(none.some((f) => f.severity === 'info' && f.title.includes('清单里没有')),
+    '无缓存条目 → info,措辞只讲清单不讲项目', JSON.stringify(none.map((f) => f.title)))
+  ok(none.length === 1 && none[0].id === 'cache:none', '无缓存时只有一条,不再叠加体积/陈旧', JSON.stringify(none.map((f) => f.id)))
+  ok(!none.some((f) => f.id === 'cache:bloat' || String(f.id).startsWith('cache:stale:')),
+    '无缓存条目时不出膨胀/陈旧', JSON.stringify(none.map((f) => f.id)))
 
   const huge = await T.runCache(makeCtx([
     ['project.godot', 100, 1], ['.godot/imported/big.bin', 400 * 1024 * 1024, 5]
   ]))
   ok(huge.some((f) => f.severity === 'warn' && f.id === 'cache:bloat'), '缓存体积超源 10 倍 → warn', JSON.stringify(huge.map((f) => f.id)))
-  const trunc = await T.runCache(makeCtx([['project.godot', 100, 1]], { trunc: true }))
-  ok(trunc.some((f) => f.title.includes('部分')), '截断时如实标注')
+  // 审查 F-2:截断时**只出截断这一条**,别的结论一律不下(旧实现在 warn 之后继续算体积/膨胀/
+  // 陈旧,同一次体检既说「以下结论只基于部分文件」又说「这个项目还没有 .godot 缓存」,自相矛盾)。
+  const truncEmpty = await T.runCache(makeCtx([['project.godot', 100, 1]], { trunc: true }))
+  ok(truncEmpty.length === 1 && truncEmpty[0].id === 'cache:truncated',
+    '截断时只有一条:cache:truncated(不再断言「没有缓存」)', JSON.stringify(truncEmpty.map((f) => f.id)))
+  // 第二个复现:3 KB 缓存 ÷ 100 B 可见源 = 30 倍 → 旧实现照样报 cache:bloat/warn,
+  // 而分母只是被截断后剩下的一小块源;cacheMax 同样只是子集里的最大值。
+  const truncCache = await T.runCache(makeCtx(
+    [['project.godot', 100, 1], ['.godot/imported/a.stex', 3072, 5]], { trunc: true }))
+  ok(truncCache.length === 1 && truncCache[0].id === 'cache:truncated',
+    '截断时不报体积/膨胀/陈旧(倍数与最新时间都算自部分清单)', JSON.stringify(truncCache.map((f) => `${f.id}/${f.severity}`)))
+  // 审查 F-4:截断文案不许建议「用 skipDirs / exts 缩小范围」—— 过滤出来的清单同样不完整,
+  // 却不会被标记 truncated,下一轮就会把用户其实有的文件报成丢失。
+  ok(!/skipDirs|exts/.test(String(truncCache[0].detail)),
+    'cache 截断文案不给过滤建议', truncCache[0].detail)
 
   // ---------- 5. brokenRefs 检查器 ----------
   // 为什么存在:P0a 唯一的 error 级结论。两种假阳性都比漏报更伤信任 ——
@@ -350,13 +410,41 @@ async function main() {
   ok(broken[0].rel === 'scene/a.tscn', '主证据是含断链的场景文件', broken[0].rel)
   ok(broken[0].title.includes('res://assets/gone.png'), '标题带原始引用路径', broken[0].title)
   ok(broken[0].detail.includes('Texture2D'), 'detail 带资源类型', broken[0].detail)
-  // id 只由证据(场景 rel + ext_resource id)推导:渲染层的折叠状态与将来的
+  // id 只由证据(场景 rel + ext_resource id + 引用 path)推导:渲染层的折叠状态与将来的
   // 「忽略这条」记忆都按它记账,换成含时间戳或数组下标的形态就会每次扫描都漂移。
-  ok(broken[0].id === 'brokenRefs:scene/a.tscn:2_b', '断链 id 稳定(证据推导,场景 rel + 引用 id)', broken[0].id)
+  ok(broken[0].id === 'brokenRefs:scene/a.tscn:2_b:res://assets/gone.png',
+    '断链 id 稳定(证据推导,场景 rel + 引用 id + 引用 path)', broken[0].id)
+  // 审查 F-1:Godot 允许(编辑器也会写出)同一个场景里两条 ext_resource 复用同一个 id 段,
+  // 指向两个不同的丢失文件。旧 id 只到 id 为止 → 两条结论撞出同一个 key,忽略/折叠一条
+  // 就静默吞掉另一条(实测 ["brokenRefs:scene/a.tscn:2_b","brokenRefs:scene/a.tscn:2_b"])。
+  const dupId = await T.runBrokenRefs(makeCtx(base, {
+    texts: { 'scene/a.tscn':
+      '[ext_resource type="Texture2D" path="res://assets/gone.png" id="2_b"]\n' +
+      '[ext_resource type="Script" path="res://assets/gone2.png" id="2_b"]\n' }
+  }))
+  ok(dupId.length === 2, '同 id 的两条断链都出条目', JSON.stringify(dupId.map((f) => f.id)))
+  ok(new Set(dupId.map((f) => f.id)).size === 2, '同 id 不同 path → 两个不同 id(不撞车)',
+    JSON.stringify(dupId.map((f) => f.id)))
 
   const notScanned = await T.runBrokenRefs(makeCtx([['scene/a.tscn', 10]], { texts: { 'scene/a.tscn': SCENE_B }, trunc: true }))
   ok(notScanned.every((f) => f.severity !== 'error'), '清单被截断时不把「没扫到」当成断链', JSON.stringify(notScanned.map((f) => f.severity)))
   ok(notScanned.some((f) => f.severity === 'warn'), '截断本身要报一条 warn')
+  ok(notScanned.some((f) => f.id === 'brokenRefs:truncated'),
+    'brokenRefs 的截断条目 id 是自己的 brokenRefs:truncated', JSON.stringify(notScanned.map((f) => f.id)))
+  // 审查 F-4(同 size):断链判定最怕的就是「用过滤缩小范围」这个建议 —— 它会让下一轮的
+  // 清单既不完整、又不带 truncated 标记,这条保守规则直接被绕过。
+  ok(!/skipDirs|exts/.test(String(notScanned[0].detail)),
+    'brokenRefs 截断文案不给 skipDirs/exts 建议', notScanned[0].detail)
+  ok(/maxEntries|完整重扫/.test(String(notScanned[0].detail)),
+    'brokenRefs 截断文案给的是安全动作', notScanned[0].detail)
+  // 审查 F-6:三个检查器的截断条目必须各带自己的前缀。传错 toolId 或写死成一个共享 id
+  // 都会让这里红(单条断言只考一个检查器,这一条考的是「三者互不相同」)。
+  const truncIds = [t, truncEmpty, notScanned].map((list) => {
+    const f = list.find((x) => String(x.id).endsWith(':truncated'))
+    return f ? f.id : '(none)'
+  })
+  ok(truncIds.join('|') === 'size:truncated|cache:truncated|brokenRefs:truncated',
+    '三条截断条目各自独立(不共用一个 id)', JSON.stringify(truncIds))
 
   const multi = await T.runBrokenRefs(makeCtx([['player.gd', 10]], {
     texts: { 'scene/a.tscn': SCENE_B, 'sub/b.tres': SCENE_B }

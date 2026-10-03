@@ -27,7 +27,9 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
     // 就是「这次没做判定」,标题要说清做了什么没做什么。
     return [truncatedFinding(
       'brokenRefs',
-      '断链判定需要完整清单,否则会把你其实有的文件报成丢失。用 skipDirs 缩小范围后重跑。',
+      '断链判定需要完整清单,否则会把你其实有的文件报成丢失(而且是 error 级)。' +
+        '请把 maxEntries 调高或做一次完整重扫 —— 别用排除目录、按扩展名筛选来「缩小范围」,' +
+        '那样得到的清单同样不完整,却不会再带截断标记。',
       '文件清单被截断,本次不做断链判定'
     )]
   }
@@ -41,9 +43,13 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
       const rel = resToRel(ref.path)
       if (rel === null || have.has(rel)) continue
       out.push({
-        // id 只用证据(场景 rel + 该条 ext_resource 的 id);ext_resource 缺 id 时退回
-        // 引用路径,免得同文件里两条无 id 的断链撞出同一个 key。不含时间戳。
-        id: `brokenRefs:${f.rel}:${ref.id || ref.path}`,
+        // id = 场景 rel + 该条 ext_resource 的 id + 该条的引用 path(全是证据,不含时间戳)。
+        // ⚠ 光靠 id 不够:同一个场景里两条 [ext_resource] 可以复用同一个 id 却指向两个
+        // 不同的丢失文件(编辑器改引用时就会长这样),旧写法 `${f.rel}:${ref.id}` 会让两条
+        // 撞出同一个 key —— 而 id 是渲染层折叠状态与将来「忽略这条」记忆的记账键,撞了
+        // 就等于「忽略一条、静默吞掉另一条」(审查 F-1 实测复现)。缺 id 时补 'noid'
+        // 占位(手写/半截文件),区分工作交给 path。
+        id: `brokenRefs:${f.rel}:${ref.id || 'noid'}:${ref.path}`,
         severity: 'error',
         title: `引用了不存在的文件:${ref.path}`,
         detail: `${f.rel} 的 [ext_resource] 声明类型为 ${ref.type || '未标注'}、id=${ref.id || '未标注'}。` +
