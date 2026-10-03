@@ -332,6 +332,43 @@ async function main() {
   ok(huge.some((f) => f.severity === 'warn' && f.id === 'cache:bloat'), '缓存体积超源 10 倍 → warn', JSON.stringify(huge.map((f) => f.id)))
   const trunc = await T.runCache(makeCtx([['project.godot', 100, 1]], { trunc: true }))
   ok(trunc.some((f) => f.title.includes('部分')), '截断时如实标注')
+
+  // ---------- 5. brokenRefs 检查器 ----------
+  // 为什么存在:P0a 唯一的 error 级结论。两种假阳性都比漏报更伤信任 ——
+  // ① 清单截断时「没扫到」≠「文件不存在」,必须拒绝判定;② 读不到文本
+  // (二进制/超 maxBytes/缺文件)必须静默跳过,不能当成断链。
+  section('5. brokenRefs:资源引用完整性')
+  const SCENE_A = '[ext_resource type="Script" path="res://player.gd" id="1_a"]\n[node name="R"]\n'
+  const SCENE_B = '[ext_resource type="Texture2D" path="res://assets/gone.png" id="2_b"]\n'
+  const base = [['player.gd', 10], ['assets/bg.png', 10], ['scene/a.tscn', 10], ['sub/b.tres', 10]]
+  const cleanCtx = makeCtx(base, { texts: { 'scene/a.tscn': SCENE_A, 'sub/b.tres': '' } })
+  ok((await T.runBrokenRefs(cleanCtx)).length === 0, '引用都存在 → 零结论')
+
+  const broken = await T.runBrokenRefs(makeCtx(base, { texts: { 'scene/a.tscn': SCENE_B } }))
+  ok(broken.length === 1, '一条断链', JSON.stringify(broken))
+  ok(broken[0].severity === 'error', '断链是 error')
+  ok(broken[0].rel === 'scene/a.tscn', '主证据是含断链的场景文件', broken[0].rel)
+  ok(broken[0].title.includes('res://assets/gone.png'), '标题带原始引用路径', broken[0].title)
+  ok(broken[0].detail.includes('Texture2D'), 'detail 带资源类型', broken[0].detail)
+  // id 只由证据(场景 rel + ext_resource id)推导:渲染层的折叠状态与将来的
+  // 「忽略这条」记忆都按它记账,换成含时间戳或数组下标的形态就会每次扫描都漂移。
+  ok(broken[0].id === 'brokenRefs:scene/a.tscn:2_b', '断链 id 稳定(证据推导,场景 rel + 引用 id)', broken[0].id)
+
+  const notScanned = await T.runBrokenRefs(makeCtx([['scene/a.tscn', 10]], { texts: { 'scene/a.tscn': SCENE_B }, trunc: true }))
+  ok(notScanned.every((f) => f.severity !== 'error'), '清单被截断时不把「没扫到」当成断链', JSON.stringify(notScanned.map((f) => f.severity)))
+  ok(notScanned.some((f) => f.severity === 'warn'), '截断本身要报一条 warn')
+
+  const multi = await T.runBrokenRefs(makeCtx([['player.gd', 10]], {
+    texts: { 'scene/a.tscn': SCENE_B, 'sub/b.tres': SCENE_B }
+  }))
+  ok(multi.length === 0, '未在清单里的文件不去读(不会凭空断链)', JSON.stringify(multi))
+
+  const skipUser = await T.runBrokenRefs(makeCtx(base, {
+    texts: { 'scene/a.tscn': '[ext_resource type="AudioStream" path="user://x.ogg" id="1_a"]\n' }
+  }))
+  ok(skipUser.length === 0, 'user:// 与绝对路径不参与判定')
+  const unreadable = await T.runBrokenRefs(makeCtx(base, { texts: {} }))
+  ok(unreadable.length === 0, '读不到文本(二进制/超限)的场景文件跳过,不报假断链')
 }
 main().catch((e) => {
   // 断言里不该抛错;真抛了(比如实现返回了 undefined)也要以退出码 1 收口,不能让 CI 看到绿。
