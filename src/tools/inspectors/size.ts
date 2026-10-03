@@ -46,7 +46,9 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
   // ⚠ 但写法不能是「先 topFiles(src, 20) 砍到前 20 名、再从这 20 条里筛 ≥20MB」:那样第 21 个之后
   // 的超标文件会被**静默丢掉** —— 21 个超标文件只列得出 20 个,而 size:total 说的却是「21 个」,
   // 界面上完全看不出少了一条(审查 F-5)。上限保留,差额改成从**未过滤**的 src 算出来、单独成条。
-  // 因为 src 按体积降序,只要有超标文件被截断,列出的那 20 行必然全部超标(bigRows.length = BIG_LIST)。
+  // 为什么被截断时列出的那 20 行必然全部超标(bigRows.length = BIG_LIST):降序发生在
+  // `topFiles` **自己的副本**上(treeUtils.ts:`[...tree].sort(...)`,入参 src 既不排序也不许被
+  // 原地改),它取的就是体积最大的 20 个;这 20 个既然都 ≥ 阈值,差额自然等于总数减列出的行数。
   const oversizeTotal = src.filter((f) => f.size >= BIG_FILE).length
   const bigRows = topFiles(src, BIG_LIST).filter((f) => f.size >= BIG_FILE)
   for (const f of bigRows) {

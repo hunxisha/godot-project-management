@@ -1,11 +1,12 @@
 // preload 服务面契约测试:window.services 与类型契约 Services 必须逐项一致。
 //
-// 为什么需要:渲染层访问宿主能力只有一条路 —— window.services(47 个透传方法,实现在
+// 为什么需要:渲染层访问宿主能力只有一条路 —— window.services(透传方法全部实现在
 // src-ztools/preload/services.js),其类型契约在 src/types/services.ts。
+// 两侧各有多少个方法**不在注释里写死**(写死的 47 早就过期了):下面第 1 节按实际键数打印。
 //
 // 演进说明:这份契约原先手写在 src/env.d.ts,与 services.js 各写一遍、靠本测试比对。
 // 现在 services.js 用 `@type {import('../../src/types/services').Services}` 直接引用它,
-// **编译器**已能强制 47 个方法一个不多一个不少(见 docs/optimization-plan.md 的 P0-2)。
+// **编译器**已能强制契约方法一个不多一个不少(见 docs/optimization-plan.md 的 P0-2)。
 // 这个测试因此从「唯一的护栏」变成「双保险」:
 //   · 编译器管签名是否匹配(本测试看不见的那部分);
 //   · 本测试管运行时对象真的有这些键(编译产物若被手改/降级打包,这里会立刻发现)。

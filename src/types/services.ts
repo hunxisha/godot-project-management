@@ -5,7 +5,8 @@
 // 任何新增能力都要改两处。抽成模块后可导出,于是:
 //   · 渲染层通过下方 `declare global` 拿到 `window.services` 的类型;
 //   · preload 侧用 `/** @type {import('../../src/types/services').Services} */`
-//     标注 services.js —— **编译器**会强制那 47 个方法一个不多一个不少。
+//     标注 services.js —— **编译器**会强制契约里的方法一个不多一个不少。
+//     方法数不在注释里写死(写死的 47 早就过期了):当前数量以 `services.test.js` 的实输出为准。
 //
 // 因此这份文件是**唯一权威**。新增能力只需在这里加签名 + 在 services.js 加实现,
 // 少写一边会直接编译失败(见 docs/optimization-plan.md 的 P0-2)。

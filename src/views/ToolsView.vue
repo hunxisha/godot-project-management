@@ -29,6 +29,21 @@ const rootPath = computed(() => t.projects.value.find((p) => p._id === t.project
 const openTool = computed(() => t.tools.value.find((x) => x.id === open.value) || null)
 const openFindings = computed(() => (open.value ? t.findingsOf(open.value) : []))
 
+/**
+ * 「全部工具都跑成功、一条结论都没有」= 项目干净。
+ * 这一行必须显式存在:调度器在切项目时返回空结果集(不报错),跑完一轮全绿之后如果页面
+ * 什么都不说,用户分不清「体检跑完且没问题」和「刚切了项目、什么都还没跑」——
+ * 两种状态下卡片、汇总条、横幅长得一模一样。失败的工具不算干净(ok:false 有自己的红卡片)。
+ */
+const allClean = computed(() => {
+  const rs = Object.values(t.results.value)
+  return !busy.value &&
+    rs.length > 0 &&
+    rs.length === t.tools.value.length &&
+    rs.every((r) => r.ok) &&
+    t.counts.value.error + t.counts.value.warn + t.counts.value.info === 0
+})
+
 /** 再点一次同一张卡片的「结果」= 收起 */
 function toggleResult(id: string) {
   open.value = open.value === id ? '' : id
@@ -65,6 +80,7 @@ function toggleResult(id: string) {
       :running="busy"
       :has-project="!!t.projectId.value"
       :progress="t.progress.value"
+      :all-clean="allClean"
       @run-all="t.runAll()"
     />
 

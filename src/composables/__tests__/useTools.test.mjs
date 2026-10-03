@@ -174,8 +174,13 @@ async function main() {
   ok(t.counts.value.error >= 1 && t.counts.value.info >= 1, 'counts 按严重度累计', JSON.stringify(t.counts.value))
   // M-6:原来的 `typeof findingsOf(...) === 'object'` 恒真(findingsOf 里就写了 `|| []`),
   // 换成能失败的形状:取到的是**那个工具真实的结论数组**,没跑过/不存在的 id 才回空数组。
-  ok(t.findingsOf('brokenRefs').length === 1 && t.findingsOf('brokenRefs')[0].id === br.findings[0].id,
-    'findingsOf 返回的就是该工具那一次跑出来的那批结论(不是恒真的 typeof 判据)', JSON.stringify(t.findingsOf('brokenRefs')))
+  // Task 16 修复:上一版拿 `br.findings[0].id` 与 `findingsOf('brokenRefs')[0].id` 相比,而
+  // `br` 就是 `t.results.value.brokenRefs` —— 同一份数组自比,**永远为真**,findingsOf 返回
+  // 别的工具的结果、或返回空数组之外的任何东西都照样绿。id 改成钉字面量(证据推导:场景 rel +
+  // ext_resource id + 引用 path),这条才有失败能力。
+  ok(t.findingsOf('brokenRefs').length === 1 &&
+    t.findingsOf('brokenRefs')[0].id === 'brokenRefs:scene/main.tscn:1_a:res://gone.gd',
+    'findingsOf 返回的就是该工具那一次跑出来的那批结论(id 与夹具证据逐字对上)', JSON.stringify(t.findingsOf('brokenRefs')))
   ok(t.findingsOf('nope').length === 0, '未注册 / 没跑过的 id 回空数组而不是 undefined', JSON.stringify(t.findingsOf('nope')))
 
   section('6. 宿主能力缺失时降级')
@@ -228,7 +233,7 @@ async function main() {
   ok(seenErr[2] === '项目不存在', '其它失败原因原样透传,不吞掉诊断', seenErr[2])
   restore()
 
-  section('10. 切换项目清空 tree / results / 文本 LRU')
+  section('10. 切换项目清空 tree / results / error / 文本 LRU')
   const PROJECT2 = { _id: 'godot/project/p2', id: 'p2', path: 'E:/proj2', name: 'Demo2', favorite: false, openCount: 0, configVersion: 5, lastOpenedAt: 1000 }
   const swScan = { 'godot/project/p1': 0, 'godot/project/p2': 0 }
   const swRead = []
@@ -259,6 +264,17 @@ async function main() {
   t7.select('godot/project/p1')
   await t7.runTool('brokenRefs')
   ok(swScan['godot/project/p1'] === 2 && swRead.length === 3, 'select 同项目是空操作,不清缓存', `${swScan['godot/project/p1']}/${swRead.length}`)
+  // Task 16 修复:error 也按项目成立。旧 select() 清了 tree/results/truncated/LRU,却漏了 error,
+  // 于是上一个项目的扫描横幅(「项目目录无法读取」)会挂在新项目页面上,直到下一次成功扫描才消失
+  // —— 而 ToolsView 的 err-line 是唯一的失败出口,残留就等于报一个不存在的问题。
+  global.window.services.scanProjectTree = (pid) => pid === 'godot/project/p1'
+    ? { ok: false, error: '项目目录不可读' }
+    : { ok: true, files: TREE.map((x) => ({ ...x })), truncated: false }
+  t7.invalidateTree() // 强制下一次真的重扫:命中 TTL 就走不到失败那一路
+  await t7.runTool('size')
+  ok(t7.error.value === '项目目录无法读取', '前置:p1 扫描失败,error 已按 R-C 归一上浮', t7.error.value)
+  t7.select('godot/project/p2')
+  ok(t7.error.value === '', '切项目一并清空 error:上一个项目的扫描横幅不残留', JSON.stringify(t7.error.value))
   restore()
 
   section('11. invalidateTree 与 runAll 的扫描计数')

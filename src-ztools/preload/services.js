@@ -2,7 +2,9 @@
 // 能力模块位于 lib/ 下,按功能领域拆分
 //
 // 下面的 @type 引用渲染层的类型契约(src/types/services.ts) —— 它是**唯一权威**:
-// 这份对象必须不多不少地实现 Services 的全部方法(当前 91 个),少一个、多一个、签名不对都会编译失败。
+// 这份对象必须不多不少地实现 Services 的全部方法,少一个、多一个、签名不对都会编译失败。
+// 方法数**不在注释里写死**:写死的数字每加一次能力就过期一次(历史上的 47 / 91 就是这么烂掉的)。
+// 想知道当前数量:跑 `node src-ztools/preload/lib/__tests__/services.test.js`,它按实际键数打印。
 // 这取代了原先「两处手写 + 一个比对测试」的做法(见 docs/optimization-plan.md 的 P0-2)。
 const { currentPlatform, fetchReleases } = require('./lib/releases')
 const install = require('./lib/install')

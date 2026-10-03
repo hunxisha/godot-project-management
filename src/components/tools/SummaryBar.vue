@@ -17,6 +17,8 @@ const props = defineProps<{
   hasProject: boolean
   /** useTools 的进度文案(空串表示没有进度可显示) */
   progress: string
+  /** 全部工具都跑成且零结论:视图算好喂进来,组件不认识 useTools,也认不出「切项目清空」与「跑完没问题」的区别 */
+  allClean: boolean
 }>()
 const emit = defineEmits<{ (e: 'run-all'): void }>()
 
@@ -34,6 +36,8 @@ const filesText = computed(() =>
     <span v-if="counts.fixable" class="c fixable">可修复 {{ counts.fixable }}</span>
     <span v-if="files" class="c meta">{{ filesText }}</span>
     <span v-if="ran" class="c meta">{{ ran }} 项已检查</span>
+    <!-- 全绿时的显式结果:没有结论 ≠ 什么都没跑(见 props.allClean)。用现成的 .c.meta,不新增色板 -->
+    <span v-if="allClean" class="c meta">体检完成 · 未发现问题</span>
     <span v-if="progress" class="c prog">{{ progress }}</span>
     <button class="btn small primary" :disabled="running || !hasProject" @click="emit('run-all')">
       <span v-if="running" class="spin"></span>

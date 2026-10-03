@@ -347,8 +347,11 @@ async function main() {
   ]))
   const st = stale.find((f) => f.severity === 'warn')
   ok(!!st, '源文件更新 → 报「缓存可能已过期」', JSON.stringify(stale.map((f) => f.severity)))
-  ok(st.detail.includes('scene/main.tscn'), 'detail 点出具体源文件', st.detail)
-  ok(String(st.id).startsWith('cache:stale:'), 'stale 条目 id 稳定可折叠', st.id)
+  // Task 16 修复:下面两条改为**先判 st 存在**。旧写法是裸 `st.detail.includes(...)` ——
+  // 回归时 stale.find 回 undefined,这里抛 TypeError 直接把整个测试脚本打断,
+  // 屏幕上只剩上面那条 PASS 加一坨堆栈,拿不到「哪一条错」也拿不到 FAIL 汇总。
+  ok(!!st && String(st.detail).includes('scene/main.tscn'), 'detail 点出具体源文件', st && st.detail)
+  ok(String(st && st.id).startsWith('cache:stale:'), 'stale 条目 id 稳定可折叠', st && st.id)
 
   // 审查 F-3:mtimeMs === 0 是宿主「取不到 metadata」的哨兵(src-tauri/src/inspectfs.rs:90-95
   // `md.modified().ok()...unwrap_or(0)`,JS 端 pre-1970 也折成 0),不是「1970-01-01 修改过」。
@@ -382,6 +385,11 @@ async function main() {
   const truncEmpty = await T.runCache(makeCtx([['project.godot', 100, 1]], { trunc: true }))
   ok(truncEmpty.length === 1 && truncEmpty[0].id === 'cache:truncated',
     '截断时只有一条:cache:truncated(不再断言「没有缓存」)', JSON.stringify(truncEmpty.map((f) => f.id)))
+  // Task 16 修复:cache 的截断**标题**此前没有任何文案断言 —— 上面那条把旧的关键字判换成了
+  // 「条数 + id」,而 F-4 那两条只查 detail,标题写成「缓存体积异常」也能全绿。
+  // cache 走的是 truncatedFinding 的 title 覆盖(默认标题讲「以下结论只基于部分文件」,
+  // 而 cache 截断时一个结论都不下),所以这里钉它自己那句里的「截断」。
+  ok(String(truncEmpty[0].title).includes('截断'), 'cache 截断那条的标题点明「截断」', truncEmpty[0].title)
   // 第二个复现:3 KB 缓存 ÷ 100 B 可见源 = 30 倍 → 旧实现照样报 cache:bloat/warn,
   // 而分母只是被截断后剩下的一小块源;cacheMax 同样只是子集里的最大值。
   const truncCache = await T.runCache(makeCtx(

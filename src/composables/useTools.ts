@@ -291,6 +291,9 @@ export function useTools() {
     truncated.value = false
     results.value = {}
     textCache.clear()
+    // error 同样按项目成立:扫描失败的横幅(「项目目录无法读取」)属于**上一个**项目,
+    // 不清的话切到正常项目后它会一直挂着,直到下一次扫描成功才消失(Task 16 修复)。
+    error.value = ''
   }
 
   function registerTool(t: Tool) {
