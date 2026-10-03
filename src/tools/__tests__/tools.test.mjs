@@ -295,6 +295,43 @@ async function main() {
   const e = await T.runSize(makeCtx([]))
   ok(e.every((f) => f.severity === 'info'), '空树不报 error/warn(没什么可查)', JSON.stringify(e.map((f) => f.severity)))
   ok(!e.some((f) => f.id === 'size:cache'), '无缓存时不出缓存条目')
+
+  // ---------- 4. cache 检查器 ----------
+  // 为什么存在:.godot 陈旧是「编辑器里改了但插件看到的还是旧的」的根因之一。
+  // 无缓存**不是**错误(新克隆项目就是没有),异常膨胀才是 warn。
+  section('4. cache:.godot 缓存体检')
+  // 新鲜:缓存最新(off=5)晚于源(off=1)
+  // ⚠ 夹具体积从 brief 原文的 9000 改为 900:源 600 B + 缓存 9000 B = 15 倍,
+  // 必然同时踩中 CACHE_OVER_SRC=10 的 bloat 分支(实测 ["cache:size/info","cache:bloat/warn"]),
+  // 于是「缓存比源新 → 只有 info」这条用例其实在考「不报膨胀」——而阈值 10 是 brief 钉死的。
+  // 用例的意图是 mtime 陈旧判定,所以改夹具而不是改断言/阈值(900/600 = 1.5 倍,阈值下界)。
+  const fresh = await T.runCache(makeCtx([
+    ['project.godot', 100, 1], ['scene/main.tscn', 500, 1], ['.godot/imported/a.stex', 900, 5]
+  ]))
+  ok(fresh.every((f) => f.severity === 'info'), '缓存比源新 → 只有 info', JSON.stringify(fresh.map((f) => f.severity)))
+  ok(fresh[0].id === 'cache:size', '第一条是体积')
+  ok(fresh[0].title.includes('.godot'), '标题点明 .godot', fresh[0].title)
+  // 阈值下界:1.5 倍不许报膨胀。CACHE_OVER_SRC 被改成 1 时这条必须红(上面 every 也会红)。
+  ok(!fresh.some((f) => f.id === 'cache:bloat'), '未超源 10 倍(实测 1.5 倍)不报膨胀', JSON.stringify(fresh.map((f) => f.id)))
+
+  const stale = await T.runCache(makeCtx([
+    ['project.godot', 100, 9], ['scene/main.tscn', 500, 9], ['.godot/imported/a.stex', 900, 2]
+  ]))
+  const st = stale.find((f) => f.severity === 'warn')
+  ok(!!st, '源文件更新 → 报「缓存可能已过期」', JSON.stringify(stale.map((f) => f.severity)))
+  ok(st.detail.includes('scene/main.tscn'), 'detail 点出具体源文件', st.detail)
+  ok(String(st.id).startsWith('cache:stale:'), 'stale 条目 id 稳定可折叠', st.id)
+
+  const none = await T.runCache(makeCtx([['project.godot', 100, 1]]))
+  ok(none.some((f) => f.severity === 'info' && f.title.includes('还没有')), '无缓存 → info(不是错误)')
+  ok(none.length === 1, '无缓存时只有一条,不再叠加体积/陈旧', JSON.stringify(none.map((f) => f.id)))
+
+  const huge = await T.runCache(makeCtx([
+    ['project.godot', 100, 1], ['.godot/imported/big.bin', 400 * 1024 * 1024, 5]
+  ]))
+  ok(huge.some((f) => f.severity === 'warn' && f.id === 'cache:bloat'), '缓存体积超源 10 倍 → warn', JSON.stringify(huge.map((f) => f.id)))
+  const trunc = await T.runCache(makeCtx([['project.godot', 100, 1]], { trunc: true }))
+  ok(trunc.some((f) => f.title.includes('部分')), '截断时如实标注')
 }
 main().catch((e) => {
   // 断言里不该抛错;真抛了(比如实现返回了 undefined)也要以退出码 1 收口,不能让 CI 看到绿。

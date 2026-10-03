@@ -4,3 +4,4 @@
 export * from './treeUtils'
 export * from './parsers/sceneRefs'
 export { run as runSize } from './inspectors/size'
+export { run as runCache } from './inspectors/cache'
