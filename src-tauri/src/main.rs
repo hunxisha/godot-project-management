@@ -200,35 +200,59 @@ fn uninstall_export_templates(exe_path: String, tag: String) -> Value {
 
 #[tauri::command]
 fn scan_project_tree(state: State<AppState>, project_id: String, opts: Option<Value>) -> Value {
-    let root = match project_root_of(&state, &project_id) { Ok(r) => r, Err(e) => return serde_json::json!({ "ok": false, "error": e }) };
-    let o = opts.unwrap_or_else(|| serde_json::json!({}));
-    let list = |key: &str| -> Vec<String> {
-        o.get(key).and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
-            .unwrap_or_default()
-    };
-    let scan = godot_workshop::inspectfs::ScanOpts {
-        include_cache: o.get("includeCache").and_then(|v| v.as_bool()).unwrap_or(false),
-        exts: list("exts"),
-        skip_dirs: list("skipDirs"),
-        max_entries: max_entries_of(&o),
-    };
+    let root = match project_root_of(&state.store, &project_id) { Ok(r) => r, Err(e) => return serde_json::json!({ "ok": false, "error": e }) };
+    // opts 的逐键解析与归一收在库里(D-6),命令层只负责取根与转发。
+    let scan = godot_workshop::inspectfs::ScanOpts::from_json(
+        &opts.unwrap_or_else(|| serde_json::json!({})));
     godot_workshop::inspectfs::scan_json(&root, &scan)
 }
 
-/// maxEntries 归一:0 / 负数 / 非数字 / 缺省一律退默认,与 JS 侧
-/// `o.maxEntries && o.maxEntries > 0 ? o.maxEntries : DEFAULT_MAX_ENTRIES` 同语义(inspectfs.js:249)。
-/// 0 不是「不限」而是非法值 —— `collect_tree` 的上限检查在 push 之后,原样透传就变成
-/// 「回 1 条 + truncated:true」,体检结论整个反了。
-fn max_entries_of(o: &Value) -> usize {
-    o.get("maxEntries").and_then(|v| v.as_u64())
-        .filter(|n| *n > 0)
-        .map(|n| n as usize).unwrap_or(godot_workshop::inspectfs::DEFAULT_MAX_ENTRIES)
+/// 读项目内文本文件(rel 相对项目根、正斜杠;超限只报 truncated)。
+#[tauri::command]
+fn read_project_text(state: State<AppState>, project_id: String, rel: String, max_bytes: Option<u64>) -> Value {
+    match project_doc_root_of(&state.store, &project_id) {
+        Ok(r) => godot_workshop::inspectfs::read_text_json(&r, &rel,
+            max_bytes.unwrap_or(godot_workshop::inspectfs::DEFAULT_MAX_BYTES)),
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    }
 }
 
-/// 4 个原语共用:projectId → 项目根(与 list_export_presets 同一取法)。
-fn project_root_of(state: &State<AppState>, project_id: &str) -> Result<std::path::PathBuf, String> {
-    let st = state.store.lock().unwrap();
+/// 写项目内文本文件(同目录临时文件 + rename 原子落盘,默认先备份)。
+#[tauri::command]
+fn write_project_text(state: State<AppState>, project_id: String, rel: String, text: String, backup: Option<bool>) -> Value {
+    match project_doc_root_of(&state.store, &project_id) {
+        Ok(r) => godot_workshop::inspectfs::write_text_json(&r, &rel, &text, backup.unwrap_or(true)),
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    }
+}
+
+/// 批量移入回收站:单项失败不中断其余,失败项原样带回(moved 以磁盘实况为准)。
+#[tauri::command]
+fn move_paths_to_trash(state: State<AppState>, project_id: String, rels: Vec<String>) -> Value {
+    match project_doc_root_of(&state.store, &project_id) {
+        Ok(r) => godot_workshop::inspectfs::trash_json(&r, &rels),
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    }
+}
+
+/// 读 / 写 / 删三命令共用:projectId → 项目根**文档里记的那个路径**(不查盘)。
+///
+/// 与 JS 侧的分工逐字对齐:`projectRoot()` 只做 store 查询,目录还在不在**不归它管** ——
+/// 拿不到文档 → '项目不存在';目录已被删 → 库里的包含闸 canonicalize 失败 → '路径无法解析'。
+/// 所以这里不能像 `project_root_of`(遍历命令用,JS 的 scanProjectTree 自己有 existsSync 分支,
+/// 回 '项目目录已不存在')那样先做 is_dir 再报错,否则同一件事两端给两句不同的话。
+fn project_doc_root_of(store: &Mutex<store::Store>, project_id: &str) -> Result<std::path::PathBuf, String> {
+    let st = store.lock().unwrap();
+    st.get(project_id)
+        .and_then(|d| d.get("path").and_then(|v| v.as_str()).map(String::from))
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| "项目不存在".to_string())
+}
+
+/// 遍历命令用:projectId → 项目根,并确认目录还在(与 list_export_presets 同一取法)。
+fn project_root_of(store: &Mutex<store::Store>, project_id: &str) -> Result<std::path::PathBuf, String> {
+    let st = store.lock().unwrap();
     let p = st.get(project_id)
         .and_then(|d| d.get("path").and_then(|v| v.as_str()).map(String::from));
     match p {
@@ -1189,7 +1213,7 @@ fn main() {
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, scan_project_tree, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets, create_project, uninstall_addon, install_asset, run_export, cancel_export_task, docs_generate, docs_import, docs_library_status, docs_list_classes, docs_get_class, docs_search, docs_search_full_text, docs_delete_library, docs_diff_libraries, fetch_releases_cmd, cancel_task, dismiss_task, search_assets, list_featured_cmd, list_all_assets_cmd, list_new_assets_cmd, list_recently_updated_cmd, list_project_assets_cmd, restore_backup])
+        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, scan_project_tree, read_project_text, write_project_text, move_paths_to_trash, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets, create_project, uninstall_addon, install_asset, run_export, cancel_export_task, docs_generate, docs_import, docs_library_status, docs_list_classes, docs_get_class, docs_search, docs_search_full_text, docs_delete_library, docs_diff_libraries, fetch_releases_cmd, cancel_task, dismiss_task, search_assets, list_featured_cmd, list_all_assets_cmd, list_new_assets_cmd, list_recently_updated_cmd, list_project_assets_cmd, restore_backup])
         .run(tauri::generate_context!())
         .expect("tauri 应用启动失败");
 }
@@ -1198,16 +1222,66 @@ fn main() {
 mod tests {
     use super::*;
 
-    /// F-2:`maxEntries` 的 0 / 负数 / 非数字都必须回落默认(与 JS 侧 scanProjectTree 同归一)。
-    /// 少了 `>0` 那道闸时 0 会被原样送进 collect_tree,回「1 条 + truncated:true」。
+    /// 造一个只装了一条项目文档的 store。夹具目录名带 pid **+ 纳秒**:同一进程里的并行用例
+    /// 会用同一个 project_id 各造一份(两个用例都要 'godot/project/ok'),只带 pid 就会互删。
+    fn store_with_project(id: &str, path: Option<&str>) -> (Mutex<store::Store>, std::path::PathBuf) {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let dir = std::env::temp_dir().join(format!("gpm-main-{}-{}-{}", id, std::process::id(), nanos));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut db = store::Store::open(&dir.join("db.json"));
+        let doc = match path {
+            Some(p) => json!({ "_id": id, "path": p }),
+            None => json!({ "_id": id }),
+        };
+        db.put(&doc);
+        (Mutex::new(db), dir)
+    }
+
+    /// D-1 的命令层那一半:读 / 写 / 删三命令共用 project_doc_root_of,它**不查盘** ——
+    /// JS 的 projectRoot() 只做 store 查询,目录被删时是库里的包含闸 canonicalize 失败,
+    /// 给 '路径无法解析'。命令层若先 is_dir 拦一道,同一件事两端就各说一句话了。
     #[test]
-    fn max_entries_of_falls_back_to_default_for_zero_and_garbage() {
-        let d = godot_workshop::inspectfs::DEFAULT_MAX_ENTRIES;
-        assert_eq!(max_entries_of(&json!({ "maxEntries": 0 })), d, "0 必须退默认而不是当上限用");
-        assert_eq!(max_entries_of(&json!({ "maxEntries": -1 })), d, "负数退默认");
-        assert_eq!(max_entries_of(&json!({ "maxEntries": "30" })), d, "非数字退默认");
-        assert_eq!(max_entries_of(&json!({ "maxEntries": null })), d, "null 退默认");
-        assert_eq!(max_entries_of(&json!({})), d, "缺省退默认");
-        assert_eq!(max_entries_of(&json!({ "maxEntries": 25 })), 25, "正整数原样生效");
+    fn project_doc_root_of_returns_the_recorded_path_without_probing_disk() {
+        let live = std::env::temp_dir().join(format!("gpm-main-live-{}-{}", std::process::id(), std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let _ = std::fs::remove_dir_all(&live);
+        std::fs::create_dir_all(&live).unwrap();
+        let (store, tmp) = store_with_project("godot/project/ok", Some(&live.to_string_lossy()));
+        assert_eq!(project_doc_root_of(&store, "godot/project/ok").unwrap(), live, "在世的根原样返回");
+        let gone = std::path::PathBuf::from(format!("{}-gone", live.to_string_lossy()));
+        let dead = store_with_project("godot/project/dead", Some(&gone.to_string_lossy()));
+        assert_eq!(project_doc_root_of(&dead.0, "godot/project/dead"), Ok(gone),
+            "目录被删也要把根交下去,由库里的闸报 '路径无法解析'");
+        assert_eq!(project_doc_root_of(&store, "godot/project/none").unwrap_err(), "项目不存在");
+        let nopath = store_with_project("godot/project/nopath", None);
+        assert_eq!(project_doc_root_of(&nopath.0, "godot/project/nopath").unwrap_err(), "项目不存在",
+            "文档在但没记 path → 与 JS 的 `!root` 同句");
+        let empty = store_with_project("godot/project/empty", Some(""));
+        assert_eq!(project_doc_root_of(&empty.0, "godot/project/empty").unwrap_err(), "项目不存在",
+            "path 为空串视同没记(JS 侧 '' 是 falsy)");
+        std::fs::remove_dir_all(&live).ok();
+        std::fs::remove_dir_all(&tmp).ok();
+        std::fs::remove_dir_all(&dead.1).ok();
+        std::fs::remove_dir_all(&nopath.1).ok();
+        std::fs::remove_dir_all(&empty.1).ok();
+    }
+
+    /// 遍历命令仍走带 existsSync 的那一条(与 JS 的 scanProjectTree 同形,回 '项目目录已不存在')。
+    #[test]
+    fn project_root_of_still_reports_missing_directory_for_scan() {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let live = std::env::temp_dir().join(format!("gpm-main-scan-{}-{}", std::process::id(), nanos));
+        let _ = std::fs::remove_dir_all(&live);
+        std::fs::create_dir_all(&live).unwrap();
+        let (store, tmp) = store_with_project("godot/project/ok", Some(&live.to_string_lossy()));
+        assert_eq!(project_root_of(&store, "godot/project/ok").unwrap(), live);
+        let dead = store_with_project("godot/project/dead", Some("/definitely/not/here"));
+        assert_eq!(project_root_of(&dead.0, "godot/project/dead").unwrap_err(), "项目目录已不存在");
+        assert_eq!(project_root_of(&store, "godot/project/none").unwrap_err(), "项目不存在");
+        std::fs::remove_dir_all(&live).ok();
+        std::fs::remove_dir_all(&tmp).ok();
+        std::fs::remove_dir_all(&dead.1).ok();
     }
 }
