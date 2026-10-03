@@ -15,6 +15,10 @@
 //!     (JS 测试没有覆盖这一形态;工具页显示乱码不如不显示)。
 //! 另有一处形状相同、数值不同的:`stamp_sec` 用手搓的 **UTC** 民政历(std 无本地时区 API,
 //! 且本任务禁止新增依赖),JS 侧是本地历 —— `YYYYMMDD_HHmm_ss` 逐字同形,本机差 8 小时。
+//!
+//! 返回形状的一条硬约定(Task 8 双端对齐钉住):`write_text_json` 成功且**没有备份**时
+//! **省略 `backupRel` 键**,不给 `null` —— `src/types/godot.ts` 声明的是 `backupRel?: string`,
+//! `null` 不在该类型里;JS 侧 `{ ok:true, backupRel: undefined }` 序列化后同样是「键不存在」。
 
 use serde_json::Value;
 use std::collections::HashSet;
@@ -381,7 +385,13 @@ fn write_at(
         remove_quietly(&tmp);
         return err_json("写入失败");
     }
-    serde_json::json!({ "ok": true, "backupRel": backup_rel })
+    // **没有备份时省略 backupRel 键**,而不是给 null:`src/types/godot.ts:633` 声明的是
+    // `backupRel?: string`,null 不在可选类型里;JS 侧 `{ ok:true, backupRel: undefined }`
+    // 经 JSON 序列化后同样「键不存在」。两端形状逐字一致,消费方不必为 null 特判。
+    let mut out = serde_json::Map::new();
+    out.insert("ok".to_string(), Value::Bool(true));
+    if !backup_rel.is_null() { out.insert("backupRel".to_string(), backup_rel); }
+    Value::Object(out)
 }
 
 /// 批量移入回收站(Windows)/ 永久删除(其他平台);单个失败**不中断其余**。
@@ -1056,7 +1066,9 @@ mod tests {
         // D-3:marker 收尾 —— 原扩展名不再留在结尾(`c.gpm-bak-<ts>.txt` 那种形态会被 Godot 导入)
         assert_eq!(bak_prefix(bak), Some("c.txt"), "备份名形如 c.txt.gpm-bak-YYYYMMDD_HHmm_ss: {}", bak);
         assert_eq!(fs::read_to_string(root.join(bak)).unwrap(), "OLD", "备份里是原内容");
-        assert_eq!(write_text_json(&root, "c.txt", "X", false)["backupRel"], Value::Null, "backup:false 不产生备份");
+        let nobak = write_text_json(&root, "c.txt", "X", false);
+        assert!(nobak.get("backupRel").is_none(),
+            "backup:false 不产生备份,且**省略** backupRel 键(不给 null,与 JS 的 undefined 序列化同形): {:?}", nobak);
         assert_eq!(fs::read_to_string(root.join("c.txt")).unwrap(), "X");
         assert_eq!(write_text_json(&root, "sub/x.txt", "A", true)["error"], "目标目录不存在", "不自动建目录");
         assert_eq!(write_text_json(&root, "", "A", true)["error"], "非法路径");
@@ -1068,7 +1080,7 @@ mod tests {
         // 新文件(原不存在)不产生备份
         let n = write_text_json(&root, "brand-new.txt", "FRESH", true);
         assert_eq!(n["ok"], true, "{:?}", n);
-        assert_eq!(n["backupRel"], Value::Null, "原文件不存在时不产生备份");
+        assert!(n.get("backupRel").is_none(), "原文件不存在时不产生备份 → 省略 backupRel 键: {:?}", n);
         assert_eq!(fs::read_to_string(root.join("brand-new.txt")).unwrap(), "FRESH");
         fs::remove_dir_all(&root).ok();
     }

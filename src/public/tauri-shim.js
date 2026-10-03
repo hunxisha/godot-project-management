@@ -62,7 +62,7 @@
     hideMainWindow: () => {},
   }
 
-  // ---------- window.services(34 条已移植命令 + watchX 事件通道) ----------
+  // ---------- window.services(54 条走 invoke 的命令 + 其余如实占位;watchX 走事件通道) ----------
   const ok = (data) => data
   window.services = {
     currentPlatform: () => (IS_WIN ? 'windows' : IS_MAC ? 'macos' : 'linux'),
@@ -92,6 +92,24 @@
     runNetworkDiagnostics: () => invoke('run_network_diagnostics', { proxy: null }),
     getProjectCacheInfo: () => Promise.resolve({ ok: false, exists: false }),
     cleanProjectCache: () => Promise.resolve({ ok: false }),
+    // ---------- 工具页原语(spec §5.4;rel 一律正斜杠相对路径) ----------
+    // 参数名必须用**驼峰**传进 invoke(maxBytes / skipDirs / maxEntries):写成下划线会被
+    // Tauri 静默反序列化成 None,限额直接失效(命令层拿不到就等于用户没设限)。
+    scanProjectTree: (projectId, opts) => invoke('scan_project_tree', { projectId, opts: opts || null }),
+    readProjectText: (projectId, rel, opts) => invoke('read_project_text', { projectId, rel, maxBytes: (opts && opts.maxBytes) || null }),
+    writeProjectText: (projectId, rel, text, opts) => invoke('write_project_text', {
+      projectId, rel, text,
+      backup: !opts || opts.backup !== false
+    }),
+    // rels 必须归成**真数组**再传:Rust 侧签名是 `rels: Vec<String>`,非数组入参在 Tauri
+    // **反序列化阶段**就被拒(promise rejection),而 JS 原语把非数组当空清单回
+    // { ok:true, moved:0 }(见 inspectfs.js:319) —— 两端形态必须一致,所以这里先过滤成
+    // 字符串数组,再把边界拒绝收敛成与原语同形的 { ok:false, error },渲染层永远收不到裸 rejection。
+    // '参数不合法' 是**垫片专属**文案,不在 JS↔Rust 原语的错误串契约里(Rust 侧无需镜像)。
+    movePathsToTrash: (projectId, rels) => invoke('move_paths_to_trash', {
+      projectId,
+      rels: Array.isArray(rels) ? rels.filter((r) => typeof r === 'string') : []
+    }).catch(() => ({ ok: false, error: '参数不合法' })),
     addProject: (inputPath) => invoke('add_project', { inputPath }),
     scanProjects: (rootDir) => invoke('scan_projects', { rootDir }),
     createProject: (o) => invoke('create_project', { name: o.name, parentDir: o.parentDir, renderer: o.renderer, versionTag: o.versionTag, versionId: o.versionId, gitInit: !!o.gitInit }),

@@ -251,17 +251,15 @@ fn project_doc_root_of(store: &Mutex<store::Store>, project_id: &str) -> Result<
 }
 
 /// 遍历命令用:projectId → 项目根,并确认目录还在(与 list_export_presets 同一取法)。
+///
+/// 取根一步**委托给 `project_doc_root_of`**(它已经把「文档没有 path / path 是空串」都收敛成
+/// '项目不存在'),这里只加 `is_dir()` 那一次探盘 —— 不再重复一遍 store 查询。
+/// 空串形态必须跟着委托走:JS 的 `projectRoot()` 里 `doc.path` 为空串就是 falsy →
+/// `scanProjectTree` 回 '项目不存在'(inspectfs.js:243-244),而旧实现先拿到 `Some("")`
+/// 再 is_dir 失败 → 报 '项目目录已不存在',两端各说一句话。
 fn project_root_of(store: &Mutex<store::Store>, project_id: &str) -> Result<std::path::PathBuf, String> {
-    let st = store.lock().unwrap();
-    let p = st.get(project_id)
-        .and_then(|d| d.get("path").and_then(|v| v.as_str()).map(String::from));
-    match p {
-        Some(s) => {
-            let pb = std::path::PathBuf::from(&s);
-            if pb.is_dir() { Ok(pb) } else { Err("项目目录已不存在".into()) }
-        }
-        None => Err("项目不存在".into()),
-    }
+    let pb = project_doc_root_of(store, project_id)?;
+    if pb.is_dir() { Ok(pb) } else { Err("项目目录已不存在".into()) }
 }
 
 #[tauri::command]
@@ -1269,6 +1267,9 @@ mod tests {
     }
 
     /// 遍历命令仍走带 existsSync 的那一条(与 JS 的 scanProjectTree 同形,回 '项目目录已不存在')。
+    /// 取根委托给 `project_doc_root_of`,所以**空串 path 的形态与 JS 对齐**:JS 的
+    /// `projectRoot()` 里 `doc.path` 空串是 falsy → `scanProjectTree` 回 '项目不存在'
+    /// (inspectfs.js:243-244),不是 '项目目录已不存在'。
     #[test]
     fn project_root_of_still_reports_missing_directory_for_scan() {
         let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
@@ -1280,8 +1281,16 @@ mod tests {
         let dead = store_with_project("godot/project/dead", Some("/definitely/not/here"));
         assert_eq!(project_root_of(&dead.0, "godot/project/dead").unwrap_err(), "项目目录已不存在");
         assert_eq!(project_root_of(&store, "godot/project/none").unwrap_err(), "项目不存在");
+        let empty = store_with_project("godot/project/empty", Some(""));
+        assert_eq!(project_root_of(&empty.0, "godot/project/empty").unwrap_err(), "项目不存在",
+            "path 为空串 → 与 JS 的 `!root` 同句(旧实现在这里是 '项目目录已不存在',双端各说一句话)");
+        let nopath = store_with_project("godot/project/nopath", None);
+        assert_eq!(project_root_of(&nopath.0, "godot/project/nopath").unwrap_err(), "项目不存在",
+            "文档在但没记 path → 同样走委托后的统一出口");
         std::fs::remove_dir_all(&live).ok();
         std::fs::remove_dir_all(&tmp).ok();
         std::fs::remove_dir_all(&dead.1).ok();
+        std::fs::remove_dir_all(&empty.1).ok();
+        std::fs::remove_dir_all(&nopath.1).ok();
     }
 }
