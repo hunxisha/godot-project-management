@@ -284,8 +284,11 @@ export function stringLiterals(raw: string): string[] {
  * **不带引号的值也收**(判据 8 的镜像):Godot 自己写盘一律带引号,但编辑器外手改 / 合并冲突
  * 后手补就是 `run/main_scene=res://main.tscn`。getIni 按判据 8 把这种值原样当裸串返回,
  * 那么这里也必须认它 —— 否则 B8 在同一页说「主场景 = res://main.tscn」、B5 说「没人引用它」,
- * 而 §6「孤儿资产误判」的失败模式是用户真去删那个文件。判定仍走 resPathLiteral:
- * 只有**整串就是路径**才算(`1280` / `true` / `PackedStringArray(...)` / `user://` / `$单例` 都不是)。
+ * 而 §6「孤儿资产误判」的失败模式是用户真去删那个文件。判定仍走 resPathLiteral:它要的是
+ * **整串以 `res://` 开头**(切掉前缀后剩下的全留作路径),所以 `1280` / `true` /
+ * `PackedStringArray(...)` / `user://` / `$单例` / `see res://x/y.png` 都不算。
+ * 副作用要写清:Godot 允许路径里有空格,于是 `res://a.png 尾巴` 会整串当路径,得到一个
+ * 对不上任何树条目的 rel —— 本模块不判目标存在性(判据 8),那条 rel 由调用方(B5)自己去比。
  */
 export function iniResPaths(doc: IniDoc): IniResPath[] {
   const out: IniResPath[] = []

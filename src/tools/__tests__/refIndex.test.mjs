@@ -431,6 +431,39 @@ async function main() {
     propIdx.readFailures[0].rel === 'data/keep2.tres' && propIdx.partial === true,
     '判据 4 不放宽判据 1:场景多收引用不等于多读文件(png 仍不读,读不到的 tres 走 readFailures)',
     JSON.stringify({ s: propIdx.sourcesScanned, f: propIdx.readFailures, p: propIdx.partial }))
+  // 跳过 [ext_resource 行的两条边界,都要钉住:这条判据同时管「不翻倍」与「不漏收」。
+  const dupIdx = await T.buildRefIndex(makeCtx(
+    [['scene/dup.tscn', 600], ['assets/bg.png', 8000]],
+    {
+      texts: {
+        'scene/dup.tscn': [
+          'gd_scene load_steps=2 format=3',
+          '[ext_resource type="Texture2D" path="res://assets/bg.png" id="1_p"]',
+          '[node name="Root" type="Node2D"]',
+          'fallback = "res://assets/bg.png"'
+        ].join('\n')
+      }
+    }
+  ).ctx)
+  ok((dupIdx.to.get('assets/bg.png') || []).map((s) => s.via).join('|') === 'ext_resource|literal',
+    '同一个目标在 ext_resource 行与属性行各出现一次 → 两条站点、两种 via(字面量通道不吞属性行)',
+    JSON.stringify((dupIdx.to.get('assets/bg.png') || []).map((s) => s.via)))
+  ok((dupIdx.from.get('scene/dup.tscn') || []).join('|') === 'assets/bg.png',
+    '同一个 from 里同一目标只列一次(from 是集合,to 是逐处站点)',
+    JSON.stringify(dupIdx.from.get('scene/dup.tscn')))
+  // 畸形 ext_resource 行上的第二条 res:// 会被跳过行判据丢掉。这与引擎一致:
+  // sceneRefs.attr() 取第一个匹配,第二条 path= 引擎自己也不认 —— 所以它不是引用。
+  const oddIdx = await T.buildRefIndex(makeCtx(
+    [['scene/odd.tscn', 600], ['assets/a.png', 10], ['assets/b.png', 10]],
+    {
+      texts: {
+        'scene/odd.tscn': 'gd_scene\n[ext_resource type="Texture2D" path="res://assets/a.png" path="res://assets/b.png" id="1_p"]'
+      }
+    }
+  ).ctx)
+  ok(oddIdx.to.has('assets/a.png') && !oddIdx.to.has('assets/b.png'),
+    '畸形 ext_resource 行的第二条 path 不收(引擎也只认第一条:attr() 取首个匹配)',
+    JSON.stringify([...oddIdx.to.keys()]))
   // 逐行扫的代价(不整篇扫):GDScript 里一个不配对的引号会把后半篇全吞掉,而漏掉的正是引用。
   // 主夹具每行引号都配对,所以这条单独钉 —— 整篇扫时下面两条 res:// 一条都收不到。
   const strayQ = [
@@ -532,7 +565,7 @@ async function main() {
     [idx.to?.constructor?.name, idx.from?.constructor?.name, idx.uids?.constructor?.name].join('/'))
   ok([...idx.to.keys()].every((k) => idx.to.get(k).every((s) => typeof s.from === 'string' &&
     ['ext_resource', 'literal', 'ini'].includes(s.via))),
-    '每条站点都有 from 与合法 via(B5 的措辞按 via 分档:引用来自场景/代码/配置)')
+    '每条站点都有 from 与合法 via(via 只说「从哪条通道抓到」:场景属性里的字面量也是 literal,B5 别把它念成「来自代码」)')
   const again = await T.buildRefIndex(makeCtx(SPECS, { texts: TEXTS }).ctx)
   ok(JSON.stringify({
     to: [...idx.to.entries()], from: [...idx.from.entries()], uids: [...idx.uids.entries()],
