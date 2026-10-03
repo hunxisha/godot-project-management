@@ -310,6 +310,24 @@ async function main() {
   ok(idx.to.has('icon.svg') && !idx.from.has('icon.svg'),
     '判据 8:本模块不判目标存不存在(树里没有 icon.svg 照样进索引),存在性是 B5 的活',
     [...idx.to.keys()].filter((k) => k.includes('icon')).join('|'))
+  // 判据 4 通道二的下游:project.godot 里**不带引号**的路径值要一路走到索引里。
+  // 编辑器外手改的 `run/main_scene=res://scene/main.tscn` 是真实形态(§5.2 让 B5 不再自己读
+  // project.godot,所以 B2 收没收到 = B5 判不判得成孤儿),两端各测一半不够,这里钉合流。
+  const INI_BARE = [
+    '; Engine configuration file.',
+    'config_version=5',
+    '[application]',
+    'run/main_scene=res://scene/main.tscn',
+    'config/icon=res://icon.svg'
+  ].join('\n')
+  const bareIdx = await T.buildRefIndex(
+    makeCtx([['project.godot', 200]], { texts: { 'project.godot': INI_BARE } }).ctx)
+  ok(sitesOf(bareIdx, 'scene/main.tscn').join('|') === 'project.godot:ini' &&
+    sitesOf(bareIdx, 'icon.svg').join('|') === 'project.godot:ini',
+    '判据 4:project.godot 不带引号的 res:// 值也走 ini 通道(手改的主场景不被 B5 说成孤儿)',
+    JSON.stringify([...bareIdx.to.entries()]))
+  ok(pathsOf(bareIdx, 'scene/main.tscn')[0] === `project.godot@ini@${lineOf(INI_BARE, 'run/main_scene=')}`,
+    '判据 4:裸值站点同样带 project.godot 里的行号', pathsOf(bareIdx, 'scene/main.tscn')[0])
 
   // ---------- 3. 判据 2:边车不算来源(本任务最重要的一条) ----------
   section('3. 判据 2:.import / .uid 边车一律不算来源')
