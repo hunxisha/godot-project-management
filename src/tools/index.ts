@@ -4,6 +4,7 @@
 export * from './treeUtils'
 export * from './outcome'
 export * from './fixPlan'
+export * from './gate'
 export * from './parsers/sceneRefs'
 export * from './parsers/godotIni'
 export * from './parsers/importFile'
