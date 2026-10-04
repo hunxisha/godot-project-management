@@ -234,6 +234,25 @@ async function main() {
   }).ctx)
   ok(dupsOf(selfDiff).length === 0,
     '判据 2：同一 rel 的边文与头部是**不同** uid 也不报（边文 vs 头部不一致本期不判，别顺手加）', ids(selfDiff))
+  // 孤儿边文也贡献一条所有权声明，而它归给的那个源已经不在盘上了。此时 rel 必须落在
+  // 「树里真看得到」的那一个 —— 指着一个不存在的名字，B10 的跳转/打开所在目录就是死链。
+  const dupWithOrphan = await T.runUid(makeCtx([
+    ['A.tscn.uid', 10], ['scene/B.tscn', 10], ['keep.gd', 10], ['keep.gd.uid', 10]
+  ], {
+    texts: {
+      'A.tscn.uid': 'uid://cdup0001',
+      'scene/B.tscn': 'gd_scene uid="uid://cdup0001"',
+      'keep.gd.uid': 'uid://ckeep001'
+    }
+  }).ctx)
+  ok(dupsOf(dupWithOrphan).length === 1, '判据 2：孤儿边文的声明照样参与重复判定', ids(dupWithOrphan))
+  ok(dupsOf(dupWithOrphan)[0].rel === 'scene/B.tscn' &&
+    dupsOf(dupWithOrphan)[0].related.join('|') === 'A.tscn',
+    '判据 2：主证据优先取树里真存在的那个（码元序里 A.tscn 在前，但那是个不存在的名字）',
+    `${dupsOf(dupWithOrphan)[0]?.rel} / ${dupsOf(dupWithOrphan)[0]?.related}`)
+  ok(orphansOf(dupWithOrphan).length === 1 && relsOf(orphansOf(dupWithOrphan)[0]).join('|') === 'A.tscn.uid',
+    '判据 2 与判据 3 互不顶掉:这条既报重复也照样报孤儿 .uid 可清',
+    ids(orphansOf(dupWithOrphan)))
   // ext_resource 的 uid= 是**引用**，不是所有权声明：一万次也不算重复
   const BIG_UID = 'uid://cbig0001'
   const REF_UID = 'uid://cref0001'
@@ -389,6 +408,31 @@ async function main() {
   ok(missingOf(lone)[0] && missingOf(lone)[0].detail.includes('唯一') &&
     !missingOf(lone)[0].detail.includes('other/y.gd'),
     '空目录同伴时的 detail 不假称有同级参照（不能把别的目录的文件说成同级）', missingOf(lone)[0]?.detail)
+  // 上面几条报出来的 .gd 全在子目录、同级最多 2 个，于是 detail 的两个分支从没被执行过：
+  // 「项目根」那条写法与「同级超过 3 个只点名前 3 个」那条截断写法。零红的判据等于没测（简报要求）。
+  const rootLone = await T.runUid(makeCtx([
+    ['root.gd', 10], ['sub/y.gd', 10], ['sub/y.gd.uid', 10]
+  ], { texts: { 'sub/y.gd.uid': 'uid://csub0001' } }).ctx)
+  ok(missingOf(rootLone)[0] && missingOf(rootLone)[0].detail.includes('（项目根）'),
+    '判据 4：根目录里唯一的 .gd → detail 说「（项目根）」而不是空目录名',
+    missingOf(rootLone)[0]?.detail)
+  const manySiblings = await T.runUid(makeCtx([
+    ['big/a.gd', 10], ['big/a.gd.uid', 10], ['big/b.gd', 10], ['big/b.gd.uid', 10],
+    ['big/c.gd', 10], ['big/c.gd.uid', 10], ['big/d.gd', 10], ['big/d.gd.uid', 10],
+    ['big/z.gd', 10]
+  ], {
+    texts: {
+      'big/a.gd.uid': 'uid://cbb00001', 'big/b.gd.uid': 'uid://cbb00002',
+      'big/c.gd.uid': 'uid://cbb00003', 'big/d.gd.uid': 'uid://cbb00004'
+    }
+  }).ctx)
+  ok(missingOf(manySiblings).length === 1 && / 等/.test(missingOf(manySiblings)[0].detail),
+    '判据 4：同级超过 3 个时 detail 走「等」的截断分支', missingOf(manySiblings)[0]?.detail)
+  ok(missingOf(manySiblings)[0].detail.includes('其他 4 个') &&
+    missingOf(manySiblings)[0].detail.includes('big/a.gd') &&
+    missingOf(manySiblings)[0].detail.includes('big/c.gd') &&
+    !missingOf(manySiblings)[0].detail.includes('big/d.gd'),
+    '截断只点名前 3 个（第四个进计数、不进名单），计数说全部', missingOf(manySiblings)[0]?.detail)
   // 自己有边文的 .gd 永不报；根目录与其它目录互不影响
   const hasUid = await T.runUid(makeCtx([['scripts/a.gd', 10], ['scripts/a.gd.uid', 10]],
     { texts: { 'scripts/a.gd.uid': 'uid://chu00001' } }).ctx)

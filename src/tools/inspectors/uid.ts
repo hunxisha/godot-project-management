@@ -38,7 +38,8 @@ const LIST_CAP = 20
 
 /**
  * 头部属性 uid="..."。取**第一个**匹配，与 `sceneRefs.ts:16-19` 的 `attr()` 同规则
- * （引擎自己也只认第一个：畸形行上的第二条 uid= 它不读）。
+ * （两个文件里都是「非全局正则的 exec」→ 首个匹配；同一行写两条 uid= 不是编辑器产物，
+ * 这里跟着 attr() 的读法走，不额外宣称引擎行为）。
  * 这不是「uid 串形状」的第二份正则 —— 形状判据只有 `refIndex.isUidToken` 一份（判据 5）。
  */
 const HEADER_UID = /\buid="([^"]*)"/
@@ -170,6 +171,10 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
   }
   dups.sort((a, b) => byText(a.uid, b.uid))
   for (const d of dups.slice(0, LIST_CAP)) {
+    // 主证据优先挑「树里真看得到」的声明者:边文的声明归给它的源,而那个源可能正是被删掉的文件,
+    // 拿它当 rel 会让 B10 的「打开所在目录/跳转文件」指点到一个不存在的名字。都不在/都在时
+    // 退回码元序第一个(owners 已按 byText 排好),所以这个选择本身逐字节确定。
+    const primary = d.owners.find((o) => have.has(o.rel)) || d.owners[0]
     out.push({
       // id = uid 本身（证据），不带下标也不带声明者清单 —— 同一 uid 再长出一个声明者仍是同一条结论，
       // 折叠状态与「忽略这条」的记忆不会因此换键（判据 8）
@@ -179,8 +184,8 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
       detail: `${d.uid} 的声明者：${d.owners.map(ownerText).join('、')}。` +
         '编辑器只会保留一个声明，另一个会被改写成新 uid —— 指向它的引用（场景副本、拷贝出去的目录）可能就此丢链接。' +
         '请确认哪个才是原件，把另一个在编辑器里重新保存。',
-      rel: d.owners[0].rel,
-      related: d.owners.slice(1).map((o) => o.rel)
+      rel: primary.rel,
+      related: d.owners.filter((o) => o !== primary).map((o) => o.rel)
     })
   }
   const hiddenDups = dups.length - Math.min(dups.length, LIST_CAP)
@@ -251,8 +256,8 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
         //   spec §3.1 #5 原文写的就是「仅当同目录其他 `.gd` 都有时」，量词域是「其他」，
         //   空集上的全称命题为真；而「孤零零一个 .gd 没有边文、项目别处却都在生成边车」
         //   恰好是绕过编辑器拷贝文件的典型形状，报出来有价值。
-        //   （简报测试清单里那句「a.gd 有、b.gd 没有 → 不报 b.gd」与这条量词写法相反
-        //     —— a 有边文时「其他每个都有」对 b 成立 —— 已按 spec 执行并在报告里上报。）
+        //   （简报测试清单曾写过「a.gd 有、b.gd 没有 → 不报 b.gd」的括注,与这条量词写法相反。
+        //     控制方 2026-10-04 裁定按字面量词执行,简报已订正 —— 后续轮次别把它改回去。）
         if (siblings.some((s) => !have.has(s + UID_SUFFIX))) continue
         hits.push(rel)
       }
