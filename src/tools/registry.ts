@@ -1,5 +1,6 @@
 // 工具注册表:一张表描述所有体检工具,UI 不认识任何具体工具(spec §2.1)。
-// P0a 登记 3 个只读工具;P0b-B10a 补 uid/addons/ini/orphans/imports/format 六条。
+// P0a 登记 3 个只读工具;P0b-B10a 补 uid/addons/ini/orphans/imports/format 六条;
+// P1 第一批补 scripts/scenes/inputMap/i18n 四条(全部只读,见 docs/tools-page-plan.md 第三部分)。
 import type { Capability, Tool } from './types'
 import { run as runSize } from './inspectors/size'
 import { run as runCache } from './inspectors/cache'
@@ -7,6 +8,10 @@ import { run as runBrokenRefs } from './inspectors/brokenRefs'
 import { run as runUid } from './inspectors/uid'
 import { run as runAddons } from './inspectors/addons'
 import { run as runIni } from './inspectors/ini'
+import { run as runScripts } from './inspectors/scripts'
+import { run as runScenes } from './inspectors/scenes'
+import { run as runInputMap } from './inspectors/inputMap'
+import { run as runI18n } from './inspectors/i18n'
 import { run as runOrphans } from './inspectors/orphans'
 import { run as runImports } from './inspectors/imports'
 import { run as runFormat } from './inspectors/format'
@@ -67,6 +72,38 @@ export const TOOLS: Tool[] = [
     phase: 'P0',
     needs: ['tree', 'text'],
     run: runIni
+  },
+  {
+    id: 'scripts',
+    name: '脚本体检',
+    summary: 'class_name 重复、继承成环、按路径继承的目标不存在',
+    phase: 'P1',
+    needs: ['tree', 'text'],
+    run: runScripts
+  },
+  {
+    id: 'scenes',
+    name: '场景体检',
+    summary: '同名兄弟节点、头部 load_steps 与实数不符、节点挂的脚本丢了',
+    phase: 'P1',
+    needs: ['tree', 'text'],
+    run: runScenes
+  },
+  {
+    id: 'inputMap',
+    name: '输入映射体检',
+    summary: '代码与场景里用到的动作名没在 [input] 定义、动作名只差大小写',
+    phase: 'P1',
+    needs: ['tree', 'text'],
+    run: runInputMap
+  },
+  {
+    id: 'i18n',
+    name: '本地化体检',
+    summary: '配置点名的翻译文件不存在、翻译 csv 首列键重复',
+    phase: 'P1',
+    needs: ['tree', 'text'],
+    run: runI18n
   },
   {
     id: 'orphans',
