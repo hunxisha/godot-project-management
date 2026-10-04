@@ -91,3 +91,36 @@ export function countSteps(text: string): { declared: number; actual: number; ex
   }
   return { declared: m ? Number(m[1]) : 0, actual, expected: actual + 1 }
 }
+
+/**
+ * `resToRel` 之前的**形状前置闸**(共享):这个值串是不是一条「干净的 res:// 项目路径写法」?
+ *
+ * 为什么要单独出一份(B8 修复轮 Important 2):`resToRel` 忠实得可怕 —— 它不 trim、也不看标点,
+ * 所以 `res://a.gd ` 归一出 `a.gd `(带尾空格)、`res://a.gd,` 归一出 `a.gd,`。那两条串拿去比清单
+ * **永远查不到**,于是「配置点名的文件不在本次文件清单里」的 error 就落在了一个其实存在的文件上
+ * (§6 的头号失败模式:虚假的「你的配置坏了」)。尾逗号不是假想形态:本仓那两份孪生解析器都对值做
+ * `trim_end_matches(',')` / `replace(/,\s*$/,'')`(见上面 godotIni.ts:15-16 记下的分叉),
+ * 说明「值尾巴上有逗号」是真实写盘/手写里会出现的东西。
+ *
+ * 闸只做**首尾**判断,不碰内部:`res://my scene.tscn` 里的空格是合法的(Godot 允许路径含空格,
+ * godotIni.ts:290 明写这条),内部空白/半个引号那种「裸值混了别的东西」是各调用方自己的事
+ * (ini.ts 的裸值另有一道更严的闸),这一份只管「切出来的 rel 会不会带上不属于路径的尾巴」。
+ *
+ * 放在本文件而不是 treeUtils:treeUtils 的口径是「进 TreeEntry[]、出统计」(见它的文件头),
+ * 而这条判的是**一个值串**的形状;判 resToRel 的入参归 resToRel 的模块管,才不会再长出第二份 rel 语义。
+ *
+ * 面向 B10:brokenRefs.ts:43-44 与 addons 的存在性那两条走的是同一个形状
+ * (`resToRel(...)` → `hasRelCI`),要接这条闸就在 resToRel 之前加一次 `resPathShapeOk(value)`,
+ * 不判的条数并入各自的排除计数。**本轮不动它们的判定**(改了要重开一个已关闭模块的证据面;
+ * addons 那边 `filled()` 已 trim、brokenRefs 那边是 `attr()` 的引号内文,接闸后各多挡的形态不同,
+ * 取舍见 task-b8-report.md 的 Fix 轮 §Important 2)。
+ *
+ * 红线:纯函数,不抛错;非字符串 / 空串一律 false(方向是少报)。
+ */
+export function resPathShapeOk(value: string): boolean {
+  if (typeof value !== 'string' || !value) return false
+  // 首尾空白:引号里的 `res://a.gd ` 解码后仍带那个空格,而 rel 的生产端(原语层)不会给出尾巴空格
+  if (value !== value.trim()) return false
+  // 尾部标点:`,` `;` `)` `]` 都是「值到这里结束了」的分隔符,不是路径的一部分(孪生解析器会剥掉尾逗号)
+  return !/[,;)\]]$/.test(value)
+}

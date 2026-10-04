@@ -202,3 +202,28 @@ export function fmtMs(n: number): string {
   if (!Number.isFinite(n) || n < 0) return '0 ms'
   return n < 1000 ? `${Math.round(n)} ms` : `${(n / 1000).toFixed(1)} s`
 }
+
+/**
+ * 根目录某个文件名在**清单里真存在的那个写法**(优先引擎自己的拼写,其次大小写异体里码元序第一个)。
+ *
+ * 为什么要共享(B8 修复轮 Minor 6):`inspectors/ini.ts` 的根配置选举与 `inspectors/addons.ts`
+ * 原来的 `iniRelOf` 是同一条规则,两份各写一遍就是下一条分叉之路(与本文件 `lowerSet` 当初的
+ * 收敛理由同源 —— 三份各写一遍的小写像,审查后才合并)。语义逐条对齐原来那两份实现:
+ *   · **只认根目录那一份** —— 带 `/` 的 rel 是子目录里的同名文件,不是项目配置;
+ *   · 优先逐字拼写(引擎写盘就是那个名字),没有再退到大小写异体里码元序最小的那个;
+ *   · 返回的是**清单里那个写法**而不是硬拼的入参:硬拼 `project.godot` 在只有 `Project.godot`
+ *     的清单上会读空(Windows 上本就是同一个文件),而结论的 rel 还要进 related/跳转,
+ *     指一个清单里没有的名字就是死链。
+ *
+ * 红线:纯函数;非字符串 rel 跳过(与 lowerRelSet 同一防御口径);`basename` 按小写常量传入。
+ */
+export function rootRelOf(tree: TreeEntry[], basename: string): string | undefined {
+  let alt: string | undefined
+  for (const f of tree) {
+    const rel = f && typeof f.rel === 'string' ? f.rel : ''
+    if (!rel || rel.includes('/')) continue
+    if (rel === basename) return rel
+    if (rel.toLowerCase() === basename && (alt === undefined || rel < alt)) alt = rel
+  }
+  return alt
+}

@@ -56,12 +56,12 @@
 //
 // 红线：纯函数，只吃 ToolContext —— 不碰 window / services / vue / DOM；唯一 IO 是 await ctx.readText。
 import type { Finding, ToolContext } from '../types'
-import type { TreeEntry } from '../../types/godot'
 import { truncatedFinding } from '../finding'
 import { getIni, getIniList, getIniRaw, parseGodotIni } from '../parsers/godotIni'
 import type { IniDoc } from '../parsers/godotIni'
 import { resToRel } from '../parsers/sceneRefs'
-import { gdignoredDirs, hasRelCI, isGdignored, lowerRelSet, lowerSet } from '../treeUtils'
+// 根配置选举(rootRelOf)与存在性小写像同源:B8 修复轮把 ini.ts 与本文件各写一遍的那份收敛成一份
+import { gdignoredDirs, hasRelCI, isGdignored, lowerRelSet, lowerSet, rootRelOf } from '../treeUtils'
 
 /** 扫描深度与文件名：只认 `addons/<目录>/plugin.cfg`（判据 2） */
 const ADDONS_DIR = 'addons'
@@ -150,23 +150,6 @@ function filled(doc: IniDoc, key: string): string | undefined {
   if (v === undefined) return undefined
   const t = v.trim()
   return t === '' ? undefined : t
-}
-
-/**
- * 根目录 project.godot 在清单里的写法：优先引擎自己那个拼写，其次任意大小写异体里码元序第一个。
- * 读 tree 里真存在的那个 rel（而不是硬拼 'project.godot'）有两个理由：
- *   · 存在性口径与判据 4/5 同源（hasRelCI 那一套），`Project.godot` 这种手改写法在 Windows 上就是同一份文件；
- *   · 结论的 rel 要能进 related/jump —— 指一个清单里没有的名字就是死链（uid.ts:187-190 的同一顾虑）。
- */
-function iniRelOf(tree: TreeEntry[]): string | undefined {
-  let alt: string | undefined
-  for (const f of tree) {
-    const rel = f && typeof f.rel === 'string' ? f.rel : ''
-    if (!rel || rel.includes('/')) continue // 只认根目录那一份
-    if (rel === INI_BASENAME) return rel
-    if (rel.toLowerCase() === INI_BASENAME && (alt === undefined || rel < alt)) alt = rel
-  }
-  return alt
 }
 
 /**
@@ -370,7 +353,13 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
   // 段时按这一档处理，与 listAddons 那份既有判定同源 —— assetfiles.js:266、285，见文件头）。
   let enabled: string[] | undefined
   let enabledIn = ''
-  const iniRel = iniRelOf(tree)
+  // 根目录 project.godot 在清单里的写法：优先引擎自己那个拼写，其次任意大小写异体里码元序第一个。
+  // 读 tree 里真存在的那个 rel（而不是硬拼 'project.godot'）有两个理由：
+  //   · 存在性口径与判据 4/5 同源（hasRelCI 那一套），`Project.godot` 这种手改写法在 Windows 上就是同一份文件；
+  //   · 结论的 rel 要能进 related/jump —— 指一个清单里没有的名字就是死链（uid.ts:187-190 的同一顾虑）。
+  // 这条选举规则 B8 修复轮收进 treeUtils.rootRelOf（与 ini.ts 的根配置选举同源，两份各写一遍就是分叉）；
+  // 换成共享实现是**行为中性的**：只认根目录、逐字拼写优先、异体取码元序最小，三条逐条对齐原实现（变异取证见报告）。
+  const iniRel = rootRelOf(tree, INI_BASENAME)
   if (!iniRel) {
     ex.noIni++
   } else {

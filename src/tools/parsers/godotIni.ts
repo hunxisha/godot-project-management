@@ -203,8 +203,8 @@ export function parseGodotIni(text: string): IniDoc {
 
 // ---------- 访问器(同一个文件,纯函数;取不到一律 undefined 而不是猜默认值) ----------
 
-/** 键的完整形态:section + '/' + key(section 为空时就是 key 本身) */
-function fullKeyOf(v: IniValue): string {
+/** 键的完整形态:section + '/' + key(section 为空时就是 key 本身);B8 修复轮导出 —— 分组键必须与 findLast 同一条规则,别让调用方再拼一遍 */
+export function fullKeyOf(v: IniValue): string {
   const sec = typeof v.section === 'string' ? v.section : ''
   const key = typeof v.key === 'string' ? v.key : ''
   return sec ? `${sec}/${key}` : key

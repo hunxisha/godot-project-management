@@ -165,6 +165,14 @@ async function main() {
   ok(noIni.fs.length === 0 && noIni.calls.length === 0,
     '清单里没有 project.godot(非 Godot 目录/没扫到)→ 0 结论、0 读取(不臆造「配置坏了」)', `${ids(noIni.fs)}|${noIni.calls.length}`)
 
+  // 根目录选举共享在 treeUtils.rootRelOf(addons 也吃它):带 `/` 的 rel 是子目录里的同名文件,不是项目配置
+  const subOnly = await check([['sub/project.godot', 400], ['scene/main.tscn', 200]], {
+    texts: { 'sub/project.godot': CLEAN }
+  })
+  ok(subOnly.fs.length === 0 && subOnly.calls.length === 0,
+    '★只有子目录里的 project.godot 时整条工具不起跑(选举只认根目录那一份,也不会去读子目录那份)',
+    `${ids(subOnly.fs)}|${subOnly.calls.join('|')}`)
+
   const noIniTrunc = await check([['scene/main.tscn', 200]], { texts: {}, trunc: true })
   ok(noIniTrunc.fs.length === 0,
     '连 project.godot 都没有时也不发降级卡(本工具一条判据都没起跑,卡片只会误导)', ids(noIniTrunc.fs))
@@ -264,12 +272,58 @@ async function main() {
   ok(/第 2 行/.test(detailOf(manyBad.fs[0])) && /另有 5 /.test(detailOf(manyBad.fs[0])),
     '聚合那条仍带前若干行的行号与原文(证据不因为聚合就消失)', detailOf(manyBad.fs[0]))
 
+  // 聚合标题同样要由数据决定(Important 1 的另一半):25 行全是 ODD_QUOTE 时,每一行都仍读成了值,
+  // 标题再写「N 行没被读成任何键值」就是假陈述;条目里也要逐条标出「这一行仍读成了值」。
+  // (不能用 `x={`:块未闭合会把后续行一路吃到文件尾,25 行只得出 1 条 problem —— 这里要的是 25 条。)
+  const MANY_OB = iniText('config_version=5', ...Array.from({ length: 25 }, (_, i) => `x${i}=[ "q`))
+  const manyOb = await check([['project.godot', 400]], { texts: { 'project.godot': MANY_OB } })
+  ok(manyOb.fs.length === 1 && manyOb.fs[0]?.id === 'ini:problem:all' &&
+    /25 行被解析器标了警\(其中 25 行仍读成了键值\)/.test(manyOb.fs[0]?.title || ''),
+    '★聚合卡标题按 values 取数:全是「块起始行有半个引号」时说「25 行被标了警(其中 25 行仍读成了键值)」,而不是「25 行没被读成键值」',
+    manyOb.fs[0]?.title)
+  ok(/这一行仍读成了值/.test(detailOf(manyOb.fs[0])),
+    '聚合卡的每条条目都标出那一行是否仍读成了值(与逐条卡的标题同一口径)', detailOf(manyOb.fs[0]))
+
   // 简报判据 3 与 4 的交界:同一行不许报两次
   const cvBadOnly = await check([['project.godot', 400]], {
     texts: { 'project.godot': iniText('config_version=abc', '[application]', '', 'config/name="X"') }
   })
   ok(ids(cvBadOnly.fs) === 'ini:config-version',
     '★config_version=abc 只出判据 4 那一条(problems 里同一行的那条让位,同一行不报两次)', ids(cvBadOnly.fs))
+
+  // ---- Fix 轮 Important 1:标题要由数据决定 ----
+  // problems 里有三种 reason 是「推了 problem 又推了 value」(godotIni.ts:169-177 的 ODD_QUOTE / OPEN_BLOCK,
+  // 以及 :193-196 那种「getIniInt 读得进而 /^\d+$/ 读不进」的 BAD_VERSION),
+  // 旧标题「这一行没被读成任何配置」对这三条都是假陈述,而且和同一张卡 detail 里「本行按单行值保留」自相矛盾。
+  const OB = godot('[t]', 'X={')
+  const OB_L = lineOf(OB, 'X={')
+  const openBlock = await check([['project.godot', 400]], { texts: { 'project.godot': OB } })
+  ok(ids(openBlock.fs) === `ini:problem:${OB_L}` &&
+    openBlock.fs[0]?.title === `这一行被读成了值，但解析器对它另有警示：第 ${OB_L} 行`,
+    '★REASON_OPEN_BLOCK(块吃到文件尾):那一行仍然读成了值 → 标题必须是「被读成了值,但另有警示」',
+    `${ids(openBlock.fs)}|${openBlock.fs[0]?.title}`)
+  ok(/整体留作值|仍被读成|被读成了值/.test(detailOf(openBlock.fs[0])) &&
+    !/读不出任何键值|没被读成/.test(detailOf(openBlock.fs[0])),
+    'detail 不再自称「这一行读不出任何键值」(那句话与它自己引的 reason 相反)', detailOf(openBlock.fs[0]))
+
+  const OQAU = godot('[autoload]', 'b=[ "x ]', 'n=1')
+  const OQAU_L = lineOf(OQAU, 'b=[')
+  const oddQuoteAu = await check([['project.godot', 400]], { texts: { 'project.godot': OQAU } })
+  ok(ids(oddQuoteAu.fs) === `ini:problem:${OQAU_L}` &&
+    oddQuoteAu.fs[0]?.title === `这一行被读成了值，但解析器对它另有警示：第 ${OQAU_L} 行`,
+    '★REASON_ODD_QUOTE 落在 [autoload] 里:那一行只一条卡(聚合写法卡不许再来叠一张),标题不是「没被读成任何配置」',
+    `${ids(oddQuoteAu.fs)}|${oddQuoteAu.fs[0]?.title}`)
+
+  const CVNEG = iniText('config_version=-1', '[application]', 'config/name="X"')
+  const CVNEG_L = lineOf(CVNEG, 'config_version=-1')
+  const cvNeg = await check([['project.godot', 400]], { texts: { 'project.godot': CVNEG } })
+  ok(ids(cvNeg.fs) === `ini:problem:${CVNEG_L}` &&
+    cvNeg.fs[0]?.title === `这一行被读成了值，但解析器对它另有警示：第 ${CVNEG_L} 行`,
+    '★config_version=-1:解析器标了警而 getIniInt 读得出 -1(判据 4 沉默)→ 只留这张卡,而它说得出真相',
+    `${ids(cvNeg.fs)}|${cvNeg.fs[0]?.title}|${sevOf(cvNeg.fs)}`)
+  ok(!cvNeg.fs.some((f) => f.id === 'ini:config-version'),
+    'config_version=-1 不出判据 4 的「读不出整数」卡(那条主张这里撑不起),也不许静默吞掉解析器的报警',
+    ids(cvNeg.fs))
 
   // ---------- 4. 判据 4:config_version 档位 ----------
   section('4. config_version')
@@ -290,6 +344,14 @@ async function main() {
   const cvStr = await check([['project.godot', 400]], { texts: { 'project.godot': iniText('config_version="5"') } })
   ok(ids(cvStr.fs) === 'ini:config-version' && cvStr.fs[0]?.severity === 'warn',
     '带引号的 "5" 读不出裸整数 → warn(getIniInt 的既有口径,godotIni.ts:252-261)', `${ids(cvStr.fs)}/${detailOf(cvStr.fs[0])}`)
+
+  const cvHuge = await check([['project.godot', 400]], {
+    texts: { 'project.godot': iniText('config_version=99999999999999999999') }
+  })
+  ok(ids(cvHuge.fs) === 'ini:config-version' && cvHuge.fs[0]?.severity === 'warn' &&
+    /安全整数/.test(detailOf(cvHuge.fs[0])),
+    '★超出安全整数范围那一档同样归「本工具读不出」(godotIni.ts:260),detail 的枚举要把它写进去而不是漏掉',
+    `${ids(cvHuge.fs)}|${detailOf(cvHuge.fs[0])}`)
 
   const cvInSec = await check([['project.godot', 400]], {
     // 同样故意用裸正文:段里那条 config_version 不许冒领项目版本号(顶层仍算「没有这一行」)
@@ -334,16 +396,67 @@ async function main() {
   const SKIP_TXT = godot('[autoload]', 'A="$One"', 'B="user://x.gd"', 'C="res://../outside.gd"', 'D="res://"',
     'E="C:/Godot/x.gd"', 'F="/home/x/gd"', 'G=1280')
   const auSkip = await check(AU, { texts: { 'project.godot': SKIP_TXT } })
-  ok(auSkip.fs.length === 0,
-    '★$单例引用、user://、越界、裸 res://、带盘符、绝对路径、裸整数:一条都不判也不报(判据 5 的「不判」桶)',
-    ids(auSkip.fs))
+  ok(ids(auSkip.fs) === 'ini:autoload-form' && auSkip.fs[0]?.severity === 'warn',
+    '★Fix 轮裁定(控制方 2026-10-04):七条全读不成时不再「0 结论」,而是聚合一条 warn —— 工具不能给自己没读过的配置发合格证',
+    `${ids(auSkip.fs)}|${sevOf(auSkip.fs)}`)
+  const skipD = detailOf(auSkip.fs[0])
+  ok(/第 \d+ 行 C = "res:\/\/\.\.\/outside\.gd"/.test(skipD) && /第 \d+ 行 D = "res:\/\/"/.test(skipD),
+    '聚合卡逐条点名「第 N 行 单例名 = 原值」(形似 res:// 而读不成的这两条)', skipD)
+  ok(!/[ABEFG] = /.test(skipD) && !/\$One/.test(skipD) && !/user:\/\/x\.gd/.test(skipD),
+    '★没有把 `$另一个单例` 与 user:// 拉进这张卡(裁定明写不许 widening:那是引擎自己写出的形态,点名等于告诉每个正常项目「你的配置坏了」)',
+    skipD)
+  ok(/没做|没有读过|不能替你确认/.test(skipD) && /项目设置/.test(skipD),
+    '卡面说清「这条判定本次没做」,并把核对动作交给用户', skipD)
+
+  const refSilence = await check(AU, {
+    texts: { 'project.godot': godot('[autoload]', 'A="$One"', 'B="user://x.gd"', 'G=1280') }
+  })
+  ok(refSilence.fs.length === 0,
+    '★$引用 / user:// / 裸整数单独出现时仍 0 结论(干净项目的 [autoload] 不会被聚合卡搅浑)', ids(refSilence.fs))
+
+  const MANYFORM_TXT = godot('[autoload]',
+    ...Array.from({ length: 25 }, (_, i) => `k${String(i + 1).padStart(2, '0')}=res://autoload/x.gd "注记"`))
+  const manyForm = await check(AU, { texts: { 'project.godot': MANYFORM_TXT } })
+  ok(manyForm.fs.length === 1 && manyForm.fs[0]?.id === 'ini:autoload-form' && /25 条/.test(manyForm.fs[0]?.title || ''),
+    '刷屏控制:25 条读不成的值也只一张聚合卡,标题给总数', `${manyForm.fs.length}|${manyForm.fs[0]?.title}`)
+  ok(/k01 = /.test(detailOf(manyForm.fs[0])) && /k20 = /.test(detailOf(manyForm.fs[0])) &&
+    !/k21 = /.test(detailOf(manyForm.fs[0])) && /另有 5 /.test(detailOf(manyForm.fs[0])),
+    '聚合卡按单例名的码元序列前 20 条并写「另有 5 条未列出」(裁的是展示,不是证据总数)', detailOf(manyForm.fs[0]))
+
+  // ---- Fix 轮 Important 2:形状闸的两扇残余门(引号值的尾巴、裸值的尾标点) ----
+  const auTailSpace = await check([...AU, ['autoload/gs.gd', 50]], {
+    texts: { 'project.godot': godot('[autoload]', 'GS="res://autoload/gs.gd "') }
+  })
+  ok(!auTailSpace.fs.some((f) => f.id.startsWith('ini:autoload-missing:')),
+    '★带尾空白的引号值不再判存在性:文件明明在清单里,旧闸归一成 `autoload/gs.gd `(带空格)后说出「不在本次文件清单里」的 error',
+    `${ids(auTailSpace.fs)}|${auTailSpace.fs[0]?.title}`)
+  ok(ids(auTailSpace.fs) === 'ini:autoload-form' && /第 \d+ 行 GS = "res:\/\/autoload\/gs\.gd "/.test(detailOf(auTailSpace.fs[0])),
+    '同一条值改由聚合 warn 说出口,卡面原样还给用户写的那一句(引号与尾巴都在)', detailOf(auTailSpace.fs[0]))
+
+  const auTailComma = await check([...AU, ['autoload/one.gd', 50]], {
+    texts: { 'project.godot': godot('[autoload]', 'Bad=res://autoload/one.gd,') }
+  })
+  ok(!auTailComma.fs.some((f) => f.id.startsWith('ini:autoload-missing:')),
+    '★裸值尾逗号不判存在性(两份孪生解析器都剥尾逗号,godotIni.ts:15-16,那枚逗号不是路径的一部分)', ids(auTailComma.fs))
+  ok(ids(auTailComma.fs) === 'ini:autoload-form' && /Bad = res:\/\/autoload\/one\.gd,/.test(detailOf(auTailComma.fs[0])),
+    '尾逗号那条同样上聚合卡(排除不静默)', detailOf(auTailComma.fs[0]))
+
+  const auTailCtrl = await check([...AU, ['autoload/one.gd', 50]], {
+    texts: { 'project.godot': godot('[autoload]', 'One="res://autoload/one.gd"') }
+  })
+  ok(auTailCtrl.fs.length === 0, '正向对照:干净的引号路径照常 0 结论(新闸没把正常写法一起吃掉)', ids(auTailCtrl.fs))
+
   const auSkip2 = await check([...AU, ['autoload/three.gd', 50]], {
     texts: { 'project.godot': godot('[autoload]', 'A="$One"', 'B="user://x.gd"', 'C="res://../outside.gd"',
       'D="res://"', 'E="C:/Godot/x.gd"', 'F="/home/x/gd"', 'G=1280', 'Bad="res://autoload/gone.gd"') }
   })
-  ok(ids(auSkip2.fs) === 'ini:autoload-missing:Bad' && /未判定.*7 条|7 条.*未判定/.test(detailOf(auSkip2.fs[0])),
-    '「不判」要看得见:同份配置里有一条真 error 时,7 条被排除的数量写进 detail(B5 立下的口径)',
-    detailOf(auSkip2.fs[0]))
+  ok(ids(auSkip2.fs) === 'ini:autoload-missing:Bad|ini:autoload-form' &&
+    /未判定.*7 条|7 条.*未判定/.test(detailOf(auSkip2.fs[0])),
+    '「不判」的计数照旧上卡(error 那条仍带 7 条排除),聚合卡与它并存而不互相顶掉',
+    `${ids(auSkip2.fs)}|${detailOf(auSkip2.fs[0])}`)
+  ok(/按单例名/.test(detailOf(auSkip2.fs[1])),
+    '排除数说的是「按单例名」计(同一个名字写两遍只读生效那一条,数字要跟代码真的数过的东西一致)',
+    detailOf(auSkip2.fs[1]))
 
   const auCase = await check([['project.godot', 400], ['autoload/game.gd', 50]], {
     texts: { 'project.godot': godot('[autoload]', 'Game="res://Autoload/Game.GD"') }
@@ -390,8 +503,10 @@ async function main() {
 
   const MESSY_TXT = godot('[ autoload ]', 'A="res://autoload/a.gd"', 'Bad=res://autoload/a.gd "注记"', 'Gone="res://autoload/gone.gd"')
   const auMessy = await check([['project.godot', 400], ['autoload/a.gd', 50]], { texts: { 'project.godot': MESSY_TXT } })
-  ok(ids(auMessy.fs) === 'ini:autoload-missing:Gone' && /1 条/.test(detailOf(auMessy.fs[0])),
-    '★段头带空气仍认得(A 没被误判);「既不是引号对、整串又不是路径」的值不判存在性而只计数', ids(auMessy.fs))
+  ok(ids(auMessy.fs) === 'ini:autoload-missing:Gone|ini:autoload-form' && /1 条/.test(detailOf(auMessy.fs[0])) &&
+    /Bad = res:\/\/autoload\/a\.gd "注记"/.test(detailOf(auMessy.fs[1])),
+    '★段头带空气仍认得(A 没被误判);「既不是引号对、整串又不是路径」的值不判存在性,而计数与聚合卡都看得见',
+    ids(auMessy.fs))
 
   const auMessyCtrl = await check([['project.godot', 400], ['autoload/a.gd', 50]], {
     texts: { 'project.godot': godot('[ autoload ]', 'Bad="res://autoload/gone.gd" ') }
@@ -422,6 +537,18 @@ async function main() {
   })
   ok(ids(msForm.fs) === 'ini:main-scene-form' && msForm.fs[0]?.severity === 'warn',
     '有值但不是 res:// 写法 → warn(不是 error:这条的主张只是「我们认不得这个写法」)', `${ids(msForm.fs)}/${sevOf(msForm.fs)}`)
+
+  // 形状闸的正向对照:Godot 的路径里**允许**有空格,所以「内部空格合法」与「尾巴有 junk」是两件事
+  const msSpaceIn = await check([['project.godot', 400], ['scene/main.tscn', 200]], {
+    texts: { 'project.godot': godot('[application]', 'run/main_scene="res://my scene.tscn"') }
+  })
+  ok(ids(msSpaceIn.fs) === 'ini:main-scene-missing' && msSpaceIn.fs[0]?.severity === 'error',
+    '★正向对照:合法的内部空格路径("res://my scene.tscn")仍走到存在性档并出 error(共享闸没把合法写法一起挡在门外)',
+    ids(msSpaceIn.fs))
+  const msSpaceOk = await check([['project.godot', 400], ['my scene.tscn', 200]], {
+    texts: { 'project.godot': godot('[application]', 'run/main_scene="res://my scene.tscn"'), 'my scene.tscn': SCENE_HEAD }
+  })
+  ok(msSpaceOk.fs.length === 0, '同一条内部空格路径在文件确实存在时 0 结论(rel 原样带着空格去比对)', ids(msSpaceOk.fs))
 
   const msRef = await check(MS, {
     texts: { 'project.godot': godot('[application]', 'run/main_scene="$GameState"') }
@@ -563,6 +690,20 @@ async function main() {
   ok(intNeg.fs.length === 0,
     '负数与 0 都是合法裸整数 → 不报(本工具不判取值范围,那需要引擎取证)', ids(intNeg.fs))
 
+  // 两个键都不读时,结论顺序才真正被钉住(INT_KEYS 的字面顺序是 width 在前、码元序是 height 在前)
+  const INT_BOTH = godot('[display]', 'window/size/viewport_height="a"', 'window/size/viewport_width="b"')
+  const intBoth = await check([['project.godot', 400]], { texts: { 'project.godot': INT_BOTH } })
+  ok(ids(intBoth.fs) ===
+    'ini:int:display/window/size/viewport_height|ini:int:display/window/size/viewport_width',
+    '★两个整数键都读不出 → 两条卡按键的码元序(height 在 width 前),不是数组的字面书写顺序(判据 11 的类内码元序)',
+    ids(intBoth.fs))
+
+  const intHuge = await check([['project.godot', 400]], {
+    texts: { 'project.godot': godot('[display]', 'window/size/viewport_width=99999999999999999999') }
+  })
+  ok(ids(intHuge.fs) === 'ini:int:display/window/size/viewport_width' && /安全整数/.test(detailOf(intHuge.fs[0])),
+    '整数键的超长串同样落在「本工具读不出」那档,detail 的枚举把它写进去', detailOf(intHuge.fs[0]))
+
   const intWrongSection = await check([['project.godot', 400]], {
     texts: { 'project.godot': godot('[application]', 'window/size/viewport_width="abc"') }
   })
@@ -583,6 +724,8 @@ async function main() {
     'detail 把撞上的两个名字都点名', detailOf(ftConflict.fs[0]))
   ok(/引擎版本/.test(detailOf(ftConflict.fs[0])) && /不.*比|没.*比/.test(detailOf(ftConflict.fs[0])),
     'detail 明说这条不比「绑定的引擎版本」(判据 9 第二条:ToolContext 里没有那份数据)', detailOf(ftConflict.fs[0]))
+  ok(!/手改|合并|被人改/.test(detailOf(ftConflict.fs[0])),
+    '★detail 不推断这一行是谁写的(「被手改或合并过」是来源推断,数组本身给不出这个证据)', detailOf(ftConflict.fs[0]))
 
   const ftThree = await check([['project.godot', 400]], {
     texts: { 'project.godot': godot('[application]', 'config/features=PackedStringArray("4.4", "Forward Plus", "Mobile", "GL Compatibility")') }
@@ -662,6 +805,28 @@ async function main() {
   ok(truncRun.fs.length > 1 && !('rel' in truncRun.fs[0]),
     '降级卡不带 rel(项目级结论没有主证据文件,末尾的 rel 红线按 id 放过它)', Object.keys(truncRun.fs[0] || {}).join('|'))
 
+  // 截断下「仍该判的」三条:简报测试清单点名要钉住非路径 main_scene、features 撞名、缺 config_version,
+  // 再加本轮新增的聚合写法卡(它同样是内容型判据,不依赖清单完整性)。这条正文**故意不带 config_version**。
+  const TRUNC2_TXT = iniText(
+    '[application]', '',
+    'run/main_scene="user://main.tscn"',
+    'config/features=PackedStringArray("4.4", "Forward Plus", "Mobile")',
+    '',
+    '[autoload]', '',
+    'GS="res://autoload/gs.gd "',
+    'One="res://autoload/gone.gd"'
+  )
+  const trunc2 = await check(TRUNC_SPECS, { texts: { 'project.godot': TRUNC2_TXT }, trunc: true })
+  ok(ids(trunc2.fs) ===
+    'ini:truncated|ini:autoload-form|ini:main-scene-form|ini:features-renderers|ini:config-version',
+    '★截断时四条内容型判据照判(聚合写法卡、主场景写法、features 撞名、缺 config_version),存在性那三条仍一条不出',
+    ids(trunc2.fs))
+  ok(sevOf(trunc2.fs) ===
+    'ini:truncated=warn|ini:autoload-form=warn|ini:main-scene-form=warn|ini:features-renderers=warn|ini:config-version=info',
+    '截断下的档位与完整清单一致(缺失仍是 info,聚合写法卡是 warn,不许借截断升档)', sevOf(trunc2.fs))
+  ok(!trunc2.fs.some((f) => /^ini:(main-scene-missing|icon-missing|autoload-missing)/.test(f.id)),
+    '同一份夹具里的存在性结论(主场景缺失那条)在截断时确实被拦住', ids(trunc2.fs))
+
   // ---------- 11. 判据 11:确定性与成本 ----------
   section('11. 顺序与 id 稳定')
   const rev = await check([...TRUNC_SPECS].reverse(), { texts: { 'project.godot': TRUNC_TEXT } })
@@ -675,6 +840,17 @@ async function main() {
   const dupKey = await check([['project.godot', 400]], { texts: { 'project.godot': godot('[t]', 'k=1', 'k=2') } })
   ok(dupKey.fs[0]?.id === 'ini:dup:t/k' && !/:\d+$/.test(dupKey.fs[0]?.id || ''),
     '重复键的 id 只由 section/key 推导,不含出现次序的下标(改行序不会换键)', dupKey.fs[0]?.id)
+
+  // 聚合写法卡的确定性:卡内条目按单例名的码元序,而不是文件里谁先写
+  const FORM_SPECS = [['project.godot', 400], ['autoload/a.gd', 50], ['autoload/z.gd', 50]]
+  const FORM_TXT = godot('[autoload]', 'Zed="res://autoload/z.gd,"', 'Alpha="res://autoload/a.gd "')
+  const formFwd = await check(FORM_SPECS, { texts: { 'project.godot': FORM_TXT } })
+  const formRev = await check([...FORM_SPECS].reverse(), { texts: { 'project.godot': FORM_TXT } })
+  ok(ids(formFwd.fs) === 'ini:autoload-form' && JSON.stringify(formRev.fs) === JSON.stringify(formFwd.fs),
+    '★聚合写法卡逐字节确定(tree 反序不改结论),id 是常量而不含条目下标', ids(formFwd.fs))
+  ok(detailOf(formFwd.fs[0]).indexOf('Alpha =') < detailOf(formFwd.fs[0]).indexOf('Zed ='),
+    '卡内顺序由单例名推导(文件里 Zed 先写,卡面 Alpha 在先),与 ini:problem:all 的聚合裁切同一口径',
+    detailOf(formFwd.fs[0]))
 
   const eqSpell = await check([['project.godot', 400], ['Project.godot', 400], ['icon.svg', 100]], {
     texts: {
@@ -749,6 +925,20 @@ async function main() {
   ok(ALL.length > 40 && ALL.every((f) => !('fix' in f)),
     `★零 fix 面:全部 ${ALL.length} 条结论一条都不带 fix 字段(Ruling B8-1:本轮零 fix,rewrite 不做)`,
     ALL.filter((f) => 'fix' in f).map((f) => f.id).join('|'))
+  // 结论**种类**清单(全量收集器的另一半):新增一类卡必须在这里登记,顺带钉住 ini:problem:<line>
+  // 与本轮新增的 ini:autoload-form 两套 id 形状(行号/单例名都是证据,不是数组下标)。
+  const kindOf = (id) => id
+    .replace(/^ini:autoload-missing:.+$/, 'ini:autoload-missing:<名>')
+    .replace(/^ini:dup:.+$/, 'ini:dup:<key>')
+    .replace(/^ini:int:.+$/, 'ini:int:<key>')
+    .replace(/^ini:problem:\d+$/, 'ini:problem:<line>')
+  const KINDS = [...new Set(ALL.map((f) => kindOf(f.id)))].sort()
+  ok(KINDS.join('|') === [
+    'ini:autoload-form', 'ini:autoload-missing:<名>', 'ini:config-version', 'ini:dup:<key>',
+    'ini:features-renderers', 'ini:icon-missing', 'ini:int:<key>', 'ini:main-scene-form',
+    'ini:main-scene-missing', 'ini:main-scene-not-scene', 'ini:problem:<line>', 'ini:problem:all',
+    'ini:truncated'
+  ].sort().join('|'), `结论种类清单固定为 ${KINDS.length} 类(全量收集器吃每次 run 的每条产出)`, KINDS.join('|'))
   ok(ALL.every((f) => f.id === 'ini:truncated' || /只报告|不改写|不代改/.test(detailOf(f))),
     '每条结论都把「只报告、不动手」说给用户(简报:detail 说「哪个键、现在的值、自己怎么核对」)',
     ALL.filter((f) => f.id !== 'ini:truncated' && !/只报告|不改写|不代改/.test(detailOf(f))).map((f) => f.id).join('|'))
@@ -763,6 +953,12 @@ async function main() {
   ok(ALL.every((f) => !/undefined|null|[Tt]rue|NaN|\d{10,}/.test(f.id)),
     'id 只由证据(段名/键名/autoload 名/行号)推导,不含 undefined/NaN/大数字串味',
     ALL.filter((f) => /undefined|null|[Tt]rue|NaN|\d{10,}/.test(f.id)).map((f) => f.id).join('|'))
+  // ★B10 是把 detail/title 原样渲染给 Godot 用户的:仓库内部路径、file:line 出处、本仓函数名都不许出现在卡面
+  //(四条同类检查器一律把 provenance 留在注释里,见 ini.ts 文件头与各条判据上方的注释)
+  const INTERNAL = /(src-ztools|src-tauri|src\/|parsers\/|inspectors\/|__tests__|godotIni|sceneRefs|projects\.js|projects\.rs|orphans\.test|refIndex\.test|parseGodotIni|getIniInt|getIniRaw|iniResPaths|findLast|fullKeyOf|\.(ts|mjs|rs)\b)/
+  ok(ALL.every((f) => !INTERNAL.test(`${f.title}\n${f.detail}`)),
+    `★用户可见文案里没有仓库内部引用(${ALL.length} 条结论逐条查,出处一律在注释里)`,
+    ALL.filter((f) => INTERNAL.test(`${f.title}\n${f.detail}`)).map((f) => f.id).join('|'))
   ok(ALL.every((f) => f.id === 'ini:truncated' || (typeof f.detail === 'string' && f.detail.length > 0)),
     '除降级卡外每条都有 detail(证据要说得出出处)',
     ALL.filter((f) => f.id !== 'ini:truncated' && !f.detail).map((f) => f.id).join('|'))
