@@ -31,16 +31,23 @@
 //
 // 红线：纯函数，只吃 ToolContext —— 不碰 window / services / vue / DOM；唯一 IO 是 await ctx.readText。
 import type { Finding, ToolContext } from '../types'
-import { truncatedFinding } from '../finding'
+import { LIST_CAP, truncatedFinding } from '../finding'
 import { KNOWN_IMPORTERS, readImportFile } from '../parsers/importFile'
 import { resToRel } from '../parsers/sceneRefs'
-import { dirOf, gdignoredDirs, hasRelCI, isCache, isGdignored, lowerRelSet } from '../treeUtils'
+import {
+  byText,
+  dirOf,
+  extOf,
+  gdignoredDirs,
+  hasAddonSeg,
+  hasRelCI,
+  isCache,
+  isGdignored,
+  lowerRelSet
+} from '../treeUtils'
 
 /** 边车尾缀：切「这份边车属于哪个资源」一律用它，不按最后一个点重拼（`X.a.b.import` 的源是 `X.a.b`） */
 const IMPORT_SUFFIX = '.import'
-
-/** 聚合结论的展示上限：与 uid.ts:35 / orphans.ts:43 同口径（刷屏控制，不影响 payload.rels 全量） */
-const LIST_CAP = 20
 
 /** 默认排除与「不判」的逐类计数，全部写进聚合结论的 detail（B5 立下的口径：排除要看得见） */
 interface Excl {
@@ -82,24 +89,13 @@ const WHY_TRUNC = '失效 .import（source_file 指向的资源不在清单里�
 
 const TRUNC_TITLE = '文件清单被截断，本次不做失效与缺 .import 判定（导入器不匹配那条照常）'
 
-/**
- * 字典序一律用 `<`/`>`（UTF-16 码元），不用 localeCompare：locale 随宿主环境变，而 rels 顺序、related
- * 与 id 要跨机器逐字节一致（同 uid.ts:44-50、orphans.ts:45-51）。
- */
-function byText(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0
-}
-
-/**
- * 顶层或任一段叫 addons 的条目 —— addons/ 内部整体不判（与 orphans.ts:54-56 同口径：排除并计数）。
- * ⚠ 别把这条读成「addons 有人管」：spec §3.1 #7 那份 addons 体检的清单只有 plugin.cfg 字段、
- * editor_plugins 启用状态与目录是否对得上、重名三条，**不含 `.import` 失效与缺边车**（docs/tools-page-plan.md:117）。
- * 也就是说 P0b 里 addons 下的失效边车**没人判**，这是已知覆盖面缺口，不是已交给他处的判定 ——
- * 控制方 2026-10-05 裁定 4：本轮把这个事实写进注释（B7 立项时按「addons 下的 .import 判不判」显式拍板）。
- */
-function isAddon(rel: string): boolean {
-  return rel.split('/').includes('addons')
-}
+// 码元序比较器 `byText`、addons 段判 `hasAddonSeg`、拼出来的 rel 的扩展名 `extOf` 三份都在
+// `treeUtils.ts`（B10b 债 8 收口：这三条原来各有一到两份逐字相同的副本，「改一处、别处留在旧口径」
+// 正是本仓点名的 hazard）。本文件只用不述，理由与两端原语同形性都写在那三份的注释里。
+// 唯一要在这里留着的一句是 **addons 缺口**：`hasAddonSeg` 让路给 B7，但别把它读成「addons 有人管」——
+// spec §3.1 #7 那份 addons 体检的清单只有 plugin.cfg 字段、editor_plugins 启用状态与目录是否对得上、
+// 重名三条，**不含 `.import` 失效与缺边车**（docs/tools-page-plan.md:117）。也就是说 P0b 里 addons
+// 下的失效边车**没人判**，这是已知覆盖面缺口，不是已交给他处的判定（控制方 2026-10-05 裁定 4）。
 
 /**
  * 边车身份：原语给的 `ext === 'import'`（`foo.png.import` 的 ext 就是 'import'，不是 'png'）。
@@ -116,19 +112,6 @@ function isAddon(rel: string): boolean {
  */
 function isSidecar(ext: unknown, rel: string): boolean {
   return ext === 'import' && rel.toLowerCase().endsWith(IMPORT_SUFFIX)
-}
-
-/**
- * rel 的扩展名（小写、无点），与原语两端同形（JS：`src-ztools/preload/lib/inspectfs.js:263`
- * 的 `path.extname(rel).slice(1).toLowerCase()`；Rust：`src-tauri/src/inspectfs.rs:83-88` 按 basename
- * 最后一个点切 —— 两端记录见 refIndex.ts:59-63）。
- * 只用来算**边车名背后那个资源**与**source_file**的扩展名：那两个路径在清单里时没有 TreeEntry.ext 可用
- * （源已被删掉/边车被改名）。清单里的条目一律用 f.ext，不在这里另起第二套口径。
- */
-function extOf(rel: string): string {
-  const base = rel.slice(rel.lastIndexOf('/') + 1)
-  const i = base.lastIndexOf('.')
-  return i > 0 ? base.slice(i + 1).toLowerCase() : ''
 }
 
 /** 判据 2：聚合出一条可执行的失效边车清单（与 orphans:all / uid:orphan:all 同一形状） */
@@ -254,7 +237,7 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
     const rel = f && typeof f.rel === 'string' ? f.rel : ''
     if (!rel || !isSidecar(f && f.ext, rel)) continue
     if (isCache(rel)) { ex.cache++; continue }
-    if (isAddon(rel)) { ex.addons++; continue }
+    if (hasAddonSeg(rel)) { ex.addons++; continue }
     if (seen.has(rel)) continue // 畸形清单里同一个 rel 出现两次：只读一次、也只进一次删除清单
     seen.add(rel)
     const { text } = await ctx.readText(rel)
@@ -308,7 +291,7 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
       const rel = f && typeof f.rel === 'string' ? f.rel : ''
       const ext = f && typeof f.ext === 'string' ? f.ext : ''
       if (!rel || !TABLE_EXT.has(ext)) continue // 表外扩展名一律不判缺失（候选清单与判据 4 同一张表）
-      if (isCache(rel) || isAddon(rel)) continue
+      if (isCache(rel) || hasAddonSeg(rel)) continue
       // .gdignore 屏蔽的目录：引擎不扫，边车本来就不会有，报「缺边车」是一条永远修不了的 warn
       if (isGdignored(ignoredDirs, rel)) { ex.ignore++; continue }
       if (seenAsset.has(rel)) continue

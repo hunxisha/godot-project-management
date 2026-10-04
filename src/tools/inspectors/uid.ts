@@ -23,30 +23,28 @@
 //
 // 红线：纯函数，只吃 ToolContext —— 不碰 window / services / vue / DOM；唯一 IO 是 await ctx.readText。
 import type { Finding, ToolContext } from '../types'
-import { truncatedFinding } from '../finding'
+import { LIST_CAP, truncatedFinding } from '../finding'
 import { isUidToken } from '../refIndex'
 import { SCENE_EXT, attr } from '../parsers/sceneRefs'
-import { dirOf, gdignoredDirs, hasRelCI, isCache, isGdignored, lowerRelSet, relSet } from '../treeUtils'
+import {
+  byText,
+  dirOf,
+  gdignoredDirs,
+  hasRelCI,
+  isCache,
+  isGdignored,
+  lowerRelSet,
+  relSet
+} from '../treeUtils'
 
 /** 边车尾缀：归属一律用它切（`X.a.b.uid` 的源是 `X.a.b`，用 dirOf/basename 重拼会拼错） */
 const UID_SUFFIX = '.uid'
-
-/** 孤儿/重复的展示上限：与 size.ts 的 BIG_LIST=20 同一口径（刷屏控制，不影响 rels 全量） */
-const LIST_CAP = 20
 
 /** 一个 rel 对某个 uid 的所有权声明渠道：自身头部 / 哪些边文指着它 */
 interface Owner {
   rel: string
   header: boolean
   sidecars: string[]
-}
-
-/**
- * 字典序比较一律用 `<`/`>`（UTF-16 码元），不用 `localeCompare`：
- * locale 会跟着宿主环境变，而 finding 的排序、`related` 与 id 都要跨机器逐字节一致（判据 8）。
- */
-function byText(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0
 }
 
 /**

@@ -112,6 +112,65 @@ export function lowerRelSet(tree: TreeEntry[]): Set<string> {
   return lowerSet(tree.map((f) => (f && typeof f.rel === 'string' ? f.rel : '')))
 }
 
+/**
+ * 字符串**码元序**(UTF-16)比较器 —— 全站结论顺序、`related`、`rels` 排序的唯一一份判据。
+ *
+ * 为什么收成一份(B10b 债 8):这条判据原本有五份逐字相同的副本(`uid` / `orphans` / `imports` /
+ * `addons` / `format` 各一份),而它决定的是**用户看到的顺序与结论 id 的稳定性** ——
+ * 「改一处、另一处悄悄留在旧口径」正是本仓点名的 hazard(见 finding.ts:3-8、fixPlan.ts:58-65)。
+ * `ini.ts` 那侧本来就没再抄一份(它用数组默认 `.sort()`,同为 UTF-16 码元序),这条不在收敛范围内。
+ *
+ * ⚠ 为什么是 `<`/`>` 而不是 `localeCompare`:locale 随宿主语言环境变,而排序结果会进
+ * `Finding.id`、`related` 与确认框的执行清单 —— 换台机器就换一批结论键是不可接受的。
+ * 这条不是风格问题:各工具文件头写的那句「逐字节确定」全靠它。
+ *
+ * 红线:纯函数,不碰任何宿主对象;调用方自己保证传字符串(与原来那五份实现同一前提,不加运行时判型)。
+ */
+export function byText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0
+}
+
+/**
+ * rel 的扩展名(小写、无点),与**两端原语逐字同形**:
+ *   · JS  端 `src-ztools/preload/lib/inspectfs.js:263` 的 `path.extname(rel).slice(1).toLowerCase()`
+ *   · Rust 端 `src-tauri/src/inspectfs.rs:83-88` 的 `ext_of(name)`,name 就是文件名(按最后一个点切)
+ * (两端形状记录同时见 `refIndex.ts:59-63`。basename 以 `.` 开头 → 空串,不是「整段当扩展名」。)
+ *
+ * 什么时候用它、什么时候不用(B10b 债 8 把 imports.ts 那份生产实现收进来,口径原样搬,一条判定没改):
+ *   · 清单里的条目**一律用 `TreeEntry.ext`**(原语已经算好,别在这里重算第二套口径);
+ *   · 只有「rel 是拼出来的、清单里没有对应条目」时才用它 —— 例如边车名切掉 `.import` 之后那个资源
+ *     (源已被删掉/边车被改名)、`source_file` 指出去的那条路径。
+ *
+ * 测试夹具里也各留了一份同规则的实现(extOf 在 tools/uid/orphans/imports/refIndex/addons/format/ini
+ * 的 .test.mjs 里各有的一份,共 9 份:再加 gate)—— 那是**刻意的独立重述**,用来钉「夹具与两端原语同口径」;
+ * 把夹具改成调用这里的实现就等于自己给自己背书,所以没收,但 tools.test.mjs 另加了一条两侧逐字一致的比对。
+ */
+export function extOf(rel: string): string {
+  const base = rel.slice(rel.lastIndexOf('/') + 1)
+  const i = base.lastIndexOf('.')
+  return i > 0 ? base.slice(i + 1).toLowerCase() : ''
+}
+
+/**
+ * 顶层或任一段叫 `addons` 的条目(**精确大小写**,B10b 债 8 从 orphans.ts / imports.ts 两份相同实现收进来)。
+ *
+ * 用途:addons/ 内部整体不进候选 —— 归 B7 的插件体检管(orphan 与 import 两条判据都这么让路)。
+ * 这一侧漏判 `Addons/` 的代价是**少报一条结论**(方向安全),所以保持精确比对。
+ *
+ * ⚠ 与 `hasAddonSegCI` 是**刻意的两份**,不是分叉:格式化工具要挡的是「改写第三方插件的代码」,
+ *   那种漏判是越界改动而不是少报,所以那边必须大小写不敏感(Windows 上 `Addons/` 与 `addons/` 是同一个目录)。
+ *   合并成一条就有一侧的方向被反过来 —— 两边的注释各自记着理由,别在这里笼统统一。
+ */
+export function hasAddonSeg(rel: string): boolean {
+  return rel.split('/').includes('addons')
+}
+
+/** `hasAddonSeg` 的大小写不敏感版:给「漏判会越界动文件」的那一侧用(见 format.ts 的读入面判据) */
+export function hasAddonSegCI(rel: string): boolean {
+  return rel.split('/').some((c) => c.toLowerCase() === 'addons')
+}
+
+
 /** 小写像里认不认得 rel(任意大小写写法命中都算) —— 传进来的必须是 lowerSet/lowerRelSet 的产物 */
 export function hasRelCI(lower: Set<string>, rel: string): boolean {
   return typeof rel === 'string' && !!rel && lower.has(rel.toLowerCase())

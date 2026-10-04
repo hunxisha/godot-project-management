@@ -72,7 +72,7 @@ import { getIni, getIniList, getIniRaw, parseGodotIni } from '../parsers/godotIn
 import type { IniDoc } from '../parsers/godotIni'
 import { resPathShapeOk, resToRel } from '../parsers/sceneRefs'
 // 根配置选举(rootRelOf)与存在性小写像同源:B8 修复轮把 ini.ts 与本文件各写一遍的那份收敛成一份
-import { gdignoredDirs, hasRelCI, isGdignored, lowerRelSet, lowerSet, rootRelOf } from '../treeUtils'
+import { byText, gdignoredDirs, hasRelCI, isGdignored, lowerRelSet, lowerSet, rootRelOf } from '../treeUtils'
 
 /** 扫描深度与文件名：只认 `addons/<目录>/plugin.cfg`（判据 2） */
 const ADDONS_DIR = 'addons'
@@ -145,14 +145,6 @@ interface EnabledHit {
   rel: string
   /** enabled 里点到这个目标的全部原样写法（证据全列） */
   spellings: string[]
-}
-
-/**
- * 字典序一律用 `<`/`>`（UTF-16 码元），不用 localeCompare：locale 随宿主环境变，而结论顺序、
- * related 与 id 要跨机器逐字节一致（同 imports.ts:89-91、uid.ts:48-50）。
- */
-function byText(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0
 }
 
 /**

@@ -37,25 +37,9 @@
 // 红线:纯函数,只吃 ToolContext —— 不碰 window / services / vue / DOM;唯一 IO 是**取用引用索引**
 // (ctx.refIndex() 那份 memo;宿主没给就自己 buildRefIndex(ctx) —— 同一份判据,不第二套引用收集)。
 import type { Finding, ToolContext } from '../types'
-import { truncatedFinding } from '../finding'
+import { LIST_CAP, truncatedFinding } from '../finding'
 import { buildRefIndex } from '../refIndex'
-import { fmtBytes, hasRelCI, isCache, lowerSet } from '../treeUtils'
-
-/** 聚合结论展示上限:与 uid.ts:35 的 LIST_CAP 同口径(刷屏控制,不影响 payload.rels 全量) */
-const LIST_CAP = 20
-
-/**
- * 按码元序比较(UTF-16),不用 localeCompare:locale 随宿主语言环境变,而 rels 顺序、related、预览清单
- * 要跨机器逐字节一致(判据 6 的 id 稳定性靠它)。同 uid.ts:48-50。
- */
-function byText(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0
-}
-
-/** 顶层或任一段叫 addons 的条目 —— addons/ 内部归 B7,这里整体不进候选 */
-function isAddon(rel: string): boolean {
-  return rel.split('/').includes('addons')
-}
+import { byText, fmtBytes, hasAddonSeg, hasRelCI, isCache, lowerSet } from '../treeUtils'
 
 /**
  * 永不进候选的扩展名:脚本按 class_name 用、场景常被动态字符串指向(文件头理由)。
@@ -132,7 +116,7 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
     const ext = f && typeof f.ext === 'string' ? f.ext : ''
     const size = f && typeof f.size === 'number' ? f.size : 0
     if (isCache(rel)) { ex.cache++; continue }                        // .godot/**:生成的缓存,不是候选也不是来源
-    if (isAddon(rel)) { ex.addons++; continue }                        // addons 内部归 B7
+    if (hasAddonSeg(rel)) { ex.addons++; continue }                      // addons 内部归 B7
     if (ext === 'import' || ext === 'uid') { ex.sidecar++; continue }  // 边车自身不是资产(B4/B6 的活)
     if (rel === 'project.godot') { ex.config++; continue }             // 配置文件:不是可删资产
     if (NON_CANDIDATE_EXT.has(ext)) { ex.code++; continue }            // .gd/.tscn:按类名/动态用,见文件头

@@ -43,7 +43,7 @@ import type { TreeEntry } from '../../types/godot'
 import type { GdLineInfo, GdScan } from '../parsers/gdScript'
 import { scanGdScript } from '../parsers/gdScript'
 import { LIST_CAP, truncatedFinding } from '../finding'
-import { fmtBytes, isCache } from '../treeUtils'
+import { byText, fmtBytes, hasAddonSegCI, isCache } from '../treeUtils'
 
 /** 一个文件里五类操作各改了多少处(与产出同一个循环累加 —— 判据 7 的「可核对计数」) */
 export interface FormatCounts {
@@ -103,10 +103,9 @@ type GdScope = 'target' | 'cache' | 'addons' | 'other'
 function gdScopeOf(entry: TreeEntry): GdScope {
   const rel = entry && typeof entry.rel === 'string' ? entry.rel : ''
   if (!rel || rel.includes('\\')) return 'other'
-  const segments = rel.split('/')
   if (isCache(rel)) return 'cache'
   if (entry.ext !== 'gd') return 'other'
-  if (segments.some((c) => c.toLowerCase() === 'addons')) return 'addons'
+  if (hasAddonSegCI(rel)) return 'addons'
   return 'target'
 }
 
@@ -375,11 +374,6 @@ function aggregateFinding(files: FileFormat[], ex: Excl): Finding {
     // payload.files 全量(不裁),因为确认框必须列全(spec §5.3 规则 3)。
     fix: { kind: 'rewrite', label: `格式化 ${n} 个脚本`, payload: { files: files.map((f) => ({ rel: f.rel, text: f.out })) } }
   }
-}
-
-/** 码元序比较:顺序、id、计数都要跨机器逐字节一致(同 orphans.ts:49-51) */
-function byText(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0
 }
 
 export async function run(ctx: ToolContext): Promise<Finding[]> {

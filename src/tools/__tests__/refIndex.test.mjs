@@ -569,10 +569,10 @@ async function main() {
   const again = await T.buildRefIndex(makeCtx(SPECS, { texts: TEXTS }).ctx)
   ok(JSON.stringify({
     to: [...idx.to.entries()], from: [...idx.from.entries()], uids: [...idx.uids.entries()],
-    n: [idx.sourcesScanned, idx.sidecarSkipped, idx.partial]
+    n: [idx.sourcesScanned, idx.sidecarSkipped, idx.shapeSkipped, idx.partial]
   }) === JSON.stringify({
     to: [...again.to.entries()], from: [...again.from.entries()], uids: [...again.uids.entries()],
-    n: [again.sourcesScanned, again.sidecarSkipped, again.partial]
+    n: [again.sourcesScanned, again.sidecarSkipped, again.shapeSkipped, again.partial]
   }),
     '同一份图两次构建逐字节一致(结论 id 由这些内容推导,抖动一次就等于给用户换了一批 id)')
   ok(SPECS.every(([, size]) => typeof size === 'number') &&
