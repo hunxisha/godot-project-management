@@ -916,6 +916,216 @@ async function main() {
   ok(tCx.counts.value.warn === 5 && tCx.counts.value.info === 1,
     '严重度计数不受 fixable 口径影响', JSON.stringify([tCx.counts.value.warn, tCx.counts.value.info]))
   restore()
+
+  // ---------- 以下是 Task B10a:按条勾选门的执行侧(spec §5.3 规则 3) ----------
+  // 为什么这一批必须落在 useTools 而不是组件:组件没有渲染测试框架,而「交给原语的到底是勾选
+  // 那几条、还是整单」是删用户文件的最后一道闸。判据本身在 src/tools/gate.ts(另有 53 条断言),
+  // 这里咬的是**调度层真的照门给的清单执行**:裁剪后过原有的两道短路、回执只记实际执行的那一份、
+  // 能力闸 / 重入闸 / 换代守卫一条都不许因为「多了个 selected」被绕过去。
+  const THREE_REL_IDS = 'project.godot,scene/main.tscn,.godot/imported/a.stex'
+  const trashThree = (id) => ({
+    id,
+    severity: 'warn',
+    title: '未引用资源',
+    fix: { kind: 'trash', label: '移除 3 个', payload: ['project.godot', 'scene/main.tscn', '.godot/imported/a.stex'] }
+  })
+  const rewriteThree = (id) => ({
+    id,
+    severity: 'info',
+    title: '代码格式化',
+    fix: {
+      kind: 'rewrite',
+      label: '格式化 3 个脚本',
+      payload: [{ rel: 'project.godot', text: 'A' }, { rel: 'scene/main.tscn', text: 'B' }, { rel: '.godot/imported/a.stex', text: 'C' }]
+    }
+  })
+
+  section('32. applyFix(f, selected):回收站通道只交勾选的那几条')
+  const subLog = []
+  global.window.services.movePathsToTrash = (pid, rels) => {
+    subLog.push({ pid, rels: rels.slice() })
+    return { ok: true, moved: rels.length, failed: [] }
+  }
+  const tS = M.useTools()
+  await tS.load()
+  await tS.runTool('size')
+  const oSub = await tS.applyFix(trashThree('orphans:sub'), ['scene/main.tscn'], { isWin: true })
+  ok(subLog.length === 1 && subLog[0].rels.join(',') === 'scene/main.tscn',
+    '★勾 1 条就只把这一条交给原语(整单三条 = 「忘了传 selected 就把没勾的也删了」那条禁路)', JSON.stringify(subLog))
+  ok(subLog[0].pid === 'godot/project/p1', '裁剪不影响调用带的完整文档 id', subLog[0].pid)
+  ok(oSub.rels.join(',') === 'scene/main.tscn' && oSub.moved === 1,
+    '回执的 rels/moved 记的是实际执行的那一份(父计划的三条不许留在账上)', JSON.stringify([oSub.rels, oSub.moved]))
+  ok(oSub.ok === true && oSub.verb === '移入回收站' && oSub.service === 'movePathsToTrash',
+    '子集不改判据:动词/服务/成败口径与整单同一套(措辞仍归 fixPlan.ts)', JSON.stringify([oSub.verb, oSub.service, oSub.ok]))
+  ok(oSub.changed === true && oSub.invalidated === true, '子集真改了磁盘 → 照样要重扫(裁剪不削弱 invalidateTree 时机)',
+    JSON.stringify([oSub.changed, oSub.invalidated]))
+  ok(tS.fixResults.value['orphans:sub'].rels.join(',') === 'scene/main.tscn' &&
+    tS.fixResults.value['orphans:sub'].moved === 1,
+    '按 finding id 记的那笔账就是子集那一份', JSON.stringify(tS.fixResults.value['orphans:sub']))
+
+  const oOrder = await tS.applyFix(trashThree('orphans:order'), ['.godot/imported/a.stex', 'project.godot'], { isWin: true })
+  ok(subLog[1].rels.join(',') === 'project.godot,.godot/imported/a.stex',
+    '先勾 a.stex 再勾 project.godot,交给原语的仍是父计划顺序(payload 顺序不随点选抖)', JSON.stringify(subLog[1].rels))
+  ok(oOrder.rels.join(',') === 'project.godot,.godot/imported/a.stex' && oOrder.moved === 2,
+    '两条勾选中:回执两条,顺序同源', JSON.stringify([oOrder.rels, oOrder.moved]))
+
+  const callsBeforeRefuse = subLog.length
+  const oEmpty = await tS.applyFix(trashThree('orphans:empty'), [], { isWin: true })
+  ok(oEmpty.ok === false && oEmpty.changed === false && oEmpty.invalidated === false,
+    '空选择 → 明确失败,不是「执行了 0 项的成功」', JSON.stringify([oEmpty.ok, oEmpty.changed, oEmpty.invalidated]))
+  ok(!!oEmpty.error && /选|勾/.test(oEmpty.message),
+    '空选择带原因(spec §5.3 规则 3 的反面就是「点了没反应」)', JSON.stringify(oEmpty.message))
+  ok(subLog.length === callsBeforeRefuse, '被拒的空选择一个原语都没碰', subLog.length - callsBeforeRefuse)
+  ok(oEmpty.service === 'movePathsToTrash' && oEmpty.rels.length === 0 && oEmpty.moved === 0,
+    '拒绝靠 empty + reason,不把计划伪装成「本管线执行不了」,账上也不留父计划的三条',
+    JSON.stringify([oEmpty.service, oEmpty.rels, oEmpty.moved]))
+  const oGhost = await tS.applyFix(trashThree('orphans:ghost'), ['never/in/plan.png'], { isWin: true })
+  ok(oGhost.ok === false && /选|勾/.test(oGhost.message) && subLog.length === callsBeforeRefuse,
+    '勾选集合里全是父计划没有的 rel → 与空选择同样被拒,不拿陌生串去撞原语', JSON.stringify([oGhost.message, subLog.length]))
+
+  const oAbs = await tS.applyFix(
+    { id: 'orphans:abs', severity: 'warn', title: 't', fix: { kind: 'trash', label: '移除', payload: ['/etc/passwd', 'project.godot'] } },
+    ['/etc/passwd'], { isWin: true })
+  ok(subLog[subLog.length - 1].rels.join(',') === '/etc/passwd' && oAbs.moved === 1,
+    '勾选越界那条:原样交给原语(门与调度层都不替 resolveRel 把它改写成项目内路径)', JSON.stringify(subLog[subLog.length - 1].rels))
+
+  section('33. applyFix(f, selected):改写通道只写勾选的那几条')
+  const wLog = []
+  global.window.services.writeProjectText = (pid, rel, text) => {
+    wLog.push({ pid, rel, text })
+    return { ok: true, backupRel: `${rel}.gpm-bak-x` }
+  }
+  const tW = M.useTools()
+  await tW.load()
+  await tW.runTool('size')
+  const oWSub = await tW.applyFix(rewriteThree('format:sub'), ['scene/main.tscn'], { isWin: true })
+  ok(wLog.length === 1 && wLog[0].rel === 'scene/main.tscn' && wLog[0].text === 'B',
+    '★勾 1 个只发 1 次写,内容还是那一条自己的(整单三条 = 改了用户没勾的两个源文件)', JSON.stringify(wLog))
+  ok(oWSub.written.length === 1 && oWSub.written[0] === 'scene/main.tscn' && oWSub.backups.length === 1 && oWSub.ok === true,
+    'written / backups 的条数不超过选中数', JSON.stringify([oWSub.written, oWSub.backups]))
+  ok(/已改写 1 个文件/.test(oWSub.message) && !/3 个/.test(oWSub.message),
+    '回执文案按实际执行说(不是「已改写 3 个文件」)', oWSub.message)
+  ok(oWSub.verb === '改写文件' && oWSub.service === 'writeProjectText',
+    '改写子集的判据字段与父计划同一套', JSON.stringify([oWSub.verb, oWSub.service]))
+  const writesAfterSub = wLog.length
+  const oWEmpty = await tW.applyFix(rewriteThree('format:empty'), [], { isWin: true })
+  ok(wLog.length === writesAfterSub && oWEmpty.ok === false && /选|勾/.test(oWEmpty.message),
+    'rewrite 的空选择:一次写都不发,带原因被拒', JSON.stringify([wLog.length - writesAfterSub, oWEmpty.message]))
+  const oWTwo = await tW.applyFix(rewriteThree('format:two'), ['.godot/imported/a.stex', 'project.godot'], { isWin: true })
+  ok(wLog.slice(writesAfterSub).map((w) => w.rel).join(',') === 'project.godot,.godot/imported/a.stex',
+    '两条勾选中:写序按父计划而不是点选顺序(与 items/files 同源那条规矩一致)', JSON.stringify(wLog.slice(writesAfterSub)))
+  ok(oWTwo.written.length === 2 && oWTwo.backups.length === 2 && oWTwo.ok === true,
+    '两条都写成 → 回执两条', JSON.stringify([oWTwo.written, oWTwo.backups]))
+  const writesBeforeFail = wLog.length
+  global.window.services.writeProjectText = (pid, rel, text) => {
+    wLog.push({ pid, rel, text })
+    return { ok: false, error: '备份失败' }
+  }
+  const oWPart = await tW.applyFix(rewriteThree('format:part'), ['scene/main.tscn'], { isWin: true })
+  ok(wLog.length === writesBeforeFail + 1 && oWPart.ok === false && oWPart.written.length === 0 && oWPart.failed.length === 1,
+    '子集里那一条写失败:只发那一次写、ok:false 且 written 不夸大(成功/失败口径不因裁剪改变)',
+    JSON.stringify([wLog.length - writesBeforeFail, oWPart.ok, oWPart.written, oWPart.failed]))
+  ok(oWPart.changed === false && oWPart.invalidated === false,
+    '子集一个都没写成 → 不重扫(与整单通道同一条规矩)', JSON.stringify([oWPart.changed, oWPart.invalidated]))
+  section('34. 子集执行没有绕过能力闸 / 重入闸 / 换代守卫')
+  // ① 能力闸:缺 trash 时,「有勾选」与「空勾选」两条都必须在一个原语都不碰之前短路,且各有原因
+  delete global.window.services.movePathsToTrash
+  const tC = M.useTools()
+  await tC.load()
+  const refuseBefore = subLog.length
+  const oNoCapEmpty = await tC.applyFix(trashThree('orphans:c1'), [], { isWin: true })
+  ok(oNoCapEmpty.ok === false && /选|勾/.test(oNoCapEmpty.message),
+    '两道短路的先后没动:空选择在能力闸之前就被拒(先说用户能改的那条原因)', JSON.stringify(oNoCapEmpty.message))
+  const oNoCap = await tC.applyFix(trashThree('orphans:c2'), ['project.godot'], { isWin: true })
+  ok(oNoCap.ok === false && oNoCap.error === '当前宿主不支持' && subLog.length === refuseBefore,
+    '有勾选但宿主缺 trash:照样在调用任何原语之前短路(裁剪不削弱能力闸)', JSON.stringify([oNoCap.error, subLog.length]))
+
+  // ② 重入闸:第一次子集执行卡在 await 上时,第二次带 selected 的调用不许插进来
+  const subReleases = []
+  const subHoldLog = []
+  global.window.services.movePathsToTrash = (pid, rels) => {
+    subHoldLog.push(rels.slice())
+    return new Promise((resolve) => { subReleases.push(() => resolve({ ok: true, moved: rels.length, failed: [] })) })
+  }
+  const tSub = M.useTools()
+  await tSub.load()
+  await tSub.runTool('size')
+  const subFirstP = tSub.applyFix(trashThree('orphans:re1'), ['project.godot'], { isWin: true })
+  await tick()
+  ok(tSub.fixing.value === 'orphans:re1' && subHoldLog.length === 1,
+    '前置条件成立:第一次子集执行真的卡在 await 上(与 §30 同一取舍)', `${tSub.fixing.value}|${subHoldLog.length}`)
+  const subBlockedP = tSub.applyFix(trashThree('orphans:re2'), ['.godot/imported/a.stex'], { isWin: true })
+  const subRaced = await Promise.race([
+    subBlockedP.then((o) => ['done', o]),
+    new Promise((resolve) => setTimeout(() => resolve(['hang', null]), 30))
+  ])
+  ok(subRaced[0] === 'done' && subRaced[1].ok === false && /上一次修复还在执行中/.test(subRaced[1].message),
+    '带 selected 的第二次调用同样被重入闸挡回', JSON.stringify(subRaced))
+  ok(subHoldLog.length === 1, '挡回的一个原语都没调(两份子集同时在改盘就是互相踩)', JSON.stringify(subHoldLog))
+  while (subReleases.length) subReleases.shift()()
+  const oReFirst = await subFirstP
+  ok(tSub.fixResults.value['orphans:re2'] === undefined && oReFirst.ok === true && tSub.fixing.value === '',
+    '挡回的不写回执,第一次照常执行完并复位 fixing', JSON.stringify([Object.keys(tSub.fixResults.value), oReFirst.ok, tSub.fixing.value]))
+
+  // ③ 换代守卫:子集执行在途时切项目 → 磁盘确实动了,但那一笔账不进现在这个项目、也不重扫
+  const P_A = { _id: 'godot/project/pa', id: 'pa', path: 'E:/pa', name: 'A', favorite: false, openCount: 0, configVersion: 5, lastOpenedAt: 2000 }
+  const P_B = { _id: 'godot/project/pb', id: 'pb', path: 'E:/pb', name: 'B', favorite: false, openCount: 0, configVersion: 5, lastOpenedAt: 1000 }
+  const bleedLog = []
+  global.window.services.movePathsToTrash = (pid, rels) => {
+    bleedLog.push(rels.slice())
+    return new Promise((resolve) => { subReleases.push(() => resolve({ ok: true, moved: rels.length, failed: [] })) })
+  }
+  global.window.ztools.db.allDocs = async () => [{ ...P_A }, { ...P_B }]
+  const tX = M.useTools()
+  await tX.load()
+  await tX.runTool('size')
+  const bleedP = tX.applyFix(trashThree('orphans:bleed'), ['project.godot'], { isWin: true })
+  await tick()
+  tX.select('godot/project/pb')
+  while (subReleases.length) subReleases.shift()()
+  const oBleed = await bleedP
+  ok(oBleed.ok === true && oBleed.changed === true && oBleed.invalidated === false,
+    '在途子集执行成功后切了项目:磁盘动了(invalidated=false 如实说没重扫)', JSON.stringify([oBleed.ok, oBleed.changed, oBleed.invalidated]))
+  ok(tX.fixResults.value['orphans:bleed'] === undefined,
+    '上一个项目的修复账不写进当前项目(F-1 的同一口径,selected 不改变它)', JSON.stringify(Object.keys(tX.fixResults.value)))
+  ok(bleedLog.length === 1 && bleedLog[0].join(',') === 'project.godot',
+    '交给原语的仍然是勾选那一条,与切项目无关', JSON.stringify(bleedLog))
+  restore()
+
+  section('35. 不传 selected:与今天的整单执行逐字节一致(向后兼容留给测试与旧调用)')
+  const compatLog = []
+  const rwCompat = []
+  // ⚠ caps 是**构造时快照**(useTools.ts 的 caps 注释),所以两个动盘原语必须在 new useTools()
+  //   之前就桩好;先建实例再补桩的话,后面那条改写用例会拿到「当前宿主不支持」而不是执行结果。
+  global.window.services.movePathsToTrash = (pid, rels) => {
+    compatLog.push(rels.slice())
+    return { ok: true, moved: rels.length, failed: [] }
+  }
+  global.window.services.writeProjectText = (pid, rel, text) => {
+    rwCompat.push({ rel, text })
+    return { ok: true, backupRel: `${rel}.gpm-bak-x` }
+  }
+  const tBk = M.useTools()
+  await tBk.load()
+  await tBk.runTool('size')
+  const oLegacy = await tBk.applyFix(trashThree('orphans:legacy'), { isWin: true })
+  const oBare = await tBk.applyFix(trashThree('orphans:bare'), undefined, { isWin: true })
+  const oNull = await tBk.applyFix(trashThree('orphans:nullish'), null, { isWin: true })
+  ok(compatLog.every((r) => r.join(',') === THREE_REL_IDS),
+    '★三种「不传 selected」的写法都交出整单三条(裁剪只在显式传数组时发生)', JSON.stringify(compatLog))
+  ok(oLegacy.ok === true && oBare.ok === true && oNull.ok === true, '三条调用都执行成功',
+    JSON.stringify([oLegacy.ok, oBare.ok, oNull.ok]))
+  ok(oNull.verb === '移入回收站' && oLegacy.verb === '移入回收站' && oBare.verb === '移入回收站',
+    '第二参是 null/对象时,第三参的 isWin 照常生效(判别只按「是不是数组」,不靠真假)',
+    JSON.stringify([oLegacy.verb, oBare.verb, oNull.verb]))
+  const strip = (o) => JSON.stringify({ ...o, at: 0, findingId: '' })
+  ok(strip(oLegacy) === strip(oBare) && strip(oBare) === strip(oNull),
+    '整单回执逐字段相同(时间戳归一后)', `${strip(oLegacy)} vs ${strip(oNull)}`)
+  const oRwLegacy = await tBk.applyFix(rewriteThree('format:legacy'), { isWin: true })
+  ok(oRwLegacy.written.length === 3 && oRwLegacy.ok === true && rwCompat.length === 3,
+    '改写通道的不传 selected 同样整单三条(3 次写 + 3 份备份都在回执里)',
+    JSON.stringify([oRwLegacy.written, oRwLegacy.ok, rwCompat.length]))
+  restore()
 }
 main().then(() => {
   console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)

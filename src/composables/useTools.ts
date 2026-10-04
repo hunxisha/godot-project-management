@@ -14,6 +14,7 @@ import { isWindows, listDocs } from '../services/bridge'
 import type { GodotProject, ScanTreeResult, TreeEntry } from '../types/godot'
 import type { Capability, Finding, Tool, ToolContext, ToolResult } from '../tools/types'
 import { planFix, type FixService } from '../tools/fixPlan'
+import { subsetPlan } from '../tools/gate'
 import { TOOLS as BASE_TOOLS, isSupported, toolById } from '../tools/registry'
 
 // 注册表跟着本模块一起导出:视图只要 useTools 这一处,就能同时拿到「有哪些工具」和「怎么跑」。
@@ -375,12 +376,30 @@ export function useTools() {
    * 执行一条结论的修复动作(spec §5.3)。
    * 三道闸依次过:① planFix 认不认这条修复 ② 宿主有没有对应能力 ③ 原语自己的包含闸。
    * **一个原语都不许在闸外被调用**,也不论哪一道闸都不抛异常 —— 工具页要把原因显示出来。
+   *
+   * **关于 selected(B10a,spec §5.3 规则 3)**:高危动作(trash 批量、rewrite 改写)在确认框里
+   * 逐条默认不选,UI 必须把用户勾选的那一份显式传进来 —— 省略第二参就是**整单执行**,
+   * 那条路只为测试与 B1 起的旧调用保留,不是给界面留的口子(视图侧的对应注释在 ToolsView.runFix)。
+   * 传了 selected 时先过 `subsetPlan` 裁子集,**再**走原有的两道短路:空选择会变成
+   * `plan.empty` 带着原因被拒(useTools.ts 下面的「① 管线执行不了的两种情形」),
+   * 于是「一条都没勾」既不会被静默吞掉,也不会绕过能力闸去碰原语。
+   * @param selected 勾选集合(数组),或与今天同形的选项对象(不裁剪);缺省 = 整单
+   * @param opts 选项;第二参给了对象时它就是本参数(B1 起的调用形状)
    * @param opts.isWin 平台口径;省略时问 bridge(取不到按非 Windows 的保守口径)
    */
-  async function applyFix(f: Finding, opts?: { isWin?: boolean }): Promise<FixOutcome> {
+  async function applyFix(
+    f: Finding,
+    selected?: string[] | { isWin?: boolean },
+    opts?: { isWin?: boolean }
+  ): Promise<FixOutcome> {
     const pid = projectId.value
-    const isWin = typeof opts?.isWin === 'boolean' ? opts.isWin : hostIsWindows()
-    const plan = planFix(f, tree.value, isWin)
+    // 第二参是数组 = 勾选集合;是对象 = 今天的选项对象;都不是(undefined / null)= 整单。
+    // 判别只看 Array.isArray,不靠真假:applyFix(f, null, { isWin: true }) 的第三参必须照常生效。
+    const sel = Array.isArray(selected) ? selected : undefined
+    const options = selected && !Array.isArray(selected) ? selected : opts
+    const isWin = typeof options?.isWin === 'boolean' ? options.isWin : hostIsWindows()
+    const fullPlan = planFix(f, tree.value, isWin)
+    const plan = sel === undefined ? fullPlan : subsetPlan(fullPlan, sel)
     const base: FixOutcome = {
       findingId: f.id,
       toolId: f.id.includes(':') ? f.id.slice(0, f.id.indexOf(':')) : '',
