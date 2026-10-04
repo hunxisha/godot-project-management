@@ -28,6 +28,10 @@
 //      一次没走)。png/gd/tscn 全在 KNOWN_IMPORTERS 的**表外**,不匹配与缺边车两条模板在这份配比里打不到,
 //      所以在 B5 计时之后另补 200 份 `.ogg` 边车(importer 写 wav → 不匹配)与 60 份无边车的 `.ttf`
 //      (目录里唯一 → 缺边车),重扫后再跑一趟**全判据**计时。两段各给护栏;
+//   7. (B9) 把同一份夹具里的 .gd 正文换成**真实形状的脏脚本**(尾随空白 + 三连空行 + 未闭合括号的对齐行 +
+//      一个 `"""` 块;每 7 份给一份 CRLF 版),每 5 份留 1 份干净脚本作反向对照,然后直测 runFormat ——
+//      它只读 .gd 全文(不调 buildRefIndex、不读边车),计时的是「逐行状态扫描 + 整份新文本拼装」。
+//      硬自查三条:改写清单数量 == 埋进去的脏脚本数、每一份新文本与盘上原文逐字节不同、干净脚本一份都不漏进清单。
 //   无论成败最后删除整个临时目录并**核实它没了**(残留 = harness 自己 FAIL)。
 //
 // 诚实边界(不冒充):测的是 Node 侧调度器 + JS 宿主原语的耗时,不是浏览器绘制耗时,
@@ -319,6 +323,103 @@ try {
     console.error(`[imports 全判据] 判定路径没被踩到:mismatch=${mmCount}(want ${MIS}) missing=${missCount}(want ${SOLO})`)
     exitCode = 1
   }
+  // ---------- B9:runFormat 直测(同样不走 registry)----------
+  // format 的读入面与 B5/B6 正交:它**只读** .gd 全文(不调 buildRefIndex、不读边车),成本大头是
+  // 「每份 .gd 一次逐行状态扫描 + 一次整份新文本拼装」。上面那份 .gd 夹具是 20 字节的 'extends Node\n',
+  // 干净文本走不到任何一条改写路径( files.length=0 )—— 那正是 B6 评审 Fix round 1 Important 2 咬过的
+  // 「零判定计时」。所以这里把 .gd 正文换成**真实形状**的脏脚本(尾随空白 + 空行段 + 未闭合括号 +
+  // 一个 """ 块),每 5 份里 1 份保持干净(反向对照:干净的必须一条都不产),另每 7 份给一份 CRLF 版
+  // (换行符统一那条也要被计时)。
+  const GD_DIRTY = [
+    'extends Node',
+    '# 顶部注释   ',
+    '',
+    '@export var speed := 1.0   ',
+    '',
+    '',
+    '',
+    'func _ready() -> void:',
+    '\tvar doc := """',
+    '\t\t多行字符串里的尾随空白   ',
+    '',
+    '\t"""',
+    '\tvar pts = [',
+    '\t\tVector2(1, 2),',
+    '\t\tVector2(3, 4)   ',
+    '\t]',
+    '\tprint(doc)',
+    '\treturn speed \\'
+  ]
+  const GD_CLEAN_TXT = 'extends Node\n\nfunc _ready() -> void:\n\tprint(1)\n'
+  let dirtyGd = 0
+  const cleanGd = new Set()
+  let crlfGd = 0
+  for (let i = 0; i < fc.gd; i++) {
+    const rel = `scripts/mod${Math.floor(i / 100)}/s${i % 100}.gd`
+    const abs = path.join(WORK, ...rel.split('/'))
+    fs.mkdirSync(path.dirname(abs), { recursive: true })
+    if (i % 5 === 2) {
+      fs.writeFileSync(abs, GD_CLEAN_TXT)
+      cleanGd.add(rel)
+      continue
+    }
+    let body = GD_DIRTY.join('\n') + '\n'
+    if (i % 7 === 3) {
+      body = body.replace(/\n/g, '\r\n')
+      crlfGd++
+    }
+    fs.writeFileSync(abs, body)
+    dirtyGd++
+  }
+  console.log(`[format 夹具] gdTotal=${fc.gd} dirty=${dirtyGd} clean=${cleanGd.size} crlf=${crlfGd} ` +
+    `dirtyBytes=${Buffer.byteLength(GD_DIRTY.join('\n') + '\n')}`)
+  const scan4 = F.scanProjectTree(DOC._id, { includeCache: true })
+  if (!scan4.ok) throw new Error(`格式化夹具重扫失败: ${scan4.error}`)
+  const fmtCtx = {
+    projectId: DOC._id, root: WORK, tree: scan4.files, truncated: scan4.truncated === true,
+    readText: async (rel) => {
+      const rr = F.readProjectText(DOC._id, rel)
+      return rr.ok && typeof rr.text === 'string' ? { text: rr.text } : { skipped: true }
+    }
+  }
+  const fmt0 = performance.now()
+  const fmtFindings = await TB.runFormat(fmtCtx)
+  const fmtMs = performance.now() - fmt0
+  const fmtAgg = fmtFindings.find((f) => f.id === 'format:all')
+  const fmtFiles = fmtAgg && fmtAgg.fix && fmtAgg.fix.payload ? fmtAgg.fix.payload.files : []
+  // 硬自查(B6 的教训):零判定的计时没有意义。三条都要过 ——
+  //   ① 真的产出了改写清单,且数量 == 埋进去的脏脚本数;
+  //   ② 每一份新文本与盘上原文**逐字节不同**(不是把原文回填);
+  //   ③ 干净的那批一份都没进清单(否则①的相等只是「全都改」的假象)。
+  let fmtRewritten = 0
+  let fmtMissing = 0
+  for (const f of fmtFiles) {
+    const abs = path.join(WORK, ...f.rel.split('/'))
+    if (!fs.existsSync(abs)) { fmtMissing++; continue }
+    if (fs.readFileSync(abs, 'utf8') !== f.text) fmtRewritten++
+  }
+  console.log(`[format 直测] entries=${fmtCtx.tree.length} truncated=${fmtCtx.truncated} ` +
+    `findings=${fmtFindings.length} files=${fmtFiles.length} 非恒等新文本=${fmtRewritten}`)
+  console.log(`[format 直测] runFormatMs=${fmtMs.toFixed(1)}`)
+  const GUARD_FORMAT_MS = 30000
+  const fmtGuard = fmtMs <= GUARD_FORMAT_MS
+  console.log(`[format 直测] guard=${GUARD_FORMAT_MS}ms(护栏) verdict=${fmtGuard ? 'PASS' : 'FAIL'}`)
+  if (!fmtGuard) exitCode = 1
+  if (fmtMissing > 0) {
+    console.error(`[format 直测] 改写清单里有 ${fmtMissing} 个 rel 不在盘上(rel 必须来自 ctx.tree)`)
+    exitCode = 1
+  }
+  if (fmtFiles.length !== dirtyGd || fmtRewritten !== dirtyGd) {
+    console.error(`[format 直测] 改写路径没被踩到:files=${fmtFiles.length} 非恒等=${fmtRewritten}(夹具里埋了 ${dirtyGd} 份脏脚本)`)
+    exitCode = 1
+  }
+  const cleanLeaked = fmtFiles.filter((f) => cleanGd.has(f.rel))
+  if (cleanLeaked.length > 0) {
+    console.error(`[format 直测] 干净脚本被拖进改写清单:${cleanLeaked.map((f) => f.rel).slice(0, 3).join('、')}`)
+    exitCode = 1
+  }
+  console.log(`[format 直测] 自查 files=${fmtFiles.length}/${dirtyGd} 非恒等=${fmtRewritten}/${dirtyGd} ` +
+    `干净泄漏=${cleanLeaked.length}(want 0) verdict=${fmtFiles.length === dirtyGd && fmtRewritten === dirtyGd && cleanLeaked.length === 0 ? 'PASS' : 'FAIL'}`)
 } catch (e) {
   console.error(`perf harness 抛错: ${e && e.stack ? e.stack : e}`)
   exitCode = 1
