@@ -101,8 +101,6 @@ export interface GdLineInfo {
   depth: number
   /** suspect 状态(本行结束时;本行或更早出现过多余闭括号) */
   suspect: boolean
-  /** 本行结束时是不是停在 `"""` / `'''` 块里(块内的 term 是内容) */
-  inBlock: boolean
 }
 
 /** 一份文本的扫描结果:逐行状态 + 文件级信息(判据 5 吃后三条) */
@@ -138,7 +136,7 @@ interface ScanState {
 
 /**
  * 判据 1 的公开形状:`Array<{ line, inString, isComment, indent, code }>`,
- * 另带 raw/term/continuation/depth/suspect/inBlock(格式化还要判缩进与换行符)。
+ * 另带 raw/term/continuation/depth/suspect(格式化还要判缩进与换行符)。
  * 纯函数:同一份文本永远得到同一份结果。
  */
 export function classifyLines(text: string): GdLineInfo[] {
@@ -220,8 +218,7 @@ export function scanGdScript(text: string): GdScan {
       code: res.inString ? '' : body.replace(/[ \t]+$/, ''),
       continuation: cont,
       depth: st.depth,
-      suspect: st.suspect,
-      inBlock: st.block !== ''
+      suspect: st.suspect
     })
   }
 

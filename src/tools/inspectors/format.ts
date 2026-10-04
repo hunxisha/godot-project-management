@@ -99,8 +99,6 @@ const STRING_GUARD = ' 多行字符串(三个双引号或三个单引号包起�
 const INDENT_TXT = ' 缩进目标按每个文件自己的多数派定,不读编辑器的缩进设置(那个设置的键名与取值语义在用户项目里' +
   '没有可举证的文本,拿它当依据就是猜);tab 与空格互转按 4 格宽,这个 4 只是本工具的换算口径,' +
   '不代表引擎或编辑器对你项目的要求。上一行以反斜杠续行、或括号还没闭合的行,前导空白是排版对齐,一律不转换。'
-const BACKUP_TXT = ' 改写会先备份再原子替换,预览清单就是下面这些文件(逐文件勾选默认不选)。'
-
 const empty = (s: string): boolean => s === '' || /^[ \t]+$/.test(s)
 
 /** 只删行尾的空格与 tab:非 ASCII 空白(\f/\v/NBSP)不当「行尾空白」处理,那是内容 */
@@ -311,7 +309,7 @@ function aggregateFinding(files: FileFormat[], ex: Excl): Finding {
       `补末尾换行 ${total.finalNL} 个文件、换行符 ${total.endings} 行。` +
       `逐文件计数(按 rel 码元序):${shown.map(perFileText).join(' ')}。` +
       (hidden ? ` 这里只列前 ${shown.length} 个文件,另有 ${hidden} 个文件未列出;下面这个动作仍按全部 ${n} 个执行。` : '') +
-      SCOPE_TXT + STRING_GUARD + INDENT_TXT + BACKUP_TXT + NOT_DOING +
+      SCOPE_TXT + STRING_GUARD + INDENT_TXT + NOT_DOING +
       ` 默认不参与:addons 目录下的 .gd ${ex.addons} 个(第三方插件代码,归插件体检那条)、` +
       `.godot 缓存里的 .gd ${ex.cache} 个;读不进正文的 .gd ${ex.unread} 个整份跳过 —— ` +
       '读不到就什么都不做,绝不会把「读不到」当成「改成空文件」。',
