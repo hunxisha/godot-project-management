@@ -441,6 +441,33 @@ async function main() {
   ok(ids(auTailComma.fs) === 'ini:autoload-form' && /Bad = res:\/\/autoload\/one\.gd,/.test(detailOf(auTailComma.fs[0])),
     '尾逗号那条同样上聚合卡(排除不静默)', detailOf(auTailComma.fs[0]))
 
+  // 尾闸排在 `$`/空值 之前会说出两句假话:空串既没有首尾空白也没有尾巴标点;
+  // `$One ` 明明是「引用另一个单例」的形态,却被计进「读不成的值」而不计入「$引用 N 条」。
+  const emptyMs = await check([['project.godot', 200]], {
+    texts: { 'project.godot': godot('[application]', 'run/main_scene=""') }
+  })
+  ok(ids(emptyMs.fs) === 'ini:main-scene-form' && /空串/.test(detailOf(emptyMs.fs[0])) &&
+    !/首尾带空白|标点收尾/.test(detailOf(emptyMs.fs[0])),
+    '空值说「值是空串」,不套尾巴闸那句(空串两样都没有)', detailOf(emptyMs.fs[0]))
+  const refTail = await check([...AU, ['autoload/one.gd', 50]], {
+    texts: {
+      'project.godot': godot('[autoload]', 'A="$One "', 'Bad="res://autoload/nope.gd "') +
+        '\n[application]\nrun/main_scene="res://main.tscn"'
+    }
+  })
+  ok(refTail.fs.some((f) => /\$单例引用 1 条/.test(detailOf(f))) &&
+    !refTail.fs.some((f) => /第 \d+ 行 A =/.test(detailOf(f))),
+    '带尾巴的 `$引用` 仍计进「$单例引用」这条子计数,也不上聚合写法卡(它不是路径尝试)',
+    refTail.fs.map((f) => detailOf(f)).join(' || '))
+  // 聚合卡的「原样还给你写的那一句」是**空白折叠后**的样子:三个尾巴空格印成一个空格。
+  // 钉住实际行为,免得将来有人以为卡面是逐字节回显。
+  const auMultiSpace = await check([...AU, ['autoload/gs.gd', 50]], {
+    texts: { 'project.godot': godot('[autoload]', 'GS="res://autoload/gs.gd   "') }
+  })
+  ok(/GS = "res:\/\/autoload\/gs\.gd "/.test(detailOf(auMultiSpace.fs[0])) &&
+    !/gs\.gd   "/.test(detailOf(auMultiSpace.fs[0])),
+    '写法卡的值是空白折叠后的原样(多空格并成一个),不是逐字节回显', detailOf(auMultiSpace.fs[0]))
+
   const auTailCtrl = await check([...AU, ['autoload/one.gd', 50]], {
     texts: { 'project.godot': godot('[autoload]', 'One="res://autoload/one.gd"') }
   })
@@ -955,7 +982,10 @@ async function main() {
     ALL.filter((f) => /undefined|null|[Tt]rue|NaN|\d{10,}/.test(f.id)).map((f) => f.id).join('|'))
   // ★B10 是把 detail/title 原样渲染给 Godot 用户的:仓库内部路径、file:line 出处、本仓函数名都不许出现在卡面
   //(四条同类检查器一律把 provenance 留在注释里,见 ini.ts 文件头与各条判据上方的注释)
-  const INTERNAL = /(src-ztools|src-tauri|src\/|parsers\/|inspectors\/|__tests__|godotIni|sceneRefs|projects\.js|projects\.rs|orphans\.test|refIndex\.test|parseGodotIni|getIniInt|getIniRaw|iniResPaths|findLast|fullKeyOf|\.(ts|mjs|rs)\b)/
+  // 只抓「源码引用」的形状:带扩展名的文件名、目录前缀、本仓的函数/常量标识符。
+  // 故意不抓 addons / imports / orphans / .gdignore 这类词 —— 用户项目里本就有这些目录与标记文件,
+  // 卡面讲到它们是合法的(判据本身就在讲这些路径),抓进来只会造成假红。
+  const INTERNAL = /(src-ztools|src-tauri|src\/|parsers\/|inspectors\/|__tests__|[\w./-]+\.(ts|mjs|js|rs)\b|parseGodotIni|getIniInt|getIniRaw|getIniBool|getIniList|iniResPaths|resToRel|resPathShapeOk|rootRelOf|fullKeyOf|hasRelCI|lowerRelSet|relSet|findLast|truncatedFinding|buildRefIndex|LIST_CAP|godotIni|sceneRefs|treeUtils|brokenRefs)/
   ok(ALL.every((f) => !INTERNAL.test(`${f.title}\n${f.detail}`)),
     `★用户可见文案里没有仓库内部引用(${ALL.length} 条结论逐条查,出处一律在注释里)`,
     ALL.filter((f) => INTERNAL.test(`${f.title}\n${f.detail}`)).map((f) => f.id).join('|'))

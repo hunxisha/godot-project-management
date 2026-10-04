@@ -198,15 +198,21 @@ function readPathValue(doc: IniDoc, fullKey: string, stripStar: boolean): Form {
       why: '值没加引号,而串里还混着空白或半个引号,归一出来的是「路径 + 别的东西」那种串'
     }
   }
-  // ★ 尾闸:引号内外一律生效(Important 2)。位置在 `$`/`res://` 判定之前,这样带尾巴的
-  //   `$One ` 也停在「读不成」而不是被认成引用形态 —— 两种都不判存在性,少报方向不变。
+  // `$` 判定放在尾闸**之前**:值开头是 `$` 就一定是「引用另一个单例」的形态,那本来就不是路径,
+  // 后面带不带空格都不改变这一点。放在尾闸之后会让 `A="$One "` 落进 auSkip 却不计进「$引用 N 条」,
+  // 子计数说的数字就比它命名的少(两种形态都不判存在性,少报方向不变)。
+  if (body.startsWith('$')) return { kind: 'ref', body, raw, why: '值是 `$另一个单例` 的引用形态,那本来就不是路径' }
+  // 空值单独说一句:`Game=""` 既没有首尾空白也没有尾巴标点,套到尾巴闸那句上就是假话。
+  // 方向仍是少报(不判存在性、计入排除),只是把原因说准。
+  if (!body) return { kind: 'other', body, raw, why: '值是空串,没有任何路径可判' }
+  // ★ 尾闸:引号内外一律生效(Important 2)。`res://a.gd "` 与 `res://a.gd,` 归一出来的是
+  //   「路径 + 尾巴」那种串,拿去比清单就会把其实存在的文件说成丢失。
   if (!resPathShapeOk(body)) {
     return {
       kind: 'other', body, raw,
       why: '值首尾带空白或以标点收尾(, ; ) ]),归一出来的串不是那条路径本身'
     }
   }
-  if (body.startsWith('$')) return { kind: 'ref', body, raw, why: '值是 `$另一个单例` 的引用形态,那本来就不是路径' }
   if (!body.startsWith('res://')) {
     return { kind: 'other', body, raw, why: '值不是 res:// 开头的路径写法(user://、绝对路径等)' }
   }
