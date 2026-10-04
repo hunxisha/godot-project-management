@@ -21,6 +21,8 @@
 //   5. (B5) 在同一份真夹具上补 .png.import 边让 png 进候选,再用真实原语**直接**调
 //      .gpm-test/out/tools.mjs 的 buildRefIndex + runOrphans(不走 registry)并计时 —— orphans 是第一个
 //      把 readText 吃满的工具,registry 里没有它(B5 不接线),runAll 量不到,这一段就是补上这块成本;
+//   6. (B6) 在同一份真夹具上用同一个 ctx 直测 runImports —— 它**只**读 .import 边车(不调 buildRefIndex),
+//      成本面与 5 正交:边车数量 × 单次读文本。同样给护栏;
 //   无论成败最后删除整个临时目录并**核实它没了**(残留 = harness 自己 FAIL)。
 //
 // 诚实边界(不冒充):测的是 Node 侧调度器 + JS 宿主原语的耗时,不是浏览器绘制耗时,
@@ -192,6 +194,23 @@ try {
   const guard = combinedMs <= GUARD_MS
   console.log(`[orphans 直测] guard=${GUARD_MS}ms(护栏) verdict=${guard ? 'PASS' : 'FAIL'}`)
   if (!guard) exitCode = 1
+
+  // ---------- B6:runImports 直测(同样不走 registry) ----------
+  // imports 的成本面与 orphans 正交:它**只读** `.import` 边车(不调 buildRefIndex),上面那份夹具刚好
+  // 给每张 png 都补了边车 ⇒ 6000 次真读文本。这里复用同一个 orphanCtx(readText 仍不接 LRU),
+  // 量到的是「边车数量 × 单次读」的线性上界 —— 哪天它变成两趟读或去调引用索引,这个数就会飞。
+  const im0 = performance.now()
+  const importFindings = await TB.runImports(orphanCtx)
+  const importsMs = performance.now() - im0
+  const staleAgg = importFindings.find((f) => f.id === 'imports:stale:all')
+  const staleRels = staleAgg && staleAgg.fix && staleAgg.fix.payload ? staleAgg.fix.payload.rels.length : 0
+  console.log(`[imports 直测] sidecars=${fc.png} findings=${importFindings.length} staleRels=${staleRels}`)
+  console.log(`[imports 直测] runImportsMs=${importsMs.toFixed(1)}`)
+  // 同样是护栏而不是 §7 的 <10s 验收(那条要等 B10 在真宿主、含 LRU 与全局调度时量)。
+  const GUARD_IMPORTS_MS = 30000
+  const importsGuard = importsMs <= GUARD_IMPORTS_MS
+  console.log(`[imports 直测] guard=${GUARD_IMPORTS_MS}ms(护栏) verdict=${importsGuard ? 'PASS' : 'FAIL'}`)
+  if (!importsGuard) exitCode = 1
 } catch (e) {
   console.error(`perf harness 抛错: ${e && e.stack ? e.stack : e}`)
   exitCode = 1

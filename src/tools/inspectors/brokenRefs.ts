@@ -15,11 +15,8 @@
 // 红线:纯函数,只吃 ToolContext —— 不碰 window / services / vue / DOM。
 import type { Finding, ToolContext } from '../types'
 import { truncatedFinding } from '../finding'
-import { parseExtResources, resToRel } from '../parsers/sceneRefs'
+import { SCENE_EXT, parseExtResources, resToRel } from '../parsers/sceneRefs'
 import { relSet } from '../treeUtils'
-
-/** 只有这两个后缀是文本资源文件,值得去读并解析 [ext_resource] */
-const SCENE_EXT = new Set(['tscn', 'tres'])
 
 export async function run(ctx: ToolContext): Promise<Finding[]> {
   if (ctx.truncated) {

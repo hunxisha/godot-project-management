@@ -13,7 +13,18 @@ export interface ExtRef {
   id: string
 }
 
-function attr(head: string, key: string): string {
+/**
+ * 只有这两个后缀是文本资源文件(头部带 `uid=`、正文带 `[ext_resource]`)。
+ * 唯一的一份:brokenRefs 决定「读哪些文件」、uid 决定「读哪批文件的头部」都吃这里
+ * (B4 评审挂账,B6 收口 —— 同一个判定抄第二份就是将来分叉的地方)。
+ */
+export const SCENE_EXT = new Set(['tscn', 'tres'])
+
+/**
+ * 从段头/头部文本里取 `key="value"` 的值,取**第一个**匹配(非全局正则的 exec 天然首匹配),
+ * 取不到给空串。B4 的 `uid.ts` 读场景头部 uid 也走这里,不再自己抄一条正则。
+ */
+export function attr(head: string, key: string): string {
   const m = new RegExp(`\\b${key}="([^"]*)"`).exec(head)
   return m ? m[1] : ''
 }

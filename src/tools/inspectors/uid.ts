@@ -25,24 +25,14 @@
 import type { Finding, ToolContext } from '../types'
 import { truncatedFinding } from '../finding'
 import { isUidToken } from '../refIndex'
+import { SCENE_EXT, attr } from '../parsers/sceneRefs'
 import { dirOf, isCache, relSet } from '../treeUtils'
-
-/** 只有这两个后缀把「自己的 uid」写在头部（判据 1 的第二条采集口） */
-const SCENE_EXT = new Set(['tscn', 'tres'])
 
 /** 边车尾缀：归属一律用它切（`X.a.b.uid` 的源是 `X.a.b`，用 dirOf/basename 重拼会拼错） */
 const UID_SUFFIX = '.uid'
 
 /** 孤儿/重复的展示上限：与 size.ts 的 BIG_LIST=20 同一口径（刷屏控制，不影响 rels 全量） */
 const LIST_CAP = 20
-
-/**
- * 头部属性 uid="..."。取**第一个**匹配，与 `sceneRefs.ts:16-19` 的 `attr()` 同规则
- * （两个文件里都是「非全局正则的 exec」→ 首个匹配；同一行写两条 uid= 不是编辑器产物，
- * 这里跟着 attr() 的读法走，不额外宣称引擎行为）。
- * 这不是「uid 串形状」的第二份正则 —— 形状判据只有 `refIndex.isUidToken` 一份（判据 5）。
- */
-const HEADER_UID = /\buid="([^"]*)"/
 
 /** 一个 rel 对某个 uid 的所有权声明渠道：自身头部 / 哪些边文指着它 */
 interface Owner {
@@ -75,13 +65,16 @@ function sidecarToken(text: string): string {
 
 /**
  * 判据 1：**只看第一行**。场景第二行往后是 `[ext_resource]`（那是引用，判据 1 明写不能算所有权），
- * 手滑把整篇文本丢进这个正则就会把引用收成声明 —— 于是「一个场景被引用一万次」长成「一万个重复」。
+ * 手滑把整篇文本丢给属性读取就会把引用收成声明 —— 于是「一个场景被引用一万次」长成「一万个重复」。
  * 第一行不是 `gd_scene`/`gd_resource`（例如文件以空行开头）时读不到 uid，当作没有声明（保守）。
+ * 属性读法一律走 `sceneRefs.attr()`（B4 评审挂账、B6 收口：这里原来另抄了一条
+ * `/\buid="([^"]*)"/`，与 attr() 是同规则的两份写法）；uid 串的**形状**判据仍只有
+ * `refIndex.isUidToken` 一份（判据 5）。
  */
 function headerUid(text: string): string {
   const head = text.split(/\r?\n/, 1)[0] || ''
-  const m = HEADER_UID.exec(head)
-  return m && isUidToken(m[1]) ? m[1] : ''
+  const uid = attr(head, 'uid')
+  return isUidToken(uid) ? uid : ''
 }
 
 /** 判据 2：detail 要写明这个 uid 与**每一条**声明者的关系（边文还是头部），因为用户要看懂谁会掉引用 */
