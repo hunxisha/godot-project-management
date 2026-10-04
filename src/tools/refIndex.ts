@@ -68,6 +68,15 @@ const SOURCE_EXT = new Set(['tscn', 'tres', 'gd', 'cs', 'gdshader', 'json', 'gde
 const UID_TOKEN = /^uid:\/\/[0-9a-z]+$/
 const UID_IN_TEXT = /\buid:\/\/[0-9a-z]+/g
 
+/**
+ * 「这个串是不是一个合法 uid」—— 全项目**唯一**一份判据(形状逐条核实见文件头)。
+ * 导给 B4(`inspectors/uid.ts`)判 `.uid` 边文与场景头部的所有权声明:同一个规则在第二个文件里
+ * 再抄一遍就是 `godotIni.ts` 那份分叉注释点过的风险(改一处、另一处静默留在旧口径)。
+ */
+export function isUidToken(s: unknown): boolean {
+  return typeof s === 'string' && UID_TOKEN.test(s)
+}
+
 /** 判据 1:这个条目是不是「可能的引用来源」 */
 function isSource(ext: string, rel: string): boolean {
   // 根级 project.godot:判据 1 的最后一项,也是 B2 解析器的唯一入口
