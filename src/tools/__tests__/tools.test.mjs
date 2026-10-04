@@ -528,6 +528,62 @@ async function main() {
   const unreadable = await T.runBrokenRefs(makeCtx(base, { texts: {} }))
   ok(unreadable.length === 0, '读不到文本(二进制/超限)的场景文件跳过,不报假断链')
 
+  // ---------- 5b. ★ B10b 债 6:形状闸(resPathShapeOk)接进本工具唯一的 error 档 ----------
+  // 为什么存在:`attr()` 交回的是引号**内文**,所以 `path="res://player.gd "` 里那枚空格、
+  // `path="res://player.gd,"` 里那枚逗号都原样跟着值走。resToRel 忠实得可怕:它不 trim、不看标点,
+  // 于是归出 `player.gd ` / `player.gd,` —— 两条比清单永远查不到,而清单里其实就有 player.gd。
+  // 结果是对着**实存的文件**发「引用了不存在的文件」(error 级假阳性,§6 头号失败模式)。
+  // 尾逗号不是假想形态:两份孪生解析器都对值做 trim_end_matches(',') / replace(/,\s*$/,'')。
+  const tailSpace = await T.runBrokenRefs(makeCtx(base, {
+    texts: { 'scene/a.tscn': '[ext_resource type="Script" path="res://player.gd " id="1_a"]\n' }
+  }))
+  ok(tailSpace.length === 0,
+    '★引号内带尾空格的路径不再判存在性:player.gd 明明在清单里,旧闸归一成 `player.gd `(带空格)后说出 error',
+    JSON.stringify(tailSpace.map((f) => f.id)))
+  const tailComma = await T.runBrokenRefs(makeCtx(base, {
+    texts: { 'scene/a.tscn': '[ext_resource type="Script" path="res://player.gd," id="1_a"]\n' }
+  }))
+  ok(tailComma.length === 0, '★裸尾逗号同样不判(孪生解析器都会剥掉它,那枚逗号不是路径的一部分)',
+    JSON.stringify(tailComma.map((f) => f.id)))
+  const tailLead = await T.runBrokenRefs(makeCtx(base, {
+    texts: { 'scene/a.tscn':
+      '[ext_resource type="Script" path=" res://player.gd" id="1_a"]\n' +
+      '[ext_resource type="Script" path="res://gone.gd" id="2_b"]\n' }
+  }))
+  ok(tailLead.length === 1 && /本次未判定:1 条/.test(tailLead[0].detail),
+    '★前置空格同侧计进同一笔(旧写法把它当「归不出 rel」静默丢掉,连「本次没判」都不说)',
+    JSON.stringify(tailLead.map((f) => f.id)))
+  // 反向对照(闸不是「把带尾巴的名字一概放过」):尾巴照旧、但目标真不在清单里时也**不判** ——
+  // 这正是「撤主张」的含义:这类值既不能说在、也不能说丢,只能说本次没判(下面那条计数把它摆明)。
+  const tailMissing = await T.runBrokenRefs(makeCtx(base, {
+    texts: { 'scene/a.tscn': '[ext_resource type="Script" path="res://gone.gd " id="1_a"]\n' }
+  }))
+  ok(tailMissing.length === 0, '带尾巴且目标确实不在清单 → 同样不判(不判 ≠ 反过来说它在)',
+    JSON.stringify(tailMissing.map((f) => f.id)))
+  // ★正向对照:干净写法的丢失目标照报错(新闸没把正常判定一起吃掉)
+  const cleanMiss = await T.runBrokenRefs(makeCtx(base, {
+    texts: { 'scene/a.tscn': '[ext_resource type="Script" path="res://gone.gd" id="1_a"]\n' }
+  }))
+  ok(cleanMiss.length === 1 && cleanMiss[0].severity === 'error',
+    '正向对照:干净的 res:// 且文件不在清单 → 那条 error 一条没少', JSON.stringify(cleanMiss.map((f) => f.id)))
+  // ★正向对照:Godot 允许路径里有空格,**内部**空格合法,不该被首尾闸一起挡在门外
+  const innerSpace = await T.runBrokenRefs(makeCtx(base, {
+    texts: { 'scene/a.tscn': '[ext_resource type="PackedScene" path="res://scene/my scene.tscn" id="5_e"]\n' }
+  }))
+  ok(innerSpace.length === 1 && innerSpace[0].title.includes('res://scene/my scene.tscn'),
+    '正向对照:合法的内部空格路径仍走到存在性档并出 error(共享闸只判首尾,不判内部)',
+    JSON.stringify(innerSpace.map((f) => f.title)))
+  // 「不判的条数」必须看得见:同一条场景里既有被闸挡下的、也有真断链的
+  const bothKinds = await T.runBrokenRefs(makeCtx(base, {
+    texts: { 'scene/a.tscn':
+      '[ext_resource type="Script" path="res://player.gd " id="1_a"]\n' +
+      '[ext_resource type="Script" path="res://gone.gd" id="2_b"]\n' }
+  }))
+  ok(bothKinds.length === 1 && /本次未判定:1 条 \[ext_resource\] 的 path 值首尾带空白或以标点收尾/.test(bothKinds[0].detail),
+    '★排除计数并进 detail:闸挡下 1 条要写 1 条(静默跳过正是三轮评审点名的东西)', bothKinds[0]?.detail)
+  ok(cleanMiss[0].detail.includes('打开该场景时编辑器会报加载失败') && !/本次未判定/.test(cleanMiss[0].detail),
+    '没有东西被闸挡下时 detail 与 B10b 之前逐字一致(不凭空多一句「本次未判定」)', cleanMiss[0].detail)
+
   // ---------- 6. outcomeOf:体检结论判定(修复轮 1,审查 F-1) ----------
   // 为什么存在:「体检完成 · 未发现问题」曾直接在 ToolsView.vue 的 computed 里判,而扫描失败
   // **不会**清空 results —— useTools.ts:146-153 置 error、清 tree、复位 truncated 后返回,

@@ -89,7 +89,7 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
   const out: Finding[] = []
   const tree = Array.isArray(ctx.tree) ? ctx.tree : []
   // 判据 3：存在性判定（孤儿 `.uid`、`.gd` 缺边文、项目闸门）只在清单完整时做 ——
-  // 与 brokenRefs.ts:25-35 同一口径：清单不全时「查不到源文件」不是证据。
+  // 与 brokenRefs.ts:42-52 同一口径：清单不全时「查不到源文件」不是证据。
   // 重复判定不吃存在性：它的证据是「两个读得到的文件各自写了同一个 uid」，
   // 清单不全只会**少列**几个声明者（少报），不会凭空造出一个重复（错报），所以截断时照常做。
   const complete = !ctx.truncated

@@ -52,7 +52,7 @@
 //     而模板一次只写其中一个 → 数组里同时出现两个就是本工具**能直接观测**的冲突,不需要引擎主张。
 //   · 「场景文件头部首 token 是 gd_scene」:`parsers/sceneRefs.ts:73-80` 与 `inspectors/uid.ts:74-78`
 //     的既有读法,夹具见 `orphans.test.mjs:74`、`refIndex.test.mjs:77`。
-//   · 存在性查不到 = error 的先例:`brokenRefs.ts:1` 与它 :33-35 记下的教训(精确大小写查表
+//   · 存在性查不到 = error 的先例:`brokenRefs.ts:1` 与它 :53-55 记下的教训(精确大小写查表
 //     会把其实存在的文件说成丢失,而那是本仓唯一的 error 级结论)。
 // 反过来,**本文件不主张编辑器的任何具体后果**:仓库里没有引擎的配置读取器,也读不到编辑器的输出,
 // 所以每条 detail 都只说「盘上这份文件写了什么 / 这次清单里查不到什么」,把核对动作交给用户。
@@ -180,7 +180,7 @@ function brief(raw: string): string {
  *   解码后仍在;`Bad=res://a.gd,` 那枚逗号裸值也有(两份孪生解析器都会剥掉尾逗号,godotIni.ts:15-16)。
  *   两种都能让 `resToRel` 切出一条清单里永远查不到的 rel,从而对**其实存在的文件**发 error。
  *   所以「首尾干净」这道闸对 quoted 与 bare 一律生效(共享在 sceneRefs.ts 的 `resPathShapeOk`,
- *   B10 可以把 brokenRefs/addons 指过来);合法的内部空格 `"res://my scene.tscn"` 不受影响。
+ *   B10b 已把 brokenRefs/addons 的存在性判定指到同一条闸);合法的内部空格 `"res://my scene.tscn"` 不受影响。
  * `stripStar` 只给 [autoload] 用:`*` 是启用单例的标记(godotIni.ts:399-402),
  * 别的键前导 `*` 不是本仓任何出处里出现过的写法,不替它猜。
  */

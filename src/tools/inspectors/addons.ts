@@ -37,7 +37,18 @@
 //
 // 存在性一律用 `lowerRelSet(ctx.tree)` + `hasRelCI()` 查表（treeUtils.ts:102-118，B6 评审裁定 2 的
 // 共享小写像），不做精确大小写比对，也不做字符串包含。**判据 4 是本工具唯一的 error**，而 error 一侧
-// 最容易造假：`brokenRefs.ts:33-35` 记的就是同一件事（精确大小写查表会把其实存在的文件说成丢失）。
+// 最容易造假：`brokenRefs.ts:53-55` 记的就是同一件事（精确大小写查表会把其实存在的文件说成丢失）。
+//
+// 查表**之前**还有一道共享形状闸 `sceneRefs.resPathShapeOk`（B10b 债 6 收口，与 brokenRefs 同一句
+// 判据）：尾巴带标点的值（`script="res://plugin.gd,"`）归一出来的是「路径 + 尾巴」那种串，
+// 拿去比清单永远查不到，于是本工具唯一的 error 会落在一个其实存在的文件上。
+// ⚠ 这一侧的取舍与 ini.ts:179-183 记的同源，但**多挡的形态不同**：`filled()` 已经 trim 过两端，
+// 所以这里真正多挡的只有「以 `,` `;` `)` `]` 收尾」一类；enabled 那档吃 getIniList 的解码原值，
+// 首尾空白与尾巴标点两样都归这条闸管。两档各计一笔（`shapeScript`/`shapeEnabled`），
+// 不与「不是 res:// 写法」那两笔混记（混了就是两句假话）。方向仍是**只撤主张**：
+// 过闸的值判定路径一字未改；被挡下的 enabled 条目也从不参与「已安装但未启用」那侧的比对
+// （那一侧只比 `addons/<目录>/plugin.cfg` 这种精确 basename，带尾巴的 rel 结构上永远对不上），
+// 所以挡下一条也不会把某个插件从「已启用」念成「未启用」。
 //
 // `ctx.truncated` 的降级口径与 imports.ts:17-20（B6 裁定 3）一致：作废的是**存在性主张**
 // （入口脚本缺失、enabled 点名文件不在），内容型判据（字段缺失、显示名重名、已安装未启用）
@@ -59,7 +70,7 @@ import type { Finding, ToolContext } from '../types'
 import { truncatedFinding } from '../finding'
 import { getIni, getIniList, getIniRaw, parseGodotIni } from '../parsers/godotIni'
 import type { IniDoc } from '../parsers/godotIni'
-import { resToRel } from '../parsers/sceneRefs'
+import { resPathShapeOk, resToRel } from '../parsers/sceneRefs'
 // 根配置选举(rootRelOf)与存在性小写像同源:B8 修复轮把 ini.ts 与本文件各写一遍的那份收敛成一份
 import { gdignoredDirs, hasRelCI, isGdignored, lowerRelSet, lowerSet, rootRelOf } from '../treeUtils'
 
@@ -88,8 +99,12 @@ interface Excl {
   unread: number
   /** script 有值但不是 res:// 形态（相对文件名、user://、带盘符、越界）→ 不判存在性（判据 4） */
   relScript: number
+  /** ★ script 形状闸挡下的条数（`filled()` 已 trim，所以这一侧只有「以 , ; ) ] 收尾」一种）→ 不判存在性（判据 4） */
+  shapeScript: number
   /** enabled 条目里不是 res:// 形态的条数 → 不判（判据 5） */
   relEnabled: number
+  /** ★ enabled 条目形状闸挡下的条数（首尾空白或尾巴标点）→ 两个方向都不判（判据 5） */
+  shapeEnabled: number
   /** enabled 这个键存在但值形态认不出（getIniList 给 undefined） */
   badEnabled: number
   /** project.godot 不在清单里或读不到 → 启用状态两条判据都不做 */
@@ -164,7 +179,9 @@ function exclNote(ex: Excl): string {
   if (ex.ignore) bits.push(`.gdignore 屏蔽的插件目录 ${ex.ignore} 个（引擎不扫那些目录，四条判据一起不判）`)
   if (ex.unread) bits.push(`plugin.cfg 读不到 ${ex.unread} 个（字段/入口脚本/重名三条对它失效）`)
   if (ex.relScript) bits.push(`script 不是 res:// 写法、不判存在性的 ${ex.relScript} 个`)
+  if (ex.shapeScript) bits.push(`script 以标点收尾(, ; ) ]、那是「值到这里结束了」的分隔符不是路径的一部分)、不判存在性的 ${ex.shapeScript} 个`)
   if (ex.relEnabled) bits.push(`enabled 里不是 res:// 写法、不判的 ${ex.relEnabled} 条`)
+  if (ex.shapeEnabled) bits.push(`enabled 里首尾带空白或以标点收尾(, ; ) ]、归一出来的串不是那条路径本身)、不判的 ${ex.shapeEnabled} 条`)
   if (ex.badEnabled) bits.push(`enabled 的值形态认不出（既不是 PackedStringArray(...) 也不是 [...]），启用状态两条判据本次未做`)
   if (ex.noIni) bits.push(`project.godot 读不到，启用状态两条判据本次未做`)
   return bits.length ? ` 本次未判定：${bits.join('；')}。` : ''
@@ -287,7 +304,7 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
   const lower = lowerRelSet(tree)
   // 判据 6：`.gdignore` 屏蔽的目录整体不进面（treeUtils.ts:133-158，B6 落地的共享闸）
   const ignoredDirs = gdignoredDirs(tree)
-  const ex: Excl = { ignore: 0, unread: 0, relScript: 0, relEnabled: 0, badEnabled: 0, noIni: 0 }
+  const ex: Excl = { ignore: 0, unread: 0, relScript: 0, shapeScript: 0, relEnabled: 0, shapeEnabled: 0, badEnabled: 0, noIni: 0 }
 
   // ---------- 判据 2：扫描面 = addons/<目录>/plugin.cfg，只认这一层深度 ----------
   // 第一段必须是 addons（与 orphans/imports 的 isAddon 同一形状），第三段必须是文件名本身，
@@ -333,9 +350,15 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
     // ---------- 判据 4：入口脚本的存在性（唯一的 error；截断时不做） ----------
     const script = filled(doc, 'script')
     if (script !== undefined) {
-      const target = resToRel(script)
-      if (target === null) ex.relScript++ // 相对文件名 / user:// / 带盘符 / 越界：不臆造「脚本丢失」
-      else if (!truncated && !hasRelCI(lower, target)) scriptHits.push({ c, value: script, target })
+      // ★ 形状闸（B10b 债 6）：`filled()` 已 trim 两端，所以这里挡下的是「以 , ; ) ] 收尾」那一种
+      //   （`script="res://entry.gd,"`，两份孪生解析器都会剥掉那枚逗号，godotIni.ts:15-16）。
+      //   旧写法把 `entry.gd,` 送去比清单 → 永远查不到 → 对本其实存在的脚本发 error。
+      if (!resPathShapeOk(script)) ex.shapeScript++
+      else {
+        const target = resToRel(script)
+        if (target === null) ex.relScript++ // 相对文件名 / user:// / 带盘符 / 越界：不臆造「脚本丢失」
+        else if (!truncated && !hasRelCI(lower, target)) scriptHits.push({ c, value: script, target })
+      }
     }
 
     // ---------- 判据 5 尾条：显示名分组（trim + 大小写不敏感） ----------
@@ -382,6 +405,12 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
   if (enabled !== undefined) {
     const byTarget = new Map<string, EnabledHit>()
     for (const entry of enabled) {
+      // ★ 形状闸（B10b 债 6，与判据 4 同一条）：enabled 的条目吃的是 getIniList 的**解码原值**，
+      //   没人 trim 过它，所以首尾空白与尾巴标点两样都归这条闸管
+      //   （`PackedStringArray("res://addons/Foo/plugin.cfg ")` 里那枚引号内的空格）。
+      //   旧写法把带尾巴的串送去比清单 → 「启用清单点名的配置不在文件清单里」落在一个其实存在的文件上。
+      //   空串不进这一档（它本来就归不出 rel，计数也不套那句假话），仍归原来那笔 relEnabled。
+      if (entry && !resPathShapeOk(entry)) { ex.shapeEnabled++; continue }
       const rel = resToRel(entry)
       if (rel === null) { ex.relEnabled++; continue }
       const key = rel.toLowerCase()

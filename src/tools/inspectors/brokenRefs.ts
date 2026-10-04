@@ -12,11 +12,31 @@
 // resToRel 会归一化('./' 吃掉、重复斜杠折叠、.. 与盘符判 null),归一后的 rel
 // 与树里的 rel 同形,只有「是不是树里的某个 key」这种判据才站得住。
 //
+// 第四条(B10b 债 6 收口):resToRel **之前**先过共享形状闸 `sceneRefs.resPathShapeOk`。
+// `path="res://a.gd "` 那枚空格在引号**内**,`attr()` 原样交出;`path="res://a.gd,"` 的逗号同理
+// (两份孪生解析器都会剥尾逗号,见 godotIni.ts:15-16,所以「值尾巴上有标点」是真实写盘/手写形态)。
+// 两条归一出来的是 `a.gd ` / `a.gd,` 那种「路径 + 尾巴」,拿去比清单**永远查不到**,
+// 于是本工具唯一的 error 档会落在一个其实存在的文件上(§6 头号失败模式:虚假的「你的配置坏了」)。
+// 方向被钉死成**只撤主张不新增**:过闸的值走的还是原来那三行,不过闸的一条 error 都不发、
+// 只并进下面的排除计数(与 addons/imports/ini 同一口径:藏起来的要看得见)。
+// 残余(台账记着,不偷偷扩):一条结论都没有时这份计数没有落点 —— 本工具没有聚合卡,
+// 凭空造一张 info 就是「超出撤主张」的语义变更,不在本轮授权范围内。
+//
 // 红线:纯函数,只吃 ToolContext —— 不碰 window / services / vue / DOM。
 import type { Finding, ToolContext } from '../types'
 import { truncatedFinding } from '../finding'
-import { SCENE_EXT, parseExtResources, resToRel } from '../parsers/sceneRefs'
+import { SCENE_EXT, parseExtResources, resPathShapeOk, resToRel } from '../parsers/sceneRefs'
 import { hasRelCI, lowerRelSet } from '../treeUtils'
+
+/**
+ * 「不判的条数」上卡面的那句话(B5 立下的口径,写法与 addons.ts 的 `exclNote`、ini.ts 的同名函数同一读法)。
+ * 只数**形状闸**挡下来的那些:空串 / `user://` / 越界写法本来就被 `resToRel` 判 null 挡在外面,
+ * 套到这句上就是说假话(那句讲的是首尾空白与尾巴标点)。
+ */
+function shapeNote(n: number): string {
+  return ` 本次未判定:${n} 条 [ext_resource] 的 path 值首尾带空白或以标点收尾(, ; ) ]),` +
+    '归一出来的串不是那条路径本身,没拿它去比文件清单(这类值既不能说「文件在」、也不能说「文件丢了」)。'
+}
 
 export async function run(ctx: ToolContext): Promise<Finding[]> {
   if (ctx.truncated) {
@@ -36,10 +56,15 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
   const have = lowerRelSet(ctx.tree)
   const scenes = ctx.tree.filter((f) => SCENE_EXT.has(f.ext))
   const out: Finding[] = []
+  /** 形状闸挡下来的条数(见文件头第四条与 `shapeNote`) */
+  let shape = 0
   for (const f of scenes) {
     const { text } = await ctx.readText(f.rel)
     if (typeof text !== 'string') continue
     for (const ref of parseExtResources(text)) {
+      // ★ 形状闸:空串不从这里过(它本来就归不出 rel,计数也不套那句假话),其余首尾脏 / 尾巴带标点的
+      //   一律不判存在性 —— 撤掉的是「文件不存在」这条 error,不新增任何东西。
+      if (ref.path && !resPathShapeOk(ref.path)) { shape++; continue }
       const rel = resToRel(ref.path)
       if (rel === null || hasRelCI(have, rel)) continue
       out.push({
@@ -58,6 +83,12 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
         related: [ref.path]
       })
     }
+  }
+  // 排除计数并进**每一条**结论的 detail(addons.ts 的 exclNote 同一落点:整趟扫完才知道总数,
+  // 而这里每条结论都是同一个判据的产物,少说一次就是让读另一条卡的人看不见)。
+  if (shape > 0) {
+    const note = shapeNote(shape)
+    for (const f of out) f.detail += note
   }
   return out
 }

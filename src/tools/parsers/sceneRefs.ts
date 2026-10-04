@@ -109,11 +109,15 @@ export function countSteps(text: string): { declared: number; actual: number; ex
  * 放在本文件而不是 treeUtils:treeUtils 的口径是「进 TreeEntry[]、出统计」(见它的文件头),
  * 而这条判的是**一个值串**的形状;判 resToRel 的入参归 resToRel 的模块管,才不会再长出第二份 rel 语义。
  *
- * 面向 B10:brokenRefs.ts:43-44 与 addons 的存在性那两条走的是同一个形状
+ * 面向 B10:`brokenRefs` 的存在性判定与 `addons` 的存在性两档走的是同一个形状
  * (`resToRel(...)` → `hasRelCI`),要接这条闸就在 resToRel 之前加一次 `resPathShapeOk(value)`,
- * 不判的条数并入各自的排除计数。**本轮不动它们的判定**(改了要重开一个已关闭模块的证据面;
- * addons 那边 `filled()` 已 trim、brokenRefs 那边是 `attr()` 的引号内文,接闸后各多挡的形态不同,
- * 取舍见 task-b8-report.md 的 Fix 轮 §Important 2)。
+ * 不判的条数并入各自的排除计数。**B10b 已把这两扇门指过来**(债清单 6 收口),两侧各自多挡的形态不同:
+ *   · `brokenRefs` 吃的是 `attr()` 的引号**内文**,首尾空白与尾巴标点两样都归这条闸管;
+ *   · `addons` 的 `filled()` 已经 trim 过,所以那边真正多挡的只有尾巴标点一类
+ *     (计数因此分成 `shapeScript`/`shapeEnabled` 两档各自的措辞,不与「不是 res:// 写法」混记)。
+ * 两侧采的都是**只撤主张**的方向:过闸的值判定路径一字未改,不过闸的只并进排除计数。
+ * 收集面(refIndex/godotIni)那一侧的方向纪律相反(宁多勿少,少收一条引用就会多一个孤儿),
+ * 见 refIndex.ts 的 `add()` 注释 —— 同一条闸在两处用法不同,不是分叉。
  *
  * 红线:纯函数,不抛错;非字符串 / 空串一律 false(方向是少报)。
  */

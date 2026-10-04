@@ -104,7 +104,7 @@ export async function buildRefIndex(ctx: ToolContext): Promise<RefIndex> {
   let sidecarSkipped = 0
   let sourcesScanned = 0
 
-  // 判据 7:清单被截断时**一个文件都不读**,直接给空索引 + partial —— 与 brokenRefs(ts:25-35)
+  // 判据 7:清单被截断时**一个文件都不读**,直接给空索引 + partial —— 与 brokenRefs(ts:42-52)
   // 同一口径:清单不全时「查不到引用」不是证据,B5 拿着半份索引会把有主的东西报成孤儿。
   if (ctx.truncated) {
     return { to, from, uids, sidecarSkipped, readFailures, sourcesScanned, partial: true }

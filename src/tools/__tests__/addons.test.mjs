@@ -105,6 +105,8 @@ const enMissOf = (fs) => fs.filter((f) => f.id.startsWith('addons:enabled-missin
 const notEnOf = (fs) => fs.filter((f) => f.id.startsWith('addons:not-enabled:'))
 const dupOf = (fs) => fs.filter((f) => f.id.startsWith('addons:dup-name:'))
 const ids = (fs) => fs.map((f) => f.id).join('|')
+/** detail 的安全取法(B10b 那批断言要正则匹配它,缺卡时得报 FAIL 而不是抛 TypeError) */
+const det = (f) => (f && typeof f.detail === 'string' ? f.detail : '(无 detail)')
 const sevOf = (fs) => fs.map((f) => `${f.id}=${f.severity}`).join('|')
 
 /** 全局收集器:每条结论都进 ALL(末尾的零 fix 红线与形状红线吃它),并核对 rel 落在本次 tree 里 */
@@ -367,6 +369,87 @@ async function main() {
   )
   ok(oddNote.fs.length === 2 && /script 不是 res:\/\/ 写法、不判存在性的 2 个/.test(oddNote.fs[0]?.detail || ''),
     '「不判」要看得见:排除计数并进 detail(与 imports 的 ex.ignore 同一表达方式)', oddNote.fs[0]?.detail)
+
+  // ---- B10b 债 6:形状闸接进判据 4/5 的两扇存在性门(只撤主张) ----
+  // 为什么存在:`filled()` 已经 trim 两端，所以 script 这一侧真正多挡的是「以 , ; ) ] 收尾」那一种；
+  // enabled 那一侧吃 getIniList 的解码原值，首尾空白与尾巴标点两样都新挡。两条都能让 resToRel
+  // 切出「路径 + 尾巴」那种永远查不到的 rel，于是判据 4 会对**其实存在的入口脚本**发本工具唯一的 error。
+  const scriptTail = await addons(
+    [['project.godot', 400], ['addons/Foo/plugin.cfg', 120], ['addons/Foo/entry.gd', 900]],
+    {
+      texts: {
+        'addons/Foo/plugin.cfg': cfg({ ...FULL, name: 'Foo', script: { raw: '"res://addons/Foo/entry.gd,"' }, version: undefined }),
+        'project.godot': iniEnabled(['res://addons/Foo/plugin.cfg'])
+      }
+    }
+  )
+  ok(scriptTail.fs.length === 1 && scriptTail.fs[0]?.id === 'addons:fields:Foo' && !scriptOf(scriptTail.fs).length,
+    '★script 带尾逗号不再判存在性:entry.gd 明明在清单里，旧闸归一成 `addons/Foo/entry.gd,` 后说出 error',
+    ids(scriptTail.fs))
+  ok(/script 以标点收尾\(, ; \) \]、那是「值到这里结束了」的分隔符不是路径的一部分\)、不判存在性的 1 个/.test(det(scriptTail.fs[0])),
+    '★被闸挡下的那条要计进「本次未判定」，且不混进「不是 res:// 写法」那笔(两句说的是不同的事)', det(scriptTail.fs[0]))
+  const scriptTailCtrl = await addons(
+    [['project.godot', 400], ['addons/Foo/plugin.cfg', 120], ['addons/Foo/entry.gd', 900]],
+    {
+      texts: {
+        'addons/Foo/plugin.cfg': cfg({ ...FULL, name: 'Foo', script: 'res://addons/Foo/gone.gd,' }),
+        'project.godot': iniEnabled(['res://addons/Foo/plugin.cfg'])
+      }
+    }
+  )
+  ok(scriptTailCtrl.fs.length === 0,
+    '带尾巴的目标**真的不在清单**时同样不判(撤主张不等于反过来说它在；这一条本次没判，见上一条计数)',
+    ids(scriptTailCtrl.fs))
+  const scriptCleanCtrl = await addons(
+    [['project.godot', 400], ['addons/Foo/plugin.cfg', 120], ['addons/Foo/entry.gd', 900]],
+    {
+      texts: {
+        'addons/Foo/plugin.cfg': cfg({ ...FULL, name: 'Foo', script: 'res://addons/Foo/gone.gd' }),
+        'project.godot': iniEnabled(['res://addons/Foo/plugin.cfg'])
+      }
+    }
+  )
+  ok(ids(scriptCleanCtrl.fs) === 'addons:script-missing:Foo' && scriptCleanCtrl.fs[0]?.severity === 'error',
+    '★正向对照:干净的 res:// 而脚本真不在清单 → 那条 error 一条没少(闸没把正常判定一起吃掉)', ids(scriptCleanCtrl.fs))
+  // 合法的内部空格（Godot 允许路径里有空格）不属于「首尾脏」，两档都照常判
+  const nameSpace = await addons(
+    [['project.godot', 400], ['addons/My Plugin/plugin.cfg', 120], ['addons/My Plugin/entry.gd', 900]],
+    {
+      texts: {
+        'addons/My Plugin/plugin.cfg': cfg({ ...FULL, name: 'My Plugin', script: 'res://addons/My Plugin/entry.gd' }),
+        'project.godot': iniEnabled(['res://addons/My Plugin/plugin.cfg'])
+      }
+    }
+  )
+  ok(nameSpace.fs.length === 0,
+    '★正向对照:内部空格合法(`addons/My Plugin/…`)两档都不受影响(共享闸只判首尾)', ids(nameSpace.fs))
+
+  const enTailSpace = await addons(CLEAN_SPECS, {
+    texts: { 'addons/Foo/plugin.cfg': cfg(FULL), 'project.godot': iniEnabled(['res://addons/Foo/plugin.cfg ']) }
+  })
+  ok(enMissOf(enTailSpace.fs).length === 0 && notEnOf(enTailSpace.fs).length === 1 &&
+    /enabled 里首尾带空白或以标点收尾\(, ; \) \]、归一出来的串不是那条路径本身\)、不判的 1 条/.test(det(enTailSpace.fs[0])),
+    '★enabled 条目带尾空格:不报「点名的配置不在清单里」(那条 warn 旧写法照发)，计数上卡；' +
+    '「已安装但未启用」那侧新旧一致(带尾巴的 rel 结构上对不上 plugin.cfg 这个 basename)',
+    `${ids(enTailSpace.fs)}|${det(enTailSpace.fs[0])}`)
+  const enTailComma = await addons(CLEAN_SPECS, {
+    texts: { 'addons/Foo/plugin.cfg': cfg(FULL), 'project.godot': iniEnabled(['res://addons/Foo/plugin.cfg,']) }
+  })
+  ok(enMissOf(enTailComma.fs).length === 0 && /、不判的 1 条/.test(det(enTailComma.fs[0])),
+    'enabled 条目带尾逗号同样不判并计数', `${ids(enTailComma.fs)}|${det(enTailComma.fs[0])}`)
+  const enMissCtrl = await addons(CLEAN_SPECS, {
+    texts: { 'addons/Foo/plugin.cfg': cfg({ ...FULL, script: 'res://addons/Foo/plugin.gd' }), 'project.godot': iniEnabled(['res://addons/Gone/plugin.cfg']) }
+  })
+  ok(ids(enMissCtrl.fs) === 'addons:enabled-missing:addons/gone/plugin.cfg|addons:not-enabled:Foo' &&
+    enMissCtrl.fs[0]?.severity === 'warn' && !/本次未判定/.test(det(enMissCtrl.fs[0])),
+    '★正向对照:干净写法而配置真不在清单 → 那条 warn 一条没少，且**没有任何东西被挡下时一句「本次未判定」都不写**',
+    `${ids(enMissCtrl.fs)}|${det(enMissCtrl.fs[0])}`)
+  const enClean = await addons(CLEAN_SPECS, {
+    texts: { 'addons/Foo/plugin.cfg': cfg({ ...FULL, script: 'res://addons/Foo/plugin.gd', version: undefined }), 'project.godot': iniEnabled(['res://addons/Foo/plugin.cfg']) }
+  })
+  ok(ids(enClean.fs) === 'addons:fields:Foo' && !/本次未判定/.test(det(enClean.fs[0])),
+    '正向对照:同一条 enabled 去掉尾巴就 0 笔不判、字段卡也不带那句(闸的措辞不会常驻在每张卡上)',
+    `${ids(enClean.fs)}|${det(enClean.fs[0])}`)
 
   const unread = await addons(
     [['project.godot', 400], ['addons/Off/plugin.cfg', 50], ['addons/Ok/plugin.cfg', 50]],
