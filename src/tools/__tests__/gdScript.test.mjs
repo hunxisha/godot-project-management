@@ -178,6 +178,18 @@ ok(at(t13, 3).depth === 0 && at(t13, 4).continuation === false,
 const t14 = L('var s = """未闭合到文件尾', '还在水里')
 ok(at(t14, 1).inString === true && at(t14, 2).inString === true,
   '判据 1:块没闭合 → 到文件尾每一行都 inString(方向是少动)', sig(t14))
+// 带前缀的多行 raw 串(`r"""`):块**照样建模**。早先的版本「认不出就不建模」,结果整块内容被当成
+// 代码行 —— 尾随空白、空行、缩进、换行符全是字符串的值(取证 R1)。
+const t22 = L('var p = r"""', 'C:\\path\\to\\   ', '', "it's 里也有引号", '"""', 'var x = 1   ')
+ok(at(t22, 1).inString === true && at(t22, 2).inString === true && at(t22, 3).inString === true &&
+    at(t22, 4).inString === true && at(t22, 5).inString === true && at(t22, 6).inString === false,
+  '★判据 1:r""" 块内的每一行(空行、另一个引号种类)都算内容,闭合后恢复', sig(t22))
+ok(T.scanGdScript(t22).unterminated === false, '判据 1:带前缀的块闭合了 → 不当成未闭合', sig(t22))
+const t23 = L("var p = r'''", 'raw 单引号块   ', "'''", 'var x = 1')
+ok(sig(t23) === 'S-- S-- S-- ---', '判据 1:带 r 前缀的单引号块与三双引号块同机制', sig(t23))
+const t24 = L('var re = r"\\d+\\s"', 'var x = 1   ')
+ok(at(t24, 1).inString === true && at(t24, 2).inString === false,
+  '判据 1:带前缀的**单行**串整行保守不动、但不留跨行状态(它本来就闭合在同一行)', sig(t24))
 
 // ---------- 6. 续行与括号配对 ----------
 section('6. 判据 4 的地基:\\ 续行、未闭合括号、suspect')
@@ -268,6 +280,46 @@ ok(at(big, 9).inString === true && at(big, 10).inString === true && at(big, 11).
 ok(at(big, 12).inString === false && at(big, 12).code === 'var q = "含 # 的串"',
   '整段:块后一行的 code 正常(字符串里的 # 没被当注释)', at(big, 12).code)
 ok(at(big, 15).continuation === true, '整段:闭括号行仍算续行', sig(big))
+
+// ---------- 9. 文件级产物(判据 5 三条闸的直接证据)----------
+// 判据 5 吃的不是逐行状态位而是这一组文件级产物(dominantTerm / termCounts / blockTermConflict /
+// strayCR / unterminated)。format.ts 只是转手用它们,所以「内容换行符归哪一边」这类账必须在这里
+// 直接钉住 —— 只在 format 侧钉的话,分类器把内容行算进代码区时两边会一起错、一起绿。
+section('9. 文件级产物:主导换行符 / 内容换行符 / 裸 CR / 未闭合')
+const u1 = 'var s = "未闭合\n下一行   \n这里闭合了"\r\nvar a = 1\r\nvar b = 2\r\n'
+const s1 = T.scanGdScript(u1)
+ok(classify(u1).map((l) => (l.inString ? 'S' : '-')).join(' ') === 'S S S - -',
+  '★判据 1:未闭合引号覆盖的三行(含闭合那一行)都算字符串内,闭合后立刻恢复',
+  classify(u1).map((l) => (l.inString ? 'S' : '-')).join(' '))
+ok(JSON.stringify(s1.termCounts) === JSON.stringify({ crlf: 3, lf: 0 }),
+  '★判据 5:未闭合引号续行的那两个行尾换行归「字符串内容」,代码区只剩 3 个 CRLF',
+  JSON.stringify(s1.termCounts))
+ok(s1.dominantTerm === '\r\n', '判据 5:主导换行符只按代码区形态定', JSON.stringify(s1.dominantTerm))
+ok(s1.blockTermConflict === true, '★判据 5:内容里混着 LF 而主导是 CRLF ⇒ 冲突置起,整条统一做不得')
+ok(s1.unterminated === false, '判据 1:闭合引号出现过 → 文件级 unterminated 为假')
+ok(s1.endsWithNewline === true, '判据 5:末行有终止符 → 不需要补末尾换行')
+const u2 = 'var s = """\r\n块内\r\n"""\nvar a = 1\nvar b = 2\n'
+const s2 = T.scanGdScript(u2)
+ok(JSON.stringify(s2.termCounts) === JSON.stringify({ crlf: 0, lf: 3 }) && s2.dominantTerm === '\n' &&
+    s2.blockTermConflict === true,
+  '★判据 5 反向:块内的 CRLF 算内容,主导按代码区定成 LF,冲突照样置起',
+  JSON.stringify([s2.termCounts, s2.dominantTerm, s2.blockTermConflict]))
+const u3 = 'var a = 1\nvar b\r= 2   \r\nvar c = 3\nvar d = 4\n'
+const s3 = T.scanGdScript(u3)
+ok(s3.strayCR === true && JSON.stringify(s3.termCounts) === JSON.stringify({ crlf: 1, lf: 3 }) &&
+    s3.dominantTerm === '\n' && s3.blockTermConflict === false,
+  '判据 5:正文中间的裸 \\r 单独置 strayCR(行内那一个 \\r 不进任何一边的换行统计)',
+  JSON.stringify([s3.strayCR, s3.termCounts, s3.dominantTerm, s3.blockTermConflict]))
+const u4 = 'var a = 1\nvar b = 2\r'
+ok(rebuild(u4) === u4 && at(u4, 2).raw === 'var b = 2\r' && at(u4, 2).term === '',
+  '★判据 5:末行没有换行时它的 \\r 是**正文**,不许折进 term(折走就是凭空少一个字节)',
+  JSON.stringify([rebuild(u4), at(u4, 2).raw]))
+ok(T.scanGdScript(u4).strayCR === true, '判据 5:同一个 \\r 也被认成「换行形态认不出」')
+ok(T.scanGdScript('var s = "一路到文件尾\nvar a = 1\n').unterminated === true,
+  '判据 1:文件停在未闭合引号里 → unterminated 置起(调用方据此更保守)')
+const u5 = 'var s = """\n块内未闭合\n'
+ok(T.scanGdScript(u5).unterminated === true && classify(u5).every((l) => l.inString),
+  '★判据 1:块没闭合到文件尾 → 每一行 inString、unterminated 置起')
 
 // 本文件的断言全是同步的(分类器不发任何 IO),所以不需要别家 harness 那份 async main 包装。
 // 中途抛错(例如夹具里拿不到某一行)会以非零码直接收口且印不出 PASS 行 —— 不会伪装成绿。

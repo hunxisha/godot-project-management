@@ -286,10 +286,15 @@ async function main() {
     'var d = foo(', '\t\t"空格对齐",', '\t\t"第二行"'),
     '★续行里的 tab 对齐保持原样(多数派是空格也不动它,普通行的 tab 才被转换)',
     J(outOf(rCont2.findings[0], 'cont2.gd')))
-  const tBs = 'func f():\n    var a = 1\nvar b = 2 \\\n\t继续   \n'
+  // 变异取证补强:原来这份夹具里 tab 与空格各一行(平局)⇒ G6(续行状态不携带)在 format 侧零红。
+  // 现在把多数派做成明确是空格,续行那一行才真正被「跳过转换」这条判据保护住。
+  const tBs = 'func f():\n    var a = 1\n    var b = 2\nvar c = 3 \\\n\t继续   \n'
   const rBs = await one('bs.gd', tBs)
-  ok(outOf(rBs.findings[0], 'bs.gd') === 'func f():\n    var a = 1\nvar b = 2 \\\n\t继续\n',
-    '★判据 4:\\ 续行的下一行只删行尾空白、前导 tab 不转换', J(outOf(rBs.findings[0], 'bs.gd')))
+  ok(outOf(rBs.findings[0], 'bs.gd') === 'func f():\n    var a = 1\n    var b = 2\nvar c = 3 \\\n\t继续\n',
+    '★判据 4:\\ 续行的下一行只删行尾空白、前导 tab 不转换(多数派明确是空格也不动它)',
+    J(outOf(rBs.findings[0], 'bs.gd')))
+  ok(reported(rBs.findings[0].detail, 'bs.gd')?.indent === 0,
+    '判据 7:续行那一行不计进缩进改动(账上 0)', J(reported(rBs.findings[0].detail, 'bs.gd')))
   ALL.push(...rCont2.findings, ...rBs.findings)
 
   // ---------- 7. 判据 3:多数派、混用、平局 ----------
@@ -493,6 +498,142 @@ async function main() {
   ok(idem.findings.length === 0, '★幂等:改完再跑一趟零结论(没有字节剩下可动 —— 第三方向产出发言)',
     J(idem.findings.map((f) => [f.id, f.detail.slice(0, 40)])))
   ALL.push(...rCorpus.findings)
+
+  // ---------- 12b. ★ 变异取证补出来的盲区夹具 ----------
+  // 这一段的每一条都对应一次「把判定改坏却零红(或只咬一处)」的实测:原夹具看不见那个差别,
+  // 所以先跑变异、确认盲区、再补夹具补断言(补完反过来重跑同一条变异,必须见红)。
+  section('12b. ★ 变异取证补出来的盲区夹具(每条对应一次零红变异)')
+
+  // (i) 只写了 tab 的空行:它的前导会被「删行尾空白」清掉,所以绝不能再来投缩进票
+  const rBlankVote = await one('t9.gd', 'func f():\n    var a = 1\n\t\n\t\n\t\n    var b = 2\n')
+  ok(outOf(rBlankVote.findings[0], 't9.gd') === L('func f():', '    var a = 1', '', '    var b = 2'),
+    '★判据 3:空行不投缩进票(否则 3 票 tab 压过 2 票空格,凭空造出一整片转换)',
+    J(outOf(rBlankVote.findings[0], 't9.gd')))
+  ok(reported(rBlankVote.findings[0].detail, 't9.gd')?.trailing === 3 &&
+      reported(rBlankVote.findings[0].detail, 't9.gd')?.blank === 2,
+    '判据 7:那三行 tab 空行的前导按「行尾空白」删掉,空行段按删掉的行数计 2',
+    J(reported(rBlankVote.findings[0].detail, 't9.gd')))
+
+  // (ii) 括号未闭合里的 tab 对齐、**不带字符串**那种(cont/cont2 的前导行都在串里,证不到这条)
+  const tCont3 = L('func f():', '    var a = 1', '    var pts = [', '\t\tVector2(1, 2),',
+    '\t\tVector2(3, 4),   ', '    ]', '    var b = 2', '    return a + b   ')
+  const rCont3 = await one('cont3.gd', tCont3)
+  ok(outOf(rCont3.findings[0], 'cont3.gd') === L('func f():', '    var a = 1', '    var pts = [',
+    '\t\tVector2(1, 2),', '\t\tVector2(3, 4),', '    ]', '    var b = 2', '    return a + b'),
+    '★判据 4:未闭合括号里的 tab 对齐既不被转换也不投票,而它的行尾空白照删',
+    J(outOf(rCont3.findings[0], 'cont3.gd')))
+  ok(reported(rCont3.findings[0].detail, 'cont3.gd')?.indent === 0 &&
+      reported(rCont3.findings[0].detail, 'cont3.gd')?.trailing === 2,
+    '判据 7:缩进 0 处 / 行尾空白 2 处(账与产出同形)', J(reported(rCont3.findings[0].detail, 'cont3.gd')))
+
+  // (iii) 缩进转换只动整行前导:串里的 tab 与代码中段的 tab 都是内容
+  const tInner = L('func f():', '    var a = 1', '    var b = 2', '\tprint("a\tb")', '\tvar c := 1\t+ 2', '    pass')
+  const rInner = await one('t10.gd', tInner)
+  ok(outOf(rInner.findings[0], 't10.gd') === L('func f():', '    var a = 1', '    var b = 2',
+    '    print("a\tb")', '    var c := 1\t+ 2', '    pass'),
+    '★判据 3 表:tab→空格只换整行前导 —— 字面量里与代码中段的 tab 一个都不换',
+    J(outOf(rInner.findings[0], 't10.gd')))
+  ok(reported(rInner.findings[0].detail, 't10.gd')?.indent === 2,
+    '判据 7:缩进计 2 行(就是前导那两行,不含行内的 tab)', J(reported(rInner.findings[0].detail, 't10.gd')))
+
+  // (iv) 补的那个末尾换行用文件自己的主导形态
+  const rCrlfFinal = await one('f1.gd', 'var a = 1\r\nvar b = 2   \r\nvar c = 3')
+  ok(outOf(rCrlfFinal.findings[0], 'f1.gd') === 'var a = 1\r\nvar b = 2\r\nvar c = 3\r\n',
+    '★判据 5 表:CRLF 文件缺的末尾换行补的是 CRLF,不是硬写 \\n(硬写就给整份文件混进 LF)',
+    J(outOf(rCrlfFinal.findings[0], 'f1.gd')))
+  ok(reported(rCrlfFinal.findings[0].detail, 'f1.gd')?.finalNL === 1 &&
+      reported(rCrlfFinal.findings[0].detail, 'f1.gd')?.endings === 0,
+    '判据 7:末尾换行 1 个 / 换行符 0 行(其余本来就是 CRLF)', J(reported(rCrlfFinal.findings[0].detail, 'f1.gd')))
+
+  // (v) 裸 \r 的闸门要在「主导判得出来」时才见血(oddc.gd 那份恰好是平局,证不到闸门)
+  const rStray2 = await one('f2.gd', 'var a = 1\nvar b\r= 2   \r\nvar c = 3\nvar d = 4\n')
+  ok(outOf(rStray2.findings[0], 'f2.gd') === 'var a = 1\nvar b\r= 2\r\nvar c = 3\nvar d = 4\n',
+    '★判据 5:正文有裸 \\r ⇒ 即使主导判得出(LF 3 : CRLF 1)整条统一也不做,那行 CRLF 留着',
+    J(outOf(rStray2.findings[0], 'f2.gd')))
+  ok(reported(rStray2.findings[0].detail, 'f2.gd')?.endings === 0,
+    '判据 7:裸 CR 闸门下换行符计 0,少做的这一条也在账上看得见')
+
+  // (vi) blockTermConflict 的「整条不做」要能在**字节**上看出来(conflict.gd 那份没有少数结尾的代码行)
+  const rCon2 = await one('f3.gd', 'var s = """\r\n块内   \r\n"""\nvar a = 1   \nvar b = 2\nvar c = 3\nvar d = 4\r\n')
+  ok(outOf(rCon2.findings[0], 'f3.gd') === 'var s = """\r\n块内   \r\n"""\nvar a = 1\nvar b = 2\nvar c = 3\nvar d = 4\r\n',
+    '★判据 5:块里混着 CRLF 而主导是 LF ⇒ 块外那行 CRLF 也不归一(其余四条照做)',
+    J(outOf(rCon2.findings[0], 'f3.gd')))
+  ok(reported(rCon2.findings[0].detail, 'f3.gd')?.endings === 0 &&
+      reported(rCon2.findings[0].detail, 'f3.gd')?.trailing === 1,
+    '判据 7:换行符 0 处、行尾空白 1 处(少做一条要能在账上看出来)', J(reported(rCon2.findings[0].detail, 'f3.gd')))
+
+  // (vii) 行尾空白只认空格与 tab:NBSP 这类非 ASCII 空白是内容
+  const rNbsp = await one('f4.gd', 'var a = 1\u00a0  \n')
+  ok(outOf(rNbsp.findings[0], 'f4.gd') === 'var a = 1\u00a0\n',
+    '★判据 2:只删空格与 tab —— NBSP 留着(\\s 会把 NBSP 一起吞掉,那是改内容)',
+    J(outOf(rNbsp.findings[0], 'f4.gd')))
+  ok((await one('f5.gd', 'var a = 1\n\n\u00a0\n\nvar b = 2\n')).findings.length === 0,
+    '★判据 2:只写了一个 NBSP 的行不是空行,三行一段也不压(NBSP 不是排版字符)', '—')
+
+  // (vii-b) 碰过字符串的行连**终止符**都不改写:主导是 CRLF 时那一行的 LF 留着,而它下面那行照被归一
+  const rTermGuard = await one('f6.gd', 'var s = """abc"""\nvar a = 1   \nvar b = 2\r\nvar c = 3\r\nvar d = 4\r\n')
+  ok(outOf(rTermGuard.findings[0], 'f6.gd') === 'var s = """abc"""\nvar a = 1\r\nvar b = 2\r\nvar c = 3\r\nvar d = 4\r\n',
+    '★判据 2/5:单行块那一行的 LF 不被归一成主导 CRLF,而紧跟那行(代码区)照归一 —— 确定与不确定的分界',
+    J(outOf(rTermGuard.findings[0], 'f6.gd')))
+  ok(reported(rTermGuard.findings[0].detail, 'f6.gd')?.endings === 1,
+    '判据 7:换行符计 1(只有代码区那一行被改),少做的没算进账', J(reported(rTermGuard.findings[0].detail, 'f6.gd')))
+
+  // (vii-c) 前导以非 ASCII 空白开头:那一整段前导都是内容,既不投票也不被折算(G19 变异补出来的盲区)
+  const rNbspLead = await one('f7.gd', L('func f():', '\tvar a = 1', '\tvar b = 2', '\u00a0   var c = 3   '))
+  ok(outOf(rNbspLead.findings[0], 'f7.gd') === L('func f():', '\tvar a = 1', '\tvar b = 2', '\u00a0   var c = 3'),
+    '★判据 3:目标=tab 时也不把「NBSP + 3 空格」折成一个 tab —— 非 ASCII 空白不认作前导缩进',
+    J(outOf(rNbspLead.findings[0], 'f7.gd')))
+  ok(reported(rNbspLead.findings[0].detail, 'f7.gd')?.indent === 0,
+    '判据 7:那一行既不转换也不投票(缩进计 0)', J(reported(rNbspLead.findings[0].detail, 'f7.gd')))
+  ALL.push(...rNbspLead.findings)
+
+  // (x) ★ 带前缀的多行 raw 串(`r"""…"""`):块内一个字节都不动(取证 R1 抓出来的改写内容 bug)
+  const tRaw = 'var p = r"""\n块内内容   \n\n\n\n"""\nvar a = 1   \n'
+  const rRaw = await one('f8.gd', tRaw)
+  ok(outOf(rRaw.findings[0], 'f8.gd') === 'var p = r"""\n块内内容   \n\n\n\n"""\nvar a = 1\n',
+    '★判据 1/2:r 前缀的多行串块内尾随空白与三连空行都是内容,只有块外那行的尾随空白被删',
+    J(outOf(rRaw.findings[0], 'f8.gd')))
+  ok(reported(rRaw.findings[0].detail, 'f8.gd')?.trailing === 1 &&
+      reported(rRaw.findings[0].detail, 'f8.gd')?.blank === 0,
+    '判据 7:块内的空行段不计、尾随空白只算块外那一处(账上也别记)',
+    J(reported(rRaw.findings[0].detail, 'f8.gd')))
+  const tRawCRLF = 'var p = r"""\n块内 LF   \n"""\r\nvar a = 1   \r\nvar b = 2\r\nvar c = 3\r\n'
+  const rRawCRLF = await one('f9.gd', tRawCRLF)
+  ok(outOf(rRawCRLF.findings[0], 'f9.gd') === 'var p = r"""\n块内 LF   \n"""\r\nvar a = 1\r\nvar b = 2\r\nvar c = 3\r\n',
+    '★判据 5:raw 块里的 LF 算「字符串内容」⇒ 与主导 CRLF 冲突,整条换行符统一不做(内容会变)',
+    J(outOf(rRawCRLF.findings[0], 'f9.gd')))
+  ok(/统一换行符[^\n]*多行字符串[^\n]*没做/.test(rRawCRLF.findings[0].detail),
+    '判据 5/7:少做的这一条在 detail 里说得出理由',
+    rRawCRLF.findings[0].detail.match(/统一换行符[^\n]*/)?.[0]?.slice(0, 60))
+  ALL.push(...rRaw.findings, ...rRawCRLF.findings)
+
+  ALL.push(...rBlankVote.findings, ...rCont3.findings, ...rInner.findings, ...rCrlfFinal.findings,
+    ...rStray2.findings, ...rCon2.findings, ...rNbsp.findings, ...rTermGuard.findings)
+
+  // (viii) 判据 8 的路径段口径与 rel 形状:三种「长得像该排除/该保留」的路径
+  const rScope2 = await many({
+    '.godotfiles/x.gd': dirty,
+    'Main.GD': dirty,
+    'weird\\path.gd': dirty,
+    'a/.godot/b.gd': dirty
+  })
+  ok(filesOf(rScope2.findings[0]).map((x) => x.rel).join('|') === '.godotfiles/x.gd|Main.GD',
+    '★判据 8:缓存按**路径段**判(.godotfiles 不是 .godot)、扩展名用原语的小写 ext(Main.GD 进面)、' +
+    'rel 里带反斜杠的不进面(形状不认识,宁可不读)',
+    filesOf(rScope2.findings[0]).map((x) => x.rel).join('|'))
+  ok(!rScope2.calls.includes('weird\\path.gd') && !rScope2.calls.includes('a/.godot/b.gd'),
+    '判据 8:反斜杠 rel 与真缓存都不发 IO', J(rScope2.calls))
+  ALL.push(...rScope2.findings)
+
+  // (ix) 畸形清单里同一个 rel 出现两次:只读一次、只进一次改写(改写清单里重复同一份 text 也是噪音)
+  const dupCtx = makeCtx([['dup.gd', Buffer.byteLength(dirty)], ['dup.gd', Buffer.byteLength(dirty)],
+    ['z.gd', Buffer.byteLength(dirty)]], { texts: { 'dup.gd': dirty, 'z.gd': dirty } })
+  const fDup = await T.runFormat(dupCtx.ctx)
+  ok(filesOf(fDup[0]).map((x) => x.rel).join('|') === 'dup.gd|z.gd',
+    '判据 9:同一个 rel 在 tree 里出现两次 → 改写清单里只有一份(不重复计费也不重复覆写)',
+    filesOf(fDup[0]).map((x) => x.rel).join('|'))
+  ok(dupCtx.calls.filter((r) => r === 'dup.gd').length === 1, '判据 8:重复条目只发一次 IO', J(dupCtx.calls))
+  ALL.push(...fDup)
 
   // ---------- 13. 判据 9:确定性与唯一 fix 形态 ----------
   section('13. 判据 9:确定性与 fix 形态')

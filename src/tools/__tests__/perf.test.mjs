@@ -418,8 +418,21 @@ try {
     console.error(`[format 直测] 干净脚本被拖进改写清单:${cleanLeaked.map((f) => f.rel).slice(0, 3).join('、')}`)
     exitCode = 1
   }
+  // 自查的第四条(本轮取证补):上面三条比的都是「实测 vs 夹具计数」,而 dirtyGd/cleanGd/crlfGd 与
+  // 夹具出自**同一个循环** —— 夹具整体退化时两边一起变 0,"相等"照样绿。实测过:把 `i % 5 === 2`
+  // 改成恒真(全部 .gd 都干净)→ 打印 `files=0/0 非恒等=0/0 verdict=PASS` 且退 0,
+  // 于是又量了一次 B6 咬过的「零判定计时」。所以这里再加一条**与夹具计数无关的绝对下限**:
+  // 脏脚本要占得住读入面、干净反向对照与 CRLF 版都必须真的存在(少了任何一条就有一条判定路径没被踩)。
+  const fmtFixtureOk = dirtyGd + cleanGd.size === fc.gd && dirtyGd * 2 >= fc.gd &&
+    cleanGd.size >= 1 && crlfGd >= 1
+  if (!fmtFixtureOk) {
+    console.error(`[format 直测] 夹具退化:dirty=${dirtyGd} clean=${cleanGd.size} crlf=${crlfGd}(gd 总数 ${fc.gd})` +
+      ` —— 要 dirty 占半数以上、且干净对照与 CRLF 版都至少各 1 份,否则判定路径根本没被踩到`)
+    exitCode = 1
+  }
   console.log(`[format 直测] 自查 files=${fmtFiles.length}/${dirtyGd} 非恒等=${fmtRewritten}/${dirtyGd} ` +
-    `干净泄漏=${cleanLeaked.length}(want 0) verdict=${fmtFiles.length === dirtyGd && fmtRewritten === dirtyGd && cleanLeaked.length === 0 ? 'PASS' : 'FAIL'}`)
+    `干净泄漏=${cleanLeaked.length}(want 0) 夹具=${fmtFixtureOk ? 'ok' : '退化'} ` +
+    `verdict=${fmtFiles.length === dirtyGd && fmtRewritten === dirtyGd && cleanLeaked.length === 0 && fmtFixtureOk ? 'PASS' : 'FAIL'}`)
 } catch (e) {
   console.error(`perf harness 抛错: ${e && e.stack ? e.stack : e}`)
   exitCode = 1
