@@ -17,6 +17,14 @@ import type { Finding, FixKind } from './types'
 /** 这次修复要走的宿主原语;null = 本管线执行不了(理由见 reason) */
 export type FixService = 'movePathsToTrash' | 'writeProjectText' | null
 
+/**
+ * 「用户一条都没勾」的拒绝理由。它住在这里而不是 gate.ts,是为了让**所有**拒绝执行的一句话
+ * 都只写一处(其余几句在本文件末尾的 planFix 里):门只决定裁哪几条,不负责发明措辞。
+ * 父计划自己有理由时(清单本来就空、payload 认不出、缺新内容)沿用父的那句 —— 它更精确;
+ * 这句只在「父计划本来能执行、是用户没勾」时出现,否则回执会指着一条不存在的原因。
+ */
+export const NO_SELECTION_REASON = '没有勾选任何文件,已拒绝执行(至少要选中一条)'
+
 /** 预览清单里的一行(dry-run 的账本,spec §5.3 规则 3) */
 export interface FixPlanItem {
   /** 相对项目根、正斜杠 —— 对外只有 rel 这一个键,绝对路径由原语拼 */

@@ -21,14 +21,7 @@
 //
 // 红线:纯函数。不碰 window、不碰 DOM、不碰 vue,没有异步。
 import type { FixPlan, FixPlanItem } from './fixPlan'
-import { rewriteWarn } from './fixPlan'
-
-/**
- * 空选择的拒绝理由。
- * 父计划自己有理由时(清单本来就空、payload 认不出、缺新内容)**沿用父的那句**——它比这句更精确;
- * 只有在「父计划本来能执行、是用户一条都没勾」这种情况下才用这句,否则回执会指着一条不存在的原因。
- */
-export const NO_SELECTION_REASON = '没有勾选任何文件,已拒绝执行(至少要选中一条)'
+import { NO_SELECTION_REASON, rewriteWarn } from './fixPlan'
 
 /**
  * 哪些条需要用户逐条确认才算被选中:trash 与 rewrite 都是动盘动作,一律默认不选。
@@ -51,6 +44,29 @@ export function gateKind(plan: FixPlan): 'per-item' | 'whole' {
  */
 export function allRels(plan: FixPlan): string[] {
   return plan.items.map((it) => it.rel)
+}
+
+/**
+ * 真正会被执行的条数:按父计划的 items 数,只数「清单里真有的」那些勾选。
+ * 视图的按钮门槛必须用它而不是 selected.length —— 勾过的 rel 会因为重扫从 items 里消失
+ * (计划换了、文件没了),那时按钮还亮着,而 subsetPlan 会交出一个空子集:
+ * 「点了没反应」正是 spec §5.3 规则 3 点名要防的形态。
+ */
+export function selectionCount(plan: FixPlan, selected: string[]): number {
+  const set = new Set(Array.isArray(selected) ? selected : [])
+  let n = 0
+  for (const it of plan.items) if (set.has(it.rel)) n++
+  return n
+}
+
+/** 已选体积合计,同样只按 items 里真实存在的条算;没有体积的条目不臆造数字 */
+export function selectionBytes(plan: FixPlan, selected: string[]): number {
+  const set = new Set(Array.isArray(selected) ? selected : [])
+  let n = 0
+  for (const it of plan.items) {
+    if (set.has(it.rel) && typeof it.size === 'number') n += it.size
+  }
+  return n
 }
 
 /**

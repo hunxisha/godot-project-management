@@ -271,6 +271,40 @@ async function main() {
     '父计划的 items/files 条数不变(门只读)', `${P_TRASH.items.length}/${P_REWRITE.files.length}`)
 }
 
+// ---------- 8. selectionCount / selectionBytes:视图的门槛与账都问这里 ----------
+// 这两条原来长在 FixConfirmDialog.vue 里,用 selected.length 数条数 —— 勾过的 rel 会因为重扫从
+// items 里消失,那时按钮亮着而 subsetPlan 交出空子集,用户点下去就是「点了没反应」(spec §5.3 规则 3)。
+section('8. selectionCount / selectionBytes(按钮门槛按父计划真有的条数算)')
+{
+  ok(T.selectionCount(P_TRASH, ['orphan/a.png', 'orphan/c.png']) === 2,
+    '勾中两条有体积的 → 2', T.selectionCount(P_TRASH, ['orphan/a.png', 'orphan/c.png']))
+  ok(T.selectionBytes(P_TRASH, ['orphan/a.png', 'orphan/c.png']) === 1250,
+    '已选体积 = 1200 + 50(不是整单 1550)', T.selectionBytes(P_TRASH, ['orphan/a.png', 'orphan/c.png']))
+  ok(T.selectionCount(P_TRASH, ['never/listed/anywhere.png']) === 0,
+    '★勾过的 rel 不在父计划 items 里(重扫后消失了)→ 0 条,按钮不许亮',
+    T.selectionCount(P_TRASH, ['never/listed/anywhere.png']))
+  ok(T.selectionCount(P_TRASH, ['orphan/a.png', 'orphan/a.png']) === 1,
+    '同一个 rel 点两遍只算一条(按 items 数,不按 selected.length)',
+    T.selectionCount(P_TRASH, ['orphan/a.png', 'orphan/a.png']))
+  ok(T.selectionCount(P_TRASH, []) === 0 && T.selectionBytes(P_TRASH, []) === 0,
+    '空勾选 → 0 条 0 字节', JSON.stringify([T.selectionCount(P_TRASH, []), T.selectionBytes(P_TRASH, [])]))
+  ok(T.selectionCount(P_TRASH, null) === 0 && T.selectionBytes(P_TRASH, undefined) === 0,
+    '非数组(视图状态没初始化好)也不炸、同样算 0 条', JSON.stringify([
+      T.selectionCount(P_TRASH, null), T.selectionBytes(P_TRASH, undefined)]))
+  ok(T.selectionBytes(P_REWRITE, ['x.gd', 'new/w.gd']) === 3,
+    '改写通道:清单外那条没有体积,不臆造数字(3 = x.gd,不是 3 + 猜的 W)',
+    T.selectionBytes(P_REWRITE, ['x.gd', 'new/w.gd']))
+  ok(T.selectionCount(P_REWRITE, ['x.gd', 'new/w.gd']) === 2,
+    '清单外的改写项照样是可勾的一条(它会新建,不是不存在)',
+    T.selectionCount(P_REWRITE, ['x.gd', 'new/w.gd']))
+  ok(T.selectionCount(P_NONE, ['orphan/a.png']) === 0 && T.selectionBytes(P_NONE, ['orphan/a.png']) === 0,
+    '不可执行的计划(items 空)算 0 —— 门槛不会因为残留勾选而亮', JSON.stringify([
+      T.selectionCount(P_NONE, ['orphan/a.png']), T.selectionBytes(P_NONE, ['orphan/a.png'])]))
+  const selAll = T.allRels(P_TRASH)
+  ok(T.selectionCount(P_TRASH, selAll) === P_TRASH.items.length,
+    '全选 = items 全长(门与 allRels 同一份口径,不各数各的)', T.selectionCount(P_TRASH, selAll))
+}
+
 main().catch((e) => {
   console.error(`\n测试脚本抛错: ${e && e.stack ? e.stack : e}`)
   process.exit(1)

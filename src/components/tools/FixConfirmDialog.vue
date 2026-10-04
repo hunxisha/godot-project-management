@@ -13,7 +13,7 @@ import Icon from '../Icon.vue'
 import { fmtBytes } from '../../tools/treeUtils'
 import type { FixPlan } from '../../tools/fixPlan'
 import { REJECT_NOTE } from '../../tools/fixPlan'
-import { allRels, gateKind } from '../../tools/gate'
+import { allRels, gateKind, selectionBytes, selectionCount } from '../../tools/gate'
 import type { FixOutcome } from '../../composables/useTools'
 
 const props = defineProps<{
@@ -54,16 +54,14 @@ watch(
  */
 const perItem = computed(() => gateKind(props.plan) === 'per-item')
 const selectedSet = computed(() => new Set(selected.value))
-const selectedCount = computed(() => selected.value.length)
+/**
+ * 条数与体积都问 gate.ts:勾过的 rel 可能因为重扫从 items 里消失,
+ * 用 selected.length 会让按钮亮着而子集是空的(点了没反应 = spec §5.3 规则 3 的反面)。
+ */
+const selectedCount = computed(() => selectionCount(props.plan, selected.value))
 const allSelected = computed(() => selectedCount.value > 0 && selectedCount.value === props.plan.items.length)
-/** 已选体积合计按**完整 items** 算(不是裁过的 shownItems),与下面的条数口径同一套 */
-const selectedBytes = computed(() => {
-  let n = 0
-  for (const it of props.plan.items) {
-    if (selectedSet.value.has(it.rel) && typeof it.size === 'number') n += it.size
-  }
-  return n
-})
+/** 已选体积合计按**完整 items** 算(不是裁过的 shownItems),与上面的条数口径同一套 */
+const selectedBytes = computed(() => selectionBytes(props.plan, selected.value))
 function toggle(rel: string, on: boolean) {
   const next = new Set(selected.value)
   if (on) next.add(rel)

@@ -406,7 +406,7 @@ async function main() {
   ok(filesOf(rScope.findings[0]).map((x) => x.rel).join('|') === 'gen/x.gd|main.gd',
     '判据 8:只有 .gd 参与;addons/**(含大小写异体)与 .godot/** 都被排除',
     filesOf(rScope.findings[0]).map((x) => x.rel).join('|'))
-  ok(/addons 目录下的 \.gd 2 个/.test(rScope.findings[0].detail) && /\.godot 缓存里的 \.gd 1 个/.test(rScope.findings[0].detail),
+  ok(/addons 目录下的 \.gd 2 个/.test(rScope.findings[0].detail) && /\.godot 缓存下的条目 1 个/.test(rScope.findings[0].detail),
     '★判据 8:两类排除各自**计数**并写进 detail,不是静默跳过',
     rScope.findings[0].detail.match(/默认不参与[^\n]*/)?.[0]?.slice(0, 150))
   ok(!rScope.calls.includes('addons/lovely/plug.gd') && !rScope.calls.includes('.godot/shader_cache/x.gd') &&
@@ -649,7 +649,6 @@ async function main() {
   // 这一段的断言全部走 `o0/d0/c0` 三个安全访问器:旧写法在 (xi) 就是**零结论**,
   // 直接 `findings[0].detail` 会让 harness 抛错、后面九条断言一条都印不出来(RED 要能看全)。
   const o0 = (r, rel) => (r.findings[0] ? outOf(r.findings[0], rel) : `零结论(${r.findings.length} 张卡)`)
-  const d0 = (r) => (r.findings[0] ? r.findings[0].detail : '零结论')
   const c0 = (r, rel) => (r.findings[0] ? reported(r.findings[0].detail, rel) : null)
 
   // (xi) 空串:后面的行不再被当续行(与 `foo(1, 2)` 那份对照,差别只在 `""`)
@@ -706,7 +705,8 @@ async function main() {
     skipReasons.push(rel)
     ALL.push(...r.findings)
   }
-  ok(skipReasons.length === 4, '判据 7:四类「补末尾换行没做」的形状各一份夹具(旧写法四条都是死字符串)',
+  ok(skipReasons.join('|') === 'g5.gd|g6.gd|g7b.gd|g8b.gd',
+    '判据 7:四类「补末尾换行没做」的形状各有一份夹具跑到(点名到 rel,少一份或换一份都红 —— 光数长度永远为真)',
     skipReasons.join('|'))
   ALL.push(...rEmpty.findings, ...rEmptyTrail.findings, ...rEmptyTrail2.findings, ...rRawLine.findings, ...rRawOpen.findings)
   // 反过来:文件本来就以换行收尾时**不该**冒出这条理由(没欠一个字节就别喊「没做」)

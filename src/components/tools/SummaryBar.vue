@@ -4,7 +4,7 @@
 import { computed } from 'vue'
 
 const props = defineProps<{
-  /** useTools 的 counts(跨所有已跑工具);fixable 在 P0a 恒为 0,留作 P0b 展示位 */
+  /** useTools 的 counts(跨所有已跑工具);fixable 从 P0b-B1 起真有人数了(口径 = planFix 判为可执行的条数) */
   counts: { error: number; warn: number; info: number; fixable: number }
   /** 文件清单条目数:截断时它是**下限**,不是总数 */
   files: number

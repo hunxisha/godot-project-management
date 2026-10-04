@@ -48,7 +48,10 @@ pub fn copy_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
     }
 }
 
-/// 删除目录:优先移入回收站(用户可恢复),失败回退直接删除
+/// 删除:交 `trash::delete`(全平台同一调用,没有按 OS 分叉的分支),失败直接回 Err。
+/// 本函数**没有**「回退直接删除」那条路 —— 旧注释这么写过,与代码不符,已订正。
+/// 注意:`trash` crate 在 macOS/Linux 也进各平台的废纸篓,所以「非 Windows 是永久删除」
+/// 只是渲染层按 OS 写的**保守措辞**,不是这个宿主的行为(记录见 inspectfs.rs:397-402)。
 pub fn delete_to_trash(path: &Path) -> Result<(), String> {
     if !path.exists() {
         return Ok(());

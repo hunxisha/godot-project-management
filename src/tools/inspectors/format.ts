@@ -46,7 +46,7 @@ import { LIST_CAP, truncatedFinding } from '../finding'
 import { byText, fmtBytes, hasAddonSegCI, isCache } from '../treeUtils'
 
 /** 一个文件里五类操作各改了多少处(与产出同一个循环累加 —— 判据 7 的「可核对计数」) */
-export interface FormatCounts {
+interface FormatCounts {
   /** 删掉行尾空白的行数 */
   trailing: number
   /** 前导缩进被转换的行数 */
@@ -179,7 +179,7 @@ function indentEligible(l: GdLineInfo): boolean {
  * 换行符与末尾换行都要先看文件级闸门(`blockTermConflict` / `strayCR` / 平局),闸门不过就整条跳过,
  * 其余四条照做(判据 5)。
  */
-export function formatGdText(text: string): { out: string; counts: FormatCounts; skips: string[] } {
+function formatGdText(text: string): { out: string; counts: FormatCounts; skips: string[] } {
   const info: GdScan = scanGdScript(text)
   const lines = info.lines
   const counts: FormatCounts = { trailing: 0, indent: 0, blank: 0, finalNL: 0, endings: 0 }
@@ -366,7 +366,7 @@ function aggregateFinding(files: FileFormat[], ex: Excl): Finding {
       (hidden ? ` 这里只列前 ${shown.length} 个文件,另有 ${hidden} 个文件未列出;下面这个动作仍按全部 ${n} 个执行。` : '') +
       SCOPE_TXT + STRING_GUARD + INDENT_TXT + NOT_DOING +
       ` 默认不参与:addons 目录下的 .gd ${ex.addons} 个(第三方插件代码,归插件体检那条)、` +
-      `.godot 缓存里的 .gd ${ex.cache} 个;读不进正文的 .gd ${ex.unread} 个整份跳过 —— ` +
+      `.godot 缓存下的条目 ${ex.cache} 个(整个目录都不进面,不限于 .gd);读不进正文的 .gd ${ex.unread} 个整份跳过 —— ` +
       '读不到就什么都不做,绝不会把「读不到」当成「改成空文件」。',
     rel: files[0].rel,
     related: shown.map((f) => f.rel),
