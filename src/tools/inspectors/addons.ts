@@ -1,5 +1,8 @@
 // P0 工具 #7：addons 体检（spec §3.1 #7、§5.2、§6 风险表；简报判据 1-7）。
 //
+// **B10 接线时的 needs**：`['tree', 'text']`（spec #7 的原文列）——不含 `write`/`trash`，
+// 本工具没有执行面，宿主缺哪个都不该把这张卡片藏起来。
+//
 // **本工具全程只报告**：产出的每一条结论都不带 `fix` 字段 —— spec #7 的 fix 列写的是
 // 「none（跳转「已安装」页处理）」，而简报第 9-11 行把 `kind:'existing'` 也一起禁了：existing 在
 // `fixPlan.ts:290-296` 就是「一次跳转」（service 一律 null、verb 留空），而跳转的落点是 B10 的视图活。
@@ -243,8 +246,8 @@ function enabledFinding(h: EnabledHit, iniRel: string, ex: Excl): Finding {
     title: `启用清单点名的插件配置不在文件清单里：${h.rel}`,
     detail: `${iniRel} 的 [editor_plugins] enabled 里点了 ${h.spellings.join('、')}，` +
       `归一成 ${h.rel} 后在这次文件清单里查不到（任意大小写写法都没有）。` +
-      ` 启用清单记的就是各插件 plugin.cfg 的路径（本项目「已安装」页的启用状态也按同一份清单判），` +
-      `而这条记录现在指着一个项目里不存在的目标 —— 多半是插件目录被删、改名或搬走了，配置里那一条还留着。` +
+      ` 启用清单记的就是各插件 plugin.cfg 的路径，而这条记录现在指着一个项目里不存在的目标。` +
+      ` 结论只说到这儿，不猜它为什么不在（被删、改名还是搬走都可能是原因，也可能清单本身没扫全）。` +
       ` 想核对就在编辑器的 项目设置→插件 里看有没有这一条。` +
       `${REPORT_ONLY}${exclNote(ex)}`,
     rel: iniRel,
@@ -259,7 +262,7 @@ function notEnabledFinding(c: Cand, iniRel: string, ex: Excl): Finding {
     severity: 'info',
     title: `插件已安装但未启用：${c.dir}`,
     detail: `${c.rel} 在这次的文件清单里，而 ${iniRel} 的 [editor_plugins] enabled 没有它 —— 已安装但未启用。` +
-      ' 这不是错：装在 addons/ 下而暂时不启用是常见选择，本项目的「已安装」页给出的也是同一个状态。' +
+      ' 这不是错：装在 addons/ 下而暂时不启用是常见选择，启用与否在本项目里同样是按 `[editor_plugins] enabled` 这份记录判的。' +
       ' 想启用就在编辑器的 项目设置→插件 列表里勾选（启用记录由编辑器写进 project.godot，不由本工具改）。' +
       `${REPORT_ONLY}${exclNote(ex)}`,
     rel: c.rel
@@ -276,8 +279,8 @@ function dupFinding(g: NameHit, ex: Excl): Finding {
     title: `插件显示名重复：${g.items[0].name}`,
     detail: `${rels.join('、')} 这几份配置的 plugin/name 都是「${g.items[0].name}」` +
       `（比对按 trim + 大小写不敏感，共 ${g.items.length} 个插件目录）。` +
-      ' 插件目录各不相同而显示名相同：列表里会出现几条同名条目，分不清哪条对应哪个目录' +
-      '（本项目「已安装」页显示的就是这个键）。' +
+      ' 插件目录各不相同而显示名相同：按名字定位不到是哪一个目录，需要靠目录名区分' +
+      '（列表里每条目仍各自带目录路径，能分辨）。' +
       ' 想消歧就把其中一个的名字改成可区分的写法。' +
       `${REPORT_ONLY}${exclNote(ex)}`,
     rel: rels[0],
@@ -308,7 +311,7 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
   // 段数不等于 3 的一律不参与 —— 引擎不按那个位置加载插件，深层配置参与只会多出无法核对的结论。
   // 文件名与第一段都只认 `plugin.cfg`/`addons` 这一种拼写：异体拼写不进面是**少报**（方向安全），
   // 不是判它坏了 —— 与两端原语给出的 rel 形状一致（rel 的空段/点段在 resolveRel 就被吃掉，
-  // `src-ztools/preload/lib/inspectfs.js:36-49`，所以 `Addons/`、`addons//plugin.cfg` 只可能来自畸形清单）。
+  // `src-ztools/preload/lib/inspectfs.js:37-50`（声明到闭括号），所以 `Addons/`、`addons//plugin.cfg` 只可能来自畸形清单）。
   const byKey = new Map<string, Cand>()
   for (const f of tree) {
     const rel = f && typeof f.rel === 'string' ? f.rel : ''

@@ -320,6 +320,15 @@ async function main() {
   )
   ok(caseVariant2.fs.length === 0,
     '★同一道闸的另一侧:script 写法与树里的写法两侧都可能是异体 → 仍不报', ids(caseVariant2.fs))
+  // 上面两条只断言「不报」。没有正向对照就没人证明那份 cfg 真的进了扫描面 ——
+  // 短路在任何一道前置闸(深度、大小写、fields 判定)上都能伪装成「大小写闸生效了」。
+  const caseVariantCtrl = await addons(
+    [['project.godot', 400], ['addons/Foo/plugin.cfg', 120]],
+    { texts: { 'addons/Foo/plugin.cfg': cfg({ ...FULL, script: 'res://addons/foo/missing.gd' }), 'project.godot': iniEnabled(['res://addons/Foo/plugin.cfg']) } }
+  )
+  ok(ids(caseVariantCtrl.fs).includes('addons:script-missing:Foo'),
+    '★大小写闸的正向对照:同一份 cfg 把树里那份异体文件拿掉就出 error(证明它确实进了面、闸是唯一拦下来的东西)',
+    ids(caseVariantCtrl.fs))
 
   const oddScripts = await addons(
     [
