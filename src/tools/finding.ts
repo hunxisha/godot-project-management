@@ -42,3 +42,15 @@ export function truncatedFinding(toolId: string, why?: string, title: string = T
     detail: why || TRUNCATED_WHY
   }
 }
+
+/**
+ * 聚合/逐条结论里「一条卡最多点名几个」的展示上限(20)。
+ *
+ * 为什么放这里:这个数已经有三份各自硬写的副本(`imports.ts:43`、`uid.ts:35`、`orphans.ts:43`,
+ * 另有 `size.ts` 的 BIG_LIST=20 同值),台账 B5 收尾点名「别再长第四第五份」。B8 的重复行/畸形行
+ * 裁切是第四处**需要这个数**的地方,所以这里出一份共享的,而不是再抄一个字面量 ——
+ * 那三份的收敛由 B10 一并处理(改它们是行为中性,但要动的文件超出 B8 的交付面)。
+ *
+ * 只裁**展示**:payload/证据总数永远按全量说(§5.3 规则 3:确认框不能被界面上的裁切糊弄)。
+ */
+export const LIST_CAP = 20
