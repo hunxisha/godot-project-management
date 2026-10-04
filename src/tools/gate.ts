@@ -107,7 +107,7 @@ export function subsetPlan(plan: FixPlan, selected: string[]): FixPlan {
     items,
     empty,
     service: plan.service,
-    // 空选择必须带原因:applyFix 的第一道短路就是 `plan.service === null || plan.empty`(useTools.ts:438),
+    // 空选择必须带原因:applyFix 的第一道短路就是 `plan.service === null || plan.empty`(useTools.ts:485),
     // 它把 reason 原样上浮成回执 —— 留空串就等于「点了没反应」。
     reason: empty ? plan.reason || NO_SELECTION_REASON : '',
     // trash 通道要交给原语的就是勾选后的 rels;rewrite 通道 rels 恒空(要动的东西在 files 里),
