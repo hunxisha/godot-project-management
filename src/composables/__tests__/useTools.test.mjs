@@ -130,7 +130,7 @@ function deferredScanner(treesByPid, counters) {
 
 async function main() {
   section('1. 注册表')
-  ok(Array.isArray(M.TOOLS) && M.TOOLS.length === 3, 'P0a 注册 3 个工具', M.TOOLS.length)
+  ok(Array.isArray(M.TOOLS) && M.TOOLS.length === 9, 'P0a 的 3 条 + P0b-B10a 接线的 6 条 = 9 条', M.TOOLS.length)
   ok(new Set(M.TOOLS.map((t) => t.id)).size === M.TOOLS.length, '工具 id 不重复')
   ok(M.TOOLS.every((t) => t.name && t.summary && t.phase === 'P0' && Array.isArray(t.needs) && typeof t.run === 'function'),
     '每项都有 name/summary/phase/needs/run')
@@ -138,6 +138,53 @@ async function main() {
   ok(M.isSupported(M.TOOLS[0], { tree: true, text: true, write: false, trash: false }) === true, 'isSupported 满足时需要项全 true')
   ok(M.isSupported(M.toolById('brokenRefs'), { tree: true, text: false, write: false, trash: false }) === false,
     'brokenRefs 需要 text,缺了就不支持')
+
+  // ---------- B10a:六条新工具的接线(逐条钉 needs) ----------
+  // needs 少写一项的后果不是报错而是**点亮了一张点不动的卡**:卡片照显示、体检照跑,
+  // 直到用户点修复按钮才撞上「宿主没有这个原语」。多写一项反过来:旧宿主上这张卡凭空消失,
+  // 连「只报告」的那一半都看不见。所以逐条比 needs 的**内容与集合**,不靠注释。
+  const NEEDS_BY_ID = {
+    uid: ['tree', 'text', 'trash'],
+    orphans: ['tree', 'text', 'trash'],
+    imports: ['tree', 'text', 'trash'],
+    addons: ['tree', 'text'],
+    ini: ['tree', 'text'],
+    format: ['tree', 'text', 'write']
+  }
+  for (const [id, needs] of Object.entries(NEEDS_BY_ID)) {
+    const tool = M.toolById(id)
+    ok(!!tool, `${id} 已登记进 TOOLS`, tool && tool.id)
+    ok(!!tool && [...tool.needs].sort().join(',') === [...needs].sort().join(','),
+      `${id} 的 needs 逐字对上接线表(${needs.join('/')})`, tool && tool.needs.join(','))
+    ok(!!tool && tool.phase === 'P0', `${id} 属 P0 阶段`, tool && tool.phase)
+  }
+  // 缺 trash 的宿主:三条 trash 工具不支持,只吃 tree/text 的五条不受牵连
+  const NO_TRASH = { tree: true, text: true, write: true, trash: false }
+  ok(['uid', 'orphans', 'imports'].every((id) => M.isSupported(M.toolById(id), NO_TRASH) === false),
+    '宿主没有 movePathsToTrash 时三条 trash 工具一律不支持(spec §5.4:缺能力是状态不是异常)')
+  ok(['size', 'cache', 'brokenRefs', 'addons', 'ini'].every((id) => M.isSupported(M.toolById(id), NO_TRASH) === true),
+    '缺 trash 不许牵连只吃 tree/text 的五条(needs 写宽 = 旧宿主上整张卡消失)')
+  // 缺 write 的宿主:只有 format 不支持;只报告的两条(B7/B8 头部声明)照常点亮
+  const NO_WRITE = { tree: true, text: true, write: false, trash: true }
+  ok(M.isSupported(M.toolById('format'), NO_WRITE) === false,
+    '宿主没有 writeProjectText 时 format 不支持(它会点出「改写」按钮却没有落盘通道)',
+    JSON.stringify(M.toolById('format').needs))
+  ok(['addons', 'ini', 'uid', 'orphans', 'imports'].every((id) => M.isSupported(M.toolById(id), NO_WRITE) === true),
+    '缺 write 不许牵连其余五条(addons/ini 声明的就是 tree+text 那一对)')
+  // 顺序 = runAll 的执行顺序:注册表被 useTools 直接遍历,所以这条决定必须由数组顺序本身承载
+  const idx = (id) => M.TOOLS.findIndex((x) => x.id === id)
+  const READ_FIRST = ['addons', 'ini', 'uid']
+  const WRITE_LAST = ['orphans', 'imports', 'format']
+  ok(READ_FIRST.every((a) => WRITE_LAST.every((b) => idx(a) < idx(b))),
+    '「先只读、后可写」:批量动盘的 orphans/imports/format 三条全在 addons/ini/uid 之后(spec 待确认 #8)',
+    M.TOOLS.map((x) => x.id).join('>'))
+  ok(['size', 'cache', 'brokenRefs'].every((a) => WRITE_LAST.every((b) => idx(a) < idx(b))),
+    'P0a 的三条只读工具同样排在动盘三条之前', M.TOOLS.map((x) => x.id).join('>'))
+  // 卡面(name/summary 是用户唯一看到的两个字面)不许出现实现术语
+  const JARGON = /rewrite|聚合卡|payload|service|needs|\bctx\b|LRU|引用索引/
+  ok(M.TOOLS.every((x) => !JARGON.test(x.name) && !JARGON.test(x.summary)),
+    '九条卡面都不含实现术语(rewrite 通道 / 聚合卡 / payload 这类)',
+    M.TOOLS.filter((x) => JARGON.test(x.name) || JARGON.test(x.summary)).map((x) => `${x.name}|${x.summary}`).join(' // '))
 
   section('2. 扫描只发生一次')
   const t = M.useTools()
@@ -174,7 +221,17 @@ async function main() {
   const all = await t.runAll()
   const boom = all.find((x) => x.toolId === 'boom')
   ok(boom.ok === false && boom.error === '炸了', '炸掉的工具标 ok:false 并带原因', JSON.stringify(boom))
-  ok(all.filter((x) => x.ok).length === 3, '其他 3 个工具不受影响', all.filter((x) => x.ok).length)
+  // B10a 起这台宿主(tree+text)只跑得动 9 条里的 5 条:缺 trash/write 的四条按 §5.4 走
+  // 「当前宿主不支持」这条**状态**,既不算失败也不算假成功。三个口径分开数,
+  // 才咬得住「一个工具炸了不拖垮别人」这条不变量在接线后仍然成立。
+  ok(all.length === t.tools.value.length, 'runAll 每个注册工具一行(含 registerTool 的探针)',
+    `${all.length}/${t.tools.value.length}`)
+  ok(all.filter((x) => x.error === '当前宿主不支持').map((x) => x.toolId).sort().join(',') === 'format,imports,orphans,uid',
+    '缺 trash/write 的四条在调用任何原语之前就短路(不是跑成也不是炸掉)',
+    all.filter((x) => x.error === '当前宿主不支持').map((x) => x.toolId).join(','))
+  ok(['size', 'cache', 'brokenRefs', 'addons', 'ini'].every((id) => (all.find((x) => x.toolId === id) || {}).ok === true),
+    '宿主能跑的 5 条全部跑成,不受「另一个工具炸了」影响(单工具失败隔离,B10a 后仍成立)',
+    JSON.stringify(all.map((x) => [x.toolId, x.ok])))
   ok(scanCalls === 2, 'runAll 强制重扫一次(之前是 1)', scanCalls)
 
   section('5. counts 汇总')
@@ -296,7 +353,10 @@ async function main() {
   ok(scanCalls === s0 + 2, 'invalidateTree 后下一次强制重扫', scanCalls - s0)
   const all8 = await t8.runAll()
   ok(scanCalls === s0 + 3, 'runAll 只再强制重扫一次', scanCalls - s0)
-  ok(all8.length === 3 && all8.every((x) => x.ok === true), '三个工具全绿', JSON.stringify(all8.map((x) => [x.toolId, x.ok])))
+  ok(all8.length === M.TOOLS.length, 'runAll 每个注册工具一行(接线后 9 行)', all8.length)
+  // 缺原语的四条不扫树(isSupported 在 ensureTree 之前短路),所以 scanCalls 的计数与 3 条时代一致
+  ok(all8.filter((x) => x.ok).length === 5 && all8.filter((x) => x.error === '当前宿主不支持').length === 4,
+    '能跑的 5 条全绿、缺原语的 4 条按能力降级(不是失败,也不许冒充跑成)', JSON.stringify(all8.map((x) => [x.toolId, x.ok])))
   ok(t8.running.value === '' && t8.allRunning.value === false && t8.progress.value === '', '跑完进度归位',
     `${t8.running.value}|${t8.allRunning.value}|${t8.progress.value}`)
 
@@ -484,7 +544,12 @@ async function main() {
     '空项目的三张卡片都是正常成功而不是失败', JSON.stringify([e1.ok, e2.ok, e3.ok, e3.findings.length, e1.scannedFiles]))
   const allE = await tE.runAll()
   ok(emptyScans === 2, 'runAll 在空项目上也只重扫一次(1+N 次遍历的退化已消除)', emptyScans)
-  ok(allE.length === 3 && allE.every((x) => x.ok === true), '空项目的全量体检仍是三行成功', JSON.stringify(allE.map((x) => [x.toolId, x.ok])))
+  ok(allE.length === M.TOOLS.length && allE.filter((x) => x.ok).length === 5,
+    '空项目的全量体检:能跑的 5 行成功,缺原语的 4 行按能力降级(降级来自宿主而不是空清单)',
+    JSON.stringify(allE.map((x) => [x.toolId, x.ok])))
+  ok(allE.every((x) => x.ok === true || x.error === '当前宿主不支持'),
+    '空项目不产生第三种状态:每一行要么跑成、要么明确「宿主不支持」',
+    JSON.stringify(allE.filter((x) => x.ok !== true && x.error !== '当前宿主不支持').map((x) => [x.toolId, x.error])))
   restore()
 
   section('19. F-2b 扫描失败时 runAll 停下并上浮单条失败')
@@ -585,7 +650,8 @@ async function main() {
   ok(duringScan !== '' && /体检/.test(duringScan), '强制重扫期间 progress 不是空串', JSON.stringify(duringScan))
   f22scan.settle('godot/project/p1')
   const rowsM2 = await runAllP
-  ok(rowsM2.length === 3 && rowsM2.every((x) => x.ok === true), 'deferred 收尾后 runAll 照常跑完', JSON.stringify(rowsM2.map((x) => [x.toolId, x.ok])))
+  ok(rowsM2.length === M.TOOLS.length && rowsM2.filter((x) => x.ok).length === 5,
+    'deferred 收尾后 runAll 照常跑完(9 行:5 行跑成 + 4 行能力降级)', JSON.stringify(rowsM2.map((x) => [x.toolId, x.ok])))
   restore()
 
   section('23. M-9 扫描失败路径复位 truncated')
