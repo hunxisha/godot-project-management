@@ -37,7 +37,7 @@
 import type { Finding, ToolContext } from '../types'
 import { truncatedFinding } from '../finding'
 import { buildRefIndex } from '../refIndex'
-import { fmtBytes, isCache } from '../treeUtils'
+import { fmtBytes, hasRelCI, isCache, lowerSet } from '../treeUtils'
 
 /** 聚合结论展示上限:与 uid.ts:38 的 LIST_CAP 同口径(刷屏控制,不影响 payload.rels 全量) */
 const LIST_CAP = 20
@@ -114,8 +114,9 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
 
   // 引用大小写异体集合(判据 5):resToRel 保留原样大小写,所以索引里 UI/Banner.PNG 与树里 ui/banner.png
   // 是两个不同键;把 to 的键都小写收进这张表,候选只要在其中有任意大小写的写法就不算孤儿。
-  const refLower = new Set<string>()
-  for (const key of index.to.keys()) refLower.add(key.toLowerCase())
+  // 小写像本身走 treeUtils 的 lowerSet(B6 评审裁定 2 收到的那一份:原来三个工具各手写一遍
+  // `new Set(); for (…) add(x.toLowerCase())`,口径漂移没人拦)。
+  const refLower = lowerSet(index.to.keys())
 
   // 一趟遍历选候选 + 逐类计数默认排除项(判据 3:排除要计数并写进 detail)。按优先级判定,互不重数。
   const ex = { cache: 0, addons: 0, sidecar: 0, config: 0, code: 0 }
@@ -142,7 +143,7 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
   // (引用者对不对是 brokenRefs/B6 的事,孤儿工具不越界替它判:越界判就会把「引用它的场景坏了」念成「它可删」)。
   const orphans: string[] = []
   for (const rel of candSize.keys()) {
-    if (refLower.has(rel.toLowerCase())) continue
+    if (hasRelCI(refLower, rel)) continue
     orphans.push(rel)
   }
 

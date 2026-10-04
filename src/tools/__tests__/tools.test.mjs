@@ -192,6 +192,52 @@ async function main() {
   ok(T.fmtMs(900) === '900 ms' && T.fmtMs(2500) === '2.5 s', 'fmtMs 可读')
   ok(T.dirOf('a/b/c.txt') === 'a/b/' && T.dirOf('c.txt') === '', 'dirOf 含尾斜杠、根目录返回空串')
 
+  // ---------- 1.4 大小写像与 .gdignore 闸门（B6 Fix round 1 裁定 2 / Important 1 收进来的共享 helper） ----------
+  // 为什么存在：三条拿「清单里查得到/查不到」当证据的判据(imports 的失效与缺边车、uid 的孤儿与缺边车、
+  // orphans 的引用比对)原先各自手写一遍 `.toLowerCase()` 的小写像 —— 三份手抄就是三处会漂的口径
+  // (B6 评审就是抓到 uid 抄漏了才跟 imports 说话不同)。`.gdignore` 同理：两份工具都漏判了整类目录。
+  section('1.4 lowerSet / lowerRelSet / hasRelCI / gdignoredDirs / isGdignored')
+  ok(T.relSet(T1).has('Project.Godot') === false, 'relSet 的公开行为没被改:精确查表依旧只认原样写法(relSet 不动是本轮的约束)')
+  const LOW = T.lowerRelSet(T1)
+  ok(LOW.has('project.godot') && T.relSet(T1).has('project.godot'), 'lowerRelSet 认得清单里的原样写法')
+  ok([...LOW].every((r) => r === r.toLowerCase()) && LOW.size === T1.length,
+    'lowerRelSet 的键一律小写、条数与树一致(这份树没有大小写撞车的两条)', [...LOW].join('|'))
+  ok(T.lowerRelSet(tree([['A.GD', 1], ['a.gd', 1]])).size === 1,
+    '★同一条目两种写法在小写像里合成一条(这正是「多认存在」的那一侧:主张只会被藏掉,不会被造出来)')
+  ok(T.lowerRelSet([{ rel: 123 }, { rel: '' }, { rel: 'ok.gd' }, null]).has('ok.gd') &&
+    T.lowerRelSet([{ rel: 123 }, { rel: '' }]).size === 0,
+    '畸形条目(rel 非串/空串)跳过不占位,合法条目照样收(检查器喂进来的树不保证干净)')
+  ok(T.hasRelCI(LOW, 'PROJECT.godot') === true && T.hasRelCI(LOW, 'nope/gone.png') === false &&
+    T.hasRelCI(LOW, '') === false && T.hasRelCI(LOW, undefined) === false,
+    'hasRelCI:任意大小写写法命中为真,不在清单里/空串/非串为假')
+  ok(T.lowerSet(new Map([['X/Y.PNG', 1], ['a', 2]]).keys()).has('x/y.png') === true,
+    'lowerSet 收任意 rel 可迭代对象(orphans 拿它处理引用索引的 to 键,不必是 TreeEntry[])')
+  ok(T.lowerSet(['A', 'a', '', 'b']).size === 2, 'lowerSet 合并大小写异体并丢掉空串')
+  // .gdignore：标记文件所在目录整棵子树被引擎跳过（仓库里两处既有用法：assetsinstall.js:96 / main.rs:596）
+  const IGT = tree([
+    ['project.godot', 10], ['art/.gdignore', 3], ['art/a.png', 10], ['art/sub/b.png', 10],
+    ['arts/c.png', 10], ['art2/d.png', 10], ['art.json', 10], ['src/e.gd', 10]
+  ])
+  const IGDIR = T.gdignoredDirs(IGT)
+  ok(IGDIR.size === 1 && IGDIR.has('art/'),
+    'gdignoredDirs 收的是标记所在目录的前缀(含尾斜杠、小写),不是标记文件自己', [...IGDIR].join('|'))
+  ok(T.isGdignored(IGDIR, 'art/a.png') && T.isGdignored(IGDIR, 'ART/A.PNG'),
+    '★isGdignored 认被屏蔽目录里的文件,大小写异体照样屏蔽(这一侧只会多藏主张)')
+  ok(T.isGdignored(IGDIR, 'art/sub/b.png') === true, '★标记屏蔽整棵子目录树(引擎语义:该目录及其所有子目录)')
+  ok(T.isGdignored(IGDIR, 'arts/c.png') === false && T.isGdignored(IGDIR, 'art2/d.png') === false &&
+    T.isGdignored(IGDIR, 'art.json') === false,
+    '★按路径段判,不是字符串前缀:art/ 的标记不许把 arts/、art2/、art.json 一起藏掉(静默吞掉别处的判定)')
+  ok(T.isGdignored(IGDIR, 'src/e.gd') === false && T.isGdignored(IGDIR, 'project.godot') === false,
+    '没打标记的目录与根目录文件不受影响')
+  ok(T.isGdignored(T.gdignoredDirs(tree([['.gdignore', 3], ['a/b.png', 10]])), 'a/b.png') === true,
+    '根目录的 .gdignore 屏蔽整棵树(空前缀)')
+  ok(T.isGdignored(T.gdignoredDirs(tree([['Art/.GDIGNORE', 3]])), 'art/x.png') === true,
+    '标记名与目录名的大小写异体照样算标记(Windows 文件系统不敏感;多屏蔽=少报,方向安全)')
+  ok(T.gdignoredDirs(tree([['art/gdignore', 3], ['art/.gdignore.bak', 3], ['art/x.gdignore', 3]])).size === 0,
+    '只有 basename 正好是 .gdignore 的才算标记(少了点、多了后缀都不是)')
+  ok(T.isGdignored(new Set(), 'art/a.png') === false && T.isGdignored(new Set(), '') === false,
+    '空标记集恒假:没有 .gdignore 的项目一条判定都不受影响')
+
   // ---------- 2. sceneRefs 解析器 ----------
   // 为什么存在:断链检查(唯一 P0 错误级结论)全靠这三个函数。解析器多吐一条引用就是
   // 误报「缺文件」,少吐一条就是漏报;resToRel 归一不稳会让断链判据整体失真。

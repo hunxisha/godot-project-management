@@ -23,11 +23,16 @@ export const SCENE_EXT = new Set(['tscn', 'tres'])
 /**
  * 从段头/头部文本里取 `key="value"` 的值,取**第一个**匹配(非全局正则的 exec 天然首匹配),
  * 取不到给空串。B4 的 `uid.ts` 读场景头部 uid 也走这里,不再自己抄一条正则。
+ *
+ * ⚠ `key` 会被插进 RegExp 里(`\\b${key}=…`),所以**必须是字面量,不接受外部数据** ——
+ *   传进用户串或解析出来的串就是正则注入面(调用方只有本文件的 parseExtResources 与 uid.ts 的 headerUid,
+ *   两处都是硬编码的键名)。要按变量取键请走 godotIni,别扩这里的入参。
  */
 export function attr(head: string, key: string): string {
   const m = new RegExp(`\\b${key}="([^"]*)"`).exec(head)
   return m ? m[1] : ''
 }
+
 
 /** 逐行抓 `[ext_resource ...]`;不跨行、不去重(顺序即文件顺序) */
 export function parseExtResources(text: string): ExtRef[] {

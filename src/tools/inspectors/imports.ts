@@ -12,15 +12,19 @@
 // 导入选项、边车内容与源文件是否「同步」、`uid` 与场景引用是否一致）一律不碰：那是编辑器与 B4/B8 的
 // 职责，越界判就是在凭空造误报。
 //
-// 存在性一律用 relSet(ctx.tree) 查表，不做字符串包含（brokenRefs.ts:11-13 的同一口径）；
-// `ctx.truncated` 时**三类判据一条都不做**（简报判据 2/3 直接指定，沿 brokenRefs/uid/orphans 的先例）。
+// 存在性一律用 lowerRelSet(ctx.tree) + hasRelCI() 查表（treeUtils 里那份共享的小写像，B6 评审裁定 2），
+// 不做字符串包含（brokenRefs.ts:11-13 的同一口径）。
+// `ctx.truncated` 的降级口径（控制方 2026-10-05 裁定 3，覆盖简报判据 2 那句字面的「一条都不判」）：
+//   截断作废的是**存在性主张**（stale / missing / 项目闸门三条），因为它们的证据是「整份清单里查不到」；
+//   **内容派生**的判据 4 不依赖清单完整性（证据是一份读得到的边车自己的 `[remap] importer` 对它自己的文件名），
+//   而且它不带 fix，所以照常判 —— 与 uid.ts 保留「重复 uid」同一读法。降级卡仍然排第一。
 // 与 orphans 不同的是：这里读不到一份边车只让**那一份**的判定失效，不出整工具的降级结论 ——
 // 本文件每条结论的证据都是「这一份读得到的文件自己写了什么」，不是「整份索引里查不到」。
 //
 // 成本红线：`.import` 边车是本文件唯一的读入面（每个候选一次 ctx.readText）。**不调 buildRefIndex**
 // —— 引用面是 B5 的猎物，这里一行都不需要；调了就会为几千个 .gd/.tscn 白读一遍。
 //
-// 措辞红线（同 uid.ts:19-22、orphans.ts:31-34）：聚合结论只挂 `fix:{kind:'trash',label,payload:{rels}}`。
+// 措辞红线（同 uid.ts:19-22、orphans.ts:31-34）：聚合结论只挂 `fix:{kind:'trash', label, payload:{rels}}`。
 // 动词（「移入回收站」/「永久删除」）、风险句、预览清单全部由 fixPlan.ts 给（按 isWin 与 kind 分叉，
 // fixPlan.ts:240）；label 只给数量与中性动词「移除」，简报钉的那句措辞照用。
 // 结论顺序是定死的类别序（聚合 stale → 逐条不匹配 → 逐条缺边车 → 项目闸门），类内按 rel 码元序。
@@ -28,9 +32,9 @@
 // 红线：纯函数，只吃 ToolContext —— 不碰 window / services / vue / DOM；唯一 IO 是 await ctx.readText。
 import type { Finding, ToolContext } from '../types'
 import { truncatedFinding } from '../finding'
-import { readImportFile } from '../parsers/importFile'
+import { KNOWN_IMPORTERS, readImportFile } from '../parsers/importFile'
 import { resToRel } from '../parsers/sceneRefs'
-import { dirOf, isCache, relSet } from '../treeUtils'
+import { dirOf, gdignoredDirs, hasRelCI, isCache, isGdignored, lowerRelSet } from '../treeUtils'
 
 /** 边车尾缀：切「这份边车属于哪个资源」一律用它，不按最后一个点重拼（`X.a.b.import` 的源是 `X.a.b`） */
 const IMPORT_SUFFIX = '.import'
@@ -46,56 +50,37 @@ interface Excl {
   unread: number
   noSource: number
   cacheSrc: number
+  /** 判据 3 的候选里被 `.gdignore` 屏蔽掉的那些（引擎按设计不扫这些目录，见 gdignoredDirs） */
+  ignore: number
 }
 
 /**
- * 判据 3/4 唯一的依据表：导入器名 → **那个导入器自己在引擎源码里声明的** recognized_extensions。
- * 出处逐行读自 godotengine/godot 标签 `4.4-stable`（`https://github.com/godotengine/godot/blob/4.4-stable/<路径>`）：
- *   · `editor/import/resource_importer_wav.cpp:36` 名 / `:43-45` 名单 —— `push_back("wav")`
- *   · `modules/vorbis/resource_importer_ogg_vorbis.cpp:44` / `:51-53` —— `ogg`
- *   · `editor/import/resource_importer_bmfont.cpp:37` / `:44-48` —— `font`、`fnt`
- *   · `editor/import/resource_importer_dynamic_font.cpp:40` / `:47-58` —— `ttf ttc otf otc woff woff2 pfb pfm`
- *   · `editor/import/resource_importer_csv_translation.cpp:39` / `:46-48` —— `csv`
- *   · `editor/import/resource_importer_shader_file.cpp:40` / `:47-49` —— `glsl`
- *   · `editor/import/3d/resource_importer_obj.cpp:593` / `:600-602` —— `obj`
- * 只有这七行进了表：它们的名单是**各自文件里写死的 push_back**，能逐条举证。
- * 故意不进表（= 表外，一律「不知道，不判」）：
- *   · texture（`editor/import/resource_importer_texture.cpp:171` 名 / `:178-180` 名单）、
- *     bitmap（`:39` / `:46-48`）、texture_atlas（`:46` / `:53-55`）、
- *     cubemap_texture（`resource_importer_layered_texture.cpp:43-45` 名随模式变 / `:80-82`）、
- *     font_data_image（`:37` / `:44-48`）—— 这五份的名单是 `ImageLoader::get_recognized_extensions(…)`，
- *     而它把**已注册的图像格式 loader** 的名单并起来（`core/io/image_loader.cpp:111-115`）：
- *     png/jpg/webp 由构建时开了哪些模块决定。抄一份「png 一定是 texture」的表就是凭印象猜。
- *   · 模块自带的其余名字（glb/gltf、svg、mp3…）本轮没有逐个取证，同样按表外处理。
- * 这条收窄同时决定判据 3 的候选面：**png 这类图像资源永远不会被报「缺 .import」**。
- * 宁少报，绝不多报（与整个文件的破坏面方向一致，简报判据 3/4 要的就是这个）。
+ * 判据 3/4 唯一的依据表在 `parsers/importFile.ts` 的 KNOWN_IMPORTERS（域数据不住在判定里，B6 评审 Minor 4：
+ * B7 的 addons 体检要用同一批名字，两处各留一份就是本轮刚替 SCENE_EXT 收掉的那种分叉）。
+ * 出处、以及「为什么 texture/bitmap/glb/svg 全都在表外」都写在那张表的注释里，这里只做判定用的两份投影：
+ *   · IMPORTER_BY_NAME —— 判据 4 拿边车里的 importer 名查它自己声明的扩展名名单；
+ *   · TABLE_EXT —— 判据 3 的候选面（表外扩展名永不报「缺 .import」）与判据 4 的扩展名侧闸门。
+ * 收窄的方向与整个文件一致：宁少报，绝不多报。
  */
-const IMPORTERS: { name: string; exts: string[] }[] = [
-  { name: 'wav', exts: ['wav'] },
-  { name: 'oggvorbisstr', exts: ['ogg'] },
-  { name: 'font_data_bmfont', exts: ['font', 'fnt'] },
-  { name: 'font_data_dynamic', exts: ['ttf', 'ttc', 'otf', 'otc', 'woff', 'woff2', 'pfb', 'pfm'] },
-  { name: 'csv_translation', exts: ['csv'] },
-  { name: 'glsl', exts: ['glsl'] },
-  { name: 'wavefront_obj', exts: ['obj'] }
-]
+const IMPORTER_BY_NAME = new Map(KNOWN_IMPORTERS.map((r) => [r.name, r]))
 
-const IMPORTER_BY_NAME = new Map(IMPORTERS.map((r) => [r.name, r]))
-
-/** 表里出现过的扩展名 = 能举证「这类资源应当有 .import」的那一批（判据 3 的候选清单与判据 4 同源） */
-const TABLE_EXT = new Set(IMPORTERS.flatMap((r) => r.exts))
+const TABLE_EXT = new Set(KNOWN_IMPORTERS.flatMap((r) => r.exts))
 
 const TABLE_EXT_TEXT = [...TABLE_EXT].sort(byText).join('/')
 
 /** 每条结论都要自带的覆盖面声明（收窄是判据，不是省略） */
-const COVERAGE = ' 本判定的扩展名清单逐项取自引擎各导入器自己声明的 recognized_extensions，' +
-  `表内只有 ${TABLE_EXT_TEXT}；图像与场景类（png/jpg/webp/glb/gltf…）的名单由引擎运行时注册的格式模块决定，` +
-  '拿不准的一律不判。'
+const COVERAGE = ' 本判定的扩展名清单逐项取自引擎各导入器自己声明的 recognized_extensions' +
+  `（逐行的出处写在 parsers/importFile.ts 的 KNOWN_IMPORTERS 注释里），表内只有 ${TABLE_EXT_TEXT}；` +
+  '表外的其余导入器（含 png/jpg/webp 等图像类，以及本轮未逐个取证的 glb/gltf/svg）一律不判。'
 
-const WHY_TRUNC = '失效 .import（source_file 指向的资源不在清单里）与缺 .import 两类都拿整份清单比存在性，' +
-  '清单不全时「查不到」不是证据 —— 它会把其实还在用的边车送上删除按钮。导入器与扩展名那条只看边车自身内容，' +
-  '但三类判据在同一次扫描里一起降级才好在卡片上读。请把 maxEntries 调高或做一次完整重扫后再看' +
+const WHY_TRUNC = '失效 .import（source_file 指向的资源不在清单里）与缺 .import 两条都拿整份清单比存在性，' +
+  '清单不全时「查不到」不是证据 —— 它会把其实还在用的边车送上删除按钮，所以这两条本次不做，' +
+  '项目级「一个边车都没有」那条闸门也一起不按字面断言。导入器与扩展名那条只看一份边车自己写了什么、' +
+  '与它自己的文件名比，清单全不全都不影响它，也不提供任何修复动作，所以本次照常判（与 uid 体检保留' +
+  '「重复 uid」同一读法）。请把 maxEntries 调高或做一次完整重扫后再看' +
   ' —— 别用排除目录、按扩展名筛选来「缩小范围」：那样得到的清单同样不完整，却不会再带截断标记，结论只会更假。'
+
+const TRUNC_TITLE = '文件清单被截断，本次不做失效与缺 .import 判定（导入器不匹配那条照常）'
 
 /**
  * 字典序一律用 `<`/`>`（UTF-16 码元），不用 localeCompare：locale 随宿主环境变，而 rels 顺序、related
@@ -105,16 +90,29 @@ function byText(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
-/** 顶层或任一段叫 addons 的条目 —— addons/ 内部整体不判（B5 同口径，addons 目录另有 addons 体检） */
+/**
+ * 顶层或任一段叫 addons 的条目 —— addons/ 内部整体不判（与 orphans.ts:54-56 同口径：排除并计数）。
+ * ⚠ 别把这条读成「addons 有人管」：spec §3.1 #7 那份 addons 体检的清单只有 plugin.cfg 字段、
+ * editor_plugins 启用状态与目录是否对得上、重名三条，**不含 `.import` 失效与缺边车**（docs/tools-page-plan.md:117）。
+ * 也就是说 P0b 里 addons 下的失效边车**没人判**，这是已知覆盖面缺口，不是已交给他处的判定 ——
+ * 控制方 2026-10-05 裁定 4：本轮把这个事实写进注释（B7 立项时按「addons 下的 .import 判不判」显式拍板）。
+ */
 function isAddon(rel: string): boolean {
   return rel.split('/').includes('addons')
 }
 
 /**
  * 边车身份：原语给的 `ext === 'import'`（`foo.png.import` 的 ext 就是 'import'，不是 'png'）。
- * 再要 rel 确实以 `.import` 收尾（大小写都收）：两端原语的 ext 本来就是从 rel 的最后一个点算出来的
+ * 再要 rel 确实以 `.import` 收尾（大小写都收）：两端原语的 ext 本来就是从 rel 的最后一个点算出来并小写的
  * （`refIndex.ts:59-63` 记的 inspectfs.js:263 / inspectfs.rs:83-88），自洽的 rel 一定满足这条，
  * 所以它纯粹是防御 —— 不满足时切出来的 assetRel 就是猜的名字，拿它比存在性会造出假 stale。
+ *
+ * ⚠ 大小写口径（B6 评审裁定 2 里钉死的那个不对称，另一侧的注释在 uid.ts:152-158）：
+ *   · 「**这份边车在不在**」→ 走小写像 hasRelCI()，任意大小写写法都算在（Windows 不敏感；这一侧只会藏主张）。
+ *   · 「**这个条目算不算边车**」→ 这里的 endsWith 用大小写不敏感，而 uid.ts 的 `.uid` 那侧保持精确。
+ *     两边答案不同是刻意的：判据 4 与 sidecarTotal 都吃这条，放宽它会把 `X.PNG.IMPORT` 这类手改名字
+ *     当成边车**读进来**（多出结论），而收紧 uid 那侧只会少读边车（少出结论）。
+ *     本轮的改动方向被钉死为「只藏不加」，所以 uid 那侧不动，这里也不动。
  */
 function isSidecar(ext: unknown, rel: string): boolean {
   return ext === 'import' && rel.toLowerCase().endsWith(IMPORT_SUFFIX)
@@ -150,9 +148,13 @@ function staleFinding(stale: { rel: string; src: string }[], ex: Excl): Finding 
       `多半是删掉或改名源文件后留下的残留边车。` +
       (hidden ? ` 这里按 rel 只列前 ${shown.length} 个，另有 ${hidden} 个未列出；下面的建议仍按全部 ${n} 个执行。` : '') +
       ` 大小写异体不判：source_file 只要有任意一种大小写写法能在清单里对上，就当作源还在（Windows 文件系统不敏感）。` +
+      // 评审 Minor 3：这条聚合是全场唯一可执行的卡片，覆盖面必须和排除项一起说清 ——
+      // 失效判定不看扩展名（任何一份能读到的边车都判），缺边车判定却只认表内扩展名，两者的面不一样。
+      ` 覆盖面：这条按边车内容判，不看资源的扩展名（任何扩展名的失效边车都会进这份清单）；` +
+      `而「资源缺 .import 边车」那条只认表内逐项举证的扩展名（清单抄在每条缺失结论的覆盖面声明里），两边范围不同。` +
       ` 默认排除、不判定的：.godot 缓存 ${ex.cache} 项、addons ${ex.addons} 项、Godot 3 老形态 ${ex.legacy} 项、` +
       `读不到 ${ex.unread} 项、source_file 缺失或不是项目内路径 ${ex.noSource} 项、` +
-      `source_file 指向 .godot 缓存 ${ex.cacheSrc} 项。` +
+      `source_file 指向 .godot 缓存 ${ex.cacheSrc} 项、.gdignore 目录内的候选资源 ${ex.ignore} 项。` +
       // spec §6 的失败模式说明：这条是全场唯一会动盘的结论，把不可逆的那一半讲清楚。
       // uid 的说法不钉引擎版本：uid 就写在边车自己的 [remap] 里（importFile.ts 的键位说明），
       // 边车没了那份记录也就没了 —— 简报判据 2 点名的正是这条代价。
@@ -183,11 +185,15 @@ function mismatchFinding(m: { rel: string; importer: string; ext: string; exts: 
   }
 }
 
-/** 判据 3：资源存在但没有 .import 边车（目录闸门成立才报，一条讲一个文件） */
-function missingFinding(m: { rel: string; ext: string; siblings: string[] }): Finding {
+/**
+ * 判据 3：资源存在但没有 `.import` 边车（目录闸门成立才报，一条讲一个文件）。
+ * `ignored` 是本次被 `.gdignore` 屏蔽掉的候选数 —— 藏起来的主张要在结论里看得见（B5 口径）。
+ */
+function missingFinding(m: { rel: string; ext: string; siblings: string[] }, ignored: number): Finding {
   const dir = dirOf(m.rel) || '（项目根）'
   const why = ` 这类缺口通常来自绕过编辑器的拷贝或改名：让编辑器重新扫描一次通常会补上边车` +
-    `（别复制别人的 .import 内容，那会把 uid 与导入参数一起搬错）。${COVERAGE}`
+    `（别复制别人的 .import 内容，那会把 uid 与导入参数一起搬错）。${COVERAGE}` +
+    (ignored ? ` 本次另有 ${ignored} 个同类资源位于 .gdignore 屏蔽的目录里，引擎按设计不扫那些目录，一条都没判。` : '')
   return {
     id: `imports:missing:${m.rel}`,
     severity: 'warn',
@@ -195,8 +201,12 @@ function missingFinding(m: { rel: string; ext: string; siblings: string[] }): Fi
     detail: m.siblings.length
       ? `同目录 ${dir} 里其他 ${m.siblings.length} 个 .${m.ext} 资源都有 .import 边车` +
         `（${m.siblings.slice(0, 3).join('、')}${m.siblings.length > 3 ? ' 等' : ''}），只有 ${m.rel} 没有。${why}`
-      : `${m.rel} 是 ${dir} 里唯一的 .${m.ext} 资源，没有同级可比对，但项目里存在 .import 边车，` +
-        `说明它在编辑器里被扫过。${why}`,
+      : // 评审 Minor 1：「项目里有边车」是**项目级**证据，撑不起「**它**被编辑器扫过」这个单文件结论，
+        // 所以这句按证据的实际强度说话：项目侧导入流程是通的，而眼前这份更常见的原因是拷贝/改名绕开编辑器，
+        // 或者它压根还没被扫到过一次。
+        `${m.rel} 是 ${dir} 里唯一的 .${m.ext} 资源，没有同级可比对；项目里别处存在 .import 边车，` +
+        `说明这个项目的编辑器导入流程是通的，而这一份没有边车 —— 通常来自绕过编辑器的拷贝或改名，` +
+        `或者这个文件还没被编辑器扫到过一次。${why}`,
     rel: m.rel
   }
 }
@@ -216,34 +226,25 @@ function gateFinding(): Finding {
 
 export async function run(ctx: ToolContext): Promise<Finding[]> {
   const tree = Array.isArray(ctx.tree) ? ctx.tree : []
+  // 降级态照常做判据 4（内容派生），关掉判据 2/3 与项目闸门（存在性派生）—— 见文件头的裁定 3 说明。
+  const truncated = ctx.truncated === true
 
-  // 判据 2/3 的存在性证据就是整份清单；清单不全时一条都不判（简报直接指定，比 uid.ts 的「内容类照常做」
-  // 更保守 —— 这里三类判据共用同一批候选清单，降级态只出一张卡才好读）。
-  if (ctx.truncated) {
-    return [truncatedFinding('imports', WHY_TRUNC, '文件清单被截断，本次不做 .import 一致性判定')]
-  }
-
-  const have = relSet(tree)
-  // 大小写异体闸（判据 2 最重要的一条）：Windows 文件系统不敏感，清单里只要有任意一种写法能对上，
-  // 源就还在。两张小写像各管一侧：haveLower 管「源文件在不在」，sidecarLower 管「边车在不在」。
-  const haveLower = new Set<string>()
-  const sidecarLower = new Set<string>()
+  const lower = lowerRelSet(tree)
+  // `.gdignore` 屏蔽的目录（一次收集，整条判据 3 的候选面都按它过滤）：引擎根本不扫这些目录，
+  // 于是「让编辑器重新扫描一次就会补上边车」这句建议在里头永远做不到 —— 那条 warn 没有闸门证据。
+  const ignoredDirs = gdignoredDirs(tree)
+  // 项目闸门的分母照 uid.ts 的 sidecarCount 口径：只排 .godot 生成物，addons 下的边车照样算
+  // 「这个项目写过导入元数据」的证据（B4 已裁的读法，两份工具不各自发明一遍）。
   let sidecarTotal = 0
   for (const f of tree) {
     const rel = f && typeof f.rel === 'string' ? f.rel : ''
     if (!rel) continue
-    haveLower.add(rel.toLowerCase())
-    if (isSidecar(f && f.ext, rel)) {
-      sidecarLower.add(rel.toLowerCase())
-      // 项目闸门的分母照 uid.ts:137-138 的 sidecarCount 口径：只排 .godot 生成物，addons 下的边车照样算
-      // 「这个项目写过导入元数据」的证据（B4 已裁的读法，两份工具不各自发明一遍）。
-      if (!isCache(rel)) sidecarTotal++
-    }
+    if (isSidecar(f && f.ext, rel) && !isCache(rel)) sidecarTotal++
   }
-  const hasSidecar = (rel: string): boolean =>
-    have.has(rel + IMPORT_SUFFIX) || sidecarLower.has((rel + IMPORT_SUFFIX).toLowerCase())
+  // 「这份资源有没有边车」按小写像查：`sound/A.WAV` 配 `sound/A.wav.import` 在 Windows 上就是配上了。
+  const hasSidecar = (rel: string): boolean => hasRelCI(lower, rel + IMPORT_SUFFIX)
 
-  const ex: Excl = { cache: 0, addons: 0, legacy: 0, unread: 0, noSource: 0, cacheSrc: 0 }
+  const ex: Excl = { cache: 0, addons: 0, legacy: 0, unread: 0, noSource: 0, cacheSrc: 0, ignore: 0 }
   const stale: { rel: string; src: string }[] = []
   const mismatches: { rel: string; importer: string; ext: string; exts: string[] }[] = []
   const seen = new Set<string>()
@@ -270,35 +271,37 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
     const assetRel = rel.slice(0, rel.length - IMPORT_SUFFIX.length)
     const srcRel = typeof data.sourceFile === 'string' ? resToRel(data.sourceFile) : null
 
-    // ---------- 判据 2：失效边车 ----------
-    if (srcRel === null) {
-      // 没有 source_file / 不是 res://（user://、绝对路径、越界串、裸 res://）：简报判据 2 明写
-      // 「不造成源缺失」—— 那些路径压根不在项目树的管辖范围里。
-      ex.noSource++
-    } else if (isCache(srcRel)) {
-      // 源指向 .godot 缓存：清缓存是常态（缓存体检还会主动劝人清），「查不到」此时不是边车失效的证据
-      ex.cacheSrc++
-    } else if (!have.has(srcRel) && !haveLower.has(srcRel.toLowerCase())) {
-      stale.push({ rel, src: data.sourceFile as string })
+    // ---------- 判据 2：失效边车（存在性主张 —— 截断时整条不做） ----------
+    if (!truncated) {
+      if (srcRel === null) {
+        // 没有 source_file / 不是 res://（user://、绝对路径、越界串、裸 res://）：简报判据 2 明写
+        // 「不造成源缺失」—— 那些路径压根不在项目树的管辖范围里。
+        ex.noSource++
+      } else if (isCache(srcRel)) {
+        // 源指向 .godot 缓存：清缓存是常态（缓存体检还会主动劝人清），「查不到」此时不是边车失效的证据
+        ex.cacheSrc++
+      } else if (!hasRelCI(lower, srcRel)) {
+        stale.push({ rel, src: data.sourceFile as string })
+      }
     }
 
-    // ---------- 判据 4：导入器名与扩展名对不上 ----------
+    // ---------- 判据 4：导入器名与扩展名对不上（内容主张 —— 截断时照做） ----------
     const row = typeof data.importer === 'string' && data.importer ? IMPORTER_BY_NAME.get(data.importer) : undefined
     if (row) {
       const nameExt = extOf(assetRel)
       const srcExt = srcRel === null ? null : extOf(srcRel)
       // 边车名与 source_file 给出的扩展名互相矛盾（手改/改名留下的）→ 不知道哪个是真的，不判；
-      // 表外的扩展名（png/jpg/glb…）也不判 —— 两侧都得能逐条举证（见上表的出处）。
+      // 表外的扩展名（png/jpg/glb…）也不判 —— 两侧都得能逐条举证（见 KNOWN_IMPORTERS 的出处）。
       if ((srcExt === null || srcExt === nameExt) && TABLE_EXT.has(nameExt) && !row.exts.includes(nameExt)) {
         mismatches.push({ rel, importer: row.name, ext: nameExt, exts: row.exts })
       }
     }
   }
 
-  // ---------- 判据 3：资源存在但没有边车（项目闸门 + 目录闸门） ----------
+  // ---------- 判据 3：资源存在但没有边车（项目闸门 + 目录闸门 + `.gdignore` 闸门） ----------
   const gate = sidecarTotal === 0
   const missing: { rel: string; ext: string; siblings: string[] }[] = []
-  if (!gate) {
+  if (!truncated && !gate) {
     const byDirExt = new Map<string, string[]>()
     const seenAsset = new Set<string>()
     for (const f of tree) {
@@ -306,6 +309,8 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
       const ext = f && typeof f.ext === 'string' ? f.ext : ''
       if (!rel || !TABLE_EXT.has(ext)) continue // 表外扩展名一律不判缺失（候选清单与判据 4 同一张表）
       if (isCache(rel) || isAddon(rel)) continue
+      // .gdignore 屏蔽的目录：引擎不扫，边车本来就不会有，报「缺边车」是一条永远修不了的 warn
+      if (isGdignored(ignoredDirs, rel)) { ex.ignore++; continue }
       if (seenAsset.has(rel)) continue
       seenAsset.add(rel)
       const key = `${dirOf(rel)}\u0000${ext}`
@@ -317,7 +322,7 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
       const ext = key.slice(key.indexOf('\u0000') + 1)
       for (const rel of rels) {
         if (hasSidecar(rel)) continue
-        // 目录闸门照 B4 已裁的量词读法（uid.ts:247-254）：「同目录其他同扩展名资源都有边车」才报这一个；
+        // 目录闸门照 B4 已裁的量词读法（uid.ts:267-275）：「同目录其他同扩展名资源都有边车」才报这一个；
         // 域为空（目录里就它一个同扩展名资源）时全称命题**真空成立 → 照样报**，那不是漏网。
         if (rels.some((x) => x !== rel && !hasSidecar(x))) continue
         missing.push({ rel, ext, siblings: rels.filter((x) => x !== rel).sort(byText) })
@@ -327,10 +332,12 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
 
   // ---------- 组装（类别序 + 类内 rel 码元序，逐字节确定） ----------
   const out: Finding[] = []
+  // 降级卡永远排第一：判据 4 在截断态照常出，但读它之前得先知道清单不全（裁定 3）。
+  if (truncated) out.push(truncatedFinding('imports', WHY_TRUNC, TRUNC_TITLE))
   if (stale.length) out.push(staleFinding(stale, ex))
   for (const m of mismatches.slice().sort((a, b) => byText(a.rel, b.rel))) out.push(mismatchFinding(m))
-  for (const m of missing.slice().sort((a, b) => byText(a.rel, b.rel))) out.push(missingFinding(m))
+  for (const m of missing.slice().sort((a, b) => byText(a.rel, b.rel))) out.push(missingFinding(m, ex.ignore))
   // 闸门那条永远单独出现：sidecarTotal === 0 时既没有边车可判失效/不匹配，缺失判定也被它按住
-  if (gate) out.push(gateFinding())
+  if (!truncated && gate) out.push(gateFinding())
   return out
 }

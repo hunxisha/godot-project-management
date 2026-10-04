@@ -5,7 +5,8 @@
 // (段头 `[…]`、`key="value"`、`;` 注释、`{}`/`[]` 多行块),B2 已经把这套规则连同它的边界
 // (重复键取末条、裸值原样返回、配平吃整块、引号不配对就丢)一次实现完,并在 godotIni.test.mjs 钉住。
 // 这里再写一遍,就会在 B8 那天长出两套「同一个文件读成两个样子」的规则(台账 Ruling B2 点名的分叉)。
-// 于是本文件只回答一件事:**`.import` 的哪几个键是什么**,取值一律走 getIni / getIniList。
+// 于是本文件只回答两件事:**`.import` 的哪几个键是什么**(readImportFile,取值一律走 getIni / getIniList),
+// 以及**引擎里哪些导入器名能逐条举证**(KNOWN_IMPORTERS,域数据不是判定 —— 见它自己的注释)。
 //
 // 键位照编辑器真实写出的形态核对过(Godot 4.x):
 //   · `[remap]` 段:`importer` / `type` / `uid`。同一段里还有 `path`、`validated`、`metadata={…}`,
@@ -66,3 +67,46 @@ export function readImportFile(text: string): ImportFile {
     legacy: typeof generator === 'string' && generator !== '' && !hasRemap(doc)
   }
 }
+
+/** 一行表:导入器名 + 它自己在引擎源码里声明认领的扩展名(全小写、无点) */
+export interface KnownImporter {
+  name: string
+  exts: string[]
+}
+
+/**
+ * 引擎里**能逐条举证**的那批导入器:名字 → 那个导入器自己声明的 recognized_extensions。
+ *
+ * 为什么这张表住在读数层而不是检查器里(B6 评审 Minor 4):它是「`.import` 这个域里的事实」,
+ * 不是一条判定。判据住在 `inspectors/imports.ts`;下一轮做 addons 体检的 B7 也要用同一批名字,
+ * 各留一份就是 B6 刚替 `SCENE_EXT` 收掉的那种分叉。
+ *
+ * 出处逐行读自 godotengine/godot 标签 `4.4-stable`
+ * (`https://github.com/godotengine/godot/blob/4.4-stable/<路径>`):
+ *   · `editor/import/resource_importer_wav.cpp:36` 名 / `:43-45` 名单 —— `push_back("wav")`
+ *   · `modules/vorbis/resource_importer_ogg_vorbis.cpp:44` / `:51-53` —— `ogg`
+ *   · `editor/import/resource_importer_bmfont.cpp:37` / `:44-48` —— `font`、`fnt`
+ *   · `editor/import/resource_importer_dynamic_font.cpp:40` / `:47-58` —— `ttf ttc otf otc woff woff2 pfb pfm`
+ *   · `editor/import/resource_importer_csv_translation.cpp:39` / `:46-48` —— `csv`
+ *   · `editor/import/resource_importer_shader_file.cpp:40` / `:47-49` —— `glsl`
+ *   · `editor/import/3d/resource_importer_obj.cpp:593` / `:600-602` —— `obj`
+ * 只有这七行进表:它们的名单是**各自文件里写死的 `push_back`**,能逐条举证。
+ * 故意不进表(= 表外,调用方一律「不知道,不判」):
+ *   · texture(`editor/import/resource_importer_texture.cpp:171` 名 / `:178-180` 名单)、
+ *     bitmap(`:39` / `:46-48`)、texture_atlas(`:46` / `:53-55`)、
+ *     cubemap_texture(`resource_importer_layered_texture.cpp:43-45` 名随模式变 / `:80-82`)、
+ *     font_data_image(`:37` / `:44-48`)—— 这五份的名单是 `ImageLoader::get_recognized_extensions(…)`,
+ *     而它把**已注册的图像格式 loader** 的名单并起来(`core/io/image_loader.cpp:111-115`):
+ *     png/jpg/webp 由构建时开了哪些模块决定。抄一份「png 一定是 texture」的表就是凭印象猜。
+ *   · 模块自带的其余名字(glb/gltf、svg、mp3…)本轮没有逐个取证,同样按表外处理。
+ * 所以「表外」不等于「引擎里没有」,只等于「这一行我给不出出处」—— 调用方按这个读。
+ */
+export const KNOWN_IMPORTERS: KnownImporter[] = [
+  { name: 'wav', exts: ['wav'] },
+  { name: 'oggvorbisstr', exts: ['ogg'] },
+  { name: 'font_data_bmfont', exts: ['font', 'fnt'] },
+  { name: 'font_data_dynamic', exts: ['ttf', 'ttc', 'otf', 'otc', 'woff', 'woff2', 'pfb', 'pfm'] },
+  { name: 'csv_translation', exts: ['csv'] },
+  { name: 'glsl', exts: ['glsl'] },
+  { name: 'wavefront_obj', exts: ['obj'] }
+]

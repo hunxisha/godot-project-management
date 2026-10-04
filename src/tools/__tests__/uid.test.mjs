@@ -452,6 +452,66 @@ async function main() {
   ok(!twoDirs.some((f) => f.id === 'uid:gate:no-uid'),
     '项目里有边车时不再出那条 info', ids(twoDirs))
 
+  // ---------- 4.5 Fix round 1：.gdignore 闸门 + 大小写异体边车（裁定 2 / Important 1） ----------
+  // 这两条都是 B6 评审咬到的「同一类检查两份工具各说各话」：imports 认大小写异体的边车，uid 原来不认；
+  // imports 的缺边车候选原来不看 .gdignore，uid 也一样不看 —— 而 .gdignore 目录里「重保存一次就补上」
+  // 那句建议永远做不到。helper 收进 treeUtils 后两边共用（本轮裁定 2），夹具各一份。
+  section('4.5 Fix round 1：.gdignore 闸门与大小写异体边车')
+  // ★裁定 2 的**方向**断言：改前 uid 报 1 条 false missing，改后 0 条 —— 改动只会把主张藏掉。
+  const caseGd = await T.runUid(makeCtx([
+    ['player.GD', 10], ['player.gd.uid', 10], ['other/y.gd', 10], ['other/y.gd.uid', 10]
+  ], { texts: { 'player.gd.uid': 'uid://cpc00001', 'other/y.gd.uid': 'uid://cy000001' } }).ctx)
+  ok(missingOf(caseGd).length === 0 && orphansOf(caseGd).length === 0,
+    '★单调方向：player.GD 的边车写成 player.gd.uid（Windows 上就是它那份）→ 「缺 .uid」那条被藏掉',
+    ids(caseGd))
+  const caseGdCtrl = await T.runUid(makeCtx([
+    ['player.GD', 10], ['other/y.gd', 10], ['other/y.gd.uid', 10]
+  ], { texts: { 'other/y.gd.uid': 'uid://cy000001' } }).ctx)
+  ok(ids(missingOf(caseGdCtrl)) === 'uid:missing:player.GD',
+    '★控制组:把那份异体边车拿走就立刻报缺失(上一条的静默来自大小写闸,不是工具恒不报)', ids(caseGdCtrl))
+  // 同一条闸门的另一侧：目录闸门看同伴的边车也按小写像读 —— 同伴的边车只要以任何写法存在就该放行
+  const caseSibling = await T.runUid(makeCtx([
+    ['sc/a.gd', 10], ['SC/A.GD.UID', 10], ['sc/b.gd', 10], ['keep.gd', 10], ['keep.gd.uid', 10]
+  ], { texts: { 'SC/A.GD.UID': 'uid://csc00001', 'keep.gd.uid': 'uid://ckeep001' } }).ctx)
+  ok(ids(missingOf(caseSibling)) === 'uid:missing:sc/b.gd',
+    '★闸门放行的一侧按小写像读:a.gd 的边车写成 SC/A.GD.UID 也算「有」→ b.gd 才是「别人都有、只它没有」',
+    ids(caseSibling))
+  // 孤儿判据的存在性那一半同样按小写像读（它带删除入口，报错了就是把在用的边车送走）
+  const caseOrphan = await T.runUid(makeCtx([
+    ['art/a.png', 800], ['Art/A.PNG.uid', 10]
+  ], { texts: { 'Art/A.PNG.uid': 'uid://cart0001' } }).ctx)
+  ok(orphansOf(caseOrphan).length === 0,
+    '★Art/A.PNG.uid 配的正是盘上的 art/a.png → 不是孤儿（这条带 trash 修复,方向只会少报,不会多报）',
+    ids(caseOrphan))
+  const caseOrphanCtrl = await T.runUid(makeCtx([
+    ['art/a.png', 800], ['Art/Elsewhere.PNG.uid', 10]
+  ], { texts: { 'Art/Elsewhere.PNG.uid': 'uid://cart0002' } }).ctx)
+  ok(relsOf(orphansOf(caseOrphanCtrl)[0])?.join('|') === 'Art/Elsewhere.PNG.uid',
+    '控制组:源以任何写法都查不到时照样进删除清单(上一条不是恒不报)', relsOf(orphansOf(caseOrphanCtrl)[0])?.join('|'))
+  // .gdignore：引擎按设计不扫的目录里，「重保存一次通常会补上边车」这句建议在里头永远做不到
+  const igGd = await T.runUid(makeCtx([
+    ['keep.gd', 10], ['keep.gd.uid', 10], ['vendor/.gdignore', 3], ['vendor/tool.gd', 10]
+  ], { texts: { 'keep.gd.uid': 'uid://ckeep001' } }).ctx)
+  ok(missingOf(igGd).length === 0,
+    '★.gdignore 目录里的 .gd 不判缺边车（建议无法执行 = 没有闸门证据的主张）', ids(igGd))
+  const igGdCtrl = await T.runUid(makeCtx([
+    ['keep.gd', 10], ['keep.gd.uid', 10], ['vendor/tool.gd', 10]
+  ], { texts: { 'keep.gd.uid': 'uid://ckeep001' } }).ctx)
+  ok(ids(missingOf(igGdCtrl)) === 'uid:missing:vendor/tool.gd' &&
+    /另有 1 个 \.gd 位于 \.gdignore 屏蔽的目录里/.test(missingOf(igGdCtrl)[0]?.detail || '') === false,
+    '★控制组:标记拿走就报;而排除计数只在**真的屏蔽过**的时候出现(不许凭空报 0 项)', ids(igGdCtrl))
+  const igGdCount = await T.runUid(makeCtx([
+    ['keep.gd', 10], ['keep.gd.uid', 10], ['vendor/.gdignore', 3], ['vendor/tool.gd', 10],
+    ['art/.GDIGNORE', 3], ['art/deep/x.gd', 10], ['only.gd', 10]
+  ], { texts: { 'keep.gd.uid': 'uid://ckeep001' } }).ctx)
+  ok(ids(missingOf(igGdCount)) === 'uid:missing:only.gd' &&
+    /另有 2 个 \.gd 位于 \.gdignore 屏蔽的目录里/.test(missingOf(igGdCount)[0].detail),
+    '★排除计数写进报出来的那条 detail（屏蔽了 2 个:vendor/tool.gd 与 art/deep/x.gd,含子目录与大小写异体标记）',
+    `${ids(missingOf(igGdCount))}/${missingOf(igGdCount)[0]?.detail}`)
+  ok(orphansOf(igGdCount).length === 0 && gateOf(igGdCount).length === 0,
+    '判据 3 与项目闸门不受 .gdignore 影响（孤儿看的是边车自己的源,闸门看的是「项目写过边车没有」）',
+    ids(igGdCount))
+
   // ---------- 5. 判据 5：token 合法性 ----------
   section('5. 判据 5：非法 token 当作没有声明')
   ok(T.isUidToken('uid://cscena1') && !T.isUidToken('uid://BAD') && !T.isUidToken('uid://<invalid>') &&

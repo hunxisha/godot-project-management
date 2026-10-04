@@ -22,7 +22,12 @@
 //      .gpm-test/out/tools.mjs 的 buildRefIndex + runOrphans(不走 registry)并计时 —— orphans 是第一个
 //      把 readText 吃满的工具,registry 里没有它(B5 不接线),runAll 量不到,这一段就是补上这块成本;
 //   6. (B6) 在同一份真夹具上用同一个 ctx 直测 runImports —— 它**只**读 .import 边车(不调 buildRefIndex),
-//      成本面与 5 正交:边车数量 × 单次读文本。同样给护栏;
+//      成本面与 5 正交:边车数量 × 单次读文本 × 一份完整 4.x 正文的解析。边车正文是**真形状**(含 [deps]
+//      与 [params]),并且 1/10 的 source_file 指向已不存在的名字,于是失效分类、聚合 rels 排序、二十行
+//      detail 模板都被计时(Fix round 1 Important 2 咬的就是上一轮那份 27 字节存根:findings=0,判定路径
+//      一次没走)。png/gd/tscn 全在 KNOWN_IMPORTERS 的**表外**,不匹配与缺边车两条模板在这份配比里打不到,
+//      所以在 B5 计时之后另补 200 份 `.ogg` 边车(importer 写 wav → 不匹配)与 60 份无边车的 `.ttf`
+//      (目录里唯一 → 缺边车),重扫后再跑一趟**全判据**计时。两段各给护栏;
 //   无论成败最后删除整个临时目录并**核实它没了**(残留 = harness 自己 FAIL)。
 //
 // 诚实边界(不冒充):测的是 Node 侧调度器 + JS 宿主原语的耗时,不是浏览器绘制耗时,
@@ -74,16 +79,19 @@ function counts(n) {
   return { png, gd, tscn, stex }
 }
 
+let TOUCHED = 0
+/** 往夹具根里写一个真文件(建夹具与 B6 的补路批次共用同一份落盘口径,顺便统一计数) */
+function touch(rel, content) {
+  const abs = path.join(WORK, ...rel.split('/'))
+  fs.mkdirSync(path.dirname(abs), { recursive: true })
+  fs.writeFileSync(abs, content)
+  TOUCHED++
+}
+
 function buildFixture() {
   const c = counts(N)
   const PNG_BUF = Buffer.from('89504e470d0a1a0a-stub'.repeat(24), 'hex')
-  let written = 0
-  const touch = (rel, buf) => {
-    const abs = path.join(WORK, ...rel.split('/'))
-    fs.mkdirSync(path.dirname(abs), { recursive: true })
-    fs.writeFileSync(abs, buf)
-    written++
-  }
+  TOUCHED = 0
   touch('project.godot', '[application]\nconfig/name="Perf"\n')
   // 与报告夹具同形态:assets/tex*/img*.png(100 张一组)
   for (let i = 0; i < c.png; i++) touch(`assets/tex${Math.floor(i / 100)}/img${i % 100}.png`, PNG_BUF)
@@ -94,7 +102,7 @@ function buildFixture() {
     touch(`scene/main_${i}.tscn`, `[ext_resource type="Texture2D" path="res://${ref}" id="1_a"]\n[node name="R" type="Node2D"]\n`)
   }
   for (let i = 0; i < c.stex; i++) touch(`.godot/imported/i${i}.stex`, PNG_BUF)
-  return { total: written, c }
+  return { total: TOUCHED, c }
 }
 
 /** 数一遍盘上条目(含 .godot),钉住「N 个真实文件」不是嘴说的 */
@@ -155,13 +163,63 @@ try {
   // 用真实宿主原语**直接**调 buildRefIndex 与 runOrphans,分别计时。
   const TOOLS_BUNDLE = path.resolve(ROOT, '.gpm-test/out/tools.mjs')
   if (!fs.existsSync(TOOLS_BUNDLE)) throw new Error(`找不到打包产物: ${TOOLS_BUNDLE}(build-bundle.mjs 应产出 tools.mjs)`)
-  const SIDE_BUF = Buffer.from('[remap]\nimporter="texture"\n')
-  for (let i = 0; i < fc.png; i++) {
-    const rel = `assets/tex${Math.floor(i / 100)}/img${i % 100}.png.import`
-    const abs = path.join(WORK, ...rel.split('/'))
-    fs.mkdirSync(path.dirname(abs), { recursive: true })
-    fs.writeFileSync(abs, SIDE_BUF)
+  // ⚠ 边车正文必须是**完整 4.x 形状**(B6 评审 Fix round 1 Important 2:上一轮这里是一条 27 字节的存根,
+  // 没有 [deps] ⇒ 每份都落进 noSource 分支,findings=0/staleRels=0,于是失效清单的构建、聚合 detail 的
+  // 二十行模板、不匹配那条判定**一次都没被计时**,而 parse 成本被低估了一个量级)。
+  // 这里照编辑器真实写出的段落排:[remap](importer/type/uid/path/metadata)+[deps](source_file/dest_files)
+  // +[params](真实选项块)。type 与 params 按导入器分形,否则「一份正文打天下」本身就是不真实。
+  const PARAMS = {
+    texture: [
+      'compress/mode=0', 'compress/high_quality=false', 'compress/lossy_quality=0.7',
+      'compress/hdr_compression=1', 'compress/normal_map=0', 'channel_pack/repack=false',
+      'mipmaps/generate=false', 'mipmaps/limit=-1', 'process/fix_alpha_border=true',
+      'process/premult_alpha=false', 'process/normal_map_invert_y=false', 'process/hdr_as_srgb=false',
+      'process/hdr_clamp_exposure=false', 'process/size_limit=0', 'detect_3d/compress_to=1'
+    ],
+    wav: [
+      'force_max/{sample_rate}=0', 'compress/mode=0', 'compress/multiple_of_zero=1',
+      'edit/normalize=false', 'edit/loop_mode=0', 'edit/loop_begin=0', 'edit/loop_end=-1',
+      'edit/loop_use_default=false', 'threshold/peak_denoise_db=0.0', 'threshold/silence_start_db=0.0'
+    ],
+    font_data_dynamic: [
+      'antialiasing=1', 'generate_mipmaps=false', 'multichannel_signed_distance_field=false',
+      'force_system_hint=0', 'rendering_mode=0', 'size=16', 'oversampling=6.0', 'fallbacks=[]'
+    ]
   }
+  const sidecarBody = (sourceRel, importer = 'texture', type = 'CompressedTexture2D', dest = 'x-3f2a1b.ctex') => [
+    '[remap]',
+    '',
+    `importer="${importer}"`,
+    `type="${type}"`,
+    'uid="uid://bh8y2vkq1n2f4"',
+    `path="res://.godot/imported/${dest}"`,
+    'metadata={',
+    '"vram_texture": false',
+    '}',
+    '',
+    '[deps]',
+    '',
+    `source_file="${sourceRel}"`,
+    `dest_files=["res://.godot/imported/${dest}"]`,
+    '',
+    '[params]',
+    '',
+    ...(PARAMS[importer] || PARAMS.texture)
+  ].join('\n')
+  let staleSide = 0
+  for (let i = 0; i < fc.png; i++) {
+    const dir = `assets/tex${Math.floor(i / 100)}`
+    const rel = `${dir}/img${i % 100}.png`
+    // 每 10 份里挑 1 份把 source_file 指向一个**不存在**的名字:这就是「删了源没删边车」的真实残留形状,
+    // 让 runImports 真的走一遍失效分类 + 聚合 rels 排序 + 二十行 detail 模板(而不是全部落进 noSource)。
+    const gone = i % 10 === 3
+    if (gone) staleSide++
+    const abs = path.join(WORK, ...`${rel}.import`.split('/'))
+    fs.mkdirSync(path.dirname(abs), { recursive: true })
+    fs.writeFileSync(abs, sidecarBody(gone ? `res://${dir}/gone${i}.png` : `res://${rel}`))
+  }
+  const sidecarBytes = Buffer.byteLength(sidecarBody('res://x'))
+  console.log(`[imports 夹具] sidecarBodyBytes=${sidecarBytes} staleSidecars=${staleSide}`)
   const TB = await import(pathToFileURL(TOOLS_BUNDLE).href)
   const scan2 = F.scanProjectTree(DOC._id, { includeCache: true })
   if (!scan2.ok) throw new Error(`孤儿夹具重扫失败: ${scan2.error}`)
@@ -204,13 +262,57 @@ try {
   const importsMs = performance.now() - im0
   const staleAgg = importFindings.find((f) => f.id === 'imports:stale:all')
   const staleRels = staleAgg && staleAgg.fix && staleAgg.fix.payload ? staleAgg.fix.payload.rels.length : 0
-  console.log(`[imports 直测] sidecars=${fc.png} findings=${importFindings.length} staleRels=${staleRels}`)
+  console.log(`[imports 直测] 与 B5 同一棵树: entries=${orphanCtx.tree.length} sidecars=${fc.png} ` +
+    `bodyBytes=${sidecarBytes} findings=${importFindings.length} staleRels=${staleRels}`)
   console.log(`[imports 直测] runImportsMs=${importsMs.toFixed(1)}`)
   // 同样是护栏而不是 §7 的 <10s 验收(那条要等 B10 在真宿主、含 LRU 与全局调度时量)。
   const GUARD_IMPORTS_MS = 30000
   const importsGuard = importsMs <= GUARD_IMPORTS_MS
   console.log(`[imports 直测] guard=${GUARD_IMPORTS_MS}ms(护栏) verdict=${importsGuard ? 'PASS' : 'FAIL'}`)
   if (!importsGuard) exitCode = 1
+
+  // ---------- B6 之二:把 png 打不到的两条判定路径也计上时(评审 Fix round 1 Important 2) ----------
+  // 上面那一趟虽然读的是完整正文,但 Task-16 的配比只有 png/gd/tscn —— 全是 KNOWN_IMPORTERS **表外**扩展名,
+  // 于是「导入器不匹配」与「缺 .import 边车」两条模板一次都没被构造(表外扩展名既不报不匹配也不报缺失,
+  // 这是判据本身的收窄,不是夹具的疏漏)。所以这里在 B5 已经测完之后,再补两小批真文件:
+  //   · assets/mis/*.ogg + 自称 importer="wav" 的边车 → 200 条不匹配结论(逐条一张卡,模板最贵的那条);
+  //   · assets/solo{k}/f.ttf(表内扩展名、目录里唯一、没有边车)→ 60 条缺边车结论(空集真空那条分支)。
+  // 补在 B5 之后是刻意的:B5 那两个数仍落在与上一轮**同一份**树上,可直接对比(本轮的断言是
+  // 「正文变长不许动 orphans 的计时」,refIndex.ts:121-128 把 .import 排除在来源之外、runOrphans 只看 ext)。
+  const MIS = 200
+  const SOLO = 60
+  for (let i = 0; i < MIS; i++) {
+    const rel = `assets/mis/e${i}.ogg`
+    touch(rel, Buffer.from('OggSfake-stub'.repeat(40)))
+    touch(`${rel}.import`, sidecarBody(`res://${rel}`, 'wav', 'AudioStreamWAV', `e${i}-9f8e7d.oggvorbisstr`))
+  }
+  for (let k = 0; k < SOLO; k++) touch(`assets/solo/s${k}/f.ttf`, Buffer.from('OTTOfake-stub'.repeat(30)))
+  const scan3 = F.scanProjectTree(DOC._id, { includeCache: true })
+  if (!scan3.ok) throw new Error(`全判据路径夹具重扫失败: ${scan3.error}`)
+  const allCtx = {
+    projectId: DOC._id, root: WORK, tree: scan3.files, truncated: scan3.truncated === true,
+    readText: async (rel) => {
+      const rr = F.readProjectText(DOC._id, rel)
+      return rr.ok && typeof rr.text === 'string' ? { text: rr.text } : { skipped: true }
+    }
+  }
+  const ia0 = performance.now()
+  const allFindings = await TB.runImports(allCtx)
+  const allMs = performance.now() - ia0
+  const allStale = allFindings.find((f) => f.id === 'imports:stale:all')
+  const allStaleRels = allStale && allStale.fix && allStale.fix.payload ? allStale.fix.payload.rels.length : 0
+  const mmCount = allFindings.filter((f) => f.id.startsWith('imports:mismatch:')).length
+  const missCount = allFindings.filter((f) => f.id.startsWith('imports:missing:')).length
+  console.log(`[imports 全判据] entries=${allCtx.tree.length} sidecars=${fc.png + MIS} staleRels=${allStaleRels} ` +
+    `mismatchFindings=${mmCount} missingFindings=${missCount} findings=${allFindings.length}`)
+  console.log(`[imports 全判据] runImportsMs=${allMs.toFixed(1)}`)
+  const allGuard = allMs <= GUARD_IMPORTS_MS
+  console.log(`[imports 全判据] guard=${GUARD_IMPORTS_MS}ms(护栏) verdict=${allGuard ? 'PASS' : 'FAIL'}`)
+  if (!allGuard) exitCode = 1
+  if (mmCount !== MIS || missCount !== SOLO) {
+    console.error(`[imports 全判据] 判定路径没被踩到:mismatch=${mmCount}(want ${MIS}) missing=${missCount}(want ${SOLO})`)
+    exitCode = 1
+  }
 } catch (e) {
   console.error(`perf harness 抛错: ${e && e.stack ? e.stack : e}`)
   exitCode = 1

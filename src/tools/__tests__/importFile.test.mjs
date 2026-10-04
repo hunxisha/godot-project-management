@@ -193,6 +193,39 @@ async function main() {
     'CRLF 换行的边车照样读(B2 按 /\\r?\\n/ 切行)', `${crlf.importer}/${crlf.sourceFile}`)
   const bom = T.readImportFile('﻿[deps]\nsource_file="res://a.png"\n')
   ok(bom.sourceFile === 'res://a.png', 'BOM 开头的文件不脏第一个段头(trim 归 B2)', bom.sourceFile)
+
+  // ---------- 5. KNOWN_IMPORTERS（B6 Fix round 1 Minor 4：表从 imports.ts 搬进读数层）----------
+  // 为什么搬:它是「`.import` 这个域里的事实」而不是判定 —— 留在检查器里,B7 做 addons 体检时就会
+  // 再抄一份第二表(本轮刚替 SCENE_EXT 收掉同一种分叉)。搬过来之后这里必须能钉住它的形状与内容,
+  // 否则「谁都能改一行就走掉一条判据」。
+  section('5. KNOWN_IMPORTERS 域数据表')
+  ok(Array.isArray(T.KNOWN_IMPORTERS) && T.KNOWN_IMPORTERS.length === 7,
+    '★表已进 barrel 且只有 7 行(每行都要能逐条举证;加行等于加一份未取证的印象)',
+    T.KNOWN_IMPORTERS && T.KNOWN_IMPORTERS.length)
+  ok(T.KNOWN_IMPORTERS.every((r) => r && typeof r.name === 'string' && r.name &&
+    Array.isArray(r.exts) && r.exts.length > 0),
+    '每行都有 importer 名与非空扩展名清单', JSON.stringify(T.KNOWN_IMPORTERS.filter((r) => !r.exts || !r.exts.length)))
+  ok(T.KNOWN_IMPORTERS.every((r) => r.exts.every((e) => e === e.toLowerCase() && !e.startsWith('.') && e)),
+    '清单里的小写与无点约定(与 TreeEntry.ext 同形,不然 TABLE_EXT.has(f.ext) 永远对不上)',
+    T.KNOWN_IMPORTERS.flatMap((r) => r.exts).filter((e) => e !== e.toLowerCase() || !e || e.startsWith('.')).join('|'))
+  ok(new Set(T.KNOWN_IMPORTERS.map((r) => r.name)).size === T.KNOWN_IMPORTERS.length,
+    'importer 名不重复(重名会让 Map 吞掉一行而判据静默失效)',
+    T.KNOWN_IMPORTERS.map((r) => r.name).join('|'))
+  // 名单**按导入器自己声明的**为准,不是按「常识里 png 归 texture」:图像家族整批不在表内。
+  // 钉的是**完整并集**而不是「包含 wav/ogg/ttf/obj」—— 只点四条的话,把某一行裁成第一个扩展名
+  // (font/fnt 少一半、ttf…pfm 只剩 ttf)照样绿,而表窄一半就意味着判据 3 的候选面悄悄缩水。
+  const ALL_EXT = [...new Set(T.KNOWN_IMPORTERS.flatMap((r) => r.exts))].sort()
+  ok(ALL_EXT.join(',') === 'csv,fnt,font,glsl,obj,ogg,otc,otf,pfb,pfm,ttc,ttf,wav,woff,woff2',
+    '★表内可扩展名就是这 15 个(逐行取自引擎自己声明的名单;少一个就是判据 3/4 的覆盖面缩一格)', ALL_EXT.join(','))
+  ok(!ALL_EXT.includes('png') && !ALL_EXT.includes('jpg') && !ALL_EXT.includes('webp') &&
+    !ALL_EXT.includes('glb') && !ALL_EXT.includes('gltf') && !ALL_EXT.includes('svg'),
+    '★png/jpg/webp/glb/gltf/svg 全都不在表内(图像名单由运行时注册的格式模块决定,给不出逐行出处)',
+    ALL_EXT.join('|'))
+  ok(T.KNOWN_IMPORTERS.every((r) => r.name !== 'texture' && r.name !== 'bitmap' && r.name !== 'layered_texture'),
+    'texture/bitmap/layered_texture 这些「名字听着确定」的导入器也不在表内(它们的名单同样是 ImageLoader 拼出来的)',
+    T.KNOWN_IMPORTERS.map((r) => r.name).join('|'))
+  ok(ALL_EXT.includes('wav') && ALL_EXT.includes('ogg') && ALL_EXT.includes('ttf') && ALL_EXT.includes('obj'),
+    '在表内的七行照样点名(wav/ogg/ttf/obj —— 判据 3 的候选面与判据 4 的表就是这一批)', ALL_EXT.join('|'))
 }
 
 main().catch((e) => {

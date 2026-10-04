@@ -276,7 +276,7 @@ async function main() {
     ['.godot/gen/x.wav', 10], ['keep/a.wav', 10], ['keep/a.wav.import', 10]
   ], { texts: { 'keep/a.wav.import': imp('res://keep/a.wav', 'wav') } }).ctx)
   ok(missingOf(cacheAsset).length === 0, '判据 3：.godot 下的资源不判缺边车(生成物)', ids(cacheAsset))
-  // 项目闸门的分母**含** addons 下的边车(照 uid.ts:136-145 的 sidecarCount 口径):那批边车同样是
+  // 项目闸门的分母**含** addons 下的边车(照 uid.ts:155-156 的 sidecarCount 口径):那批边车同样是
   // 「这个项目写过导入元数据」的证据。两份工具在同一个量词上不许各说各话。
   const addonGate = await T.runImports(makeCtx([
     ['addons/foo/icon.png.import', 10], ['sound/a.wav', 10]
@@ -284,21 +284,52 @@ async function main() {
   ok(gateOf(addonGate).length === 0 && ids(missingOf(addonGate)) === 'imports:missing:sound/a.wav',
     '★判据 3：只有 addons 下有边车时项目闸门**不**成立(addons 的边车照样算证据,与 B4 同一读法)', ids(addonGate))
 
-  // ---------- 3. 降级闸门：ctx.truncated 一条都不判 ----------
+  // ---------- 3. 降级闸门：截断作废「存在性主张」，不作废「内容派生主张」 ----------
+  // 控制方 2026-10-05 裁定 3 覆盖简报判据 2 那句字面的「一条都不判」：
+  //   stale / missing / 项目闸门三条的证据都是「整份清单里查不到」→ 清单不全时作废；
+  //   判据 4 的证据是**一份读得到的边车自己**的 [remap] importer 对它自己的文件名，且不带 fix → 照常判，
+  //   与 uid.ts 在截断时保留「重复 uid」同一读法（uid.test.mjs:351 那条）。
+  // 改前这三条钉的是「截断 → 只有一张卡、一个文件都不读」；改后钉的是「截断 → 只读边车、
+  // 出降级卡 + 不匹配，不出 stale/missing/gate」—— 覆盖面更窄的旧断言其实**没在管**判据 4 在降级态的行为，
+  // 新断言把两条主张的分界与降级卡的排序一起钉住，并把「一条都不出」换成「该出的必须出、不该出的不许出」。
   section('3. 降级闸门：ctx.truncated')
   const TRUNC_SPECS = [
-    ['art/gone.png.import', 100], ['sound/b.wav', 10], ['fonts/z.ttf', 10]
+    ['art/gone.png.import', 100],                          // 源不在清单里：stale 主张（截断时作废）
+    ['sound/x.ogg', 10], ['sound/x.ogg.import', 10],        // importer="wav" 配 .ogg：不匹配主张（截断时照出）
+    ['fonts/z.ttf', 10],                                    // 表内资源没边车：missing 主张（截断时作废）
+    ['scripts/player.gd', 10]
   ]
-  const truncCtx = makeCtx(TRUNC_SPECS, { trunc: true, texts: { 'art/gone.png.import': imp('res://art/gone.png') } })
+  const TRUNC_TEXTS = {
+    'art/gone.png.import': imp('res://art/gone.png'),
+    'sound/x.ogg.import': imp('res://sound/x.ogg', 'wav')
+  }
+  const truncCtx = makeCtx(TRUNC_SPECS, { trunc: true, texts: TRUNC_TEXTS })
   const t1 = await T.runImports(truncCtx.ctx)
-  ok(t1.length === 1 && truncOf(t1).length === 1 && truncOf(t1)[0].severity === 'warn',
-    'ctx.truncated → 只有一条降级结论(三类判据一条都不出)', ids(t1))
+  ok(t1.length === 2 && truncOf(t1).length === 1 && t1[0].id === 'imports:truncated' &&
+    t1[0].severity === 'warn',
+    '★ctx.truncated → 降级卡排第一，后面只跟内容派生的不匹配（存在性两条整条按住）', ids(t1))
   ok(truncOf(t1)[0] && /截断/.test(truncOf(t1)[0].title) && truncOf(t1)[0].detail.includes('maxEntries'),
     '降级结论说清「为什么没做」并给安全动作', `${truncOf(t1)[0]?.title}/${truncOf(t1)[0]?.detail}`)
-  ok(!truncOf(t1)[0]?.fix && staleOf(t1).length === 0 && missingOf(t1).length === 0 &&
-    mismatchOf(t1).length === 0 && gateOf(t1).length === 0,
-    '★降级态不许有删除入口,也不许有缺失/不匹配/闸门结论', ids(t1))
-  ok(truncCtx.calls.length === 0, '成本红线:截断时一个文件都不读', truncCtx.calls.length)
+  ok(truncOf(t1)[0] && /导入器|不匹配/.test(truncOf(t1)[0].title) && /照常/.test(truncOf(t1)[0].detail),
+    '★降级卡要如实交代「哪几条没做、哪一条照做了」，不许说成「本次不做 .import 一致性判定」',
+    truncOf(t1)[0]?.title)
+  ok(!truncOf(t1)[0]?.fix && staleOf(t1).length === 0 && missingOf(t1).length === 0 && gateOf(t1).length === 0,
+    '★降级态不许有删除入口，也不许有失效/缺失/闸门三条存在性主张', ids(t1))
+  ok(mismatchOf(t1).length === 1 && mismatchOf(t1)[0].id === 'imports:mismatch:sound/x.ogg.import' &&
+    !mismatchOf(t1)[0].fix,
+    '判据 4 在降级态照常出，且仍然不带 fix（这条主张不吃清单完整性）', ids(mismatchOf(t1)))
+  ok([...new Set(truncCtx.calls)].sort().join('|') === ['art/gone.png.import', 'sound/x.ogg.import'].sort().join('|'),
+    '★成本口径改了：截断时**只读边车**（判据 4 要读），.ogg/.ttf/.gd 这些资源本身依旧一个字不读',
+    truncCtx.calls.join('|'))
+  ok(!truncCtx.calls.some((r) => !r.toLowerCase().endsWith('.import')),
+    '成本红线在降级态同样成立：calls 里没有非边车 rel ⇒ 依旧没调 buildRefIndex', truncCtx.calls.join('|'))
+  const t1Full = await T.runImports(makeCtx(TRUNC_SPECS, { texts: TRUNC_TEXTS }).ctx)
+  ok(staleOf(t1Full).length === 1 && missingOf(t1Full).length === 1 && mismatchOf(t1Full).length === 1,
+    '★同一份夹具不截断时三条都出(证明上面 stale/missing 的缺席来自闸门，不是夹具本来就产不出)',
+    ids(t1Full))
+  const truncGate = await T.runImports(makeCtx([['sound/a.wav', 10], ['fonts/b.ttf', 10]], { trunc: true }).ctx)
+  ok(gateOf(truncGate).length === 0 && truncGate.length === 1 && truncOf(truncGate).length === 1,
+    '项目闸门那条也算存在性断言：截断时「一个边车都没有」不许按字面断言，只留降级卡', ids(truncGate))
 
   // ---------- 4. 判据 3：资源存在但没有 .import ----------
   section('4. 判据 3：缺边车与两道闸门')
@@ -344,6 +375,13 @@ async function main() {
   ok(missingOf(lone)[0] && /唯一/.test(missingOf(lone)[0].detail) &&
     !missingOf(lone)[0].detail.includes('fonts/z.ttf'),
     '空同级时的 detail 不假称有参照,也不把别的目录的文件说成同级', missingOf(lone)[0]?.detail)
+  // 评审 Minor 1：旧文案写「项目里存在 .import 边车，说明**它**在编辑器里被扫过」—— 那是拿**项目级**证据
+  // 下一个**单文件**的结论(边车在别的目录,凭什么说这个文件被扫过?)。新文案只能说到项目级为止。
+  ok(missingOf(lone)[0] && /别处存在 \.import 边车/.test(missingOf(lone)[0].detail) &&
+    /说明这个项目|说明这个项目的编辑器导入流程/.test(missingOf(lone)[0].detail) &&
+    !/说明它在编辑器里被扫过|说明它被扫过/.test(missingOf(lone)[0].detail),
+    '★判据 3 的推断强度不许超过证据：项目级边车只证明「这个项目的导入流程是通的」,不证明「这个文件被扫过」',
+    missingOf(lone)[0]?.detail)
   const rootLone = await T.runImports(makeCtx([
     ['root.wav', 10], ['fonts/z.ttf', 10], ['fonts/z.ttf.import', 10]
   ], { texts: { 'fonts/z.ttf.import': imp('res://fonts/z.ttf', 'font_data_dynamic') } }).ctx)
@@ -412,6 +450,96 @@ async function main() {
   ], { texts: { 'sound/a.wav.import': LEGACY, 'keep/z.ttf.import': imp('res://keep/z.ttf', 'font_data_dynamic') } }).ctx)
   ok(missingOf(hasSide).length === 0, '判据 3：有边车(哪怕是 Godot 3 老形态)就不报缺失', ids(hasSide))
 
+  // ---------- 4.5 `.gdignore` 目录闸门（Fix round 1 / Important 1）----------
+  // 评审咬到的那一条：候选循环只看 isCache/isAddon，于是**被 .gdignore 屏蔽的目录**里孤零零一个
+  // .ogg/.wav/.ttf 会穿过「同目录其他都有」的空集真空，报出一条 warn，而它的建议
+  // （「让编辑器重新扫描一次通常会补上边车」）在这种目录里**永远做不到** —— 引擎按设计不扫这里。
+  // 那就是一条没有闸门证据的 missing 主张，正好踩在本工具的校准线上，所以整条不判并计数。
+  // 标记的真实形状：点文件，ext 为空串（tools.test.mjs:107 已钉住它与 LICENSE 同组）。
+  section('4.5 .gdignore 屏蔽的目录整体不判缺失')
+  const IG_BASE = [['keep/a.wav', 10], ['keep/a.wav.import', 10]]
+  const IG_TEXTS = { 'keep/a.wav.import': imp('res://keep/a.wav', 'wav') }
+  const igLone = await T.runImports(makeCtx([
+    ...IG_BASE, ['art/.gdignore', 3], ['art/solo.ogg', 10]
+  ], { texts: IG_TEXTS }).ctx)
+  ok(missingOf(igLone).length === 0,
+    '★被 .gdignore 屏蔽的目录里唯一的 .ogg → 一条不报（建议「让编辑器重扫」在这儿永远做不到）',
+    ids(igLone))
+  const igLoneCtrl = await T.runImports(makeCtx([
+    ...IG_BASE, ['art/solo.ogg', 10]
+  ], { texts: IG_TEXTS }).ctx)
+  ok(ids(missingOf(igLoneCtrl)) === 'imports:missing:art/solo.ogg',
+    '★控制组:把 .gdignore 拿走就立刻报缺失(上一条的静默确实来自这道闸,不是恒不报)', ids(missingOf(igLoneCtrl)))
+  const igDeep = await T.runImports(makeCtx([
+    ...IG_BASE, ['art/.gdignore', 3], ['art/sub/deep/b.ttf', 10]
+  ], { texts: IG_TEXTS }).ctx)
+  ok(missingOf(igDeep).length === 0, '判据 3：标记只在本目录生效,但**连子目录一起**屏蔽（art/ → art/sub/deep/）', ids(igDeep))
+  const igBoundary = await T.runImports(makeCtx([
+    ...IG_BASE, ['art/.gdignore', 3], ['arts/x.ogg', 10], ['art2/y.ogg', 10]
+  ], { texts: IG_TEXTS }).ctx)
+  ok(ids(missingOf(igBoundary)) === 'imports:missing:art2/y.ogg|imports:missing:arts/x.ogg',
+    '★前缀边界:按**路径段**比,不是字符串前缀 —— art/ 的标记不许把 arts/、art2/ 一起藏掉(段界漏判会静默吞掉整个项目)',
+    ids(missingOf(igBoundary)))
+  const igRoot = await T.runImports(makeCtx([
+    ...IG_BASE, ['.gdignore', 3], ['sound/z.wav', 10]
+  ], { texts: IG_TEXTS }).ctx)
+  ok(missingOf(igRoot).length === 0 && gateOf(igRoot).length === 0,
+    '判据 3：根目录的 .gdignore 屏蔽整棵树 → 缺失一条不报（项目闸门是另一回事,照旧不算成立）', ids(igRoot))
+  const igAnyCase = await T.runImports(makeCtx([
+    ...IG_BASE, ['Art/.GDIGNORE', 3], ['art/upper.ogg', 10]
+  ], { texts: IG_TEXTS }).ctx)
+  ok(missingOf(igAnyCase).length === 0,
+    '判据 3：标记名与目录名的大小写异体照样挡（Windows 不敏感;这一侧只会多藏主张,不会多造主张）', ids(igAnyCase))
+  // 计数要看得见（B5 立下的口径）：与其余默认排除同一个渠道 —— 聚合 stale 的那句「默认排除、不判定的」
+  const igCount = await T.runImports(makeCtx([
+    ...IG_BASE,
+    ['art/.gdignore', 3], ['art/a.ogg', 10], ['art/sub/b.ttf', 10],
+    ['gone/c.wav.import', 10]
+  ], { texts: { ...IG_TEXTS, 'gone/c.wav.import': imp('res://gone/c.wav', 'wav') } }).ctx)
+  ok(/\.gdignore 目录内的候选资源 2 项/.test(staleOf(igCount)[0]?.detail || ''),
+    '★排除计数写进聚合 detail：藏起来的主张要说清藏了多少个候选（与 .godot/addons 同一渠道）',
+    staleOf(igCount)[0]?.detail)
+  ok(/覆盖面：这条按边车内容判[\s\S]*而「资源缺 \.import 边车」那条只认/.test(staleOf(igCount)[0]?.detail || ''),
+    '★唯一可执行的卡片要自带覆盖面半句：失效判定不看扩展名，缺边车判定只看表内扩展名（评审 Minor 3）',
+    staleOf(igCount)[0]?.detail)
+  const igCountMissing = await T.runImports(makeCtx([
+    ...IG_BASE, ['art/.gdignore', 3], ['art/a.ogg', 10], ['only/z.wav', 10]
+  ], { texts: IG_TEXTS }).ctx)
+  ok(ids(missingOf(igCountMissing)) === 'imports:missing:only/z.wav' &&
+    /另有 1 个同类资源位于 \.gdignore 屏蔽的目录里/.test(missingOf(igCountMissing)[0].detail),
+    '判据 3 的 detail 也要说清藏了多少（藏起来的主张在**报出来的那条**上留痕，不只留在聚合卡里）',
+    `${ids(missingOf(igCountMissing))}/${missingOf(igCountMissing)[0]?.detail}`)
+  ok(!/另有 [0-9]+ 个同类资源位于 \.gdignore/.test(missingOf(igLoneCtrl)[0]?.detail || ''),
+    '控制组：没有 .gdignore 被屏蔽时那句计数不出现（不许凭空报一个 0 项的排除）', missingOf(igLoneCtrl)[0]?.detail)
+
+
+  const igSidecar = await T.runImports(makeCtx([
+    ...IG_BASE, ['art/.gdignore', 3], ['art/a.ogg', 10], ['art/a.ogg.import', 10]
+  ], { texts: { ...IG_TEXTS, 'art/a.ogg.import': imp('res://art/gone.ogg', 'oggvorbisstr') } }).ctx)
+  ok(staleOf(igSidecar).length === 1 && mismatchOf(igSidecar).length === 0 &&
+    ids(missingOf(igSidecar)) === '',
+    '判据 3 与 2/4 的分工：.gdignore 只关掉「缺边车」这一条主张；边车自己的内容与存在性无关的判定照常做',
+    ids(igSidecar))
+
+  // ---------- 4.6 大小写异体的边车查表走同一份工具函数（Fix round 1 / 裁定 2）----------
+  section('4.6 边车存在性的大小写读法（共享 lowerRelSet/hasRelCI）')
+  const ciSubject = await T.runImports(makeCtx([
+    ['sound/A.WAV', 10], ['sound/A.wav.import', 10], ['sound/b.wav', 10], ['sound/b.wav.import', 10]
+  ], {
+    texts: {
+      'sound/A.wav.import': imp('res://sound/A.WAV', 'wav'), 'sound/b.wav.import': imp('res://sound/b.wav', 'wav')
+    }
+  }).ctx)
+  ok(missingOf(ciSubject).length === 0,
+    '★单调方向：主体大小写异体命中 → 主张被**藏掉**（改前 1 条、改后 0 条,这条改动只可能少报）', ids(ciSubject))
+  const ciDirGate = await T.runImports(makeCtx([
+    ['sound/a.wav', 10], ['sound/A.WAV.import', 10], ['sound/b.wav', 10]
+  ], { texts: { 'sound/A.WAV.import': imp('res://sound/a.wav', 'wav') } }).ctx)
+  ok(ids(missingOf(ciDirGate)) === 'imports:missing:sound/b.wav',
+    '★闸门那一侧的大小写读法是**解除抑制**（与主体那侧方向相反）:a.wav 的边车写成 A.WAV.import 照样算「有」,' +
+    '于是 b.wav（任何写法都没有边车）被报出来 —— 这条主张是真的,不是多报',
+    ids(ciDirGate))
+
   // ---------- 5. 判据 4：导入器与扩展名不匹配 ----------
   section('5. 判据 4：导入器与扩展名对不上')
   const mm = await T.runImports(makeCtx([
@@ -432,6 +560,14 @@ async function main() {
     '判据 4：detail 同时给出边车里的 importer、该导入器声明的扩展名与实际扩展名', mismatchOf(mm)[0]?.detail)
   ok(mismatchOf(mm)[0] && mismatchOf(mm)[0].rel === 'sound/x.wav.import',
     '判据 4：rel 指向那份边车本身(卡片跳到能打开的文件)', mismatchOf(mm)[0]?.rel)
+  // 评审 Minor 2：旧 COVERAGE 把 glb/gltf/svg 也说成「名单由引擎运行时注册的格式模块决定」—— 那是替
+  // 本轮没取证的事实编理由（它们其实有写死的名单，只是我没逐个核对）。新措辞只说「表外的其余导入器一律不判」，
+  // 并把**图像类**与**未取证的那些**分开讲。
+  ok(mismatchOf(mm)[0] && /表外的其余导入器（含 png\/jpg\/webp 等图像类，以及本轮未逐个取证的 glb\/gltf\/svg）一律不判/.test(mismatchOf(mm)[0].detail),
+    '★覆盖面声明不再替未取证的格式编理由(glb/gltf/svg 归「本轮未逐个取证」,不归「运行时注册决定」)',
+    mismatchOf(mm)[0]?.detail)
+  ok(mismatchOf(mm)[0] && !/图像与场景类（png\/jpg\/webp\/glb\/gltf…）的名单由引擎运行时注册的格式模块决定/.test(mismatchOf(mm)[0].detail),
+    '★旧的过度声明措辞必须已经消失(留着它就是把没取证的说成取过证)', mismatchOf(mm)[0]?.detail)
   // 表外 importer 一律不判
   const tableOutImp = await T.runImports(makeCtx([
     ['sound/a.wav', 10], ['sound/a.wav.import', 10]
@@ -460,6 +596,22 @@ async function main() {
   }).ctx)
   ok(mismatchOf(conflict).length === 0,
     '判据 4：边车名说 .wav、source_file 说 .ogg → 两个证据互相打不开,不判(不替用户挑一个)', ids(conflict))
+  // 表里**每行的第二个及以后的扩展名**也得进判定面（变异 IM5 把表读窄成「每行只取第一个」时，这两条会红）
+  const tailExt = await T.runImports(makeCtx([
+    ['fonts/a.fnt', 10], ['fonts/b.fnt', 10], ['fonts/b.fnt.import', 10],
+    ['fonts/c.woff', 10], ['fonts/c.woff.import', 10], ['keep/z.wav', 10], ['keep/z.wav.import', 10]
+  ], {
+    texts: {
+      'fonts/b.fnt.import': imp('res://fonts/b.fnt', 'font_data_bmfont'),
+      'fonts/c.woff.import': imp('res://fonts/c.woff', 'font_data_bmfont'),
+      'keep/z.wav.import': imp('res://keep/z.wav', 'wav')
+    }
+  }).ctx)
+  ok(ids(missingOf(tailExt)) === 'imports:missing:fonts/a.fnt',
+    '★判据 3 认表内行的**尾巴**扩展名(fnt 是 font_data_bmfont 名单里的第二条,不是第一条)', ids(missingOf(tailExt)))
+  ok(ids(mismatchOf(tailExt)) === 'imports:mismatch:fonts/c.woff.import',
+    '★判据 4 同样认尾巴扩展名(woff 在 font_data_dynamic 的名单里、不在 bmfont 的名单里 → 不匹配)',
+    ids(mismatchOf(tailExt)))
   // Godot 3 老形态不判不匹配
   const legacyMm = await T.runImports(makeCtx([['art/a.png.import', 60]], { texts: { 'art/a.png.import': LEGACY } }).ctx)
   ok(mismatchOf(legacyMm).length === 0, '判据 4：Godot 3 的 generator 形态不参与不匹配判定', ids(legacyMm))

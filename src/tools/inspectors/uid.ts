@@ -26,7 +26,7 @@ import type { Finding, ToolContext } from '../types'
 import { truncatedFinding } from '../finding'
 import { isUidToken } from '../refIndex'
 import { SCENE_EXT, attr } from '../parsers/sceneRefs'
-import { dirOf, isCache, relSet } from '../treeUtils'
+import { dirOf, gdignoredDirs, hasRelCI, isCache, isGdignored, lowerRelSet, relSet } from '../treeUtils'
 
 /** 边车尾缀：归属一律用它切（`X.a.b.uid` 的源是 `X.a.b`，用 dirOf/basename 重拼会拼错） */
 const UID_SUFFIX = '.uid'
@@ -104,11 +104,26 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
   }
 
   const have = relSet(tree)
+  // 大小写异体闸（与 imports.ts / orphans.ts 共用 treeUtils 的那一份小写像，B6 评审裁定 2）：
+  // Windows 文件系统不敏感，`Scripts/Player.GD` 与 `scripts/player.gd.uid` 在盘上配的就是同一对文件。
+  // 原来这里两处 `have.has(rel + UID_SUFFIX)` 走精确查表，于是同一个问题 uid 报「缺边车」、
+  // imports 报「不缺」—— 两条工具在同一类检查上不许各说各话，统一走 hasRelCI(lower, …)。
+  // ⚠ 方向：这一侧只会把「缺失」主张**藏掉**（多认一份边车存在 = 少一条 warn），单调安全；
+  //   反过来**不**放宽的是 :155 那条 `rel.endsWith(UID_SUFFIX)` —— 那是「这个条目算不算边车」的自我介绍，
+  //   放宽它会把 `X.GD.UID` 这类手改名字当成边车**读进来并计入项目闸门**，方向是**多出主张**，
+  //   不在本轮「只藏不加」的授权范围内（imports.ts 的 isSidecar 注释记着对称的那一半理由）。
+  const lower = lowerRelSet(tree)
+  // `.gdignore` 屏蔽的目录：引擎按设计不扫，那种目录里的脚本永远不会拿到 `.uid` 边车，
+  // 报「缺边车」+「把脚本在编辑器里重新保存一次通常会补上边车」是一条做不到的建议（B6 评审 Important 1
+  // 说这同一个洞在两份工具里都在，helper 收进 treeUtils 后两边一起adopt）。
+  const ignoredDirs = gdignoredDirs(tree)
   /** uid → (声明者 rel → 声明渠道)。按 rel 归并，所以同一文件的边文与头部同 uid 天然不算重复（判据 2） */
   const claims = new Map<string, Map<string, Owner>>()
   const orphans: string[] = []
   const gdRels: string[] = []
   let sidecarCount = 0
+  /** 判据 4 的候选里被 `.gdignore` 屏蔽掉的那些，计数写进结论 detail（B5 口径：排除要看得见） */
+  let ignoredGd = 0
 
   const addClaim = (uid: string, ownerRel: string, header: boolean, viaRel: string) => {
     let owners = claims.get(uid)
@@ -131,14 +146,19 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
     if (!rel || isCache(rel)) continue // 判据 1：.godot/** 一律不采集，uid_cache.bin 也不是边车
     const ext = f && typeof f.ext === 'string' ? f.ext : ''
     if (ext === 'gd') {
-      gdRels.push(rel) // 判据 4 只看 tree 里有没有那份 .uid，不读 .gd 的内容（判据 6）
+      // 判据 4 只看 tree 里有没有那份 .uid，不读 .gd 的内容（判据 6）。
+      // `.gdignore` 屏蔽的目录不进候选，也不进同目录比对的分组（连同级一起算，别拿被屏蔽的同伴当参照）。
+      if (isGdignored(ignoredDirs, rel)) { ignoredGd++; continue }
+      gdRels.push(rel)
       continue
     }
     if (ext === 'uid' && rel.endsWith(UID_SUFFIX)) {
       sidecarCount++
       const src = rel.slice(0, -UID_SUFFIX.length)
       if (!src) continue // 源名切空（畸形 rel）时既没法判存在性、也没法归属性，整条跳过
-      if (complete && !have.has(src)) orphans.push(rel)
+      // 源在不在清单里同样按小写像读：`A.tscn.uid` 配着盘上的 `a.tscn` 时它**不是**孤儿，
+      // 而这条结论带删除入口 —— 报错了就是把还在用的边车送走（方向：只会少报孤儿，不会多报）。
+      if (complete && !hasRelCI(lower, src)) orphans.push(rel)
       const { text } = await ctx.readText(rel)
       // 判据 6：readText 给不出 text 就是「读不到」（缺文件 / 超 maxBytes / 二进制 / 非法路径），
       // 该文件的声明当作未知跳过 —— 不报错、也不计入重复（漏读不得变假阳性）。
@@ -241,7 +261,7 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
       }
       const hits: string[] = []
       for (const rel of gdRels) {
-        if (have.has(rel + UID_SUFFIX)) continue // 自己已有边文，永不报缺失
+        if (hasRelCI(lower, rel + UID_SUFFIX)) continue // 自己已有边文（任意大小写写法），永不报缺失
         const dir = dirOf(rel)
         const siblings = (byDir.get(dir) || []).filter((x) => x !== rel).sort(byText)
         // 目录闸门：同目录里只要还有一个 .gd 也没边文，那就是目录级的既有状态，不报。
@@ -251,7 +271,8 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
         //   恰好是绕过编辑器拷贝文件的典型形状，报出来有价值。
         //   （简报测试清单曾写过「a.gd 有、b.gd 没有 → 不报 b.gd」的括注,与这条量词写法相反。
         //     控制方 2026-10-04 裁定按字面量词执行,简报已订正 —— 后续轮次别把它改回去。）
-        if (siblings.some((s) => !have.has(s + UID_SUFFIX))) continue
+        //   这里同样按小写像读同伴的边车：同伴的边车写成 `A.GD.UID` 就是「有」，闸门该放行。
+        if (siblings.some((s) => !hasRelCI(lower, s + UID_SUFFIX))) continue
         hits.push(rel)
       }
       for (const rel of hits.sort(byText)) {
@@ -260,7 +281,8 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
         // 「跟谁比」点名要给出完整 rel（与树同形，用户能直接点开），不裁成 basename
         const why = '项目里已存在 .uid 边车，说明这个项目在 Godot 4.4+ 下工作过（4.4 之前不生成 .uid），' +
           '这类缺口通常来自绕过编辑器的拷贝或改名；把该脚本在编辑器里重新保存一次通常会补上边车' +
-          '（别复制别人的 .uid 内容，那会造出一个重复 uid）。'
+          '（别复制别人的 .uid 内容，那会造出一个重复 uid）。' +
+          (ignoredGd ? ` 本次另有 ${ignoredGd} 个 .gd 位于 .gdignore 屏蔽的目录里，引擎按设计不扫那些目录，一条都没判。` : '')
         out.push({
           // 判据 4：一条 finding 只讲一个 .gd，id 直接落到那个文件
           id: `uid:missing:${rel}`,

@@ -201,6 +201,44 @@ async function main() {
   ok(agg(caseCtrl).length === 1 && relsOf(agg(caseCtrl)[0]).join('|') === 'ui/banner.png',
     '判据 5 控制组：同图无人引用 → 仍报孤儿（上一条的「不报」确实来自异体闸，不是工具恒不报）',
     relsOf(agg(caseCtrl)[0])?.join('|'))
+  // ★方向断言（B6 Fix round 1 裁定 2 钉的那条）：小写像用在「**是否被引用**」这一侧只会藏孤儿；
+  // 「这个资产有没有边车」（进不进候选集）那一侧**故意保持精确匹配** —— 放宽它会把候选集做大，
+  // 于是能凭空多出一条带删除按钮的主张，那不在「只藏不加」的授权范围内（orphans.ts:106-107 的旧注释就是这条）。
+  const caseSidecar = await T.runOrphans(makeCtx([
+    ['UI/Banner.PNG', 4000], ['ui/banner.png.import', 200],
+    ['scene/other.tscn', 300]
+  ], { texts: { 'scene/other.tscn': 'gd_scene load_steps=1 format=3\n[node name="R" type="Node2D"]' } }).ctx)
+  ok(caseSidecar.length === 0,
+    '★单调方向：资产写成 UI/Banner.PNG 而边车是 ui/banner.png.import → 精确匹配认不出边车 → 不进候选 → 一条不报',
+    ids(caseSidecar))
+  const caseSidecarCtrl = await T.runOrphans(makeCtx([
+    ['UI/Banner.PNG', 4000], ['UI/Banner.PNG.import', 200],
+    ['scene/other.tscn', 300]
+  ], { texts: { 'scene/other.tscn': 'gd_scene load_steps=1 format=3\n[node name="R" type="Node2D"]' } }).ctx)
+  ok(relsOf(agg(caseSidecarCtrl)[0])?.join('|') === 'UI/Banner.PNG',
+    '★控制组：边车与原样写法对上时就进候选并报孤儿(上一条的静默来自候选侧的精确匹配,不是恒不报)',
+    relsOf(agg(caseSidecarCtrl)[0])?.join('|'))
+  // 引用比对那一侧走 treeUtils.lowerSet(裁定 2 里 orphans 要adopt的那一行)：
+  // 上面 caseRun 已经把「异体引用藏孤儿」钉住了，这里再钉一次「同一条小写像来自 to 的全部键」。
+  const refImage = await T.runOrphans(makeCtx([
+    ['a/b/x.png', 100], ['a/b/x.png.import', 100], ['a/b/other.png', 100], ['a/b/other.png.import', 100],
+    ['scene/r.tscn', 300]
+  ], {
+    texts: { 'scene/r.tscn': 'gd_scene load_steps=2 format=3\n[ext_resource type="Texture2D" path="res://A/B/X.PNG" id="1"]' }
+  }).ctx)
+  ok(relsOf(agg(refImage)[0])?.join('|') === 'a/b/other.png',
+    'lowerSet 收的是整份 to 键的小写像:异体引用只藏它自己那条,别处的候选照常报(不许把集合建歪成恒真)',
+    relsOf(agg(refImage)[0])?.join('|'))
+  // 上一条的候选是小写名，所以 `refLower.has(rel)` 与 `hasRelCI(refLower, rel)` 无从区分（变异 OP1 实测零红 =
+  // 等价变异，不是判据挂空）。这条把**候选自己**写成大写名：只有走 hasRelCI 才藏得住，精确查表就会报孤儿。
+  const refImageUpper = await T.runOrphans(makeCtx([
+    ['UI/Banner.PNG', 100], ['UI/Banner.PNG.import', 100], ['scene/r.tscn', 300]
+  ], {
+    texts: { 'scene/r.tscn': 'gd_scene load_steps=2 format=3\n[ext_resource type="Texture2D" path="res://ui/banner.png" id="1"]' }
+  }).ctx)
+  ok(refImageUpper.length === 0,
+    '★候选写 UI/Banner.PNG 而引用写 res://ui/banner.png：比对必须走 hasRelCI(小写像)，精确查表会误报一条能删的孤儿',
+    ids(refImageUpper))
 
   // ---------- 3. 判据 4：truncated / partial 一条都不报 ----------
   section('3. 判据 4：降级闸门')

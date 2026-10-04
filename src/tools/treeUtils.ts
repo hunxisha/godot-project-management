@@ -84,6 +84,79 @@ export function relSet(tree: TreeEntry[]): Set<string> {
   return new Set(tree.map((f) => f.rel))
 }
 
+/**
+ * 任意 rel 串集合 → 小写像(B6 评审裁定 2 收到的共享底座:原来三份各写一遍)。
+ *
+ * 为什么要有这一份:Windows 文件系统大小写不敏感,同一个目标的 `Art/A.PNG`、`art/a.png`、
+ * `ART/a.Png` 在盘上是**同一个文件**。工具页里三条拿「清单里查得到/查不到」当证据的判据
+ * (imports 的失效边车与缺边车、uid 的孤儿与缺边车、orphans 的引用比对)都会撞上同一件事:
+ * 只用原样 rel 判,就会把「其实存在、只是写法不同」的东西说成不存在 —— 而这三条里有一条带着删除按钮。
+ *
+ * ⚠ 方向纪律:小写像只会让「查得到」更容易成立,于是
+ *   · 「查不到 ⇒ 主张(缺失/失效/孤儿)」那一侧永远只会**少报**(安全,本工具唯一的破坏面方向);
+ *   · 「别人的边车在 ⇒ 闸门放行」那一侧会**解除抑制**,但解出来的主张是真的(主体自己确实没有边车)。
+ * 两条工具的调用点各自注释,别在这里笼统承诺「只会藏」。
+ *
+ * 红线:纯函数;`tree` 里混进非字符串 rel 时跳过(与原语两端的防御口径一致)。
+ */
+export function lowerSet(values: Iterable<string>): Set<string> {
+  const out = new Set<string>()
+  for (const v of values) {
+    if (typeof v === 'string' && v) out.add(v.toLowerCase())
+  }
+  return out
+}
+
+/** relSet 的大小写不敏感版:把整份清单的 rel 收成小写像(存在性比对的唯一一份小写口径) */
+export function lowerRelSet(tree: TreeEntry[]): Set<string> {
+  return lowerSet(tree.map((f) => (f && typeof f.rel === 'string' ? f.rel : '')))
+}
+
+/** 小写像里认不认得 rel(任意大小写写法命中都算) —— 传进来的必须是 lowerSet/lowerRelSet 的产物 */
+export function hasRelCI(lower: Set<string>, rel: string): boolean {
+  return typeof rel === 'string' && !!rel && lower.has(rel.toLowerCase())
+}
+
+/**
+ * `.gdignore` 屏蔽目录集合(B6 评审 Important 1)。
+ *
+ * 引擎的语义(Godot 官方:`.gdignore` 是放在**目录里**的空标记文件,编辑器扫描时跳过该目录**及其所有子目录**):
+ * `art/.gdignore` 屏蔽 `art/` 与 `art/**`。仓库里已经有两处把这份标记当回事
+ * (`src-ztools/preload/lib/assetsinstall.js:96` 安装资产时显式不搬它、`src-tauri/src/main.rs:596` Rust 侧同规则),
+ * 所以它不是本工具臆造的目录概念。
+ * 标记条目回到 ctx.tree 时是点文件:`ext === ''`(见 tools.test.mjs:107「点文件与无点文件合并进 (无扩展名) 组」),
+ * 所以这里按 **basename** 判,不看 ext。
+ *
+ * 返回的是**目录前缀**(含尾斜杠、已小写);根目录的标记给空串 `''`,含义是「整棵树都被屏蔽」。
+ * 与 isCache 同理由按路径段而不是子串匹配:前缀必须停在 `/` 上,否则 `art/` 的标记会把 `arts/`、`art2/` 一起藏掉。
+ */
+export function gdignoredDirs(tree: TreeEntry[]): Set<string> {
+  const out = new Set<string>()
+  for (const f of tree) {
+    const rel = f && typeof f.rel === 'string' ? f.rel : ''
+    if (!rel) continue
+    const base = rel.slice(rel.lastIndexOf('/') + 1)
+    // 标记名按小写比对:Windows 上不敏感(盘上可能是 `.GDIGNORE`),而这一侧多匹配只会**少报**结论
+    if (base.toLowerCase() !== '.gdignore') continue
+    out.add(dirOf(rel).toLowerCase())
+  }
+  return out
+}
+
+/** rel(某个文件)是否落在某个被 `.gdignore` 屏蔽的目录里 —— 逐级祖先比对,含根标记给出的空前缀 */
+export function isGdignored(dirs: Set<string>, rel: string): boolean {
+  if (!dirs || dirs.size === 0) return false
+  if (dirs.has('')) return true // 根目录的标记屏蔽整棵树
+  if (typeof rel !== 'string' || !rel) return false
+  const lower = rel.toLowerCase()
+  let i = lower.indexOf('/')
+  while (i >= 0) {
+    if (dirs.has(lower.slice(0, i + 1))) return true
+    i = lower.indexOf('/', i + 1)
+  }
+  return false
+}
+
 /** rel 的目录部分(含尾斜杠);根目录文件返回空串 */
 export function dirOf(rel: string): string {
   const i = rel.lastIndexOf('/')
