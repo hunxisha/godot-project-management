@@ -94,12 +94,29 @@ function openFix(f: Finding) {
  * ① 把在途状态告诉框;② 真改了磁盘就重跑**这一个**检查器 —— 结论得跟上刚动过的文件。
  * applyFix 自己不抛异常(失败一律回结构化回执),所以只有「重跑检查器」那一步需要单独兜:
  * 那一步炸了不能把已经如实落盘的修复动作说成失败。
+ *
+ * ★断言级注释(B10a,spec §5.3 规则 3):`selected` 是**用户勾选的那一份**,必须原样交给 applyFix。
+ * 这一页不许出现「整单执行」的入口 —— 高危动作(批量进回收站、批量改写源文件)默认逐条不选,
+ * 忘了传就等于把用户没勾的文件也删了。三条规矩与它们的实际约束力(逐条实测过,不靠推测):
+ *   · **不许给默认值**:`selected ?? []`、`|| allRels(plan)` 这类兜底都不许写 —— 后者是整单执行。
+ *   · vue-tsc 咬得住「组件不再发载荷」:emit 签名去掉 selected 时,模板里 `@confirm="runFix"`
+ *     那一行直接编译失败(TS2322 `(selected: string[]) => Promise<void> is not assignable to () => any`,
+ *     实测过,不是推测)。
+ *   · vue-tsc **咬不住**「处理器把载荷丢掉」:函数参数逆变让 `runFix()` 依然类型相容
+ *     (实测:把本函数改成无参、applyFix 退回整单调用 → vue-tsc rc=0,一片绿)。
+ *     所以下面那行 Array.isArray 兜底是**故意朝「关死」的方向**写的:载荷不是数组(有调用点忘了传)
+ *     就当空选择处理,由 gate.ts 裁成 empty 并带着「没有勾选任何文件」的原因被拒
+ *     (useTools.test.mjs §32 钉住「空选择一个原语都不碰」),绝不退化成整单执行。
+ *   · 新增调用点(比如将来的一键清理)同样必须显式算出勾选集合,不许调 `applyFix(f)` 走整单那一路
+ *     —— applyFix 省略第二参的整单行为是给测试与 B1 旧调用留的,不是给界面留的口子。
  */
-async function runFix() {
+async function runFix(selected: string[]) {
   if (!fixFinding.value) return
+  // 载荷形状兜底 = 空选择(拒绝),而不是整单执行:见上面那条「咬不住丢载荷」的实测结论
+  const sel = Array.isArray(selected) ? selected : []
   fixBusy.value = true
   try {
-    const o = await t.applyFix(fixFinding.value, { isWin: winHost.value })
+    const o = await t.applyFix(fixFinding.value, sel, { isWin: winHost.value })
     fixOutcome.value = o
     // applyFix 成功时已经 invalidateTree,这一次 runTool 拿到的必然是重扫后的清单
     if (o.changed && open.value) {
