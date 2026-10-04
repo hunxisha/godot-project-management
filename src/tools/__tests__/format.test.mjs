@@ -323,9 +323,14 @@ async function main() {
   ok(/前导形状不确定/.test(rOdd.findings[0].detail), '判据 7:「为什么少做一行」写进 detail',
     rOdd.findings[0].detail.match(/统一缩进:[^\n]*/)?.[0]?.slice(0, 90))
   const rMixedLead = await one('t7.gd', L('func f():', '    var a = 1', ' \tvar b = 2   ', '    var c = 3'))
-  ok(outOf(rMixedLead.findings[0], 't7.gd') === L('func f():', '    var a = 1', '     var b = 2', '    var c = 3'),
-    '目标 = 空格时混排前导可确定性展开( \' +tab → 5 空格:引擎按 tab_size=4 计列,1+4 与 5 同宽,列位不变)',
+  ok(outOf(rMixedLead.findings[0], 't7.gd') === L('func f():', '    var a = 1', ' \tvar b = 2', '    var c = 3'),
+    '★Fix3:前导混着 tab 与空格 ⇒ 那一行的缩进一律不转换(旧写法把 \' +tab 展开成 5 空格,' +
+    '却拿不出「引擎按列计数」的证据:tab 是走到**下一个制表位**,\' +tab 落第 4 列,5 个空格落第 5 列)',
     J(outOf(rMixedLead.findings[0], 't7.gd')))
+  ok(reported(rMixedLead.findings[0].detail, 't7.gd')?.indent === 0 &&
+      /前导形状不确定/.test(rMixedLead.findings[0].detail),
+    '判据 7:少做的这一行进「为什么少做」账(与目标 = tab 那一侧同一档,不再是单向静默)',
+    J(reported(rMixedLead.findings[0].detail, 't7.gd')))
   const rMixedTab = await one('t8.gd', L('func f():', '\tvar a = 1   ', '\t \tvar b = 2', '\t\tvar c = 3'))
   ok(outOf(rMixedTab.findings[0], 't8.gd') === L('func f():', '\tvar a = 1', '\t \tvar b = 2', '\t\tvar c = 3'),
     '反向:目标 = tab 时混排前导折不出唯一形状 ⇒ 那行不动(只有别处的行尾空白被清)',
@@ -634,6 +639,82 @@ async function main() {
     filesOf(fDup[0]).map((x) => x.rel).join('|'))
   ok(dupCtx.calls.filter((r) => r === 'dup.gd').length === 1, '判据 8:重复条目只发一次 IO', J(dupCtx.calls))
   ALL.push(...fDup)
+
+  // ---------- 12c. ★ Fix round 1:`""` / 带前缀单行串 / 「补末尾换行没做」上卡 ----------
+  // 评审实测的三种形状(旧写法都吃得到):
+  //   · `foo("", 2)` 里那个没被数到的 `(` 把后半份文件全判成续行 ⇒ 缩进判据一路白丢,卡面上既无计数也无理由;
+  //   · 空串行自己的尾随空白被留下;
+  //   · 「补末尾换行」的四条拒绝理由是**死字符串**(算出来了却没进 skips)⇒ 判据 7 的五类里少一类。
+  section('12c. ★ Fix round 1:空串/带前缀单行串的括号续串 + 最终换行的「没做」要上卡')
+  // 这一段的断言全部走 `o0/d0/c0` 三个安全访问器:旧写法在 (xi) 就是**零结论**,
+  // 直接 `findings[0].detail` 会让 harness 抛错、后面九条断言一条都印不出来(RED 要能看全)。
+  const o0 = (r, rel) => (r.findings[0] ? outOf(r.findings[0], rel) : `零结论(${r.findings.length} 张卡)`)
+  const d0 = (r) => (r.findings[0] ? r.findings[0].detail : '零结论')
+  const c0 = (r, rel) => (r.findings[0] ? reported(r.findings[0].detail, rel) : null)
+
+  // (xi) 空串:后面的行不再被当续行(与 `foo(1, 2)` 那份对照,差别只在 `""`)
+  const tEmpty = L('func f():', '    var s = foo("", 2)', '\tvar x = 1', '\tvar y = 2', '\tvar z = 3')
+  const rEmpty = await one('g1.gd', tEmpty)
+  ok(o0(rEmpty, 'g1.gd') === L('func f():', '\tvar s = foo("", 2)', '\tvar x = 1', '\tvar y = 2', '\tvar z = 3'),
+    '★Fix1:`foo("", 2)` 之后三行不再是续行 ⇒ 多数派按 tab 定,那行的 4 空格被折回一个 tab',
+    J(o0(rEmpty, 'g1.gd')))
+  ok(c0(rEmpty, 'g1.gd')?.indent === 1,
+    '判据 7:这一处缩进改动记在账上(旧写法是 0 结论,连「少做了什么」都没得说)', J(c0(rEmpty, 'g1.gd')))
+
+  // (xii) 空串那一行自己:尾随空白照删(它就是一个闭合的字符串,与已经上线的 `"abc"` 同档)
+  const rEmptyTrail = await one('g2.gd', 'var s = ""   \nvar b = 1   \n')
+  ok(o0(rEmptyTrail, 'g2.gd') === 'var s = ""\nvar b = 1\n',
+    '★Fix1:闭合空串那一行的行尾空白被删(单双引号同机制见下一条)', J(o0(rEmptyTrail, 'g2.gd')))
+  ok(c0(rEmptyTrail, 'g2.gd')?.trailing === 2,
+    '判据 7:两处尾随空白都记账', J(c0(rEmptyTrail, 'g2.gd')))
+  const rEmptyTrail2 = await one('g2b.gd', "var s = ''   \nvar b = 1   \n")
+  ok(o0(rEmptyTrail2, 'g2b.gd') === "var s = ''\nvar b = 1\n",
+    '判据 1/2:单引号空串同档', J(o0(rEmptyTrail2, 'g2b.gd')))
+
+  // (xiii) 带前缀的单行串:**那一行仍整行不动**,只把闭引号之后的括号算回来(方向只多算括号)
+  const tRawLine = L('func f():', '    var s = foo(r"\\d+", 2)   ', '    var x = 1', '\tvar y = 2   ', '    var z = 3')
+  const rRawLine = await one('g3.gd', tRawLine)
+  ok(o0(rRawLine, 'g3.gd') === L('func f():', '    var s = foo(r"\\d+", 2)   ', '    var x = 1',
+    '    var y = 2', '    var z = 3'),
+    '★Fix1:带前缀单行串那一行的字节一个没动(尾随空格仍留着),但它后面的行不再是续行',
+    J(o0(rRawLine, 'g3.gd')))
+  ok(c0(rRawLine, 'g3.gd')?.indent === 1 && c0(rRawLine, 'g3.gd')?.trailing === 1,
+    '判据 7:缩进 1 行 / 尾随空白 1 处(那行的尾随空格不在账上,因为它没动)', J(c0(rRawLine, 'g3.gd')))
+
+  // (xiv) 未闭合的带前缀串:仍只放弃本行(残留钉住,不扩大成跨行状态)
+  const rRawOpen = await one('g4.gd', 'var p = r"没闭合\nvar a = 1   \n')
+  ok(o0(rRawOpen, 'g4.gd') === 'var p = r"没闭合\nvar a = 1\n',
+    '判据 1:带前缀且真未闭合 ⇒ 放弃本行剩下的扫描,下一行回到代码态(已知残留,与文件头同一口径)',
+    J(o0(rRawOpen, 'g4.gd')))
+
+  // (xv) ★ 判据 7 的第五类:补末尾换行的四条拒绝理由都要在卡面上说得出(旧写法是四条死字符串)
+  const NOFINAL = [
+    ['g5.gd', '# 全是注释   \n# 第二行   ', /补末尾换行:全文只有注释与空行/, '纯注释(评审点名的那条复现形状)'],
+    ['g6.gd', 'var a = 1   \nvar s = "没闭合', /补末尾换行:文件停在未闭合的字符串里/, '文件停在未闭合串里'],
+    ['g7b.gd', 'var a = 1   \nvar b\r= 2', /补末尾换行:正文中间有裸/, '正文里有裸 \\r'],
+    ['g8b.gd', 'var a = 1   \n\n  ', /补末尾换行:末行本来就是空行/, '末行本来就是空行']
+  ]
+  const skipSeg = (r) => (r.findings[0] ? r.findings[0].detail.match(/\{没做:[^}]*\}/)?.[0] || '无没做段' : '零结论')
+  const skipReasons = []
+  for (const [rel, text, re, what] of NOFINAL) {
+    const r = await one(rel, text)
+    const seg = skipSeg(r)
+    ok(r.findings.length === 1 && re.test(seg),
+      `★判据 7:${what} ⇒ 卡片发了、末尾换行没补,「没做」的理由必须跟着 rel 上卡`, `${rel}:${seg}`)
+    ok(reported(r.findings[0]?.detail || '', rel)?.finalNL === 0, `判据 7:${what} 那一档末尾换行计 0(账与产出一致)`,
+      J(reported(r.findings[0]?.detail || '', rel)))
+    skipReasons.push(rel)
+    ALL.push(...r.findings)
+  }
+  ok(skipReasons.length === 4, '判据 7:四类「补末尾换行没做」的形状各一份夹具(旧写法四条都是死字符串)',
+    skipReasons.join('|'))
+  ALL.push(...rEmpty.findings, ...rEmptyTrail.findings, ...rEmptyTrail2.findings, ...rRawLine.findings, ...rRawOpen.findings)
+  // 反过来:文件本来就以换行收尾时**不该**冒出这条理由(没欠一个字节就别喊「没做」)
+  const rNoSkipNoise = await one('g9.gd', '# 全是注释   \n# 第二行   \n')
+  ok(rNoSkipNoise.findings.length === 1 && !/补末尾换行/.test(skipSeg(rNoSkipNoise)),
+    '★判据 7:已经以换行收尾的文件不欠末尾换行 ⇒「没做」段里不许虚报一条(总计那行给的是 0,不算承诺)',
+    skipSeg(rNoSkipNoise))
+  ALL.push(...rNoSkipNoise.findings)
 
   // ---------- 13. 判据 9:确定性与唯一 fix 形态 ----------
   section('13. 判据 9:确定性与 fix 形态')

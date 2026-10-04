@@ -25,15 +25,24 @@
 // 已知**不建模**的构造,以及它为什么越不过「不动」这条线:
 //   · `$"..."` 插值串里的嵌套引号 —— 配对可能算错,后果是多算几行「未闭合」⇒ 更不动;
 //   · 同一行里挨着的两个串(`a = "x" "y"`)—— 会被读成块,那一行不动;
-//   · 带前缀的**单行**串(`r"…"`)—— 整行标 inString、不往里猜(带前缀的**多行块** `r"""…"""` 是建模的,
-//     见 STRING_PREFIX 与 scanLine 块分支:那里不建模反而会改写字符串内容);
+//   · 带前缀的**单行**串(`r"…"`)—— 整行仍标 inString(那一行的字节照旧一个不动),但会往后找到同类
+//     闭引号,好让**它之后**的括号与后续行不再被误判(见 STRING_PREFIX 与 scanLine 的 prefixed 分支;
+//     带前缀的**多行块** `r"""…"""` 是完整建模的,那里不建模反而会改写字符串内容);
 //   · 正文中间的裸 `\r`(老 Mac 残留)—— 不解释,只如实还原(是否因此放弃统一换行符由调用方判,见 GdScan.strayCR)。
+//
+// Fix round 1(评审 Important 1)把「一遇 `""` / `r"…"` 就放弃整行剩下的扫描」改成了
+// 「**只放弃真正认不出的那一段**」:旧写法里 `foo("", 2)` 的那个 `(` 永远结算不了 ⇒ 后半份文件
+// 每一行都被判成续行,判据 3/4 的保护一路开绿灯,而卡面上既没有计数也没有 `{没做:}` 可说。
+// 这次改动**只增加括号统计**,不放开任何一个「原本拒绝动的字节」:
+//   · 空串 `""` / `''` 里面没有内容,它与已经上线的 `"abc"` 走同一条「闭合的字符串不冻结整行」的规矩;
+//   · 带前缀的单行串那一行**仍然整行 inString**(它的尾随空白与缩进都不动),只是括号不再算漏。
 //
 // 行切分口径(判据 5 的前提):按 `\n` 切,**不把 `\r` 当换行**。CRLF 文本里行尾的 `\r` 折进 `term`,
 // 所以「改主导换行符」永远只改终止符、改不到正文中间的 `\r`。`raw + term` 逐字节可还原原文。
 //
 // 红线:纯函数。不碰 window / services / vue / DOM,不读文件、不拼路径。
-import type { TreeEntry } from '../../types/godot'
+// 读入面(哪些条目算目标 / 缓存 / 第三方)是**检查器**的决定,不在这个文本解析器里 ——
+// 见 `inspectors/format.ts` 的 `gdScopeOf`(Fix round 1 Minor 3:那一层判据原来长在文本层)。
 
 /** GDScript 认的三种「表达式跨行」括号(parser 的 push_multiline 调用点就是这三种) */
 const OPEN_BRACKETS = '([{'
@@ -42,42 +51,19 @@ const CLOSE_BRACKETS = ')]}'
 /**
  * 字符串前缀字母(`gdscript_tokenizer.cpp:895-906`):`r` raw、`&` StringName、`^` NodePath。
  * 引擎的认法是「吃掉开引号之后回看紧挨着的前一个字符」,这里照抄同一个形状:引号前是这三个字母之一
- * 就当它是带前缀的串。两条分支,方向都是「少动」:
- *   · 带前缀的**单行**串(`r"abc"`)—— 整行标 inString、不再往里猜(代价只是这几行不改);
+ * 就当它是带前缀的串。三条分支,方向都是「少动」:
  *   · 带前缀的**多行**块(`r"""…"""`)—— 按普通块建模,理由见 `scanLine` 块分支的注释:
- *     那里「不建模」不是保守,而是把整块字符串内容当代码行,五类操作全都会落到内容字节上。
- * 为什么对**单行**串宁可误伤:漏掉前缀可能让 `r"路径\"` 之后的行被当成代码;而多标一行 inString
- * 永远只是少改。两处判定都往「多标」那侧收 —— 多标安全、少标危险。
- * 残留(已知、够不着):带前缀的**单行**串如果整行没闭合,本模块不留跨行状态,后面的行会被当成代码。
- * 但那种文本引擎自己也判「Unterminated string」(文件在 Godot 里就解析不过),不在真实 .gd 的形状里。
+ *     那里「不建模」不是保守,而是把整块字符串内容当代码行,五类操作全都会落到内容字节上;
+ *   · 带前缀的**空**串(`r""`)—— 里面没有字节,与不带前缀的空串同档(scanLine 的空串分支);
+ *   · 带前缀的**单行**串(`r"abc"`)—— 往后找同类闭引号:**找到**就把这一行剩下的括号算完
+ *     (否则 `foo(r"…", x)` 会让后面一整片行被误判成续行),但那一行**仍然整行标 inString**,
+ *     它的尾随空白/缩进/空行/终止符一个都不动 ⇒ 这条改动没有放开该行的任何字节。
+ *     **找不到**闭引号 ⇒ 真未闭合(引擎自己判 Unterminated string),只放弃本行剩下的部分,
+ *     不跨行带状态(已知残留,`scanLine` 的 prefixed 分支与测试 §10 各钉一次)。
+ * 为什么这样仍然在「少动」那一侧:找闭引号用的是与块分支同一条 `\` 吃两格的规则(:944-960),
+ * 偏差只可能把闭合看得**更晚**(多算几行字符串内 ⇒ 更少动),不可能看得更早。
  */
 const STRING_PREFIX = new Set(['r', '&', '^'])
-
-/** 一个条目在格式化眼里的身份:目标 / 缓存 / 第三方插件 / 别的东西 */
-export type GdScope = 'target' | 'cache' | 'addons' | 'other'
-
-/**
- * 读入面判据(判据 8):只有 `.gd` 参与,`.godot/**` 与 `addons/**` 各算一类**排除计数**。
- *
- * 与 `inspectors/orphans.ts:129-130`、`inspectors/imports.ts:311` 同一条路径段判据:
- *   · 缓存按**路径段**判,不用子串匹配 —— `project.godot` 与 `sub/x.godot` 都不是缓存
- *     (子串匹配的坑与出处写在 treeUtils.ts:19-22);
- *   · addons 按**大小写不敏感**判:Windows 上 `Addons/` 与 `addons/` 是同一个目录,漏判一侧就会
- *     把归 B7 的第三方插件脚本改写掉 —— 这一侧的漏判是**越界改动**,不是「少改」,必须堵住。
- *     (方向与 orphans 那条不同:那里漏判只是少报孤儿,这里漏判会动别人的代码。)
- *   · rel 里出现反斜杠 → 形状不认识,一律不进读入面(宁可不读,不替原语猜路径)。
- *   · 扩展名用原语给的 `f.ext`(小写无点,两端同形,记录见 refIndex.ts:59-63),不在这里重算;
- *     `Main.GD` 的 ext 就是 `gd`,所以照样进面。
- */
-export function gdScopeOf(entry: TreeEntry): GdScope {
-  const rel = entry && typeof entry.rel === 'string' ? entry.rel : ''
-  if (!rel || rel.includes('\\')) return 'other'
-  const segments = rel.split('/')
-  if (segments.some((c) => c === '.godot')) return 'cache'
-  if (entry.ext !== 'gd') return 'other'
-  if (segments.some((c) => c.toLowerCase() === 'addons')) return 'addons'
-  return 'target'
-}
 
 /** 一行的分类结果 */
 export interface GdLineInfo {
@@ -330,6 +316,8 @@ function scanLine(raw: string, st: ScanState): LineResult {
         // 改了就是一次「改坏代码」(取证见 R1 变异)。而按普通块扫的偏差方向是安全的 ——
         // raw 串与非 raw 串在 `\` 上的唯一差别是「`\` 后跟非引号字符」那种,我们多跳一个非引号字符,
         // 闭合位置只可能看得**更晚**(多算几行字符串内 ⇒ 更少动),不可能看得更早。
+        // ★三连判定必须在空串判定**之前**:`""""` 是开块 + 一个落单引号,不是「空串 + 什么」,
+        //   读成块才算未闭合到行尾(方向是冻结,见测试 §10 的四连引号那条)。
         inString = true
         block = ch === '"' ? '"""' : "'''"
         closeCode(i)
@@ -338,14 +326,44 @@ function scanLine(raw: string, st: ScanState): LineResult {
         i += 3
         continue
       }
-      if (prefixed || raw[i + 1] === ch) {
-        // 带前缀的串、或第二个同类引号紧跟的怪形状:认不出 ⇒ 整行不动,不再往里猜
+      if (raw[i + 1] === ch) {
+        // 空串 `""` / `''`(带不带前缀都一样):两个同类引号 = **开并闭**,里面没有任何字节。
+        // 这与已经上线的 `"abc"` 完全同档 —— 闭合的字符串不冻结整行(hash.gd 钉着 `"http://x#frag"   `
+        // 的尾随空白照删),所以这里**没有放开任何「字符串内容」的字节**:串的长度是 0。
+        // 旧写法在这里 `i = raw.length` 放弃整行剩下的扫描,于是 `foo("", 2)` 里那个 `(` 永远没被
+        // 结算 ⇒ 后半份文件每行都被判成续行(评审实测:同一份文件把 `""` 换成 `1` 就从 0 结论变 1 结论)。
+        // 修完只多算括号:起点压到 i+2,继续扫这一行剩下的代码区。
+        closeCode(i)
+        bracketStart = i + 2
+        i += 2
+        continue
+      }
+      if (prefixed) {
+        // 带前缀的**单行**串(`r"…" / &"…" / ^"…"`)往后找**同类**闭引号,
+        // `\` 一律吃掉两个字符 —— 与上面块分支同一条规则(`:944-960`:raw 串不解析转义,
+        // 但 `\"`/`\\` 仍吃配对字符),所以偏差方向也一样:只会把闭合看得**更晚**,不会更早。
+        // 找到 ⇒ 那一行**照旧整行标 inString**(现状不动:不放开这一行的任何字节),
+        //          但括号统计从闭引号之后接着算 ⇒ 后面的行不再被 `(` 误判成续行;
+        // 找不到 ⇒ 真未闭合(引擎自己也判 Unterminated string)⇒ 只放弃本行剩下的部分,
+        //          仍然**不跨行带状态**(与文件头「已知残留」那一格同口径)。
+        let j = i + 1
+        let closer = -1
+        while (j < raw.length) {
+          if (raw[j] === '\\') { j += 2; continue }
+          if (raw[j] === ch) { closer = j; break }
+          j++
+        }
         inString = true
         closeCode(i)
-        bracketStart = raw.length
-        endsBackslash = false
-        i = raw.length
-        break
+        if (closer < 0) {
+          bracketStart = raw.length
+          endsBackslash = false
+          i = raw.length
+          break
+        }
+        bracketStart = closer + 1
+        i = closer + 1
+        continue
       }
       quote = ch
       closeCode(i)

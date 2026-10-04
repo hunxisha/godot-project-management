@@ -321,6 +321,48 @@ const u5 = 'var s = """\n块内未闭合\n'
 ok(T.scanGdScript(u5).unterminated === true && classify(u5).every((l) => l.inString),
   '★判据 1:块没闭合到文件尾 → 每一行 inString、unterminated 置起')
 
+// ---------- 10. Fix round 1 Important 1:`""` 与带前缀单行串要把本行剩下的括号算完 ----------
+// 评审实测:旧写法一遇 `""` / `r"…"` 就 `i = raw.length` 放弃整行剩下的扫描,于是 `foo("", 2)` 里那个
+// 没被数到的 `(` 把**后半份文件**全判成续行(缩进判据一路白丢,而卡面上既没有计数也没有「没做」说明)。
+// 修法只放开两处「多算括号」,不放开任何字节:空串按开并闭处理(与已经上线的 `"abc"` 同一档);
+// 带前缀的单行串往后找同类闭引号,找到就接着算括号,**那一行仍然整行标 inString、一个字节都不动**。
+section('10. Fix round 1:`""` 空串与带前缀单行串不再吞掉本行剩下的括号统计')
+const f1 = L('func f():', '    var s = foo("", 2)', '\tvar x = 1', '\tvar y = 2')
+ok(sig(f1) === '--- --- --- ---', '★Fix1:`""` 是开并闭 ⇒ 后面的行不再是续行', sig(f1))
+ok(at(f1, 2).inString === false && at(f1, 2).depth === 0 && at(f1, 2).code === 'var s = foo("", 2)',
+  '★Fix1:闭合的空串让那一行回到代码态(与 `"abc"` 同档:串内没有任何字节,谈不上内容被改)',
+  `${sig(f1)}|${at(f1, 2).code}`)
+ok(T.scanGdScript(f1).unterminated === false && T.scanGdScript(f1).blockTermConflict === false,
+  '判据 1/5:空串不留跨行状态', JSON.stringify(T.scanGdScript(f1).termCounts))
+const f2 = L("var a = set('x', '')", 'var b = 1')
+ok(sig(f2) === '--- ---', '★Fix1:单引号空串同机制(整行仍是代码态)', sig(f2))
+const f3 = L('var s = ""   ', 'var b = 1   ')
+ok(at(f3, 1).raw === 'var s = ""   ' && at(f3, 1).inString === false,
+  '判据 1:分类器只如实给 raw(删不删那一行的尾随空白是 format.ts 的决定)', JSON.stringify(at(f3, 1).raw))
+const f4 = L('func f():', '    var s = foo(r"\\d+", 2)', '    var x = 1')
+ok(at(f4, 2).inString === true, '★Fix1:带前缀的**单行**串那一行照旧整行动不了(没放开任何字节)', sig(f4))
+ok(at(f4, 2).depth === 0 && at(f4, 3).continuation === false,
+  '★Fix1:找到闭引号之后括号照算 ⇒ 下一行不再是续行', `${at(f4, 2).depth}|${sig(f4)}`)
+const f5 = L('var s = r""', 'var x = 1')
+ok(sig(f5) === '--- ---', '判据 1:带前缀的**空**串(`r""`)也是开并闭 —— 里面确实没有内容', sig(f5))
+const f6 = L('var p = r"没闭合', 'var x = 1   ')
+ok(at(f6, 1).inString === true && at(f6, 2).inString === false && T.scanGdScript(f6).unterminated === false,
+  '★判据 1:带前缀且**真未闭合** ⇒ 只放弃本行剩下的部分,不跨行带状态(已知残留,钉住它不扩大)', sig(f6))
+const f7 = L('var s = ""  # 尾注释', 'var x = 1')
+ok(at(f7, 1).isComment === false && at(f7, 1).code === 'var s = ""',
+  '判据 1:空串之后的 `#` 仍按行尾注释切(代码区继续扫到了注释起点)', at(f7, 1).code)
+const f8 = L('var s = """"', 'var x = 1')
+ok(at(f8, 1).inString === true && at(f8, 2).inString === true && T.scanGdScript(f8).unterminated === true,
+  '★判据 1:四连引号仍按「三连 = 开块」读(空串分支排在三连判定之后),块没闭合 ⇒ 后面整片不动', sig(f8))
+const f9 = L('var x = [r"a\\"", 1]', '\tvar y = 2')
+ok(at(f9, 1).depth === 0 && at(f9, 2).continuation === false,
+  '★判据 1:带前缀串里 `\\"` 照样吃两个字符(与块分支同一条规则)⇒ `]` 被结算、深度归零',
+  `${at(f9, 1).depth}|${sig(f9)}`)
+const f10 = L("var s = r\"a'b\" + foo(1)", 'var x = 1')
+ok(at(f10, 1).inString === true && at(f10, 1).depth === 0 && at(f10, 2).continuation === false &&
+    at(f10, 2).inString === false,
+  '★判据 1:带前缀的串只认**同类**闭引号(串里的单引号不是终点,与块分支同一条规矩)', sig(f10))
+
 // 本文件的断言全是同步的(分类器不发任何 IO),所以不需要别家 harness 那份 async main 包装。
 // 中途抛错(例如夹具里拿不到某一行)会以非零码直接收口且印不出 PASS 行 —— 不会伪装成绿。
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)

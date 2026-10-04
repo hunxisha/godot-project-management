@@ -28,10 +28,14 @@
 //      一次没走)。png/gd/tscn 全在 KNOWN_IMPORTERS 的**表外**,不匹配与缺边车两条模板在这份配比里打不到,
 //      所以在 B5 计时之后另补 200 份 `.ogg` 边车(importer 写 wav → 不匹配)与 60 份无边车的 `.ttf`
 //      (目录里唯一 → 缺边车),重扫后再跑一趟**全判据**计时。两段各给护栏;
-//   7. (B9) 把同一份夹具里的 .gd 正文换成**真实形状的脏脚本**(尾随空白 + 三连空行 + 未闭合括号的对齐行 +
-//      一个 `"""` 块;每 7 份给一份 CRLF 版),每 5 份留 1 份干净脚本作反向对照,然后直测 runFormat ——
+//   7. (B9) 把同一份夹具里的 .gd 正文换成**真实形状的脏脚本**,按五种形状轮换(见下面 GD_LINES 那段注释:
+//      全 tab / 空格为主埋一行 tab / tab 为主埋一行四空格 / **混合换行符**(每 3 行一个 CRLF,绕开 `"""` 块)/
+//      整份 CRLF),另有 1/9 那份**不写末尾换行**,每 7 份留 1 份干净脚本作反向对照,然后直测 runFormat ——
 //      它只读 .gd 全文(不调 buildRefIndex、不读边车),计时的是「逐行状态扫描 + 整份新文本拼装」。
-//      硬自查三条:改写清单数量 == 埋进去的脏脚本数、每一份新文本与盘上原文逐字节不同、干净脚本一份都不漏进清单。
+//      硬自查五条:改写清单数量 == 埋进去的脏脚本数、每一份新文本与盘上原文逐字节不同、
+//      干净脚本一份都不漏进清单、夹具各形状都有绝对下限、**卡面总计那行的五类计数全部 > 0**
+//      (最后这条才是「五个改写分支真的都跑过」的产出侧证据,不是夹具侧的自我声明 ——
+//      Fix round 1 Minor 1 补的就是这条:上一轮 endings 与 indent 两类恒 0 却照样绿)。
 //   无论成败最后删除整个临时目录并**核实它没了**(残留 = harness 自己 FAIL)。
 //
 // 诚实边界(不冒充):测的是 Node 侧调度器 + JS 宿主原语的耗时,不是浏览器绘制耗时,
@@ -328,9 +332,15 @@ try {
   // 「每份 .gd 一次逐行状态扫描 + 一次整份新文本拼装」。上面那份 .gd 夹具是 20 字节的 'extends Node\n',
   // 干净文本走不到任何一条改写路径( files.length=0 )—— 那正是 B6 评审 Fix round 1 Important 2 咬过的
   // 「零判定计时」。所以这里把 .gd 正文换成**真实形状**的脏脚本(尾随空白 + 空行段 + 未闭合括号 +
-  // 一个 """ 块),每 5 份里 1 份保持干净(反向对照:干净的必须一条都不产),另每 7 份给一份 CRLF 版
-  // (换行符统一那条也要被计时)。
-  const GD_DIRTY = [
+  // 一个 """ 块 + 行尾续行)。
+  //
+  // ⚠ Fix round 1 Minor 1 订正过一次措辞与夹具:上一轮这里只埋了两种形状(全 tab 缩进 + 整份 LF /
+  // 整份 CRLF),于是五类操作里**只有两类**真的进了改写分支 —— 整份 CRLF 那份文件的主导换行符就是它自己
+  // (`counts.endings` 恒 0),而每份文件内部前导全是 tab(没有少数派 ⇒ `counts.indent` 恒 0)。
+  // 评审实测:那两个分支一次都没跑,卡面上却是按「五类都在做」的模板打印的。
+  // 现在按下面五个变体轮换,把**缩进两个方向**、**换行符统一**、**末尾补换行**都真踩到,
+  // 并且在结尾用**卡面总计那行**(产出侧,不是夹具侧)断言五类计数全部 > 0。
+  const GD_LINES = [
     'extends Node',
     '# 顶部注释   ',
     '',
@@ -351,28 +361,63 @@ try {
     '\treturn speed \\'
   ]
   const GD_CLEAN_TXT = 'extends Node\n\nfunc _ready() -> void:\n\tprint(1)\n'
+  // 前导 tab 按 4 格展开成空格(与 format.ts 的换算宽度同一档,这样那一行本身就是「已经是目标形状」)
+  const toSpace = (l) => l.replace(/^[\t]+/, (m) => '    '.repeat(m.length))
+  // 缩进变体要动的两行:SPACE_MAJ 那份保留这一行的 tab(少数派 ⇒ 该被展开成 4 空格),
+  // TAB_MAJ 那份把这一行改成 4 空格(少数派 ⇒ 该被折回一个 tab)。
+  const TAB_KEEP = 17
+  const SPACE_KEEP = 12
+  // 混合换行符那一组**刻意绕开 `"""` 块覆盖的四行**(8~11):块内行的终止符是字符串**内容**,
+  // 一旦内容与代码区主导不同,判据 5 的冲突闸就把整条「换行符统一」关掉(上一轮评审在这里踩过一次,
+  // 埋了 CRLF 却一条 endings 都没产生)。所以只在纯代码行上混 CRLF。
+  const BLOCK_LINES = new Set([8, 9, 10, 11])
+  const EOL_MIX = new Set([0, 3, 6, 13, 16])
+  // 这条不变量当场核一次:将来谁把 CRLF 挪到块覆盖的那几行上,判据 5 的冲突闸就会把整条统一关掉,
+  // endings 恒 0 —— P5 变异实测过那条腿会红,但更省事的是这里直接拦下来。
+  if ([...EOL_MIX].some((k) => BLOCK_LINES.has(k))) {
+    throw new Error('EOL_MIX 不能碰 """ 块覆盖的行(那会让「换行符统一」整条被冲突闸关掉)')
+  }
   let dirtyGd = 0
   const cleanGd = new Set()
-  let crlfGd = 0
+  let crlfGd = 0 // 整份 CRLF
+  let mixedGd = 0 // 混合换行符(endings 分支)
+  let spaceMajGd = 0 // tab→空格分支
+  let tabMajGd = 0 // 空格→tab 分支
+  let noFinalGd = 0 // 末尾补换行分支
   for (let i = 0; i < fc.gd; i++) {
     const rel = `scripts/mod${Math.floor(i / 100)}/s${i % 100}.gd`
     const abs = path.join(WORK, ...rel.split('/'))
     fs.mkdirSync(path.dirname(abs), { recursive: true })
-    if (i % 5 === 2) {
+    if (i % 7 === 3) {
       fs.writeFileSync(abs, GD_CLEAN_TXT)
       cleanGd.add(rel)
       continue
     }
-    let body = GD_DIRTY.join('\n') + '\n'
-    if (i % 7 === 3) {
-      body = body.replace(/\n/g, '\r\n')
+    const variant = i % 5
+    let lines = GD_LINES
+    if (variant === 1) lines = GD_LINES.map((l, k) => (k === TAB_KEEP ? l : toSpace(l)))
+    else if (variant === 2) lines = GD_LINES.map((l, k) => (k === SPACE_KEEP ? '    var pts = [' : l))
+    let body
+    if (variant === 4) {
+      body = lines.join('\r\n') + '\r\n'
       crlfGd++
+    } else if (variant === 3) {
+      body = lines.map((l, k) => l + (EOL_MIX.has(k) ? '\r\n' : '\n')).join('')
+      mixedGd++
+    } else body = lines.join('\n') + '\n'
+    if (variant === 1) spaceMajGd++
+    if (variant === 2) tabMajGd++
+    if (i % 9 === 4) {
+      // 1/9 那份**不写末尾换行**:让「补文件末尾单个换行」那条也真的进改写分支
+      body = body.replace(/[\r\n]+$/, '')
+      noFinalGd++
     }
     fs.writeFileSync(abs, body)
     dirtyGd++
   }
-  console.log(`[format 夹具] gdTotal=${fc.gd} dirty=${dirtyGd} clean=${cleanGd.size} crlf=${crlfGd} ` +
-    `dirtyBytes=${Buffer.byteLength(GD_DIRTY.join('\n') + '\n')}`)
+  console.log(`[format 夹具] gdTotal=${fc.gd} dirty=${dirtyGd} clean=${cleanGd.size} ` +
+    `crlf=${crlfGd} 混合结尾=${mixedGd} 空格为主=${spaceMajGd} tab为主埋空格=${tabMajGd} ` +
+    `缺末尾换行=${noFinalGd} dirtyBytes=${Buffer.byteLength(GD_LINES.join('\n') + '\n')}`)
   const scan4 = F.scanProjectTree(DOC._id, { includeCache: true })
   if (!scan4.ok) throw new Error(`格式化夹具重扫失败: ${scan4.error}`)
   const fmtCtx = {
@@ -418,21 +463,38 @@ try {
     console.error(`[format 直测] 干净脚本被拖进改写清单:${cleanLeaked.map((f) => f.rel).slice(0, 3).join('、')}`)
     exitCode = 1
   }
-  // 自查的第四条(本轮取证补):上面三条比的都是「实测 vs 夹具计数」,而 dirtyGd/cleanGd/crlfGd 与
-  // 夹具出自**同一个循环** —— 夹具整体退化时两边一起变 0,"相等"照样绿。实测过:把 `i % 5 === 2`
-  // 改成恒真(全部 .gd 都干净)→ 打印 `files=0/0 非恒等=0/0 verdict=PASS` 且退 0,
-  // 于是又量了一次 B6 咬过的「零判定计时」。所以这里再加一条**与夹具计数无关的绝对下限**:
-  // 脏脚本要占得住读入面、干净反向对照与 CRLF 版都必须真的存在(少了任何一条就有一条判定路径没被踩)。
+  // 自查的第四条与第五条(取证补的两路闸,Fix round 1 Minor 1 把第五条换成**产出侧**的):
+  //   上面三条比的都是「实测 vs 夹具计数」,而 dirtyGd/cleanGd/… 与夹具出自**同一个循环** ——
+  //   夹具整体退化时两边一起变 0,"相等"照样绿。实测过:把 `i % 7 === 3`(干净对照那条)改成恒真
+  //   ⇒ 全部 .gd 都是干净文本,打印 `files=0/0 非恒等=0/0 verdict=PASS` 且退 0,
+  //   于是又量了一次 B6 咬过的「零判定计时」。所以再加两路:
+  //   ④ 与实测无关的**夹具绝对下限**:每一种形状都必须真的存在;
+  //   ⑤ 与夹具计数无关的**产出侧证据**:把卡面「总计改动」那五个数解出来,五类**全部 > 0** 才叫
+  //      「五个改写分支都真的跑了」—— 上一轮只有 ④,而 ④ 只保证「埋了 CRLF 版」,不保证 endings 真的产生。
   const fmtFixtureOk = dirtyGd + cleanGd.size === fc.gd && dirtyGd * 2 >= fc.gd &&
-    cleanGd.size >= 1 && crlfGd >= 1
+    cleanGd.size >= 1 && crlfGd >= 1 && mixedGd >= 1 && spaceMajGd >= 1 && tabMajGd >= 1 && noFinalGd >= 1
   if (!fmtFixtureOk) {
-    console.error(`[format 直测] 夹具退化:dirty=${dirtyGd} clean=${cleanGd.size} crlf=${crlfGd}(gd 总数 ${fc.gd})` +
-      ` —— 要 dirty 占半数以上、且干净对照与 CRLF 版都至少各 1 份,否则判定路径根本没被踩到`)
+    console.error(`[format 直测] 夹具退化:dirty=${dirtyGd} clean=${cleanGd.size} crlf=${crlfGd} ` +
+      `混合结尾=${mixedGd} 空格为主=${spaceMajGd} tab为主埋空格=${tabMajGd} 缺末尾换行=${noFinalGd}(gd 总数 ${fc.gd})` +
+      ` —— dirty 要占半数以上,且每种形状至少各 1 份,否则判定路径根本没被踩到`)
     exitCode = 1
   }
+  const fmtTotals = /总计改动:尾随空白 (\d+) 行、缩进 (\d+) 行、压掉空行 (\d+) 行、补末尾换行 (\d+) 个文件、换行符 (\d+) 行/
+    .exec(fmtAgg ? fmtAgg.detail : '')
+  const five = fmtTotals ? fmtTotals.slice(1).map(Number) : null
+  const fiveOk = !!five && five.every((x) => x > 0)
+  if (!fiveOk) {
+    console.error(`[format 直测] 有改写分支一次都没跑:卡面总计那行 = ${fmtTotals ? fmtTotals[0] : '解不出来'}` +
+      `(要五类全部 > 0;上一轮就是 endings/indent 恒 0 却照样绿)`)
+    exitCode = 1
+  }
+  console.log(`[format 直测] 卡面五类总计 尾随空白=${five ? five[0] : '?'} 缩进=${five ? five[1] : '?'} ` +
+    `空行=${five ? five[2] : '?'} 末尾换行=${five ? five[3] : '?'} 换行符=${five ? five[4] : '?'} ` +
+    `verdict=${fiveOk ? 'PASS' : 'FAIL'}`)
   console.log(`[format 直测] 自查 files=${fmtFiles.length}/${dirtyGd} 非恒等=${fmtRewritten}/${dirtyGd} ` +
     `干净泄漏=${cleanLeaked.length}(want 0) 夹具=${fmtFixtureOk ? 'ok' : '退化'} ` +
-    `verdict=${fmtFiles.length === dirtyGd && fmtRewritten === dirtyGd && cleanLeaked.length === 0 && fmtFixtureOk ? 'PASS' : 'FAIL'}`)
+    `五类总计=${fiveOk ? 'ok' : '有分支没跑'} ` +
+    `verdict=${fmtFiles.length === dirtyGd && fmtRewritten === dirtyGd && cleanLeaked.length === 0 && fmtFixtureOk && fiveOk ? 'PASS' : 'FAIL'}`)
 } catch (e) {
   console.error(`perf harness 抛错: ${e && e.stack ? e.stack : e}`)
   exitCode = 1

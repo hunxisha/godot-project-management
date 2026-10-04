@@ -18,6 +18,9 @@
 //   5. 只要有任一字符串**内容**里的换行符与代码区主导不同,整个文件的「换行符统一」直接不做;
 //      正文里出现裸 `\r` 时同理(引擎自己就把这种字符当错误报,见 gdScript.ts 文件头的出处)。
 // 计数与产出同一个循环累加(判据 7 要「可核对的计数」),测试里另有第二趟纯比较交叉核对。
+// 「这一类为什么没做」的五档理由(统一缩进 / 统一换行符 / 补末尾换行 各一档以上)都跟着 rel 上卡面的
+// `{没做:}` —— 卡面承诺了五件事,少做了任何一件都要让用户看得见(Fix round 1 Important 2:
+// 补末尾换行那四条理由当时算出来了却没进 skips,五类在卡面上只剩四类可解释)。
 //
 // ## 缩进为什么按「文件自身的多数派」而不读编辑器设置(判据 3)
 //
@@ -38,9 +41,9 @@
 import type { Finding, ToolContext } from '../types'
 import type { TreeEntry } from '../../types/godot'
 import type { GdLineInfo, GdScan } from '../parsers/gdScript'
-import { gdScopeOf, scanGdScript } from '../parsers/gdScript'
+import { scanGdScript } from '../parsers/gdScript'
 import { LIST_CAP, truncatedFinding } from '../finding'
-import { fmtBytes } from '../treeUtils'
+import { fmtBytes, isCache } from '../treeUtils'
 
 /** 一个文件里五类操作各改了多少处(与产出同一个循环累加 —— 判据 7 的「可核对计数」) */
 export interface FormatCounts {
@@ -74,6 +77,37 @@ interface Excl {
   addons: number
   /** 进了读入面但 `readText` 给不出正文的(二进制 / 超限 / 读错误) */
   unread: number
+}
+
+/** 一个条目在格式化眼里的身份:目标 / 缓存 / 第三方插件 / 别的东西 */
+type GdScope = 'target' | 'cache' | 'addons' | 'other'
+
+/**
+ * 读入面判据(判据 8):只有 `.gd` 参与,`.godot/**` 与 `addons/**` 各算一类**排除计数**。
+ *
+ * 这一段从 `parsers/gdScript.ts` 搬了过来(Fix round 1 Minor 3):「哪个树条目归我改」是**检查器**的决定,
+ * 不是文本解析器的规矩 —— gdScript.ts 只回答「这一行的字节能不能动」。
+ *
+ * 与 `inspectors/orphans.ts:129-130`、`inspectors/imports.ts:311` 同一条路径段判据:
+ *   · 缓存**直接用 `treeUtils.ts:19-22` 的 `isCache`**(那份的注释明写两端必须同语义,
+ *     自己重抄一遍 `.godot` 段判据就是下一条分叉之路);按路径段而不是子串匹配 ——
+ *     `project.godot` 与 `sub/x.godot` 都不是缓存;
+ *   · addons 按**大小写不敏感**判(与上面两家的 `isAddon` 是一处**刻意的偏差**,理由跟着搬过来):
+ *     Windows 上 `Addons/` 与 `addons/` 是同一个目录,漏判一侧就会把归 B7 的第三方插件脚本改写掉 ——
+ *     这一侧的漏判是**越界改动**,不是「少改」,必须堵住。
+ *     (方向与 orphans 那条不同:那里漏判只是少报孤儿,这里漏判会动别人的代码。);
+ *   · rel 里出现反斜杠 → 形状不认识,一律不进读入面(宁可不读,不替原语猜路径);
+ *   · 扩展名用原语给的 `f.ext`(小写无点,两端同形,记录见 `refIndex.ts:59-63`),不在这里重算;
+ *     `Main.GD` 的 ext 就是 `gd`,所以照样进面。
+ */
+function gdScopeOf(entry: TreeEntry): GdScope {
+  const rel = entry && typeof entry.rel === 'string' ? entry.rel : ''
+  if (!rel || rel.includes('\\')) return 'other'
+  const segments = rel.split('/')
+  if (isCache(rel)) return 'cache'
+  if (entry.ext !== 'gd') return 'other'
+  if (segments.some((c) => c.toLowerCase() === 'addons')) return 'addons'
+  return 'target'
 }
 
 /**
@@ -127,6 +161,12 @@ function leadKind(indent: string): 'tab' | 'space' | 'mixed' | 'none' {
  * · continuation ⇒ 前导是「跟着上一行对齐」的排版意图,一刀切会把可读的多行调用弄丑(判据 4);
  * · 空行 ⇒ 不参与统计,也不参与转换:它的前导会被「删行尾空白」清掉。
  *   排除空行是必须的,否则一个文件里几行只写了 tab 的空行会把多数派投给 tab,凭空造出转换。
+ * ⚠ 「续行行连**多数派统计**都不参与」比判据 3 的字面(统计该文件里所有代码行的前导空白)**更窄**,
+ *   这是刻意的取舍、不是实现细节:对齐缩进是「这一行想贴在某一列」的排版意图,它对齐用的那一种字符
+ *   本来就不表达本文件的块缩进风格,把它算进票数只会把目标推向排版工具的巧合。
+ *   代价也写明白:一份「块缩进全是空格、但每个多行调用都用 tab 对齐」的文件,目标会按空格定,
+ *   而那些对齐行既不投票也不被转换(「不转换」由卡面 INDENT_TXT 全局说明,所以不进 `{没做:}` 那条逐文件账),
+ *   而不是被重排成对齐的空格 —— 少改的那一侧永远是排版,不是代码。
  */
 function indentEligible(l: GdLineInfo): boolean {
   return !l.inString && !l.continuation && !empty(l.raw)
@@ -140,8 +180,8 @@ function indentEligible(l: GdLineInfo): boolean {
  * 换行符与末尾换行都要先看文件级闸门(`blockTermConflict` / `strayCR` / 平局),闸门不过就整条跳过,
  * 其余四条照做(判据 5)。
  */
-export function formatGdText(text: string, scan?: GdScan): { out: string; counts: FormatCounts; skips: string[] } {
-  const info: GdScan = scan || scanGdScript(text)
+export function formatGdText(text: string): { out: string; counts: FormatCounts; skips: string[] } {
+  const info: GdScan = scanGdScript(text)
   const lines = info.lines
   const counts: FormatCounts = { trailing: 0, indent: 0, blank: 0, finalNL: 0, endings: 0 }
   const skips: string[] = []
@@ -182,21 +222,29 @@ export function formatGdText(text: string, scan?: GdScan): { out: string; counts
     let body = l.raw
     if (target && indentEligible(l) && l.indent) {
       const kind = leadKind(l.indent)
-      if (target === 'space') {
-        // tab → 空格:形状确定(每个 tab 换成 4 格),混排前导也能确定性展开
-        if (kind === 'tab' || kind === 'mixed') {
-          const converted = l.indent.replace(/\t/g, ' '.repeat(TAB_WIDTH))
-          if (converted !== l.indent) {
-            body = converted + body.slice(l.indent.length)
-            counts.indent++
-          }
-        }
-      } else if (kind === 'space' && l.indent.length % TAB_WIDTH === 0) {
-        // 空格 → tab:只有整倍数才折得回去,余数不知道该给几格 ⇒ 不动(判据 3 的「只动整行前导」)
-        body = '\t'.repeat(l.indent.length / TAB_WIDTH) + body.slice(l.indent.length)
-        counts.indent++
-      } else if (kind === 'space' || kind === 'mixed') {
+      if (kind === 'mixed') {
+        // 前导同时混着 tab 与空格 ⇒ **两个方向都不转换**,只记「这一行没做」。
+        // 为什么不按「每个 tab 换成 4 格」展开:tab 是走到**下一个制表位**,不是固定宽 4 列,
+        // `' ' + '\t'` 落第 4 列而 5 个空格落第 5 列 —— 展开出来的那一行会和同一块里其它行**错开一列**
+        // (实测:`    var a = 1` 与 `' \tvar b = 2'` 展开后是第 4 列与第 5 列)。
+        // 早先这里写着一句「与引擎按列计数的口径同形」,那是**没有证据的引擎行为断言**,评审已判为假,
+        // 现在与目标 = tab 那一侧同一个口径:形状折不出唯一答案就别动(文件头第 3 道闸本来就是这么写的)。
         indentLeft++
+      } else if (target === 'space' && kind === 'tab') {
+        // tab → 空格:纯 tab 前导的形状是确定的(每个 tab 换成 4 格)
+        const converted = l.indent.replace(/\t/g, ' '.repeat(TAB_WIDTH))
+        if (converted !== l.indent) {
+          body = converted + body.slice(l.indent.length)
+          counts.indent++
+        }
+      } else if (target === 'tab' && kind === 'space') {
+        // 空格 → tab:只有整倍数才折得回去,余数不知道该给几格 ⇒ 不动(判据 3 的「只动整行前导」)
+        if (l.indent.length % TAB_WIDTH === 0) {
+          body = '\t'.repeat(l.indent.length / TAB_WIDTH) + body.slice(l.indent.length)
+          counts.indent++
+        } else {
+          indentLeft++
+        }
       }
     }
     const trimmed = rstrip(body)
@@ -207,8 +255,10 @@ export function formatGdText(text: string, scan?: GdScan): { out: string; counts
     bodies[i] = body
   }
   if (indentLeft > 0) {
-    // 只有「目标 = tab」这一侧会走到这里:空格折回 tab 需要整倍数,混排前导也折不出唯一形状。
-    // 目标 = 空格时混排前导是能确定性展开的(每个 tab 换成 4 格,与引擎按列计数的口径同形),所以不算少做。
+    // 两侧都会走到这里,而且是同一个口径:折不出唯一形状的前导一律不动 ——
+    // · 目标 = tab:空格数不是 4 的整倍数,余数给几格没有依据;
+    // · 两个方向:前导混着 tab 与空格(制表位按列走,展开后的列宽与纯空格前导对不齐)。
+    // 「少做了 N 行」必须上卡(判据 7),否则用户看到的还是那句「统一整行前导缩进」被静默少做。
     skips.push(`统一缩进:${indentLeft} 行的前导形状不确定(空格数不是 ${TAB_WIDTH} 的整倍数、或同一行里 tab 与空格混着),这些行没动`)
   }
 
@@ -257,6 +307,12 @@ export function formatGdText(text: string, scan?: GdScan): { out: string; counts
   else if (info.strayCR) finalNLBlocked = '补末尾换行:正文中间有裸 \\r,补 \n 会顺手改掉换行形态,不动'
   else if (lastKept >= 0 && lines[lastKept].inString) finalNLBlocked = '补末尾换行:文件停在未闭合的字符串里,补就是改内容,不动'
   else if (lastKept >= 0 && bodies[lastKept] === '') finalNLBlocked = '补末尾换行:末行本来就是空行,不再添一行'
+  // ★判据 7:这四条理由必须跟着 rel 上卡面。`SCOPE_TXT` 向用户承诺了「补齐文件末尾单个换行」,
+  // 卡片发出来了、这一类却是 0 却不写为什么 —— 那就是承诺被静默少做(旧写法把 finalNLBlocked
+  // 算出来就丢在局部变量里,四条都是死字符串,五类计数在卡面上只剩四类可解释)。
+  // 只在**真的欠一个换行**时才写(`!info.endsWithNewline`):文件本来就以换行收尾时没什么可补,
+  // 虚报一条「没做」比不报更糟(它会让用户以为工具拒了它没拒的东西)。
+  if (finalNLBlocked && !info.endsWithNewline) skips.push(finalNLBlocked)
 
   let out = ''
   for (let k = 0; k < keep.length; k++) {
