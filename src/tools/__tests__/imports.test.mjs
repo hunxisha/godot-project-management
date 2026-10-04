@@ -506,10 +506,10 @@ async function main() {
     ...IG_BASE, ['art/.gdignore', 3], ['art/a.ogg', 10], ['only/z.wav', 10]
   ], { texts: IG_TEXTS }).ctx)
   ok(ids(missingOf(igCountMissing)) === 'imports:missing:only/z.wav' &&
-    /另有 1 个同类资源位于 \.gdignore 屏蔽的目录里/.test(missingOf(igCountMissing)[0].detail),
+    /另有 1 个表内候选资源位于 \.gdignore 屏蔽的目录里/.test(missingOf(igCountMissing)[0].detail),
     '判据 3 的 detail 也要说清藏了多少（藏起来的主张在**报出来的那条**上留痕，不只留在聚合卡里）',
     `${ids(missingOf(igCountMissing))}/${missingOf(igCountMissing)[0]?.detail}`)
-  ok(!/另有 [0-9]+ 个同类资源位于 \.gdignore/.test(missingOf(igLoneCtrl)[0]?.detail || ''),
+  ok(!/另有 [0-9]+ 个表内候选资源位于 \.gdignore/.test(missingOf(igLoneCtrl)[0]?.detail || ''),
     '控制组：没有 .gdignore 被屏蔽时那句计数不出现（不许凭空报一个 0 项的排除）', missingOf(igLoneCtrl)[0]?.detail)
 
 

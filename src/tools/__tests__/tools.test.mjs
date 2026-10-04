@@ -461,6 +461,18 @@ async function main() {
   const base = [['player.gd', 10], ['assets/bg.png', 10], ['scene/a.tscn', 10], ['sub/b.tres', 10]]
   const cleanCtx = makeCtx(base, { texts: { 'scene/a.tscn': SCENE_A, 'sub/b.tres': '' } })
   ok((await T.runBrokenRefs(cleanCtx)).length === 0, '引用都存在 → 零结论')
+  // B6 修复轮裁定 2 的同一口径用到 error 级结论上:引擎与 Windows/macOS 文件系统都不区分大小写,
+  // 按精确大小写查表会把「其实有的文件」报成断链 —— 而这是 P0a 唯一的 error,假 error 最伤信任。
+  const caseRef = await T.runBrokenRefs(makeCtx(base, {
+    texts: { 'scene/a.tscn': '[ext_resource type="Texture2D" path="res://Assets/BG.PNG" id="3_c"]\n' }
+  }))
+  ok(caseRef.length === 0, '引用写成 res://Assets/BG.PNG 而树里是 assets/bg.png → 不算断链(大小写异体)',
+    JSON.stringify(caseRef.map((f) => f.id)))
+  const caseMiss = await T.runBrokenRefs(makeCtx(base, {
+    texts: { 'scene/a.tscn': '[ext_resource type="Texture2D" path="res://Assets/NOPE.PNG" id="4_d"]\n' }
+  }))
+  ok(caseMiss.length === 1, '反向对照:换个真的没有的名字(同样大写写法)照样报,不是把大写一概放过',
+    JSON.stringify(caseMiss.map((f) => f.id)))
 
   const broken = await T.runBrokenRefs(makeCtx(base, { texts: { 'scene/a.tscn': SCENE_B } }))
   ok(broken.length === 1, '一条断链', JSON.stringify(broken))

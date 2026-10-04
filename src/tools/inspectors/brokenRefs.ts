@@ -8,7 +8,7 @@
 // (缺文件 / 超 maxBytes / 二进制 / 非法路径),一律静默跳过 —— 把它当成断链
 // 就会对每一个 .png/.ttf 之外的正常场景报出假 error。
 //
-// 存在性一律用 relSet(ctx.tree) 查表比对,不做字符串包含判断:Tasks 9/10 审查后
+// 存在性一律用 lowerRelSet(ctx.tree) + hasRelCI 查表比对(任意大小写写法命中都算),不做字符串包含判断:Tasks 9/10 审查后
 // resToRel 会归一化('./' 吃掉、重复斜杠折叠、.. 与盘符判 null),归一后的 rel
 // 与树里的 rel 同形,只有「是不是树里的某个 key」这种判据才站得住。
 //
@@ -16,7 +16,7 @@
 import type { Finding, ToolContext } from '../types'
 import { truncatedFinding } from '../finding'
 import { SCENE_EXT, parseExtResources, resToRel } from '../parsers/sceneRefs'
-import { relSet } from '../treeUtils'
+import { hasRelCI, lowerRelSet } from '../treeUtils'
 
 export async function run(ctx: ToolContext): Promise<Finding[]> {
   if (ctx.truncated) {
@@ -30,7 +30,10 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
       '文件清单被截断,本次不做断链判定'
     )]
   }
-  const have = relSet(ctx.tree)
+  // 存在性一律走大小写不敏感查表(B6 修复轮裁定 2 的同一口径):Windows/macOS 的文件系统不区分大小写,
+  // 引擎自己也是这么解析 res:// 的。按精确大小写比对会把 `res://Assets/Icon.PNG`(树里实为
+  // assets/icon.png)报成「文件不存在」—— 而这是本工具唯一的 error 级结论,假 error 比漏报更伤信任。
+  const have = lowerRelSet(ctx.tree)
   const scenes = ctx.tree.filter((f) => SCENE_EXT.has(f.ext))
   const out: Finding[] = []
   for (const f of scenes) {
@@ -38,7 +41,7 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
     if (typeof text !== 'string') continue
     for (const ref of parseExtResources(text)) {
       const rel = resToRel(ref.path)
-      if (rel === null || have.has(rel)) continue
+      if (rel === null || hasRelCI(have, rel)) continue
       out.push({
         // id = 场景 rel + 该条 ext_resource 的 id + 该条的引用 path(全是证据,不含时间戳)。
         // ⚠ 光靠 id 不够:同一个场景里两条 [ext_resource] 可以复用同一个 id 却指向两个

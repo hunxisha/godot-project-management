@@ -270,6 +270,12 @@ try {
   const importsGuard = importsMs <= GUARD_IMPORTS_MS
   console.log(`[imports 直测] guard=${GUARD_IMPORTS_MS}ms(护栏) verdict=${importsGuard ? 'PASS' : 'FAIL'}`)
   if (!importsGuard) exitCode = 1
+  // 上一轮的教训就是这里没自查:27 字节的假边车让 staleRels=0 也照样「绿」,于是要判的东西一条没判、
+  // 时间却量得挺好看。stale 这条路径(分类 + 600 条排序 + 聚合 detail 模板)必须真被踩到才算数。
+  if (staleRels !== staleSide) {
+    console.error(`[imports 直测] 失效判定路径没被踩到:staleRels=${staleRels}(夹具里埋了 ${staleSide} 份)`)
+    exitCode = 1
+  }
 
   // ---------- B6 之二:把 png 打不到的两条判定路径也计上时(评审 Fix round 1 Important 2) ----------
   // 上面那一趟虽然读的是完整正文,但 Task-16 的配比只有 png/gd/tscn —— 全是 KNOWN_IMPORTERS **表外**扩展名,

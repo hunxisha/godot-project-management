@@ -178,10 +178,10 @@ export async function buildRefIndex(ctx: ToolContext): Promise<RefIndex> {
     }
 
     if (ext === 'tscn' || ext === 'tres') {
-      // 判据 4 通道一:.tscn/.tres 走 parseExtResources(sceneRefs.ts:22),目标一律过 resToRel(判据 8)
+      // 判据 4 通道一:.tscn/.tres 走 parseExtResources(sceneRefs.ts:38),目标一律过 resToRel(判据 8)
       const refs = parseExtResources(text)
       // parseExtResources 没有把行号带出来(ExtRef 只有 type/uid/path/id)。它扫的就是
-      // `[ext_resource` 开头的行(sceneRefs.ts:26 同一个谓词),所以位置能一一对齐;
+      // `[ext_resource` 开头的行(sceneRefs.ts:42 同一个谓词),所以位置能一一对齐;
       // 数量一旦对不上(将来那边漂了),退成「不给行号」而不是猜一个错的行给用户看。
       const heads: number[] = []
       const rows = text.split(/\r?\n/)

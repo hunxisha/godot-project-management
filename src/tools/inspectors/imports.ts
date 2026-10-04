@@ -193,7 +193,7 @@ function missingFinding(m: { rel: string; ext: string; siblings: string[] }, ign
   const dir = dirOf(m.rel) || '（项目根）'
   const why = ` 这类缺口通常来自绕过编辑器的拷贝或改名：让编辑器重新扫描一次通常会补上边车` +
     `（别复制别人的 .import 内容，那会把 uid 与导入参数一起搬错）。${COVERAGE}` +
-    (ignored ? ` 本次另有 ${ignored} 个同类资源位于 .gdignore 屏蔽的目录里，引擎按设计不扫那些目录，一条都没判。` : '')
+    (ignored ? ` 本次另有 ${ignored} 个表内候选资源位于 .gdignore 屏蔽的目录里，引擎按设计不扫那些目录，一条都没判。` : '')
   return {
     id: `imports:missing:${m.rel}`,
     severity: 'warn',

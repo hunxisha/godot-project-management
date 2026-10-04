@@ -39,12 +39,12 @@ import { truncatedFinding } from '../finding'
 import { buildRefIndex } from '../refIndex'
 import { fmtBytes, hasRelCI, isCache, lowerSet } from '../treeUtils'
 
-/** 聚合结论展示上限:与 uid.ts:38 的 LIST_CAP 同口径(刷屏控制,不影响 payload.rels 全量) */
+/** 聚合结论展示上限:与 uid.ts:35 的 LIST_CAP 同口径(刷屏控制,不影响 payload.rels 全量) */
 const LIST_CAP = 20
 
 /**
  * 按码元序比较(UTF-16),不用 localeCompare:locale 随宿主语言环境变,而 rels 顺序、related、预览清单
- * 要跨机器逐字节一致(判据 6 的 id 稳定性靠它)。同 uid.ts:58-60。
+ * 要跨机器逐字节一致(判据 6 的 id 稳定性靠它)。同 uid.ts:48-50。
  */
 function byText(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
