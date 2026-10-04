@@ -21,6 +21,7 @@
 //
 // 红线:纯函数。不碰 window、不碰 DOM、不碰 vue,没有异步。
 import type { FixPlan, FixPlanItem } from './fixPlan'
+import { rewriteWarn } from './fixPlan'
 
 /**
  * 空选择的拒绝理由。
@@ -103,7 +104,9 @@ export function subsetPlan(plan: FixPlan, selected: string[]): FixPlan {
   const empty = items.length === 0
   return {
     verb: plan.verb,
-    warn: plan.warn,
+    // rewrite 的风险句按**勾完之后的那一批**重算(措辞仍归 fixPlan.ts):照抄父计划会在
+    // 「只勾中会被新建的那一条」时继续承诺「有的文件会先复制成备份」—— 预览侧的过度安心。
+    warn: plan.service === 'writeProjectText' ? rewriteWarn(items) : plan.warn,
     items,
     empty,
     service: plan.service,

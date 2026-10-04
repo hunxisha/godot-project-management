@@ -138,7 +138,8 @@ const runLabel = computed(() =>
           </div>
 
           <div class="fx-sum">
-            将影响 <b>{{ plan.items.length }}</b> 个文件 · 合计约 <b>{{ fmtBytes(plan.bytes) }}</b>
+            <template v-if="perItem">本条结论涉及 <b>{{ plan.items.length }}</b> 个文件 · 整单约 <b>{{ fmtBytes(plan.bytes) }}</b></template>
+            <template v-else>将影响 <b>{{ plan.items.length }}</b> 个文件 · 合计约 <b>{{ fmtBytes(plan.bytes) }}</b></template>
             <span v-if="unknownCount" class="fx-dim">(其中 {{ unknownCount }} 个不在本次文件清单里,体积未知)</span>
             <span v-if="rejectedCount" class="fx-dim">({{ rejectedCount }} 个路径非法,原语会拒绝)</span>
           </div>

@@ -156,7 +156,29 @@ const OUTSIDE_NOTE = '不在本次文件清单中,仍会交给原语并如实回
 // 改写通道必须换一句:writeProjectText 对不存在的目标是**新建文件**,而新建不产生备份
 // (inspectfs.js:185-188 的 ENOENT 分支 + :203 的 `if (exists && ...)`)——
 // 继续说「原文件已备份」就是在给用户一条没有退路的承诺。
-const NEWFILE_NOTE = '文件清单里没有它:改写会新建文件,没有备份可还原'
+export const NEWFILE_NOTE = '文件清单里没有它:改写会新建文件,没有备份可还原'
+
+/**
+ * 改写通道的风险句,按「这一批里有没有清单外的目标」分三档(措辞只住在这里,
+ * `gate.subsetPlan` 裁完子集也要回来调它 —— 直接抄父计划的 warn 会在只勾中「会被新建」那一条时
+ * 仍然承诺「有的文件会先复制成备份」,那是预览侧的过度安心)。
+ * 判据从 items 自己反推:`size` 是数字 ⇒ 清单里有它;note 是 NEWFILE_NOTE ⇒ 会被新建、没有备份。
+ */
+export function rewriteWarn(items: FixPlanItem[]): string {
+  let createdNew = false
+  let listed = 0
+  for (const it of items) {
+    if (typeof it.size === 'number') listed += 1
+    else if (it.note === NEWFILE_NOTE) createdNew = true
+  }
+  // 备份名以原扩展名**之后**收尾(player.gd.gpm-bak-<stamp>),这是原语刻意的设计,
+  // 见 inspectfs.js:147-153、204 —— 文案照它说,别写成「<原名>.bak」那种根本不会出现的形态。
+  return !createdNew
+    ? '改写前会先把原文件复制成「原名.gpm-bak-时间戳」备份,再原子替换,可随时还原。'
+    : listed === 0
+      ? '这些文件都不在本次文件清单里:改写会直接新建文件,新建没有备份可还原。'
+      : '清单里有的文件会先复制成「原名.gpm-bak-时间戳」备份再原子替换;清单里没有的那些会被新建,新建没有备份可还原。'
+}
 
 /**
  * items / rels / files / bytes **一起算**,一趟去重(审查 Important 2:分两趟算,预览就能说出
@@ -264,16 +286,10 @@ export function planFix(f: Finding, tree: TreeEntry[], isWin: boolean): FixPlan 
       }
     }
     const r = toItems(sources, sizeOf, 'rewrite')
-    // 备份名以原扩展名**之后**收尾(player.gd.gpm-bak-<stamp>),这是原语刻意的设计,
-    // 见 inspectfs.js:147-153、204 —— 文案照它说,别写成「<原名>.bak」那种根本不会出现的形态。
-    // 三档措辞:清单外目标走 ENOENT 分支当**新建**,新建不产生备份(:185-188 + :203),
-    // 所以只要有一个清单外项就不能再统一承诺「可随时还原」;而一个清单内项都没有时,
-    // 连「有的文件会先备份」这句都会指向根本不存在的备份,只能说新建那一半。
-    const warn = !r.createdNew
-      ? '改写前会先把原文件复制成「原名.gpm-bak-时间戳」备份,再原子替换,可随时还原。'
-      : r.listed === 0
-        ? '这些文件都不在本次文件清单里:改写会直接新建文件,新建没有备份可还原。'
-        : '清单里有的文件会先复制成「原名.gpm-bak-时间戳」备份再原子替换;清单里没有的那些会被新建,新建没有备份可还原。'
+    // 三档措辞见 rewriteWarn(它同时是 gate 裁子集后的复用入口):清单外目标走 ENOENT 分支当**新建**,
+    // 新建不产生备份(:185-188 + :203),所以只要有一个清单外项就不能再统一承诺「可随时还原」;
+    // 而一个清单内项都没有时,连「有的文件会先备份」这句都会指向根本不存在的备份,只能说新建那一半。
+    const warn = rewriteWarn(r.items)
     return {
       verb: '改写文件',
       warn,

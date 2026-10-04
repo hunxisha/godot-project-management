@@ -147,8 +147,10 @@ export function useTools() {
   /**
    * 引用索引的**单份**缓存(B10a,spec §5.2「ctx 一次扫描多工具共享」的最后一笔欠账)。
    *
-   * buildRefIndex 是整页唯一带真实 IO 的公共调用(每个来源一次 readText)。接线 6 个工具之后,
-   * 吃索引的工具各自重读约 3 千个文件是不可接受的 —— 缓存这一处就把重复遍历全部消掉。
+   * buildRefIndex 是整页唯一带真实 IO 的公共调用(每个来源一次 readText)。
+   * 今天只有 orphans 吃它(uid/imports/addons/ini 都明写不建引用索引),所以这份缓存省的是
+   * 「同一代里重复取用 + 重跑 orphan 检查」那一类重复遍历;把六个工具的重复读全部挡掉是接线后的账,
+   * 不是现状 —— 别照着这句话以为今天有五个消费者。
    *
    * 键 = `项目id#扫描世代`,失效有三处(三处的分工由变异取证区分,不是随手多写):
    *   · **承重的那一处是 `ensureTree`**:它每成功装进一份新清单就清一次。TTL 到期与 runAll 的
@@ -430,20 +432,21 @@ export function useTools() {
    * 传了 selected 时先过 `subsetPlan` 裁子集,**再**走原有的两道短路:空选择会变成
    * `plan.empty` 带着原因被拒(useTools.ts 下面的「① 管线执行不了的两种情形」),
    * 于是「一条都没勾」既不会被静默吞掉,也不会绕过能力闸去碰原语。
-   * @param selected 勾选集合(数组),或与今天同形的选项对象(不裁剪);缺省 = 整单
-   * @param opts 选项;第二参给了对象时它就是本参数(B1 起的调用形状)
+   * @param selected 勾选集合(数组);**类型上只收 string[]**,缺省 = 整单(只给测试与显式调用留的路,
+   *                 生产调用点必须显式传,否则等于绕过按条勾选 —— B10a 评审点名这条)
+   * @param opts 选项(平台口径);它挪到第三个位置,就是为了「第二参写错形状」不能在类型下编译
    * @param opts.isWin 平台口径;省略时问 bridge(取不到按非 Windows 的保守口径)
    */
   async function applyFix(
     f: Finding,
-    selected?: string[] | { isWin?: boolean },
+    selected?: string[],
     opts?: { isWin?: boolean }
   ): Promise<FixOutcome> {
     const pid = projectId.value
-    // 第二参是数组 = 勾选集合;是对象 = 今天的选项对象;都不是(undefined / null)= 整单。
-    // 判别只看 Array.isArray,不靠真假:applyFix(f, null, { isWin: true }) 的第三参必须照常生效。
+    // 第二参只认数组;undefined / null = 整单。判别只看 Array.isArray,不靠真假:
+    // applyFix(f, undefined, { isWin: true }) 的第三参必须照常生效。
     const sel = Array.isArray(selected) ? selected : undefined
-    const options = selected && !Array.isArray(selected) ? selected : opts
+    const options = opts
     const isWin = typeof options?.isWin === 'boolean' ? options.isWin : hostIsWindows()
     const fullPlan = planFix(f, tree.value, isWin)
     const plan = sel === undefined ? fullPlan : subsetPlan(fullPlan, sel)

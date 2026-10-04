@@ -176,7 +176,8 @@ async function main() {
   const READ_FIRST = ['addons', 'ini', 'uid']
   const WRITE_LAST = ['orphans', 'imports', 'format']
   ok(READ_FIRST.every((a) => WRITE_LAST.every((b) => idx(a) < idx(b))),
-    '「先只读、后可写」:批量动盘的 orphans/imports/format 三条全在 addons/ini/uid 之后(spec 待确认 #8)',
+    '「先出结论、后动盘」:批量删改的 orphans/imports/format 三条全在 addons/ini/uid 之后(spec 待确认 #8)。' +
+    '注意 uid 自己带孤儿 .uid 的回收站修复,只是 runAll 不执行任何修复,所以它归在前一组',
     M.TOOLS.map((x) => x.id).join('>'))
   ok(['size', 'cache', 'brokenRefs'].every((a) => WRITE_LAST.every((b) => idx(a) < idx(b))),
     'P0a 的三条只读工具同样排在动盘三条之前', M.TOOLS.map((x) => x.id).join('>'))
@@ -696,7 +697,7 @@ async function main() {
   await tF.load()
   await tF.runTool('size') // 先把清单扫进来(applyFix 用 tree 解析预览体积)
   const scanBeforeFix = scanCalls
-  const oK = await tF.applyFix(FIX_FINDING, { isWin: true })
+  const oK = await tF.applyFix(FIX_FINDING, undefined, { isWin: true })
   ok(oK.ok === true && oK.moved === 1 && oK.failed.length === 0, '回收站成功回执', JSON.stringify(oK))
   ok(trashLog.length === 1 && trashLog[0].rels.join(',') === 'scene/main.tscn',
     '只把 rel 交给原语(渲染层不拼绝对路径,越界与符号链接由 resolveInside 把关)', JSON.stringify(trashLog))
@@ -722,7 +723,7 @@ async function main() {
   await tFxP.runTool('size')
   const oP = await tFxP.applyFix(
     { id: 'uid:multi', severity: 'warn', title: '孤儿 .uid', fix: { kind: 'trash', label: '移入回收站', payload: ['scene/main.tscn', '.godot/imported/a.stex'] } },
-    { isWin: true })
+    undefined, { isWin: true })
   ok(oP.ok === false, '原语回 ok:false 时回执必须 ok:false(不把部分失败美化成成功)', JSON.stringify(oP))
   ok(oP.moved === 1 && oP.failed.length === 1 && oP.failed[0].rel === 'scene/main.tscn',
     '成功数与失败项原样带出(UI 据此写「N 项成功、M 项失败」)', JSON.stringify([oP.moved, oP.failed]))
@@ -736,7 +737,7 @@ async function main() {
   global.window.services.movePathsToTrash = () => ({ ok: false, moved: 0, failed: [{ rel: 'scene/main.tscn', error: '文件不存在' }] })
   await tFxP.runTool('cache') // 把上一次重扫用掉,TTL 重新变新鲜,下面的 0 增量才有意义
   const scanBeforeDead = scanCalls
-  const oD = await tFxP.applyFix(FIX_FINDING, { isWin: true })
+  const oD = await tFxP.applyFix(FIX_FINDING, undefined, { isWin: true })
   ok(oD.ok === false && oD.changed === false && oD.invalidated === false,
     '一项都没删掉的失败:changed/invalidated 都是 false', JSON.stringify([oD.ok, oD.changed, oD.invalidated]))
   ok(oD.message.includes('文件不存在'), '原语的中文原因照旧透传', oD.message)
@@ -749,7 +750,7 @@ async function main() {
   await tH.load()
   ok(tH.caps.trash === false && tH.caps.write === false, 'caps 探到宿主没有 trash/write 能力', JSON.stringify(tH.caps))
   const trashCallsBefore = trashLog.length
-  const oN = await tH.applyFix(FIX_FINDING, { isWin: true })
+  const oN = await tH.applyFix(FIX_FINDING, undefined, { isWin: true })
   ok(oN.ok === false && oN.error === '当前宿主不支持', '缺能力时结构化返回而不是抛异常', JSON.stringify(oN))
   ok(trashLog.length === trashCallsBefore, '缺失的原语压根没被调用', trashLog.length - trashCallsBefore)
   ok(oN.changed === false && oN.invalidated === false, '没执行 = 磁盘没变,不重扫', `${oN.changed}/${oN.invalidated}`)
@@ -766,7 +767,7 @@ async function main() {
   await tI.runTool('size')
   const oW = await tI.applyFix(
     { id: 'format:1', severity: 'info', title: '行尾空白', fix: { kind: 'rewrite', label: '格式化', payload: { files: [{ rel: 'a.gd', text: 'x' }, { rel: 'b.gd', text: 'y' }] } } },
-    { isWin: true })
+    undefined, { isWin: true })
   ok(writeLog.length === 2 && writeLog.every((w) => w.rel === 'a.gd' || w.rel === 'b.gd') && writeLog[0].text === 'x',
     '逐文件调 writeProjectText,参数只有 rel + 新内容', JSON.stringify(writeLog.map((w) => w.rel)))
   ok(oW.ok === false && oW.written.join(',') === 'a.gd' && oW.failed.length === 1 && oW.failed[0].error === '写入失败',
@@ -780,7 +781,7 @@ async function main() {
   const scanBeforeW = scanCalls
   const oWF = await tI.applyFix(
     { id: 'ini:1', severity: 'warn', title: '重复键', fix: { kind: 'rewrite', label: '改写配置', payload: { rel: 'project.godot', text: 'z' } } },
-    { isWin: true })
+    undefined, { isWin: true })
   ok(oWF.ok === false && oWF.changed === false && oWF.written.length === 0,
     '备份失败 = 原文件一个字节没动(原语正是这么保证的)', JSON.stringify([oWF.ok, oWF.changed, oWF.written]))
   ok(oWF.message.includes('备份失败'), '失败原因用原语原话', oWF.message)
@@ -791,19 +792,19 @@ async function main() {
   const writeCallsBefore = writeLog.length
   const oE = await tI.applyFix(
     { id: 'cache:1', severity: 'info', title: '缓存可清理', fix: { kind: 'existing', label: '去项目页清理', service: 'cleanProjectCache' } },
-    { isWin: true })
+    undefined, { isWin: true })
   ok(oE.ok === false && oE.service === null, 'existing 不是可执行动作:service 为 null', JSON.stringify([oE.ok, oE.service]))
   ok(/既有能力|跳转/.test(oE.message), '说不清「为什么不做」不算完 —— 回执必须给原因', oE.message)
   ok(writeLog.length === writeCallsBefore && trashLog.length === trashCallsBefore,
     '不可执行的修复一个原语都不碰(不重复执行既有能力)', `${writeLog.length}/${trashLog.length}`)
   const oNT = await tI.applyFix(
     { id: 'ini:2', severity: 'warn', title: '重复键', rel: 'project.godot', fix: { kind: 'rewrite', label: '改写配置' } },
-    { isWin: true })
+    undefined, { isWin: true })
   ok(oNT.ok === false && oNT.service === null && /内容/.test(oNT.message),
     'rewrite 没带新内容 → 拒执行并说明缺什么(不写空文件覆掉用户配置)', oNT.message)
   ok(writeLog.length === writeCallsBefore, '这条路也没调原语', writeLog.length - writeCallsBefore)
   global.window.services.movePathsToTrash = () => { throw new Error('宿主炸了') }
-  const oBoom = await tI.applyFix(FIX_FINDING, { isWin: true })
+  const oBoom = await tI.applyFix(FIX_FINDING, undefined, { isWin: true })
   ok(oBoom.ok === false && oBoom.error === '宿主炸了' && oBoom.changed === false,
     '原语抛异常也只标失败,不冒泡(工具页要能在结论里显示原因)', JSON.stringify([oBoom.ok, oBoom.error, oBoom.changed]))
   global.window.services.movePathsToTrash = (pid, rels) => ({ ok: true, moved: rels.length, failed: [] })
@@ -841,14 +842,14 @@ async function main() {
   await tP.runTool('size')
   const oDup = await tP.applyFix(
     { id: 'fmt:dup', severity: 'info', title: '行尾空白', fix: { kind: 'rewrite', label: '格式化', payload: { files: [{ rel: 'a.gd', text: 'FIRST' }, { rel: './a.gd', text: 'SECOND' }] } } },
-    { isWin: true })
+    undefined, { isWin: true })
   ok(dupWriteLog.length === 1 && dupWriteLog[0].text === 'FIRST',
     '同一个 rel 点名两次只发一次写(预览说 1 个文件,盘上就只写 1 次)', JSON.stringify(dupWriteLog))
   ok(oDup.ok === true && oDup.written.length === 1 && oDup.failed.length === 0,
     'ok 的比数是去重后的那份清单(未去重时 written 永远追不上 files.length)', JSON.stringify([oDup.ok, oDup.written, oDup.failed]))
   await tP.applyFix(
     { id: 'uid:abs', severity: 'warn', title: '孤儿 .uid', fix: { kind: 'trash', label: '移入回收站', payload: ['/etc/passwd', 'C:\\Windows\\x'] } },
-    { isWin: true })
+    undefined, { isWin: true })
   ok(rawRelLog.length === 1 && rawRelLog[0].length === 2 &&
     rawRelLog[0][0] === '/etc/passwd' && rawRelLog[0][1] === 'C:\\Windows\\x',
     '绝对路径/带盘符的 rel **原样**交给原语(渲染层不改写成项目内路径,越界判断是 resolveRel 的活)', JSON.stringify(rawRelLog))
@@ -871,13 +872,13 @@ async function main() {
   await tRe.runTool('size')
   const firstP = tRe.applyFix(
     { id: 'uid:r1', severity: 'warn', title: 't', fix: { kind: 'trash', label: '移入回收站', payload: ['scene/main.tscn'] } },
-    { isWin: true })
+    undefined, { isWin: true })
   await tick()
   ok(tRe.fixing.value === 'uid:r1' && holdLog.length === 1,
     '前置条件成立:第一次修复真的卡在 await 上(同步桩复现不出竞态,与 F-1 同一取舍)', `${tRe.fixing.value}|${holdLog.length}`)
   const blockedP = tRe.applyFix(
     { id: 'uid:r2', severity: 'warn', title: 't', fix: { kind: 'trash', label: '移入回收站', payload: ['.godot/imported/a.stex'] } },
-    { isWin: true })
+    undefined, { isWin: true })
   const raced = await Promise.race([
     blockedP.then((o) => ['done', o]),
     new Promise((resolve) => setTimeout(() => resolve(['hang', null]), 30))
@@ -1115,12 +1116,18 @@ async function main() {
     '★三种「不传 selected」的写法都交出整单三条(裁剪只在显式传数组时发生)', JSON.stringify(compatLog))
   ok(oLegacy.ok === true && oBare.ok === true && oNull.ok === true, '三条调用都执行成功',
     JSON.stringify([oLegacy.ok, oBare.ok, oNull.ok]))
-  ok(oNull.verb === '移入回收站' && oLegacy.verb === '移入回收站' && oBare.verb === '移入回收站',
-    '第二参是 null/对象时,第三参的 isWin 照常生效(判别只按「是不是数组」,不靠真假)',
-    JSON.stringify([oLegacy.verb, oBare.verb, oNull.verb]))
+  ok(oBare.verb === '移入回收站' && oNull.verb === '移入回收站',
+    '第二参给 undefined/null 时,平台口径照旧从第三参取(判别只按「是不是数组」,不靠真假)',
+    JSON.stringify([oBare.verb, oNull.verb]))
+  // 旧形状(选项对象挤在第二参)在新签名里**不再被类型接受**,运行时也不再当选项看:
+  // 它会退化成宿主默认平台口径。这条断言把「形状写错 ≠ 还能悄悄带着 isWin 执行整单」钉成事实,
+  // 也让 B10b 之后新增的调用点一旦抄旧写法就立刻红在这里。
+  ok(oLegacy.verb !== '移入回收站',
+    '★第二参塞选项对象不再被当成选项(旧形状在生产调用点已不可能通过类型),执行仍按整单但平台口径回退宿主',
+    JSON.stringify([oLegacy.verb, oBare.verb]))
   const strip = (o) => JSON.stringify({ ...o, at: 0, findingId: '' })
-  ok(strip(oLegacy) === strip(oBare) && strip(oBare) === strip(oNull),
-    '整单回执逐字段相同(时间戳归一后)', `${strip(oLegacy)} vs ${strip(oNull)}`)
+  ok(strip(oBare) === strip(oNull),
+    '整单回执逐字段相同(undefined 与 null 两种「不选」写法;时间戳归一后)', `${strip(oBare)} vs ${strip(oNull)}`)
   const oRwLegacy = await tBk.applyFix(rewriteThree('format:legacy'), { isWin: true })
   ok(oRwLegacy.written.length === 3 && oRwLegacy.ok === true && rwCompat.length === 3,
     '改写通道的不传 selected 同样整单三条(3 次写 + 3 份备份都在回执里)',

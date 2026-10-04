@@ -148,8 +148,19 @@ async function main() {
   ok(!/可从回收站还原|随时还原|可撤销/.test(s1mac.warn),
     '子集里不出现任何还原承诺:把不可还原说成可还原会让用户以为能撤回而真的删掉东西', s1mac.warn)
   const s2 = T.subsetPlan(P_REWRITE, ['y.gd'])
-  ok(s2.verb === P_REWRITE.verb && s2.warn === P_REWRITE.warn && s2.service === P_REWRITE.service && s2.kind === P_REWRITE.kind,
-    'rewrite 子集同样只换清单不换判据', JSON.stringify(diffFields(P_REWRITE, s2)))
+  ok(s2.verb === P_REWRITE.verb && s2.service === P_REWRITE.service && s2.kind === P_REWRITE.kind,
+    'rewrite 子集的动词/服务/类型逐字沿用父计划(门里另写措辞就是 B1 要防的漂移)', JSON.stringify(diffFields(P_REWRITE, s2)))
+  // warn 是**唯一**要按子集重算的判据字段,因为父的那句是「这一批整体会不会新建文件」的陈述。
+  // 照抄就会在「只勾中清单外那条」时继续承诺「有的文件会先复制成备份」—— 预览侧的过度安心,
+  // 而这条卡的正主就是删除/覆写。重算仍走 fixPlan.rewriteWarn,措辞没有第二个家。
+  ok(/复制成/.test(s2.warn) && !/新建/.test(s2.warn),
+    '★只勾清单内那条 → 风险句只剩备份那一档(不再跟着父计划提新建)', s2.warn)
+  const s2new = T.subsetPlan(P_REWRITE, ['new/w.gd'])
+  ok(/都不在本次文件清单里/.test(s2new.warn) && !/复制成/.test(s2new.warn),
+    '★只勾清单外那条 → 换成「会被新建、没有备份可还原」那一档,不许再承诺备份', s2new.warn)
+  const s2mix = T.subsetPlan(P_REWRITE, ['y.gd', 'new/w.gd'])
+  ok(/先复制成/.test(s2mix.warn) && /新建没有备份可还原/.test(s2mix.warn),
+    '两种都勾到 → 回到父计划那句两段式的措辞(判据与整单一致)', s2mix.warn)
   ok(s1.reason === '' && s2.reason === '', '选中非空时 reason 保持空串(父计划本来就没有要拒绝的理由)', `${s1.reason}|${s2.reason}`)
 
   // ---------- 4. 空选择必须被拒(绝不静默什么都不做) ----------
