@@ -82,6 +82,8 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
   // 「候选读不到不影响、但引用者读不到要降级」那条链条:refIndex 只对白名单来源记 readFailures,
   // 少读了引用者就是少了几条引用 —— 拿「查不到」去劝人删文件是危险的(会报出一条本不该报的孤儿)。
   if (index.partial) {
+    // 这句里的 failed.length 一定 > 0:partial 目前唯一的触发源就是 readFailures 非空
+    // (refIndex.ts:226)。将来给 partial 加第二个触发源时,这里要改成按实际清单说话。
     const failed = index.readFailures.map((f) => f.rel)
     const shown = failed.slice(0, LIST_CAP)
     const hidden = failed.length - shown.length
@@ -158,9 +160,9 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
     // 判据 6:id 是常量键,不带数量/时间戳/下标 —— 删掉第一个孤儿仍是同一条结论,折叠与忽略记忆不换键。
     id: 'orphans:all',
     severity: 'warn',
-    title: `未引用资源(孤儿资产)${n} 个:引用索引里一次都没提到`,
+    title: `未引用资源(孤儿资产)${n} 个:res:// 引用索引里一次都没提到`,
     detail: `候选(带 .import 边车的导入资产)里没有任何引用指向的文件 ${n} 个,合计 ${fmtBytes(bytes)}:` +
-      `${shown.join('、')}${hidden ? ` 等 ${n} 个` : ''}。` +
+      `${shown.join('、')}${hidden ? ' 等' : ''}。` +
       (hidden ? ` 这里按 rel 只列前 ${shown.length} 个,另有 ${hidden} 个未列出;下面的建议仍按全部 ${n} 个执行。` : '') +
       ` 默认排除、不进候选的:.godot 缓存 ${ex.cache} 项、addons ${ex.addons} 项、` +
       `.import/.uid 边车 ${ex.sidecar} 项、project.godot ${ex.config} 项、` +
@@ -168,7 +170,13 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
       // 判据 6(spec §6 原话含义,必须出现):明示静态分析的边界,动态加载无法判定。
       ` 本判定是**静态分析** —— 只有当引用索引(.gd/.tscn/.tres/.cs/.gdshader/.json/.gdextension/` +
       `export_presets.cfg/project.godot 里的 res:// 路径与字符串字面量)一次都没提到该资源才算孤儿;` +
-      `拼接路径、ResourceLoader 运行时动态构造的加载静态分析无法判定,这类资源可能其实在用。删除前请确认无动态引用。`,
+      `拼接路径、ResourceLoader 运行时动态构造的加载静态分析无法判定,这类资源可能其实在用。` +
+      // 评审 Important:uid 是引擎 4.4+ 的另一条引用通道,而本判定只按 res:// 匹配。
+      // 「load("uid://…")」或 ext_resource 只写 uid= 而 path= 已失效的资源,在这儿会被算成没人引用。
+      // 引用索引确实把 uid:// 串收到了 index.uids 里,但没有 uid→文件 的映射可用
+      // (要建就得再去读每个候选的 .uid/.import,那是第二次 IO),所以这里只能明说不把它当引用。
+      ` 另一条已知盲区:引擎也认 uid:// —— 只用 uid 引用(没有 res:// 路径写法)的资源不算被引用,` +
+      `删除前请确认它没有被人用 uid 形式加载。`,
     rel: rels[0],
     related: shown,
     // 只有 kind/label/payload:动词/风险句/预览清单归 fixPlan.ts(见文件头措辞红线)。

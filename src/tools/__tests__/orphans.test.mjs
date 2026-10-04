@@ -224,6 +224,10 @@ async function main() {
   ok(degraded(partial)[0].id === 'orphans:partial' && degraded(partial)[0].detail.includes('scripts/ref.gd'),
     'partial 降级：id 与 truncated 分开（两种情形安全动作不同），detail 点名读不到的来源',
     `${degraded(partial)[0]?.id}/${degraded(partial)[0]?.detail}`)
+  // 简报「没有 fix 的结论一个都不发」的字面读法:两条降级结论都不许带删除入口。
+  ok(!degraded(tr)[0].fix && !degraded(partial)[0].fix,
+    '判据 4：截断与 partial 两条降级结论都不带 fix(降级态不许有删除按钮)',
+    `${JSON.stringify(degraded(tr)[0]?.fix)}/${JSON.stringify(degraded(partial)[0]?.fix)}`)
   // 候选自己的 .import 读不到 → 不影响判定（.import 不是引用来源，根本不会被读）
   const impFail = makeCtx([['assets/solo.png', 5000], ['assets/solo.png.import', 600]], {
     texts: { 'assets/solo.png.import': SOLO_IMPORT }, fail: { 'assets/solo.png.import': { skipped: true } }
@@ -332,6 +336,14 @@ async function main() {
   ok(exa && exa.detail.includes('静态分析') && exa.detail.includes('ResourceLoader') &&
     exa.detail.includes('拼接路径'),
     '判据 6（spec §6 原话含义）：detail 明示静态分析 + 拼接路径/ResourceLoader 动态加载无法判定', exa?.detail)
+  // 评审 Important:引擎还有一条 uid:// 引用通道,而本判定只按 res:// 匹配。
+  // 标题若说「索引一次都没提到」就是在替一条没走过的通道打包票 —— 标题限缩到 res://,detail 明说盲区。
+  ok(exa && exa.title.includes('res:// 引用索引'),
+    '判据 6：标题限缩成「res:// 引用索引」,不替 uid 通道背书', exa?.title)
+  ok(exa && /uid:\/\//.test(exa.detail) && exa.detail.includes('只用 uid 引用'),
+    '判据 6：detail 明说 uid:// 是已知盲区(只用 uid 的资源会被算成未引用),删除前自己确认', exa?.detail)
+  ok(!exa || exa.detail.indexOf('等 ') === -1,
+    '判据 6：裁切句不再重复报总数(「等」+ 计数两句说的是同一件事,留一处)', exa?.detail)
 
   // ---------- 9. 判据 7：不产生「空孤儿」噪音 ----------
   section('9. 判据 7：零噪音')
