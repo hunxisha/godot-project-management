@@ -4,6 +4,10 @@
 //
 // 红线同 P0a:**只吃 ToolContext**,不碰 window / services / vue / DOM。纯函数(除 await 读文本)。
 //
+// ★ B10b 债 7 收口:三条通道抓到的目标一律过 `note()`(判据 9),共享形状闸
+// `sceneRefs.resPathShapeOk` 在那里落地 —— phantom(首尾带空白/尾巴带标点归出的那种
+// 「路径 + 尾巴」)不再进 `to`,并计进 `shapeSkipped` 由 B5 写进孤儿结论。
+//
 // 判据的方向由 §6 风险表钉死:孤儿工具会把「没人引用」的东西摆到删除按钮旁边,用户真会删。
 // 于是「引用收集」这一侧的方向是**宁多勿少**(判据 4 连注释与死代码里的字符串都算引用);
 // 而判据 2/3 排除的两类不是「引用」而是**生成的边车与缓存** —— 它们让每个资产都被自己引用,
@@ -27,8 +31,8 @@
 // 变异取证证明「只放宽其中一道」不会改变结果(两道都放宽才会红)。
 import type { ToolContext } from './types'
 import { iniResPaths, parseGodotIni, stringLiterals } from './parsers/godotIni'
-import { parseExtResources, resToRel } from './parsers/sceneRefs'
-import { isCache } from './treeUtils'
+import { parseExtResources, resPathShapeOk, resToRel } from './parsers/sceneRefs'
+import { hasRelCI, isCache, lowerRelSet } from './treeUtils'
 
 /** 一条引用站点:from(引用者 rel)在什么通道、哪一行提到了目标 */
 export interface RefSite {
@@ -46,6 +50,14 @@ export interface RefIndex {
   uids: Map<string, string[]>
   /** 因是 `.import`/`.uid` 边车而跳过的候选来源数(判据 2) */
   sidecarSkipped: number
+  /**
+   * ★ B10b 债 7:形状闸挡下、**没有计进 `to`** 的引用条数(判据 9)。
+   * 判的是「值的写法」(`res://a.png ` 带尾空格、`res://a.png,` 带尾逗号),不是「目标存不存在」:
+   * 这种串归一出来的是「路径 + 尾巴」,结构上对不上清单里任何一个 rel —— 留在 `to` 里
+   * 就是一条永远查不到的 phantom(台账债 7 点名的就是它)。**只有清单里确实没有同名条目时才不计入**;
+   * 清单里真有那种名字的条目时照旧算引用(收集侧少收一条 = 孤儿工具多报一个可删的文件,方向违令)。
+   */
+  shapeSkipped: number
   /** 「本该是来源却读不到」:reason 用 ctx 给的原语串,不编造(判据 6) */
   readFailures: { rel: string; reason: string }[]
   /** 被**尝试**读取的来源数(读失败也算扫过,否则 B5 会把「一个都没读」念成「读完了没有引用」) */
@@ -102,15 +114,21 @@ export async function buildRefIndex(ctx: ToolContext): Promise<RefIndex> {
   const uids = new Map<string, string[]>()
   const readFailures: { rel: string; reason: string }[] = []
   let sidecarSkipped = 0
+  let shapeSkipped = 0
   let sourcesScanned = 0
 
   // 判据 7:清单被截断时**一个文件都不读**,直接给空索引 + partial —— 与 brokenRefs(ts:42-52)
   // 同一口径:清单不全时「查不到引用」不是证据,B5 拿着半份索引会把有主的东西报成孤儿。
   if (ctx.truncated) {
-    return { to, from, uids, sidecarSkipped, readFailures, sourcesScanned, partial: true }
+    return { to, from, uids, sidecarSkipped, shapeSkipped, readFailures, sourcesScanned, partial: true }
   }
 
   const tree = Array.isArray(ctx.tree) ? ctx.tree : []
+  // 判据 9(形状闸)要用「清单里真有的名字(任意大小写写法)」当对照集 —— 一次建好,整趟共用。
+  // 为什么必须带这个对照集:收集侧的方向纪律与判定侧**相反**,少收一条引用就会让孤儿工具多报一个
+  // 可删的文件(§6 风险表)。所以只撤「结构上永远对不上任何条目」的那几种 phantom:
+  // 归出来的 rel 在清单里连大小写异体都找不到时才算 phantom,找得到就说明那是个真名字、真引用,照收。
+  const inTree = lowerRelSet(tree)
   for (const f of tree) {
     const rel = f && typeof f.rel === 'string' ? f.rel : ''
     if (!rel) continue
@@ -158,6 +176,29 @@ export async function buildRefIndex(ctx: ToolContext): Promise<RefIndex> {
     }
 
     /**
+     * ★ 判据 9(B10b 债 7):**三条通道唯一的目标入口**,把「取值 → 归一 → 形状闸 → 入账」收在一处。
+     *
+     * 为什么要收:通道的目标一律是 `resToRel(值)`,而 `resToRel` 不 trim、也不看标点 ——
+     * `res://a.png ` / `res://a.png,` 归出来的是 `a.png `(带尾空格)/ `a.png,`。那种串在
+     * `to` 里是一条**永远对不上任何树条目的 phantom**:它既保护不了真资源(B5 照旧把它当
+     * 「没人引用」),又让索引多一条假目标;同一条值在 ini 体检里(B8)是被拒的,两边不一致
+     * 就是台账债 7 点名的那笔。
+     *
+     * ⚠ 方向与判定侧**相反**,这里不许无条件拒:收集侧少收一条引用 = 孤儿工具多摆一个删除按钮。
+     *   于是只有「归出来的 rel 在清单里连大小写异体都找不到」(= 结构上对不上任何条目、
+     *   本来就保护不了任何东西)时才撤,并计进 `shapeSkipped`;清单里真有那种名字(如手工建的
+     *   `notes)`、带尾空格的文件名)照旧算引用。判定侧(brokenRefs/addons)的同一闸是「只撤主张」,
+     *   两侧共用 `sceneRefs.resPathShapeOk` 这一份**形状**判据,判的方向由各自的破坏面决定。
+     *   不判的那几条不是静默跳过:`shapeSkipped` 进索引、由 B5 写进孤儿结论的 detail。
+     */
+    const note = (value: string, via: RefSite['via'], line?: number) => {
+      const target = resToRel(value)
+      if (target === null) return
+      if (!resPathShapeOk(value) && !hasRelCI(inTree, target)) { shapeSkipped++; return }
+      add(target, via, line)
+    }
+
+    /**
      * 逐行抓引号字面量(判据 4 的 literal 通道,场景与非场景共用一份规则)。
      * **注释与死代码里的字符串也算引用** —— 孤儿工具会把「没人引用」的东西摆到删除按钮旁边,
      * 而注释里的 preload("res://x.tscn") 至少说明人还记得它在用;方向是保守的:
@@ -170,10 +211,7 @@ export async function buildRefIndex(ctx: ToolContext): Promise<RefIndex> {
     const addLiteralSites = (rows: string[], skipExtResourceLines: boolean) => {
       for (let i = 0; i < rows.length; i++) {
         if (skipExtResourceLines && rows[i].trim().startsWith('[ext_resource')) continue
-        for (const lit of stringLiterals(rows[i])) {
-          const target = resToRel(lit)
-          if (target !== null) add(target, 'literal', i + 1)
-        }
+        for (const lit of stringLiterals(rows[i])) note(lit, 'literal', i + 1)
       }
     }
 
@@ -188,8 +226,7 @@ export async function buildRefIndex(ctx: ToolContext): Promise<RefIndex> {
       for (let i = 0; i < rows.length; i++) if (rows[i].trim().startsWith('[ext_resource')) heads.push(i + 1)
       const aligned = heads.length === refs.length
       refs.forEach((ref, i) => {
-        const target = resToRel(ref.path)
-        if (target !== null) add(target, 'ext_resource', aligned ? heads[i] : undefined)
+        note(ref.path, 'ext_resource', aligned ? heads[i] : undefined)
         addUid(ref.uid)
       })
       // 判据 4 通道四:场景里**非 ext_resource 行**的字符串属性同样是引用。只给场景 ext_resource
@@ -199,10 +236,7 @@ export async function buildRefIndex(ctx: ToolContext): Promise<RefIndex> {
       addLiteralSites(rows, true)
     } else if (rel === 'project.godot') {
       // 判据 4 通道二:project.godot 交给 B2 的解析器,autoload 的 `*` 前缀已由它剥掉
-      for (const p of iniResPaths(parseGodotIni(text))) {
-        const target = resToRel(p.path)
-        if (target !== null) add(target, 'ini', p.line)
-      }
+      for (const p of iniResPaths(parseGodotIni(text))) note(p.path, 'ini', p.line)
     } else {
       // 判据 4 通道三:其余白名单文件(.gd/.cs/.gdshader/.json/.gdextension/根级 cfg)
       addLiteralSites(text.split(/\r?\n/), false)
@@ -221,6 +255,7 @@ export async function buildRefIndex(ctx: ToolContext): Promise<RefIndex> {
     from,
     uids,
     sidecarSkipped,
+    shapeSkipped,
     readFailures,
     sourcesScanned,
     partial: readFailures.length > 0

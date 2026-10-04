@@ -408,7 +408,7 @@ async function main() {
   section('10. B10a：走 ctx.refIndex() 的缓存版')
   const emptyIdx = (over = {}) => ({
     to: new Map(), from: new Map(), uids: new Map(),
-    sidecarSkipped: 0, readFailures: [], sourcesScanned: 0, partial: false, ...over
+    sidecarSkipped: 0, shapeSkipped: 0, readFailures: [], sourcesScanned: 0, partial: false, ...over
   })
   // ① 注入一份「orphan.png 其实被引用了」的索引 → 一条孤儿都不报，而且本文件零 IO
   const injCtx = makeCtx(BASE_SPECS, { texts: BASE_TEXTS })
@@ -450,6 +450,53 @@ async function main() {
   ok(JSON.stringify(eqDirect.calls) === JSON.stringify(eqCached.calls),
     '读取序列也逐条相同（接入没有偷偷多读或少读一个文件）',
     `${JSON.stringify(eqDirect.calls)} vs ${JSON.stringify(eqCached.calls)}`)
+
+  // ---------- 11. ★ B10b 债 7：phantom 引用被形状闸撤下后，孤儿结论一条不多不少 ----------
+  // 为什么存在：索引侧新增的 `shapeSkipped` 动的正是「谁算被引用」这条证据，而这条证据直接决定
+  // 删除按钮摆不摆出来。两半边都要钉：撤下 phantom 不得凭空造出一个孤儿（方向违令的那一侧），
+  // 而撤了多少条要写在卡面上（静默跳过是三轮评审点名的东西）。
+  section('11. B10b 债 7：形状闸撤下 phantom 与孤儿结论的等价性')
+  // ① 脏写法对不上任何条目 → 撤下它，孤儿结论与撤之前**逐字节相同**（真资源本来就没被这条 protecting）
+  const junkTxt = 'extends Node\nconst A = "res://assets/x.png "\nconst B = "res://assets/x.png,"\n'
+  const junkCtx = makeCtx([
+    ['assets/x.png', 100], ['assets/x.png.import', 40], ['scripts/ref.gd', 200]
+  ], { texts: { 'scripts/ref.gd': junkTxt } })
+  const junkRun = await T.runOrphans(junkCtx.ctx)
+  const junkIdx = await T.buildRefIndex(junkCtx.ctx)
+  ok(junkIdx.shapeSkipped === 2 && !junkIdx.to.has('assets/x.png ') && !junkIdx.to.has('assets/x.png,'),
+    '夹具自检：两条脏写法（尾空格 / 尾逗号）都没进索引，计了 2 笔', `${junkIdx.shapeSkipped}/${[...junkIdx.to.keys()].join('|')}`)
+  ok(relsOf(agg(junkRun)[0])?.join('|') === 'assets/x.png',
+    '★判据 2 的等价半边：撤下 phantom 之后 x.png 仍是孤儿（那条脏写法本来也对不上它，撤它不改变任何账）',
+    JSON.stringify(relsOf(agg(junkRun)[0])))
+  ok(/另有 2 条 res:\/\/ 写法首尾带空白或以标点收尾/.test(junkRun[0]?.detail || '') &&
+    /没有任何条目的名字\(任意大小写写法\)对得上/.test(junkRun[0]?.detail || ''),
+    '★不判的条数要看得见：撤下 2 笔就写 2 笔，并说清「对不上任何条目」这个撤的理由', junkRun[0]?.detail)
+  // ② 同一份图但一条脏写法都没有 → 那句「另有 N 条」绝不出现（常驻措辞就是假话）
+  const cleanTxt = 'extends Node\nconst C = "res://assets/x.png"\n'
+  const cleanRun = await T.runOrphans(makeCtx([
+    ['assets/x.png', 100], ['assets/x.png.import', 40], ['scripts/ref.gd', 200]
+  ], { texts: { 'scripts/ref.gd': cleanTxt } }).ctx)
+  ok(cleanRun.length === 0, '正向对照：干净的引用照常算引用（一条孤儿都不报）', ids(cleanRun))
+  const cleanNoRef = await T.runOrphans(makeCtx([
+    ['assets/x.png', 100], ['assets/x.png.import', 40], ['scripts/ref.gd', 200]
+  ], { texts: { 'scripts/ref.gd': 'extends Node\n' } }).ctx)
+  ok(relsOf(agg(cleanNoRef)[0])?.join('|') === 'assets/x.png' &&
+    !/另有 \d+ 条 res:\/\/ 写法/.test(cleanNoRef[0]?.detail || ''),
+    '★零笔时那句措辞整条不出现（不写「另有 0 条」这种常驻句）', cleanNoRef[0]?.detail)
+  // ③ ★ 最要紧的一条：脏写法的 rel 在清单里**真有名**（手工建的文件名以 ) 收尾）→ 照旧算引用。
+  //    无条件撤下脏写法会把这条在用的文件念成孤儿，而孤儿结论带着删除入口 —— 那正是收集侧方向违令。
+  const realJunkRun = await T.runOrphans(makeCtx([
+    ['notes)', 100], ['notes).import', 40], ['scripts/ref.gd', 200]
+  ], { texts: { 'scripts/ref.gd': 'extends Node\nconst D = "res://notes)"\n' } }).ctx)
+  ok(realJunkRun.length === 0,
+    '★判据 9 的等价半边：清单里真有名 `notes)` → 那条以 ) 收尾的写法照旧算引用，一条孤儿都不报（无条件撤就会报）',
+    ids(realJunkRun) + ' / rels=' + JSON.stringify(relsOf(agg(realJunkRun)[0])))
+  // ④ 大小写异体那一侧不受影响（闸撤的是「对不上任何条目」，不是「写法不同」）
+  const caseVarRun = await T.runOrphans(makeCtx([
+    ['Assets/Y.PNG', 100], ['Assets/Y.PNG.import', 40], ['scripts/ref.gd', 200]
+  ], { texts: { 'scripts/ref.gd': 'extends Node\nconst E = "res://assets/y.png"\n' } }).ctx)
+  ok(caseVarRun.length === 0,
+    '正向对照：引用写小写而清单是大写 → 仍算被引用（判据 5 的那条大小写闸没被动到）', ids(caseVarRun))
 }
 
 main().catch((e) => {

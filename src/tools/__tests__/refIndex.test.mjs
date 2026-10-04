@@ -582,6 +582,86 @@ async function main() {
     JSON.stringify(idx.from.get('project.godot')))
   ok(idx.from.get('scripts/player.gd')?.join('|') === 'assets/dead.png|data/levels.json|assets/bg.png',
     'from:跳过 user:// / 裸 res:// / 越界后的其余三条,按行序', JSON.stringify(idx.from.get('scripts/player.gd')))
+
+  // ---------- 11. ★ 判据 9(B10b 债 7):形状闸与 phantom 目标 ----------
+  // 为什么存在:三条通道的目标一律是 `resToRel(值)`,而 resToRel 不 trim 也不看标点 ——
+  // `res://a.png `(引号内的尾空格)、`res://a.png,`(两份孪生解析器都会剥掉的那枚逗号)归出来的
+  // rel 带着那个尾巴。它进 `to` 就是一条**永远对不上任何树条目**的 phantom:既保护不了真资源
+  // (B5 照旧把 a.png 当没人引用),又让索引里躺着一个假目标;同一条值在 B8 的 ini 体检里是被拒的,
+  // 两边不一致就是台账债 7。闸只撤「结构上对不上任何条目」的那些 —— 清单里真有名 `notes)` 的文件
+  // 被 `res://notes)` 指到时**照旧算引用**(收集侧少收一条 = 孤儿工具多摆一个删除按钮,方向违令)。
+  const SHAPE_SPECS = [
+    ['project.godot', 300],
+    ['scene/s.tscn', 300],
+    ['scripts/one.gd', 300],
+    ['assets/tile.png', 300],
+    ['assets/tile.png.import', 300],
+    ['assets/keep.png', 300],
+    ['notes)', 300]
+  ]
+  const SHAPE_TEXTS = {
+    'scripts/one.gd': [
+      'extends Node',
+      'const A = "res://assets/tile.png "',
+      'const B = "res://assets/tile.png,"',
+      'const C = "res://notes)"',
+      'const D = "res://assets/keep.png"'
+    ].join('\n'),
+    'scene/s.tscn': [
+      'gd_scene load_steps=2 format=3',
+      '',
+      '[ext_resource type="Texture2D" path="res://assets/tile.png " id="1_a"]'
+    ].join('\n'),
+    'project.godot': '[application]\nrun/main_scene="res://assets/tile.png,"\n'
+  }
+  const mShape = makeCtx(SHAPE_SPECS, { texts: SHAPE_TEXTS })
+  const sIdx = await T.buildRefIndex(mShape.ctx)
+  ok(!sIdx.to.has('assets/tile.png ') && !sIdx.to.has('assets/tile.png,'),
+    '★判据 9:尾空格 / 尾逗号归出的 phantom 不进 to(债 7 那条「索引里躺着假目标」)',
+    [...sIdx.to.keys()].filter((k) => k.includes('tile')).map((k) => JSON.stringify(k)).join('|'))
+  ok(sIdx.shapeSkipped === 4,
+    '判据 9:四条脏写法(literal 两条 + ext_resource 一条 + ini 一条)全部计进 shapeSkipped,不静默跳过',
+    sIdx.shapeSkipped)
+  ok(sIdx.to.has('notes)') && sitesOf(sIdx, 'notes)').join('|') === 'scripts/one.gd:literal',
+    '★判据 9 的正向半边:清单里真有名 `notes)` 的条目 → 那条脏写法照样算引用(无条件撤就会把在用的文件念成孤儿)',
+    sitesOf(sIdx, 'notes)').join('|'))
+  ok(sIdx.to.has('assets/keep.png'),
+    '正向对照:干净写法一条没少(闸不是「把带尾巴的名字一概放过」,也不动正常值)', sitesOf(sIdx, 'assets/keep.png').join('|'))
+  ok(!sIdx.to.has('assets/tile.png'),
+    '判据 9 的边界:被 phantom 指过的那个真资源**不会**因此算被引用(闸只撤假目标,不替用户猜「他本来想写谁」)',
+    [...sIdx.to.keys()].join('|'))
+  ok(sIdx.from.get('scripts/one.gd')?.join('|') === 'notes)|assets/keep.png',
+    '判据 9:from 的目标清单与 to 同源(被撤下的 phantom 也不出现在「这个来源指出了谁」里)',
+    JSON.stringify(sIdx.from.get('scripts/one.gd')))
+  ok(sIdx.from.get('scene/s.tscn')?.length === 0 && sIdx.from.has('scene/s.tscn'),
+    '判据 9:整份来源只有 phantom 时 from 里仍是空数组而不是缺键(来源清单不因此缩水)',
+    JSON.stringify(sIdx.from.get('scene/s.tscn')))
+  // 内部空格是合法路径字符(Godot 允许路径里有空格) —— 闸只判首尾,不能把这种真名字挡在门外
+  const mSpaceIn = makeCtx([['scripts/a.gd', 10], ['my scene.tscn', 10]], {
+    texts: { 'scripts/a.gd': 'const S = "res://my scene.tscn"' }
+  })
+  const sIn = await T.buildRefIndex(mSpaceIn.ctx)
+  ok(sIn.to.has('my scene.tscn') && sIn.shapeSkipped === 0,
+    '★正向对照:合法的内部空格路径照常进索引且一笔不计(共享闸只判首尾,与 ini/brokenRefs 同一口径)',
+    `${[...sIn.to.keys()].join('|')}/${sIn.shapeSkipped}`)
+  // 大小写异体:清单一侧是 Art/Tile2.PNG,引用写小写 → 那是**干净值**,与 phantom 无关
+  const mCase = makeCtx([['scripts/a.gd', 10], ['Art/Tile2.PNG', 10]], {
+    texts: { 'scripts/a.gd': 'const S = "res://art/tile2.png"' }
+  })
+  const shapeCase = await T.buildRefIndex(mCase.ctx)
+  ok(shapeCase.to.has('art/tile2.png') && shapeCase.shapeSkipped === 0,
+    '正向对照:大小写异体的干净引用照收(收引用这侧一律宁多勿少)', `${[...shapeCase.to.keys()].join('|')}/${shapeCase.shapeSkipped}`)
+  const mTrunc = makeCtx(SHAPE_SPECS, { trunc: true, texts: SHAPE_TEXTS })
+  const tIdx2 = await T.buildRefIndex(mTrunc.ctx)
+  ok(tIdx2.shapeSkipped === 0 && mTrunc.calls.length === 0,
+    '判据 7+9:截断时一个文件都不读,shapeSkipped 自然是 0(不数没看过的东西)', `${tIdx2.shapeSkipped}/${mTrunc.calls.length}`)
+  const sIdx2 = await T.buildRefIndex(makeCtx(SHAPE_SPECS, { texts: SHAPE_TEXTS }).ctx)
+  ok(sIdx2.shapeSkipped === sIdx.shapeSkipped &&
+    JSON.stringify([...sIdx.to.keys()]) === JSON.stringify([...sIdx2.to.keys()]),
+    '判据 9 的确定性:同一份图两次构建,撤下的条数与剩下的键逐字节一致', `${sIdx2.shapeSkipped}`)
+  const dirtyKeys = [...sIdx.to.keys()].filter((k) => k !== k.trim() || /[,;)\]]$/.test(k))
+  ok(dirtyKeys.length === 1 && dirtyKeys[0] === 'notes)',
+    '索引里剩下的键:只有「清单里真有其名」那一条带尾巴(证明撤的是 phantom 而不是所有脏形状)', dirtyKeys.join('|'))
 }
 
 main().catch((e) => {

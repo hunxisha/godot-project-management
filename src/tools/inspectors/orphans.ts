@@ -182,7 +182,13 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
       // 引用索引确实把 uid:// 串收到了 index.uids 里,但没有 uid→文件 的映射可用
       // (要建就得再去读每个候选的 .uid/.import,那是第二次 IO),所以这里只能明说不把它当引用。
       ` 另一条已知盲区:引擎也认 uid:// —— 只用 uid 引用(没有 res:// 路径写法)的资源不算被引用,` +
-      `删除前请确认它没有被人用 uid 形式加载。`,
+      `删除前请确认它没有被人用 uid 形式加载。` +
+      // B10b 债 7 的「不判要看得见」:索引侧被形状闸撤下的 phantom 条数(它们对不上清单里任何条目,
+      // 所以既没保护过任何资源、也不在这份清单的证据里 —— 但少收了几条引用这件事本身要摆到卡面上)。
+      (index.shapeSkipped
+        ? ` 另有 ${index.shapeSkipped} 条 res:// 写法首尾带空白或以标点收尾(归出来的是「路径 + 尾巴」那种串),` +
+          '而这次文件清单里没有任何条目的名字(任意大小写写法)对得上,所以没计进引用索引。'
+        : ''),
     rel: rels[0],
     related: shown,
     // 只有 kind/label/payload:动词/风险句/预览清单归 fixPlan.ts(见文件头措辞红线)。

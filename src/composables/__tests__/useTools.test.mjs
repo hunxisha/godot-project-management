@@ -1194,7 +1194,7 @@ async function main() {
     '★同一代里两个工具**同时**取用也只有一趟遍历(缓存的是 promise:single-flight,不是各建各的)',
     memoReads.length - oneBuild)
   const cachedKeys = taken[0] ? Object.keys(taken[0]).sort().join(',') : ''
-  ok(cachedKeys === 'from,partial,readFailures,sidecarSkipped,sourcesScanned,to,uids' && !('findings' in taken[0]),
+  ok(cachedKeys === 'from,partial,readFailures,shapeSkipped,sidecarSkipped,sourcesScanned,to,uids' && !('findings' in taken[0]),
     '缓存里只有索引本身:没有 findings(结论按工具成立,缓存它就绕过了「重跑这个检查器」的语义)', cachedKeys)
 
   tMemo.invalidateTree()

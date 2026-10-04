@@ -288,7 +288,10 @@ export function stringLiterals(raw: string): string[] {
  * **整串以 `res://` 开头**(切掉前缀后剩下的全留作路径),所以 `1280` / `true` /
  * `PackedStringArray(...)` / `user://` / `$单例` / `see res://x/y.png` 都不算。
  * 副作用要写清:Godot 允许路径里有空格,于是 `res://a.png 尾巴` 会整串当路径,得到一个
- * 对不上任何树条目的 rel —— 本模块不判目标存在性(判据 8),那条 rel 由调用方(B5)自己去比。
+ * 对不上任何树条目的 rel —— 本模块**只负责把值交出去**,不判目标存在性(判据 8),也不判这条值是不是
+ * 「干净的写法」(那是收集侧的判据)。下游 `refIndex.ts` 的 `note()` 会把首尾带空白/尾巴带标点的
+ * 那种 phantom 撤下引用索引并计数(B10b 债 7);`res://a.png 尾巴` 这种**内部**混了别的东西的值
+ * 不在那条闸的管辖范围里(共享闸只判首尾,内部空格是合法路径字符),仍会作为 rel 交给调用方。
  */
 export function iniResPaths(doc: IniDoc): IniResPath[] {
   const out: IniResPath[] = []
