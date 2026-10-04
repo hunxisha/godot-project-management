@@ -18,7 +18,10 @@
 //      (真遍历磁盘、真读文本;项目文档走 window.ztools.db.get 桩);
 //   3. 上层用 CI 同一份打包产物 .gpm-test/out/usetools.mjs:useTools() → load() → runAll();
 //   4. performance.now() 计 scanAloneMs 与 runAllMs,判 ≤10000ms;
-//      无论成败最后删除整个临时目录并**核实它没了**(残留 = harness 自己 FAIL)。
+//   5. (B5) 在同一份真夹具上补 .png.import 边让 png 进候选,再用真实原语**直接**调
+//      .gpm-test/out/tools.mjs 的 buildRefIndex + runOrphans(不走 registry)并计时 —— orphans 是第一个
+//      把 readText 吃满的工具,registry 里没有它(B5 不接线),runAll 量不到,这一段就是补上这块成本;
+//   无论成败最后删除整个临时目录并**核实它没了**(残留 = harness 自己 FAIL)。
 //
 // 诚实边界(不冒充):测的是 Node 侧调度器 + JS 宿主原语的耗时,不是浏览器绘制耗时,
 // 也没走 Tauri 的 IPC / JSON 跨桥序列化;两端扫描都是同步整树遍历,无中途让出(P0b 议题)。
@@ -113,7 +116,7 @@ let exitCode = 0
 try {
   console.log(`building fixture: ${N} files under ${WORK}`)
   const tBuild = performance.now()
-  const { total } = buildFixture()
+  const { total, c: fc } = buildFixture()
   const onDisk = countOnDisk(WORK)
   console.log(`fixture built in ${(performance.now() - tBuild).toFixed(0)} ms: written=${total} onDisk=${onDisk} (want ${N})`)
   if (total !== N || onDisk !== N) throw new Error(`夹具数目不符:written=${total}, onDisk=${onDisk}, want=${N}`)
@@ -142,6 +145,53 @@ try {
   const pass = runAllMs <= 10000
   console.log(`limit=10000ms verdict=${pass ? 'PASS' : 'FAIL'}`)
   if (!pass) exitCode = 1
+
+  // ---------- B5:buildRefIndex + runOrphans 直测(不走 registry) ----------
+  // orphans 是 P0b 第一个把 readText 吃满的工具:引用来源(buildRefIndex 要读**全部**白名单文本文件,
+  // 不只是 brokenRefs 读的 .tscn)才是成本大头。而 registry 里没接线 orphans(B5 交付不接线),
+  // 上面的 runAll 压根没跑它。于是在同一份真夹具上补 .png.import 边让 png 进候选集,
+  // 用真实宿主原语**直接**调 buildRefIndex 与 runOrphans,分别计时。
+  const TOOLS_BUNDLE = path.resolve(ROOT, '.gpm-test/out/tools.mjs')
+  if (!fs.existsSync(TOOLS_BUNDLE)) throw new Error(`找不到打包产物: ${TOOLS_BUNDLE}(build-bundle.mjs 应产出 tools.mjs)`)
+  const SIDE_BUF = Buffer.from('[remap]\nimporter="texture"\n')
+  for (let i = 0; i < fc.png; i++) {
+    const rel = `assets/tex${Math.floor(i / 100)}/img${i % 100}.png.import`
+    const abs = path.join(WORK, ...rel.split('/'))
+    fs.mkdirSync(path.dirname(abs), { recursive: true })
+    fs.writeFileSync(abs, SIDE_BUF)
+  }
+  const TB = await import(pathToFileURL(TOOLS_BUNDLE).href)
+  const scan2 = F.scanProjectTree(DOC._id, { includeCache: true })
+  if (!scan2.ok) throw new Error(`孤儿夹具重扫失败: ${scan2.error}`)
+  // 合成 ctx 直接接真原语(与 useTools.ctx 同一 readText 三态收口:给不出字符串就是读不到)。
+  // 刻意**不接 LRU**:runOrphans 内部会再 buildRefIndex 一次,第二趟是真读,所以 runOrphansMs
+  // 是「孤儿工具单独跑一遍」的成本上界 —— 恰好是要防退化的那个数。
+  const orphanCtx = {
+    projectId: DOC._id, root: WORK, tree: scan2.files, truncated: scan2.truncated === true,
+    readText: async (rel) => {
+      const rr = F.readProjectText(DOC._id, rel)
+      return rr.ok && typeof rr.text === 'string' ? { text: rr.text } : { skipped: true }
+    }
+  }
+  const bi0 = performance.now()
+  const idx = await TB.buildRefIndex(orphanCtx)
+  const buildRefMs = performance.now() - bi0
+  const or0 = performance.now()
+  const orphanFindings = await TB.runOrphans(orphanCtx)
+  const orphanMs = performance.now() - or0
+  const combinedMs = buildRefMs + orphanMs
+  const agg = orphanFindings.find((f) => f.id === 'orphans:all')
+  const orphanRels = agg && agg.fix && agg.fix.payload ? agg.fix.payload.rels.length : 0
+  console.log(`[orphans 直测] entries=${scan2.files.length} truncated=${orphanCtx.truncated} ` +
+    `sourcesScanned=${idx.sourcesScanned} indexPartial=${idx.partial} findings=${orphanFindings.length} orphanRels=${orphanRels}`)
+  console.log(`[orphans 直测] buildRefIndexMs=${buildRefMs.toFixed(1)} runOrphansMs=${orphanMs.toFixed(1)} combinedMs=${combinedMs.toFixed(1)}`)
+  // 护栏,不是 §7 的 <10s 验收:真验收(B10 接线后在真宿主、含 LRU 与全局调度)另行取证。
+  // 30s 对 1 万级两次真读 + 两趟线性扫描留足机器抖动余量;若哪天退化成二次全树扫 / 平方级引用查找,
+  // 这个数会飙到几十分钟必然红 —— 这就是它存在的意义(宁可宽松也不制造不稳定红)。
+  const GUARD_MS = 30000
+  const guard = combinedMs <= GUARD_MS
+  console.log(`[orphans 直测] guard=${GUARD_MS}ms(护栏) verdict=${guard ? 'PASS' : 'FAIL'}`)
+  if (!guard) exitCode = 1
 } catch (e) {
   console.error(`perf harness 抛错: ${e && e.stack ? e.stack : e}`)
   exitCode = 1
