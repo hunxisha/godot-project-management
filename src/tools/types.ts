@@ -1,5 +1,6 @@
 // 工具页(项目体检)的类型层。设计见 docs/tools-page-plan.md §5.1 / §5.2。
 import type { TreeEntry } from '../types/godot'
+import type { RefIndex } from './refIndex'
 
 export type Severity = 'error' | 'warn' | 'info'
 
@@ -45,6 +46,15 @@ export interface ToolContext {
   truncated: boolean
   /** 读文本;LRU 由调用方(useTools)负责,这里只是通道 */
   readText(rel: string): Promise<{ text?: string; skipped?: boolean }>
+  /**
+   * 引用索引的取用入口(B10a,spec §5.2):同一份索引只建一次,吃索引的工具共享它。
+   *
+   * **可选**,而且是刻意可选:缓存住在 useTools 的闭包里,只能通过 ctx 递进去 ——
+   * 检查器 import 一个全局单例就把「一次扫描共享」变成了第二份没人管的状态(本轮红线)。
+   * 宿主/测试没给这一项时,检查器自己 `buildRefIndex(ctx)`:两条路跑的是同一份判据,
+   * 差别只在「这一代里是否已经有人建过」。
+   */
+  refIndex?(): Promise<RefIndex>
 }
 
 export interface Tool {

@@ -399,6 +399,57 @@ async function main() {
     '判据 7：两种「无事发生」都不发 info（不在这里重复 outcomeOf 的活）', ids(zeroCand) + '/' + ids(allRef))
   const empty = await T.runOrphans(makeCtx([]).ctx)
   ok(Array.isArray(empty) && empty.length === 0, '判据 7：空清单 → 空数组', ids(empty))
+
+  // ---------- 10. B10a：索引经 ctx.refIndex() 取用（memo 接入），判据一条都不改 ----------
+  // 为什么这几条要紧：本轮把 orphans 从「自己 buildRefIndex」改成「先取 ctx 上那份缓存」。
+  // 接错了第 0~9 节一条都不会红 —— 它们喂的 ctx 都没有 refIndex，走的是退回那一路。
+  // 所以这里正面钉三件事：① 给了 refIndex 就**真的**用它（结论由那份索引决定，且自己零读取）；
+  // ② 没给就退回 buildRefIndex（第 4 节的 calls 比对继续成立）；③ 两条路产出逐字节相同。
+  section('10. B10a：走 ctx.refIndex() 的缓存版')
+  const emptyIdx = (over = {}) => ({
+    to: new Map(), from: new Map(), uids: new Map(),
+    sidecarSkipped: 0, readFailures: [], sourcesScanned: 0, partial: false, ...over
+  })
+  // ① 注入一份「orphan.png 其实被引用了」的索引 → 一条孤儿都不报，而且本文件零 IO
+  const injCtx = makeCtx(BASE_SPECS, { texts: BASE_TEXTS })
+  let injUsed = 0
+  injCtx.ctx.refIndex = async () => {
+    injUsed++
+    return emptyIdx({ to: new Map([['assets/orphan.png', [{ from: 'scene/main.tscn', via: 'literal', line: 3 }]]]) })
+  }
+  const injRun = await T.runOrphans(injCtx.ctx)
+  ok(injUsed === 1, '★给了 refIndex 就取用它（每个 ctx 只取一次，不重复要）', injUsed)
+  // 注入的索引只提到 orphan.png：orphan 被藏住，而**没被那份索引提到的 used.png** 反过来变成孤儿。
+  // 结论随注入内容整体翻转 = 判据吃的就是那份共享索引；calls 为空 = orphans 自己一趟都没读。
+  const injRels = injRun.length ? relsOf(agg(injRun)[0]) : null
+  ok(injRels && injRels.join('|') === 'assets/used.png' && injCtx.calls.length === 0,
+    '★结论由那份索引决定（被它提到的 orphan 藏住、没被提到的 used 报成孤儿），而 orphans 自己一个文件都没读',
+    `${ids(injRun)}/${JSON.stringify(injRels)}/calls=${JSON.stringify(injCtx.calls)}`)
+  // ② 注入 partial：降级闸门认的是**共享那一份**索引的 partial，不是自己重建的结果
+  const partCtx = makeCtx(BASE_SPECS, { texts: BASE_TEXTS })
+  partCtx.ctx.refIndex = async () => emptyIdx({ partial: true, readFailures: [{ rel: 'scripts/ref.gd', reason: 'skipped' }] })
+  const partRun = await T.runOrphans(partCtx.ctx)
+  ok(partRun.length === 1 && partRun[0].id === 'orphans:partial' && partRun[0].detail.includes('scripts/ref.gd'),
+    '共享索引 partial=true → 走既有的降级结论并点名（上一个工具留下的读不全，这一条必须认）', ids(partRun))
+  // 截断那一路同样不许因为多了 refIndex 而变行为（降级卡仍是唯一一条，仍然零读取）
+  const trInj = makeCtx(BASE_SPECS, { trunc: true, texts: BASE_TEXTS })
+  trInj.ctx.refIndex = async () => emptyIdx({ partial: true })
+  const trInjRun = await T.runOrphans(trInj.ctx)
+  ok(trInjRun.length === 1 && trInjRun[0].id === 'orphans:truncated' && trInj.calls.length === 0,
+    '截断 + 给了 refIndex：降级结论一条、id 仍是 orphans:truncated、零读取（判据 4 没被接入削弱）',
+    `${ids(trInjRun)}/calls=${trInj.calls.length}`)
+  // ③ 两条路等价：退回直接建索引 vs 走 refIndex（内容仍是同一份 buildRefIndex 产物）
+  const eqDirect = makeCtx(BASE_SPECS, { texts: BASE_TEXTS })
+  const eqDirectRun = await T.runOrphans(eqDirect.ctx)
+  const eqCached = makeCtx(BASE_SPECS, { texts: BASE_TEXTS })
+  eqCached.ctx.refIndex = () => T.buildRefIndex(eqCached.ctx)
+  const eqCachedRun = await T.runOrphans(eqCached.ctx)
+  ok(JSON.stringify(eqDirectRun) === JSON.stringify(eqCachedRun),
+    '★接入是行为等价的：同一份 ctx 走「退回建索引」与走「refIndex 拿同一份索引」结论逐字节相同',
+    `${ids(eqDirectRun)} vs ${ids(eqCachedRun)}`)
+  ok(JSON.stringify(eqDirect.calls) === JSON.stringify(eqCached.calls),
+    '读取序列也逐条相同（接入没有偷偷多读或少读一个文件）',
+    `${JSON.stringify(eqDirect.calls)} vs ${JSON.stringify(eqCached.calls)}`)
 }
 
 main().catch((e) => {

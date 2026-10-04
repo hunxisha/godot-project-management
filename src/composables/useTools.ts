@@ -2,6 +2,8 @@
 // 关键不变量(spec §5.1):同一个项目的 tree 只扫一次,所有工具共享 ctx。
 // 它的孪生不变量(审查 F-1):一份 tree 只属于**发起它的那个项目**。扫描是真的异步 IPC,
 // 所以「tree 与 readText 同属一个项目」靠世代号 + 捕获的 pid 绑定,过期结果整份丢弃。
+// B10a 把同一条不变量延伸到引用索引(ctx.refIndex 那份按 (projectId, scanGen) 键控的 memo):
+// 索引是这页唯一带真实 IO 的公共调用,清单换代它就是旧目录的引用图 —— 与 tree 同生同灭。
 //
 // 修复调度的不变量(spec §5.3,Task B1):渲染层只交 rel,绝对路径与越界/符号链接的包含闸
 // 归原语(inspectfs.js 的 resolveInside);原语回报的 ok/failed/moved 一律如实上浮;
@@ -15,6 +17,7 @@ import type { GodotProject, ScanTreeResult, TreeEntry } from '../types/godot'
 import type { Capability, Finding, Tool, ToolContext, ToolResult } from '../tools/types'
 import { planFix, type FixService } from '../tools/fixPlan'
 import { subsetPlan } from '../tools/gate'
+import { buildRefIndex, type RefIndex } from '../tools/refIndex'
 import { TOOLS as BASE_TOOLS, isSupported, toolById } from '../tools/registry'
 
 // 注册表跟着本模块一起导出:视图只要 useTools 这一处,就能同时拿到「有哪些工具」和「怎么跑」。
@@ -141,6 +144,36 @@ export function useTools() {
 
   const textCache = new Map<string, { text?: string; skipped?: boolean }>()
 
+  /**
+   * 引用索引的**单份**缓存(B10a,spec §5.2「ctx 一次扫描多工具共享」的最后一笔欠账)。
+   *
+   * buildRefIndex 是整页唯一带真实 IO 的公共调用(每个来源一次 readText)。接线 6 个工具之后,
+   * 吃索引的工具各自重读约 3 千个文件是不可接受的 —— 缓存这一处就把重复遍历全部消掉。
+   *
+   * 键 = `项目id#扫描世代`,失效有三处(三处的分工由变异取证区分,不是随手多写):
+   *   · **承重的那一处是 `ensureTree`**:它每成功装进一份新清单就清一次。TTL 到期与 runAll 的
+   *     强制重扫**不推进 scanGen**,只有这里能察觉「清单换了」(删掉它 → §36 的 runAll 那条转红)。
+   *   · `select()` 与 `invalidateTree()` 各清一次:这两处同时也推进 scanGen,所以键本身就够用,
+   *     显式清是为了不把上一个项目/世代的索引留在内存里,并且让「索引寿命 = 清单新鲜度」这条
+   *     规则不依赖调用点纪律(变异取证:单独删这两处之一当前无观测差异)。
+   * 存的是 **promise** 而不是结果:同一代里两个工具同时取用时只有一趟遍历,第二个等同一份。
+   * 只存索引本身,不存 finding:结论按工具与项目成立,缓存它就绕过了「修完重跑这一个检查器」的语义。
+   */
+  let refCache: { key: string; promise: Promise<RefIndex> } | null = null
+
+  function refIndexOf(context: ToolContext): Promise<RefIndex> {
+    const key = `${context.projectId}#${scanGen}`
+    if (refCache && refCache.key === key) return refCache.promise
+    const promise = buildRefIndex(context)
+    // 建索引失败不留缓存:与 readText 的「失败的读不写 LRU」同一口径(审查 F-3)。
+    // 一次临时 IO 错如果粘在缓存上,整个世代都拿不到索引,而 orphans 会拿着残缺的引用图劝人删文件。
+    promise.catch(() => {
+      if (refCache && refCache.key === key) refCache = null
+    })
+    refCache = { key, promise }
+    return promise
+  }
+
   async function load() {
     const rows = ((await listDocs<GodotProject>('godot/project/')) || []) as WithId[]
     projects.value = rows
@@ -221,6 +254,8 @@ export function useTools() {
     treeAt.value = Date.now()
     // 清单变了(重扫/换项目),之前读到的文本随时可能已经过时
     textCache.clear()
+    // 同理,B10a 的索引缓存也属于**上一份清单**:这一路不推进 scanGen,靠这里显式作废。
+    refCache = null
     return true
   }
 
@@ -232,7 +267,7 @@ export function useTools() {
    */
   function ctx(pid: string): ToolContext {
     const root = selected(pid)?.path || ''
-    return {
+    const context: ToolContext = {
       projectId: pid,
       root,
       tree: tree.value,
@@ -271,8 +306,16 @@ export function useTools() {
         if (textCache.size >= TEXT_LRU) textCache.delete(textCache.keys().next().value as string)
         textCache.set(k, v)
         return v
-      }
+      },
+      /**
+       * 索引取用入口(B10a)。**必须**经由 ctx 递进去:检查器一旦 import 一个模块级单例,
+       * 「一次扫描共享一份」就变成「整个渲染进程共享一份」,跨项目与换代失效都得重写一遍。
+       * 用闭包外的 context 而不是新建一份 ctx:索引读的是**这个工具正在用的**那份清单与文本 LRU,
+       * 同源才能保证「同一代两次取用逐字节同一份」。
+       */
+      refIndex: () => refIndexOf(context)
     }
+    return context
   }
 
   async function runTool(id: string): Promise<ToolResult | null> {
@@ -353,6 +396,7 @@ export function useTools() {
     results.value = {}
     fixResults.value = {}
     textCache.clear()
+    refCache = null // 引用索引同样按项目成立(B10a):scanGen 已经推进,键不会再命中,这里连内存一起还
     // error 同样按项目成立:扫描失败的横幅(「项目目录无法读取」)属于**上一个**项目,
     // 不清的话切到正常项目后它会一直挂着,直到下一次扫描成功才消失(Task 16 修复)。
     error.value = ''
@@ -370,6 +414,9 @@ export function useTools() {
     scanGen += 1
     treeAt.value = 0
     textCache.clear()
+    // 引用索引的键含 scanGen,推进后自然取不到;显式清一次是为了不把上一个世代的引用图留在内存里
+    // (修完文件的那一代索引说的正是「已经被删掉的那些文件还被引用」,这种旧图绝不能被下一个工具复用)
+    refCache = null
   }
 
   /**

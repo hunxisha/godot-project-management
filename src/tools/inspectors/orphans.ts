@@ -14,8 +14,9 @@
 //   `.gd`/`.tscn` 正常情况下根本没有 .import 边车,「有边车」判据已把它们挡在候选集外;这里再显式挡一道
 //   (NON_CANDIDATE_EXT)是为了防御畸形项目(一个 .gd 旁边恰好有个 .gd.import)导致的**误删**。
 //
-// 引用来源**只**用 buildRefIndex(ctx)（spec §5.2「一次扫描多工具共享」）。本文件不调 ctx.readText、
-// 不再造第二套引用收集 —— 判据 1/8 全靠这条:成本 = 一次建索引,孤儿工具自己零 IO。
+// 引用来源**只**用共享的引用索引(B10a 起经 `ctx.refIndex()` 取用那份 memo,没给时自己
+// `buildRefIndex(ctx)`,两条路同一份判据 —— spec §5.2「一次扫描多工具共享」)。本文件不调 ctx.readText、
+// 不再造第二套引用收集 —— 判据 1/8 全靠这条:成本 = 一次建索引(同代第二个工具零成本),孤儿工具自己零 IO。
 // buildRefIndex 把 `.import`/`.uid` 边车与 `.godot/**` 排除在**引用来源**之外(refIndex.ts:121-128):
 // foo.png.import 里就有 source_file="res://foo.png",把它当引用会让**每个导入资产都被自己「引用」**,
 // 孤儿检查永远报不出东西(假阴性比假阳性更难发现,B3 判据 2)。于是「只被自己的 .png.import 提到」的
@@ -33,7 +34,8 @@
 // 再写一遍就是 B1 建这条管线要防的漂移。label 只给数量与中性动词「移除」。逐条不另发结论(几百张卡片会压垮
 // 页面),聚合成一条 orphans:all,与 uid:orphan:all 同形(但 id 不带数量,detail 带数量与体积)。
 //
-// 红线:纯函数,只吃 ToolContext —— 不碰 window / services / vue / DOM;唯一 IO 是 buildRefIndex(ctx)。
+// 红线:纯函数,只吃 ToolContext —— 不碰 window / services / vue / DOM;唯一 IO 是**取用引用索引**
+// (ctx.refIndex() 那份 memo;宿主没给就自己 buildRefIndex(ctx) —— 同一份判据,不第二套引用收集)。
 import type { Finding, ToolContext } from '../types'
 import { truncatedFinding } from '../finding'
 import { buildRefIndex } from '../refIndex'
@@ -63,8 +65,11 @@ function isAddon(rel: string): boolean {
 const NON_CANDIDATE_EXT = new Set(['gd', 'tscn'])
 
 export async function run(ctx: ToolContext): Promise<Finding[]> {
-  // 判据 1/8:引用收集只有一次 IO —— buildRefIndex(ctx)。本文件不碰 ctx.readText。
-  const index = await buildRefIndex(ctx)
+  // 判据 1/8:引用收集只有一次 IO —— 优先取用 ctx 的索引入口(B10a 的 memo,同一代只建一份),
+  // 宿主/测试没给这一项时退回直接 buildRefIndex(ctx)。两条路跑的是**同一份** refIndex.ts 判据:
+  // 传进来的就是同一个 ctx(同一份 tree、同一个 readText),所以读到的文件序列逐条相同
+  // (第 4 节的 calls 比对钉着这件事),差别只在「这一代里是否已经有人建过」。
+  const index = ctx.refIndex ? await ctx.refIndex() : await buildRefIndex(ctx)
 
   // 判据 4:清单被截断 → 一条孤儿都不报(此时索引本就是空的,见 refIndex.ts:109)。沿用 brokenRefs 先例。
   if (ctx.truncated) {

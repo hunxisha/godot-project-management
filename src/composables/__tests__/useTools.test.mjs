@@ -1126,6 +1126,173 @@ async function main() {
     '改写通道的不传 selected 同样整单三条(3 次写 + 3 份备份都在回执里)',
     JSON.stringify([oRwLegacy.written, oRwLegacy.ok, rwCompat.length]))
   restore()
+
+  // ---------- Task B10a:buildRefIndex 的 memo(spec §5.2「ctx 一次扫描多工具共享」的最后一笔欠账) ----------
+  section('36. buildRefIndex 的 memo:同一代只建一份索引')
+  const memoTree = [
+    { rel: 'project.godot', size: 100, mtimeMs: 1, ext: 'godot' },
+    { rel: 'scene/main.tscn', size: 200, mtimeMs: 1, ext: 'tscn' }
+  ]
+  const memoReads = []
+  global.window.services.scanProjectTree = () => ({ ok: true, files: memoTree.map((x) => ({ ...x })), truncated: false })
+  global.window.services.readProjectText = (pid, rel) => {
+    memoReads.push(`${pid}|${rel}`)
+    return {
+      ok: true,
+      text: rel === 'scene/main.tscn' ? '[ext_resource type="Script" path="res://a.gd" id="1_a"]' : '[application]\n',
+      bytes: 10,
+      truncated: false
+    }
+  }
+  global.window.ztools.db.allDocs = async () => [{ ...PROJECT }]
+  const taken = []
+  const idxProbe = (id) => ({
+    id,
+    name: '索引取用探针',
+    summary: 's',
+    phase: 'P0',
+    needs: ['tree'],
+    run: async (c) => {
+      taken.push(await c.refIndex())
+      return []
+    }
+  })
+  const tMemo = M.useTools()
+  await tMemo.load()
+  tMemo.registerTool(idxProbe('idx1'))
+  tMemo.registerTool(idxProbe('idx2'))
+  const rMemo1 = await tMemo.runTool('idx1')
+  const oneBuild = memoReads.length
+  ok(rMemo1.ok === true && taken.length === 1, '前置:ctx.refIndex() 存在且取到索引(缺这一项时探针会以 TypeError 失败)',
+    JSON.stringify([rMemo1.ok, rMemo1.error, taken.length]))
+  ok(oneBuild === 2, '前置:一趟建索引读了两个来源(project.godot + scene/main.tscn)', oneBuild)
+  ok(!!taken[0] && taken[0].to instanceof Map && taken[0].from instanceof Map && taken[0].uids instanceof Map,
+    '取到的是 RefIndex 的形状(to/from/uids 三张 Map + 计数),不是别的东西',
+    taken[0] && Object.keys(taken[0]).join(','))
+  ok(taken[0] && [...taken[0].to.keys()].join(',') === 'a.gd', '索引内容正确:scene/main.tscn 引用了 a.gd',
+    taken[0] && [...taken[0].to.keys()].join(','))
+  await tMemo.runTool('idx2')
+  ok(memoReads.length === oneBuild,
+    '★同一代里第二个工具取用:一个文件都没重读(接完 6 个工具后「各自重读约 3 千个文件」就是这笔欠账)',
+    memoReads.length - oneBuild)
+  ok(taken[1] === taken[0], '两个工具拿到的是**同一份**索引对象(缓存的是索引本身而不是各建各的)',
+    `${taken.length}`)
+  await tMemo.runTool('idx1')
+  ok(memoReads.length === oneBuild && taken[2] === taken[0], '同代第三次取用同样零遍历并复用同一对象',
+    `${memoReads.length}/${taken.length}`)
+  // 缓存的是 **promise** 而不是结果:两个工具同时取用时只有一趟遍历在跑,第二个等同一份。
+  // 只 await 建立后再置缓存的写法(常见的手滑版)在这里会翻倍 —— 全量体检正是并发取用的场景。
+  await Promise.all([tMemo.runTool('idx1'), tMemo.runTool('idx2')])
+  ok(memoReads.length === oneBuild,
+    '★同一代里两个工具**同时**取用也只有一趟遍历(缓存的是 promise:single-flight,不是各建各的)',
+    memoReads.length - oneBuild)
+  const cachedKeys = taken[0] ? Object.keys(taken[0]).sort().join(',') : ''
+  ok(cachedKeys === 'from,partial,readFailures,sidecarSkipped,sourcesScanned,to,uids' && !('findings' in taken[0]),
+    '缓存里只有索引本身:没有 findings(结论按工具成立,缓存它就绕过了「重跑这个检查器」的语义)', cachedKeys)
+
+  tMemo.invalidateTree()
+  await tMemo.runTool('idx1')
+  ok(memoReads.length === oneBuild * 2, 'invalidateTree(scanGen+1)后重取:索引跟着重建,不端旧世代的引用图',
+    memoReads.length)
+  ok(taken[taken.length - 1] !== taken[0], '换代后拿到的是新的一份对象', `${taken.length}`)
+
+  // runAll 的强制重扫**不推进 scanGen**(只有 invalidateTree/select 才推进),但清单确实换了:
+  // 索引必须跟着作废 —— 与紧挨着它的 textCache.clear() 同一个理由(旧索引 = 旧目录的引用图)。
+  const lastBeforeAll = taken[taken.length - 1]
+  await tMemo.runAll()
+  ok(taken[taken.length - 1] !== lastBeforeAll,
+    'runAll 的强制重扫同样作废索引(靠 ensureTree 装进新清单那一路清,不只看 scanGen)', `${taken.length}`)
+
+  // ---------- 36b. 超 TEXT_LRU 的工作集:让「readText 次数不翻倍」这条真的有失败能力 ----------
+  // 上面那棵树只有 2 个来源,文本 LRU(200)会把「重建索引」的第二次读取全部吃掉 —— 小夹具下
+  // 计数断言遮住了回归(实测把缓存整个拿掉也只红对象身份那两条)。250 个来源超出上限,
+  // LRU 自己会整体抖动,于是「第二次取用要不要重读 250 个文件」只能由索引 memo 决定。
+  const BIG_N = 250
+  const bigTree = Array.from({ length: BIG_N }, (_, i) => ({ rel: `scene/b${i}.tscn`, size: 10, mtimeMs: 1, ext: 'tscn' }))
+  const bigReads = []
+  global.window.services.scanProjectTree = () => ({ ok: true, files: bigTree.map((x) => ({ ...x })), truncated: false })
+  global.window.services.readProjectText = (pid, rel) => {
+    bigReads.push(rel)
+    return { ok: true, text: '无引用\n', bytes: 4, truncated: false }
+  }
+  const bigTaken = []
+  const tBig = M.useTools()
+  await tBig.load()
+  tBig.registerTool({
+    id: 'bigidx', name: '大工作集索引探针', summary: 's', phase: 'P0', needs: ['tree'],
+    run: async (c) => { bigTaken.push(await c.refIndex()); return [] }
+  })
+  await tBig.runTool('bigidx')
+  const firstBuild = bigReads.length
+  ok(firstBuild === BIG_N, '前置:250 个来源各读一次(工作集超出 TEXT_LRU=200,第二次遍历不可能被 LRU 吃掉)',
+    firstBuild)
+  await tBig.runTool('bigidx')
+  ok(bigReads.length === firstBuild,
+    '★同一代第二次取用:readText 次数不翻倍(§3 的硬要求;这是 3 千文件项目里唯一真正省下来的东西)',
+    `${bigReads.length}/${firstBuild}`)
+  ok(bigTaken[1] === bigTaken[0], '大工作集下同样拿到同一份索引对象', `${bigTaken.length}`)
+  await Promise.all([tBig.runTool('bigidx'), tBig.runTool('bigidx')])
+  ok(bigReads.length === firstBuild && bigTaken[bigTaken.length - 1] === bigTaken[0],
+    '★两个工具**同时**取用:一趟遍历、同一份对象(建完才置缓存的写法在这里会重读 250 个文件)',
+    `${bigReads.length - firstBuild}/${bigTaken.length}`)
+  tBig.invalidateTree()
+  await Promise.all([tBig.runTool('bigidx'), tBig.runTool('bigidx')])
+  ok(bigReads.length === firstBuild * 2,
+    '★换代 = 冷缓存 + 两个工具同时取用:重建**一趟**(换代必须重取,但 single-flight 仍成立 —— 建完才置缓存的写法这里会重读两趟)',
+    `${bigReads.length}/${firstBuild}`)
+  ok(bigTaken[bigTaken.length - 1] === bigTaken[bigTaken.length - 2] &&
+    bigTaken[bigTaken.length - 1] !== bigTaken[0],
+    '换代后两个并发取用拿到同一份**新**索引(旧世代的那份没有被任何人端走)', `${bigTaken.length}`)
+
+  section('37. memo 的跨项目隔离(同名 rel 不许串)')
+  const P1 = { ...PROJECT, lastOpenedAt: 2000 }
+  const P2 = { ...PROJECT2, lastOpenedAt: 1000 }
+  const isoTrees = {
+    'godot/project/p1': [{ rel: 'scene/a.tscn', size: 100, mtimeMs: 1, ext: 'tscn' }],
+    'godot/project/p2': [{ rel: 'scene/a.tscn', size: 100, mtimeMs: 1, ext: 'tscn' }]
+  }
+  const isoTexts = {
+    'godot/project/p1|scene/a.tscn': '[ext_resource type="Script" path="res://only/in/p1.res" id="1_a"]',
+    'godot/project/p2|scene/a.tscn': '[ext_resource type="Script" path="res://only/in/p2.res" id="1_a"]'
+  }
+  const isoReads = []
+  global.window.services.scanProjectTree = (pid) => ({
+    ok: true,
+    files: (isoTrees[pid] || []).map((x) => ({ ...x })),
+    truncated: false
+  })
+  global.window.services.readProjectText = (pid, rel) => {
+    isoReads.push(`${pid}|${rel}`)
+    return { ok: true, text: isoTexts[`${pid}|${rel}`] ?? '', bytes: 1, truncated: false }
+  }
+  global.window.ztools.db.allDocs = async () => [{ ...P1 }, { ...P2 }]
+  const isoTaken = []
+  const tIso = M.useTools()
+  await tIso.load()
+  ok(tIso.projectId.value === 'godot/project/p1', '前置:默认选中最近打开的 p1', tIso.projectId.value)
+  tIso.registerTool({
+    id: 'isoidx', name: '跨项目索引探针', summary: 's', phase: 'P0', needs: ['tree'],
+    run: async (c) => { isoTaken.push(await c.refIndex()); return [] }
+  })
+  await tIso.runTool('isoidx')
+  ok(isoTaken[0] && [...isoTaken[0].to.keys()].join(',') === 'only/in/p1.res', 'p1 的索引只含 p1 的引用',
+    isoTaken[0] && [...isoTaken[0].to.keys()].join(','))
+  tIso.select('godot/project/p2')
+  await tIso.runTool('isoidx')
+  ok((isoTaken[1] ? [...isoTaken[1].to.keys()].join(',') : '') === 'only/in/p2.res',
+    '★切到 p2 后取到的是 p2 自己的引用图:两个项目都有 scene/a.tscn 但引用不同(P0a T14 的同类)',
+    isoTaken[1] ? [...isoTaken[1].to.keys()].join(',') : '(没有索引)')
+  ok(!!isoTaken[1] && ![...isoTaken[1].to.keys()].includes('only/in/p1.res'), 'p1 的引用没有渗进 p2 的索引',
+    isoTaken[1] ? JSON.stringify([...isoTaken[1].to.keys()]) : '(没有索引)')
+  ok(isoReads.filter((r) => r.startsWith('godot/project/p2|')).length === 1,
+    'p2 确实自己读了一遍(而不是把 p1 的结果端过来)', JSON.stringify(isoReads))
+  const beforeBack = isoReads.length
+  tIso.select('godot/project/p1')
+  await tIso.runTool('isoidx')
+  ok(isoTaken[2] !== isoTaken[0], '切回 p1 也重建:select 清了索引缓存,不把上一个世代的旧图端回来')
+  ok(isoReads.length === beforeBack + 1, '切回来真的只重读了 p1 的那一个来源(缓存清空而不是无限增长)',
+    isoReads.length - beforeBack)
+  restore()
 }
 main().then(() => {
   console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
