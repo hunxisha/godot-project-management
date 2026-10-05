@@ -13,12 +13,19 @@
 //     但判据 5 明写不判它们,所以**不进本层的返回值** —— 类型里没有的字段,调用方就顺手判不了。
 //   · `[deps]` 段:`source_file`(spec §3.1 #8 说的「`.import` 指向的源文件」就在这里)、
 //     `dest_files`(照原样读成列表;判据 5 不判它的对错,读出来只是别把形状猜错)。
+//   · `[params]` 段(#16 纹理审计起开放三键,仍是「点名列出,不做通用字典」):
+//     `compress/mode`(0=无损 1=有损 2=VRAM)、`mipmaps/generate`、`detect_3d/compress_to`
+//     (检测到 3D 用途后引擎自动改写导入参数的开关;0 = 用户显式关掉了自动转压)。
+//     键名按编辑器真实写出的形态核对(Godot 4.x texture 导入器)。**只抽这三键**:
+//     params 里还有几十个键(lossy_quality、roughness、process/*…),来一个键加一个字段的
+//     「通用 params 字典」会让本层长成第二个判定面;没有列入的字段照旧不进返回值,
+//     调用方就顺手判不了 —— 与上面 [remap] 不读 path/validated 是同一条纪律。
 //   · 顶层:`generator="organically.godot.texture"` 是 Godot 3 老形态的唯一痕迹,那种文件没有
 //     `[remap]` 也没有 `[deps]`,即压根没有 source_file —— 所以 legacy 单独标出来给调用方当闸门。
 //
 // 缺失就是 undefined:不补 `res://` 占位、不把裸串猜成列表、不给 `validated` 兜默认值。
 // 红线:纯函数,不碰 window / services / vue / DOM;输入是调用方读到的文本(本层不做 IO)。
-import { getIni, getIniList, parseGodotIni } from './godotIni'
+import { getIni, getIniBool, getIniInt, getIniList, parseGodotIni } from './godotIni'
 import type { IniDoc } from './godotIni'
 
 /** 一份 `.import` 里本工具关心的全部字段(其余键留在 IniDoc 里,判据 5 决定不读) */
@@ -33,6 +40,20 @@ export interface ImportFile {
   sourceFile?: string
   /** `[deps] dest_files`(只认 B2 认识的两种列表形态;别的形态给 undefined,不猜) */
   destFiles?: string[]
+  /**
+   * `[params] compress/mode`(getIniInt:裸整数才解析)。0=无损 1=有损 2=VRAM 压缩。
+   * **缺失就是 undefined**:不把「没写」猜成引擎默认 0 —— 手写/老版本的边车可能真没有这段,
+   * 拿 undefined 当 0 判,检查器就会对读不到参数的文件说「它开了无损」。
+   */
+  compressMode?: number
+  /** `[params] mipmaps/generate`(getIniBool:只有裸 true/false 算)。缺失同样是 undefined,不猜默认 */
+  mipmapsGenerate?: boolean
+  /**
+   * `[params] detect_3d/compress_to`(getIniInt)。非 0 = 引擎检测到纹理被 3D 用途引用后
+   * 会**自动改写** compress/mode 与 mipmaps 并重导入;0 = 用户显式关掉了这条自动链路,
+   * 参数从此只听手改的。
+   */
+  detect3dCompressTo?: number
   /** 顶层 `generator`(Godot 3 老形态才有的键) */
   generator?: string
   /** 没有 `[remap]` 段却写了非空 `generator` —— 即 Godot 3 的老形态 */
@@ -62,6 +83,9 @@ export function readImportFile(text: string): ImportFile {
     uid: getIni(doc, 'remap/uid'),
     sourceFile: getIni(doc, 'deps/source_file'),
     destFiles: getIniList(doc, 'deps/dest_files'),
+    compressMode: getIniInt(doc, 'params/compress/mode'),
+    mipmapsGenerate: getIniBool(doc, 'params/mipmaps/generate'),
+    detect3dCompressTo: getIniInt(doc, 'params/detect_3d/compress_to'),
     generator,
     // 空串(`generator=""`)不算「写了 generator」:那是个没有值的键,不是 Godot 3 的形态证据
     legacy: typeof generator === 'string' && generator !== '' && !hasRemap(doc)

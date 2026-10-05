@@ -31,7 +31,7 @@ function ok(cond, label, extra) {
 }
 function section(t) { console.log(`\n=== ${t} ===`) }
 
-const KEY_SET = ['destFiles', 'generator', 'importer', 'legacy', 'sourceFile', 'type', 'uid'].join(',')
+const KEY_SET = ['compressMode', 'destFiles', 'detect3dCompressTo', 'generator', 'importer', 'legacy', 'mipmapsGenerate', 'sourceFile', 'type', 'uid'].join(',')
 
 /**
  * 判据 1 的自证夹具:Godot 4.x 编辑器写出的真实形态(逐段照上游 .import 文件排,含
@@ -59,6 +59,7 @@ const REAL_4X = [
   'compress/high_quality=false',
   'compress/lossy_quality=0.7',
   'mipmaps/generate=false',
+  'detect_3d/compress_to=1',
   'process/fix_alpha_border=true'
 ].join('\n')
 
@@ -78,7 +79,7 @@ async function main() {
     'readImportFile(text) 已进 barrel,签名一参', `${typeof T.readImportFile}/${T.readImportFile?.length}`)
   const r4 = T.readImportFile(REAL_4X)
   ok(r4 && Object.keys(r4).sort().join(',') === KEY_SET,
-    '★返回值只有简报钉死的那 7 个键(path/validated/[params] 一律不外露 —— 判据 5 的「不读」面在类型层就挡住)',
+    '★返回值只有简报钉死的那 10 个键(#16 前半起 [params] 只外露 compressMode/mipmapsGenerate/detect3dCompressTo 三键;path/validated 与 params 其余几十键仍不外露 —— 判据 5 的「不读」面在类型层就挡住)',
     Object.keys(r4 || {}).sort().join(','))
   ok(r4.importer === 'texture' && r4.type === 'CompressedTexture2D' && r4.uid === 'uid://bkm2b5nqf3rhe',
     '判据 1:importer/type/uid 取自 [remap] 段(不是任何段里的同名键)',
@@ -88,6 +89,28 @@ async function main() {
     '判据 1:destFiles 走 getIniList 的 [ ... ] 形态', JSON.stringify(r4.destFiles))
   ok(r4.legacy === false && r4.generator === undefined,
     '4.x 形态:legacy=false、generator 缺失就是缺失(不臆造成空串)', `${r4.legacy}/${r4.generator}`)
+
+  // ---------- 1b. #16 前半:[params] 的三键读数 ----------
+  section('1b. #16 前半:[params] 抽 compress/mode、mipmaps/generate、detect_3d/compress_to')
+  ok(r4.compressMode === 0 && r4.mipmapsGenerate === false && r4.detect3dCompressTo === 1,
+    '★params 三键:mode 走 getIniInt、mipmaps 走 getIniBool、detect_3d 走 getIniInt',
+    `${r4.compressMode}/${r4.mipmapsGenerate}/${r4.detect3dCompressTo}`)
+  const noParams = T.readImportFile('[remap]\nimporter="texture"\n')
+  ok(noParams.compressMode === undefined && noParams.mipmapsGenerate === undefined && noParams.detect3dCompressTo === undefined,
+    '★没有 [params] 段(手写/老版本边车):三键全 undefined —— 不把「没写」猜成引擎默认值',
+    JSON.stringify([noParams.compressMode, noParams.mipmapsGenerate, noParams.detect3dCompressTo]))
+  const quotedMode = T.readImportFile('[params]\ncompress/mode="0"\nmipmaps/generate="false"\n')
+  ok(quotedMode.compressMode === undefined && quotedMode.mipmapsGenerate === undefined,
+    '★引号包住的 "0"/"false" 不是裸值 → undefined(getIniInt/getIniBool 的「不猜」直通到读数层)',
+    `${quotedMode.compressMode}/${quotedMode.mipmapsGenerate}`)
+  const fullMode = T.readImportFile('[params]\ncompress/mode=2\nmipmaps/generate=true\ndetect_3d/compress_to=0\n')
+  ok(fullMode.compressMode === 2 && fullMode.mipmapsGenerate === true && fullMode.detect3dCompressTo === 0,
+    'VRAM 压缩 + 开 mipmap + 显式关掉 3D 自动转压:三键照实读出(检查器判据的另两路)',
+    `${fullMode.compressMode}/${fullMode.mipmapsGenerate}/${fullMode.detect3dCompressTo}`)
+  const paramsScope = T.readImportFile('[remap]\nimporter="texture"\nmetadata={\n"compress/mode=9"\n}\n[deps]\nsource_file="res://a.png"\n')
+  ok(paramsScope.compressMode === undefined,
+    '★metadata 多行块里长得像 params 的行不串段(块配平归 B2,读数层只认 [params] 段下的键)',
+    String(paramsScope.compressMode))
 
   // ---------- 1. 判据 1:薄层 —— 规则全部来自 parseGodotIni ----------
   section('1. 判据 1:读数层不重造 INI')

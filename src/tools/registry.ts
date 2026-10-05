@@ -1,6 +1,7 @@
 // 工具注册表:一张表描述所有体检工具,UI 不认识任何具体工具(spec §2.1)。
 // P0a 登记 3 个只读工具;P0b-B10a 补 uid/addons/ini/orphans/imports/format 六条;
-// P1 第一批补 scripts/scenes/inputMap/i18n 四条、第二批补 export/git 两条(全部只读,共 15 条)。
+// P1 第一批补 scripts/scenes/inputMap/i18n 四条、第二批补 export/git 两条(全部只读,共 15 条);
+// P2 补 secrets(#18)、textures(#16 前半)两条,共 17 条。
 import type { Capability, Tool } from './types'
 import { run as runSize } from './inspectors/size'
 import { run as runCache } from './inspectors/cache'
@@ -15,6 +16,7 @@ import { run as runI18n } from './inspectors/i18n'
 import { run as runExport } from './inspectors/export'
 import { run as runGit } from './inspectors/git'
 import { run as runSecrets } from './inspectors/secrets'
+import { run as runTextures } from './inspectors/textures'
 import { run as runOrphans } from './inspectors/orphans'
 import { run as runImports } from './inspectors/imports'
 import { run as runFormat } from './inspectors/format'
@@ -131,6 +133,14 @@ export const TOOLS: Tool[] = [
     phase: 'P2',
     needs: ['tree', 'text'],
     run: runSecrets
+  },
+  {
+    id: 'textures',
+    name: '纹理导入体检',
+    summary: '大纹理仍以无损导入且未开 mipmap 的(3D 用途吃显存,纯 2D 可忽略)',
+    phase: 'P2',
+    needs: ['tree', 'text'],
+    run: runTextures
   },
   {
     id: 'orphans',
