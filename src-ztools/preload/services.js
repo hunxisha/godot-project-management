@@ -50,7 +50,12 @@ const servicesImpl = {
   /** 查询已装引擎的导出模板状态 */
   exportTemplateStatus: (versionId) => templates.exportTemplateStatus({ versionId }),
   /** 下载安装导出模板(入队,进度走 watchTasks,任务 kind='templates') */
-  installExportTemplates: (versionId) => templates.downloadAndInstallTemplates({ versionId }),
+  /** 安装导出模板:缺省从官方 release 下载;opts.srcPath 提供时从本地 .tpz/目录导入 */
+  installExportTemplates: (versionId, opts) => templates.downloadAndInstallTemplates({
+    versionId,
+    srcPath: opts && opts.srcPath,
+    versionDir: opts && opts.versionDir
+  }),
   /** 卸载导出模板(删除模板目录与记录) */
   uninstallExportTemplates: (versionId) => templates.uninstallExportTemplates({ versionId }),
   /** 添加项目(目录或 project.godot 文件) */

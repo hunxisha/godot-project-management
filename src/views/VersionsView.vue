@@ -227,9 +227,13 @@ async function askDelete(v: GodotVersion & { _id: string }) {
 const {
   tplStatuses,
   confirmingTplId,
+  localImport,
   tplTaskFor,
   refreshTplStatuses,
   installTemplates,
+  startLocalImport,
+  confirmLocalImport,
+  cancelLocalImport,
   askUninstallTemplates
 } = useExportTemplates({ installed, tasks, notify })
 
@@ -341,7 +345,13 @@ function progressOf(t: DownloadTask): number {
             @click="installTemplates(v)"
           ><Icon name="download" :size="13" /> {{ tplTaskFor(v._id) ? '模板任务中' : '获取模板' }}</button>
           <button
-            v-else
+            class="btn small ghost"
+            :disabled="!!tplTaskFor(v._id)"
+            title="从本地 .tpz 安装(自编译/第三方模板);不发起下载"
+            @click="startLocalImport(v)"
+          ><Icon name="upload" :size="13" /> 导入本地模板</button>
+          <button
+            v-if="tplStatuses[v._id]?.installed"
             class="btn small ghost"
             :title="`卸载导出模板(${tplStatuses[v._id]?.versionDir})`"
             @click="askUninstallTemplates(v)"
@@ -352,6 +362,20 @@ function progressOf(t: DownloadTask): number {
           <button class="btn small danger-text" @click="askDelete(v)">
             {{ confirmingId === v._id ? '确认删除?' : '删除' }}
           </button>
+        </div>
+        <!-- 本地导入的确认行:选完 .tpz 后在这里改目标目录名(默认就是状态查询给的那个),
+             确认才入队;编辑器按版本串查找模板,目录名必须与它的 --version 输出一致 -->
+        <div v-if="localImport && localImport.versionId === v._id" class="tpl-import">
+          <span class="tpl-import-label">模板目录名</span>
+          <input
+            v-model="localImport.dirName"
+            class="select tpl-import-input"
+            title="编辑器按版本串在 export_templates/ 下查找,须与引擎 --version 输出一致(如 4.3.stable)"
+            @keyup.enter="confirmLocalImport"
+          >
+          <button class="btn small" @click="confirmLocalImport">开始导入</button>
+          <button class="btn small ghost" @click="cancelLocalImport">取消</button>
+          <span class="tpl-import-hint">只允许字母数字、点、下划线、连字符</span>
         </div>
       </div>
     </div>
@@ -592,6 +616,34 @@ function progressOf(t: DownloadTask): number {
   align-items: center;
   gap: 5px;
   flex-shrink: 0;
+}
+
+/* 本地导入确认行:横排在版本卡底部,窄卡换行 */
+.tpl-import {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  border-top: 1px dashed var(--border);
+  padding-top: 8px;
+  margin-top: 8px;
+}
+
+.tpl-import-label {
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.tpl-import-input {
+  width: 140px;
+  min-width: 0;
+  font-size: 12.5px;
+}
+
+.tpl-import-hint {
+  font-size: 11.5px;
+  color: var(--text-3);
 }
 
 /* ---------- 可用版本 ---------- */

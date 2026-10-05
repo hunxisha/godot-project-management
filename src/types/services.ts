@@ -90,8 +90,10 @@ export interface Services {
   deleteVersion(v: { id: string, installDir?: string, managed: boolean }): { ok: boolean, error?: string }
   /** 查询已装引擎的导出模板状态(versionDir 形如 4.3.stable;目录存在即视为已安装) */
   exportTemplateStatus(versionId: string): { versionDir: string, installed: boolean, tracked: boolean, path: string }
-  /** 下载安装导出模板(入队,进度走 watchTasks,任务 kind='templates') */
-  installExportTemplates(versionId: string): { ok: boolean, error?: string, taskId?: string }
+  /** 下载安装导出模板(入队,进度走 watchTasks,任务 kind='templates')。
+   *  opts.srcPath 提供时改从本地导入(.tpz 文件或已解压的模板目录),不再发起下载;
+   *  opts.versionDir 提供时作为目标目录名(默认:该引擎记录里已有的 versionDir,否则 tag 派生) */
+  installExportTemplates(versionId: string, opts?: { srcPath?: string; versionDir?: string }): { ok: boolean, error?: string, taskId?: string }
   /** 卸载导出模板(删除模板目录与记录) */
   uninstallExportTemplates(versionId: string): { ok: boolean, error?: string }
   /** 列出项目的导出预设(解析 export_presets.cfg;无该文件时返回空列表) */

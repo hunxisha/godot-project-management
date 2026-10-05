@@ -17,7 +17,7 @@ const path = require('node:path')
 const os = require('node:os')
 const { downloadResumable } = require('./http')
 const { extractZip, ensureDir, dirSize, inspectZip } = require('./extract')
-const { trashPath } = require('./fsutil')
+const fsutil = require('./fsutil')
 const { currentPlatform } = require('./godotExe')
 const { getDoc, putDoc, removeDoc } = require('./store')
 
@@ -42,6 +42,18 @@ function setTask(id, patch) {
  */
 function versionDirFromTag(tag) {
   return String(tag).replace(/-/g, '.')
+}
+
+/**
+ * 自定义模板目录名的白名单(与 Rust 端 `is_valid_version_dir_name` 逐字镜像):
+ * 字母数字开头,只含字母数字 / 点 / 下划线 / 连字符,1–64 字符。
+ * versionDir 会被 `path.join(base, versionDir)` —— 放行 `/`、`\`、`..` 就等于允许把
+ * 模板装到任意位置;版本串(`4.3.stable` / `4.4.dev6`)本来也不需要别的字符。
+ * @param {string} s
+ * @returns {boolean}
+ */
+function isValidVersionDirName(s) {
+  return typeof s === 'string' && /^[0-9A-Za-z][0-9A-Za-z._-]{0,63}$/.test(s)
 }
 
 /**
@@ -138,15 +150,33 @@ function exportTemplateStatus(opts) {
 }
 
 /**
- * 下载并安装导出模板(入队,立即返回)。
- * 重新安装会覆盖:先删除旧目录再落新包(与素材的先清后装同语义)。
- * @param {{versionId: string}} params
+ * 下载安装,或从本地导入导出模板(入队,立即返回)。
+ * 重新安装会覆盖:旧目录先**移入回收站**再落新包(与素材的先清后装同语义;永久删除
+ * 会让「装错了想退回」变成不可能,计划书点名的安全边界)。
+ *
+ * 来源二选一:
+ *   · 缺省 → 下载官方 release 的 tpz(与既有行为逐字节一致);
+ *   · params.srcPath → 本地导入(.tpz 文件走「zip 预检 → 解压」,已解压的模板目录直接进校验),
+ *     不发起任何网络请求。自编译/第三方模板由此进场。
+ *
+ * 目标目录名(versionDir)的**统一取法**(三处读它的地方必须同一条):显式 params.versionDir
+ * → 该引擎记录里已有的 `godot/templates/<id>.versionDir` → tag 派生。早先这里写死 tag 派生,
+ * 「手动导入过自定义目录名的引擎」再走一次下载安装就会装到另一个目录,而状态卡读的
+ * 还是记录里的旧值 —— 实际装的目录与 db 记录不一致(计划书第 5 项点名的分叉)。
+ *
+ * @param {{versionId: string, srcPath?: string, versionDir?: string}} params
  * @param {{versionsRoot?: string, templatesBase?: string, platform?: string}} [opts]
  *   templatesBase 仅供测试覆盖安装根;缺省按 Godot 规则解析(._sc_ → exe 旁,否则用户数据目录)
  *   platform 仅供测试注入目标平台(测试模板包内是固定平台的文件);缺省用真实平台
  * @returns {{ok: boolean, error?: string, taskId?: string}}
  */
-function downloadAndInstallTemplates({ versionId }, opts) {
+function downloadAndInstallTemplates(params, opts) {
+  const { versionId, versionDir: versionDirArg } = params || {}
+  // srcPath 在这里归一成确定字符串:'' = 没有本地来源(走下载)。后面所有分支部只认 src。
+  // (中间变量不是画蛇添足:JSDoc 类型下 `typeof (params||{}).srcPath === 'string'` 收窄不了
+  //  重复的属性访问表达式,TS 会一路把 undefined 带进 inspectZip/extractZip 的参数里。)
+  const srcPathRaw = (params || {}).srcPath
+  const src = typeof srcPathRaw === 'string' ? srcPathRaw : ''
   const v = getDoc(versionId)
   if (!v || !v.tag || !v.exePath) return { ok: false, error: '未找到该引擎' }
   const o = opts || {}
@@ -154,7 +184,29 @@ function downloadAndInstallTemplates({ versionId }, opts) {
   const downloadsDir = settings.versionsRoot
     ? path.join(settings.versionsRoot, 'downloads')
     : path.join(os.tmpdir(), 'ztools-godot-dl')
-  const fileName = `Godot_v${v.tag}${v.variant === 'mono' ? '_mono' : ''}_export_templates.tpz`
+
+  // 本地来源先验存在再入队:文件不存在的问题不该等到任务队列里才暴露
+  let localStat = null
+  if (src !== '') {
+    try {
+      localStat = fs.statSync(src)
+    } catch (e) {
+      return { ok: false, error: '模板文件不存在' }
+    }
+    if (!localStat.isFile() && !localStat.isDirectory()) return { ok: false, error: '模板来源既不是文件也不是目录' }
+  }
+
+  // 与 exportTemplateStatus / uninstallExportTemplates 同一条取法(见 JSDoc「统一取法」)
+  const priorDoc = getDoc(`godot/templates/${versionId}`)
+  const versionDir = versionDirArg || (priorDoc && priorDoc.versionDir) || versionDirFromTag(v.tag)
+  // 显式目录名过白名单(记录里的值与 tag 派生值不校验:它们是本管线自己写下的,天然安全)
+  if (versionDirArg !== undefined && !isValidVersionDirName(versionDirArg)) {
+    return { ok: false, error: '模板目录名不合法:只允许字母数字、点、下划线、连字符' }
+  }
+
+  const fileName = src
+    ? path.basename(src)
+    : `Godot_v${v.tag}${v.variant === 'mono' ? '_mono' : ''}_export_templates.tpz`
   const url = templateUrl(v.tag, v.variant)
 
   const task = tasks.create({
@@ -181,38 +233,51 @@ function downloadAndInstallTemplates({ versionId }, opts) {
       const queued = tasks.get(id)
       if (!queued || queued.status === 'canceled') return
 
-      ensureDir(downloadsDir)
-      setTask(id, { status: 'downloading' })
-      let lastTime = Date.now()
-      let lastReceived = 0
-      const dl = downloadResumable(url, zipPath, {
-        attempts: 3,
-        onProgress: (received, total) => {
-          const now = Date.now()
-          const speed = Math.max(0, ((received - lastReceived) / Math.max(1, now - lastTime)) * 1000)
-          lastTime = now
-          lastReceived = received
-          setTask(id, { received, totalSize: total })
+      if (localStat && localStat.isFile()) {
+        // 本地 .tpz:没有 .part 文件,直接对源文件做预检(坏包在这里就被拦下)
+        setTask(id, { status: 'downloading', totalSize: localStat.size, received: localStat.size })
+        const insp = inspectZip(src)
+        if (!insp.ok) throw new Error(`压缩包无法解析(${insp.error}),请确认选的是 .tpz(zip)文件`)
+      } else if (!localStat) {
+        ensureDir(downloadsDir)
+        setTask(id, { status: 'downloading' })
+        let lastTime = Date.now()
+        let lastReceived = 0
+        const dl = downloadResumable(url, zipPath, {
+          attempts: 3,
+          onProgress: (received, total) => {
+            const now = Date.now()
+            const speed = Math.max(0, ((received - lastReceived) / Math.max(1, now - lastTime)) * 1000)
+            lastTime = now
+            lastReceived = received
+            setTask(id, { received, totalSize: total })
+          }
+        })
+        tasks.setToken(id, dl)
+        const cur = tasks.get(id)
+        if (!cur || cur.status === 'canceled') {
+          dl.cancel()
+          return
         }
-      })
-      tasks.setToken(id, dl)
-      const cur = tasks.get(id)
-      if (!cur || cur.status === 'canceled') {
-        dl.cancel()
-        return
-      }
-      await dl.promise
-      const afterDl = tasks.get(id)
-      if (!afterDl || afterDl.status === 'canceled') return
+        await dl.promise
+        const afterDl = tasks.get(id)
+        if (!afterDl || afterDl.status === 'canceled') return
 
-      // zip 预检:解压前先验证压缩包可解析,拦住「下到半个文件」的坏包
-      const insp = inspectZip(zipPath)
-      if (!insp.ok) throw new Error(`下载的压缩包无法解析(${insp.error}),请重试(已完成部分会保留)`)
+        // zip 预检:解压前先验证压缩包可解析,拦住「下到半个文件」的坏包
+        const insp = inspectZip(zipPath)
+        if (!insp.ok) throw new Error(`下载的压缩包无法解析(${insp.error}),请重试(已完成部分会保留)`)
+      }
+      // 本地目录来源(localStat.isDirectory()):没有解压这一步,直接进校验
 
       setTask(id, { status: 'extracting' })
-      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ztools-godot-tpl-'))
-      const extractDir = path.join(tmpDir, 'x')
-      await extractZip(zipPath, extractDir)
+      let extractDir = ''
+      if (localStat && localStat.isDirectory()) {
+        extractDir = src // 已解压的模板目录:零拷贝直接用
+      } else {
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ztools-godot-tpl-'))
+        extractDir = path.join(tmpDir, 'x')
+        await extractZip(localStat ? src : zipPath, extractDir)
+      }
 
       // tpz 固定带 templates/ 顶层目录;防御性兼容单 wrapper 或散装
       const tops = fs.readdirSync(extractDir, { withFileTypes: true })
@@ -224,14 +289,21 @@ function downloadAndInstallTemplates({ versionId }, opts) {
       }
 
       setTask(id, { status: 'verifying' })
-      const versionDir = versionDirFromTag(v.tag)
       // templatesBase 仅供测试覆盖安装根;正常路径按 Godot 规则解析(._sc_ → exe 旁,否则用户数据目录)
       const baseDir = o.templatesBase || resolveTemplatesBase(v.exePath).base
       const dest = path.join(baseDir, versionDir)
       const fileCount = verifyTemplatesDir(sourceRoot, o.platform || process.platform)
 
       ensureDir(baseDir)
-      fs.rmSync(dest, { recursive: true, force: true })
+      if (fs.existsSync(dest)) {
+        // 覆盖 = 旧目录进回收站(与显式卸载同一通道);移不走就停下 —— 永久删除换「必然成功」
+        // 是用用户的退路换安装率,不做这个交换。
+        try {
+          fsutil.trashPath(dest, true)
+        } catch (e) {
+          throw new Error('无法移走旧模板(回收站不可用?),可先「卸载模板」后再装')
+        }
+      }
       moveSync(sourceRoot, dest)
 
       putDoc(`godot/templates/${versionId}`, {
@@ -255,7 +327,8 @@ function downloadAndInstallTemplates({ versionId }, opts) {
       }
     } finally {
       try {
-        succeeded && fs.existsSync(zipPath) && fs.unlinkSync(zipPath)
+        // 本地文件来源没有 .part,不能把用户选的那个源文件当临时产物删掉
+        succeeded && !localStat && fs.existsSync(zipPath) && fs.unlinkSync(zipPath)
       } catch (e) { /* ignore */ }
       try {
         tmpDir && fs.rmSync(tmpDir, { recursive: true, force: true })
@@ -282,8 +355,8 @@ function uninstallExportTemplates(opts) {
     const versionDir = (doc && doc.versionDir) || versionDirFromTag(v.tag)
     const base = templatesBase || resolveTemplatesBase(v.exePath).base
     const dir = path.join(base, versionDir)
-    // 显式卸载走回收站(与项目删除一致),误删可恢复
-    if (fs.existsSync(dir)) trashPath(dir, true)
+    // 显式卸载走回收站(与项目删除一致),误删可恢复;fsutil 走整体引用,测试可注入探针
+    if (fs.existsSync(dir)) fsutil.trashPath(dir, true)
     removeDoc(`godot/templates/${versionId}`)
     return { ok: true }
   } catch (e) {
@@ -293,6 +366,7 @@ function uninstallExportTemplates(opts) {
 
 module.exports = {
   versionDirFromTag,
+  isValidVersionDirName,
   templateUrl,
   resolveTemplatesBase,
   exportTemplateStatus,

@@ -146,8 +146,10 @@ fn export_template_status(exe_path: String, tag: String) -> Value {
     godot_workshop::templates::status(&base, &tag)
 }
 
+/// 安装导出模板:缺省从官方 release 下载;src_path 提供时改从本地导入(.tpz 文件或已解压目录),
+/// 不发起网络请求。version_dir 提供时作为目标目录名(须过 templates::is_valid_version_dir_name 白名单)。
 #[tauri::command]
-fn install_export_templates(app: AppHandle, state: State<Versions>, exe_path: String, tag: String, url: String) -> Value {
+fn install_export_templates(app: AppHandle, state: State<Versions>, exe_path: String, tag: String, url: Option<String>, src_path: Option<String>, version_dir: Option<String>) -> Value {
     let platform = if cfg!(target_os = "windows") { "windows" } else if cfg!(target_os = "macos") { "macos" } else { "linux" };
     let appdata = std::env::var("APPDATA").ok().map(std::path::PathBuf::from);
     let base = godot_workshop::templates::templates_base(Some(Path::new(&exe_path)), &home_dir(), appdata.as_deref(), platform);
@@ -166,9 +168,28 @@ fn install_export_templates(app: AppHandle, state: State<Versions>, exe_path: St
         set(taskqueue::Status::Running, None, serde_json::json!({}));
         let stage = std::env::temp_dir().join(format!("gpm-tpl-stage-{task_id}"));
         let _ = std::fs::remove_dir_all(&stage);
+        let local = src_path.as_deref().map(std::path::PathBuf::from);
+        if let Some(src) = &local {
+            // 本地来源:文件 → 解压进 stage;目录 → 直接当 stage(免拷贝)。坏包/错平台交给 install_from_stage 校验。
+            let stage_ref: &Path = if src.is_dir() {
+                src.as_path()
+            } else {
+                let tpz_stage = &stage;
+                if let Err(e) = godot_workshop::extract::unzip(src, tpz_stage) {
+                    set(taskqueue::Status::Error, Some(e), serde_json::json!({}));
+                    return;
+                }
+                tpz_stage
+            };
+            match godot_workshop::templates::install_from_stage(stage_ref, &base, &tag, platform, version_dir.as_deref()) {
+                Ok((files, vd)) => { let _ = std::fs::remove_dir_all(&stage); set(taskqueue::Status::Done, None, serde_json::json!({ "versionDir": vd, "files": files })); }
+                Err(e) => { let _ = std::fs::remove_dir_all(&stage); set(taskqueue::Status::Error, Some(e), serde_json::json!({})); }
+            }
+            return;
+        }
         let tpz = stage.with_extension("tpz");
         let dl = godot_workshop::http::download(
-            godot_workshop::http::DownloadOptions { url, dest: tpz.clone(), proxy, sha256: None },
+            godot_workshop::http::DownloadOptions { url: url.unwrap_or_default(), dest: tpz.clone(), proxy, sha256: None },
             |received, _t| { if let Some(t) = v.book.lock().unwrap().get_mut(task_id) { t.payload["received"] = serde_json::json!(received); } },
         ).await;
         if let Err(e) = dl { set(taskqueue::Status::Error, Some(e), serde_json::json!({})); let _ = std::fs::remove_dir_all(&stage); return; }
@@ -176,7 +197,7 @@ fn install_export_templates(app: AppHandle, state: State<Versions>, exe_path: St
         let _ = std::fs::remove_file(&tpz);
         if let Err(e) = ex { set(taskqueue::Status::Error, Some(e), serde_json::json!({})); let _ = std::fs::remove_dir_all(&stage); return; }
         let tag_now = v.book.lock().unwrap().get_mut(task_id).map(|t| t.payload["tag"].as_str().unwrap_or("").to_string()).unwrap_or_default();
-        match godot_workshop::templates::install_from_stage(&stage, &base, &tag_now, platform) {
+        match godot_workshop::templates::install_from_stage(&stage, &base, &tag_now, platform, version_dir.as_deref()) {
             Ok((files, vd)) => { let _ = std::fs::remove_dir_all(&stage); set(taskqueue::Status::Done, None, serde_json::json!({ "versionDir": vd, "files": files })); }
             Err(e) => { let _ = std::fs::remove_dir_all(&stage); set(taskqueue::Status::Error, Some(e), serde_json::json!({})); }
         }

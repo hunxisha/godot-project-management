@@ -85,6 +85,7 @@ stub('http.js', {
 })
 
 const { createZip, ensureDir } = require(path.join(LIB, 'extract.js'))
+const fsutil = require(path.join(LIB, 'fsutil.js'))
 const install = require(path.join(LIB, 'install.js'))
 const templates = require(path.join(LIB, 'templates.js'))
 
@@ -243,6 +244,128 @@ async function main() {
   const t6c = await waitTask(r6c.taskId)
   ok(t6c.status === 'error' && t6c.error === '网络断了', '下载失败如实上报')
   state.failMessage = ''
+
+  // ---------- 6b ----------
+  section('6b. 本地导入(.tpz / 目录):不下载、versionDir 统一取法、覆盖走回收站')
+  {
+    // 白名单:与 Rust is_valid_version_dir_name 镜像
+    ok(templates.isValidVersionDirName('4.3.stable') === true, '白名单放行版本串形态')
+    ok(templates.isValidVersionDirName('../evil') === false && templates.isValidVersionDirName('a/b') === false &&
+      templates.isValidVersionDirName('a\b') === false && templates.isValidVersionDirName('') === false,
+      '★白名单拒 ../、分隔符、空串(目录名会被 join 到数据目录下,不能当穿越入口)')
+    ok(templates.isValidVersionDirName('.hidden') === false && templates.isValidVersionDirName('带中文') === false,
+      '点开头与非 ASCII 也拒')
+
+    // .tpz 文件导入:零下载、就位、记录、源文件保留
+    const vidLocal = makeEngine('4.5-dev6')
+    state.fixtureZip = await buildZip({
+      'templates/windows_release_x86_64.exe': 'win-release',
+      'templates/web_nothreads.zip': 'web'
+    })
+    const before = state.downloads
+    const rL = templates.downloadAndInstallTemplates(
+      { versionId: vidLocal, srcPath: state.fixtureZip },
+      { templatesBase: tplBase, platform: 'win32' }
+    )
+    ok(rL.ok === true, '.tpz 导入入队成功', rL.error)
+    const tL = await waitTask(rL.taskId)
+    ok(tL.status === 'done', `.tpz 导入完成(${tL.status} ${tL.error || ''})`)
+    ok(state.downloads === before, '★本地导入不发起任何下载')
+    const destL = path.join(tplBase, '4.5.dev6')
+    ok(fs.existsSync(path.join(destL, 'windows_release_x86_64.exe')), '模板文件落到 tag 派生目录')
+    ok(fs.existsSync(state.fixtureZip), '★用户选的源 .tpz 没被当成临时产物删掉')
+    const docL = docs.get(`godot/templates/${vidLocal}`)
+    ok(!!docL && docL.versionDir === '4.5.dev6', '记录 versionDir')
+
+    // 显式 versionDir:装到自定义目录,记录跟着走
+    const rV = templates.downloadAndInstallTemplates(
+      { versionId: vidLocal, srcPath: state.fixtureZip, versionDir: '4.5.dev6.mycustom' },
+      { templatesBase: tplBase, platform: 'win32' }
+    )
+    const tV = await waitTask(rV.taskId)
+    ok(tV.status === 'done', '显式目录名生效', tV.error)
+    ok(fs.existsSync(path.join(tplBase, '4.5.dev6.mycustom')), '装到自定义目录')
+    ok(docs.get(`godot/templates/${vidLocal}`).versionDir === '4.5.dev6.mycustom', '记录写的是实际生效的目录名')
+    ok(fs.existsSync(destL) && fs.readFileSync(path.join(destL, 'windows_release_x86_64.exe'), 'utf8') === 'win-release',
+      'tag 派生的旧目录是第一次导入的那份,显式目录名的安装不碰它')
+    ok(!fs.existsSync(path.join(tplBase, 'evil')), '穿越形态在同步闸就被拒,什么都没装')
+
+    // 记录优先:不带显式参数再走一次(下载路径),必须装到记录里已有的自定义目录
+    state.fixtureZip = await buildZip({ 'templates/windows_release_x86_64.exe': 'win-release-2' })
+    const rP = templates.downloadAndInstallTemplates(
+      { versionId: vidLocal },
+      { templatesBase: tplBase, platform: 'win32' }
+    )
+    const tP = await waitTask(rP.taskId)
+    ok(tP.status === 'done', `重装完成(${tP.error || ''})`)
+    ok(fs.existsSync(path.join(tplBase, '4.5.dev6.mycustom', 'windows_release_x86_64.exe')) &&
+      fs.readFileSync(path.join(tplBase, '4.5.dev6.mycustom', 'windows_release_x86_64.exe'), 'utf8') === 'win-release-2',
+      '★记录里有 versionDir 时下载安装也装到那里(不漂回 tag 派生 —— 计划书点名的「实际装目录与 db 记录不一致」)')
+    ok(fs.existsSync(path.join(destL, 'windows_release_x86_64.exe')) &&
+      fs.readFileSync(path.join(destL, 'windows_release_x86_64.exe'), 'utf8') === 'win-release',
+      '★tag 派生目录没被重装碰过(内容仍是第一次导入那份)')
+    const docP = docs.get(`godot/templates/${vidLocal}`)
+    ok(docP.versionDir === '4.5.dev6.mycustom', '记录仍是那个目录名')
+
+    // 覆盖 = 回收站:探针替换 fsutil.trashPath(整体引用,属性替换生效),真删 + 记账
+    const trashCalls = []
+    const origTrash = fsutil.trashPath
+    fsutil.trashPath = (p, isDir) => { trashCalls.push(String(p)); return origTrash(p, isDir) }
+    try {
+      const rT = templates.downloadAndInstallTemplates(
+        { versionId: vidLocal, srcPath: state.fixtureZip, versionDir: '4.5.dev6.mycustom' },
+        { templatesBase: tplBase, platform: 'win32' }
+      )
+      const tT = await waitTask(rT.taskId)
+      ok(tT.status === 'done', '覆盖重装完成', tT.error)
+      ok(trashCalls.includes(path.join(tplBase, '4.5.dev6.mycustom')),
+        '★覆盖安装把旧目录交给了回收站通道(与显式卸载同一通道),不再是 rmSync 永久删除')
+      ok(fs.existsSync(path.join(tplBase, '4.5.dev6.mycustom', 'windows_release_x86_64.exe')), '覆盖后新内容就位')
+    } finally {
+      fsutil.trashPath = origTrash
+    }
+
+    // 非法目录名:同步拒绝,不入队
+    const rBad = templates.downloadAndInstallTemplates(
+      { versionId: vidLocal, srcPath: state.fixtureZip, versionDir: '../evil' },
+      { templatesBase: tplBase, platform: 'win32' }
+    )
+    ok(rBad.ok === false && /不合法/.test(rBad.error || ''), '非法目录名同步拒绝', rBad.error)
+    ok(!install.taskQueue.get(rBad.taskId || ''), '被拒的请求不产生任务')
+
+    // srcPath 不存在:同步拒绝
+    const rNo = templates.downloadAndInstallTemplates(
+      { versionId: vidLocal, srcPath: path.join(WORK, 'no-such.tpz') },
+      { templatesBase: tplBase, platform: 'win32' }
+    )
+    ok(rNo.ok === false && rNo.error === '模板文件不存在', '来源文件不存在 → 同步拒绝', rNo.error)
+    ok(!install.taskQueue.get(rNo.taskId || ''), '不产生任务')
+
+    // 坏 zip:任务里报「压缩包无法解析」
+    const badZip = path.join(WORK, 'bad.tpz')
+    fs.writeFileSync(badZip, 'this is not a zip')
+    const rBz = templates.downloadAndInstallTemplates(
+      { versionId: vidLocal, srcPath: badZip },
+      { templatesBase: tplBase, platform: 'win32' }
+    )
+    const tBz = await waitTask(rBz.taskId)
+    ok(tBz.status === 'error' && /压缩包无法解析/.test(tBz.error || ''), `坏包报错(${tBz.error})`)
+    ok(fs.existsSync(badZip), '坏包源文件保留(不当临时产物清理)')
+
+    // 已解压目录形态:直接校验就位(源目录被 move 走 = 安装拿走它,不再复制一份)
+    const dirSrc = path.join(WORK, 'staged-templates')
+    fs.mkdirSync(path.join(dirSrc, 'templates'), { recursive: true })
+    fs.writeFileSync(path.join(dirSrc, 'templates', 'windows_release_x86_64.exe'), 'from-dir')
+    const rD = templates.downloadAndInstallTemplates(
+      { versionId: vidLocal, srcPath: dirSrc, versionDir: 'from.dir' },
+      { templatesBase: tplBase, platform: 'win32' }
+    )
+    const tD = await waitTask(rD.taskId)
+    ok(tD.status === 'done', `目录形态导入完成(${tD.error || ''})`)
+    ok(fs.readFileSync(path.join(tplBase, 'from.dir', 'windows_release_x86_64.exe'), 'utf8') === 'from-dir', '目录内容就位')
+    ok(!fs.existsSync(path.join(dirSrc, 'templates')),
+      '★目录形态安装拿走的是模板本体(templates/ 子目录被移走),用户自己的外壳目录保留')
+  }
 
   // ---------- 7 ----------
   section('7. 手动安装识别:目录存在即视为已安装')

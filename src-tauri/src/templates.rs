@@ -10,6 +10,18 @@ pub fn version_dir_for_tag(tag: &str) -> String {
     tag.replace('-', ".")
 }
 
+/// 自定义模板目录名的白名单(与 JS 端 `isValidVersionDirName` 逐字镜像):
+/// 字母数字开头,只含字母数字 / 点 / 下划线 / 连字符,1–64 字符。
+/// versionDir 会被 `path.join(base, versionDir)`——放行 `/`、`\`、`..` 就等于让
+/// 「目录名」把模板装到任意位置;版本串(`4.3.stable` / `4.4.dev6`)本来就不需要别的字符。
+pub fn is_valid_version_dir_name(s: &str) -> bool {
+    let b = s.as_bytes();
+    if b.is_empty() || b.len() > 64 { return false; }
+    let first = b[0];
+    if !(first.is_ascii_alphanumeric()) { return false; }
+    b.iter().all(|&c| c.is_ascii_alphanumeric() || c == b'.' || c == b'_' || c == b'-')
+}
+
 /// 模板数据目录(对齐 lib/templates.js 的 resolveTemplatesBase)
 pub fn templates_base(exe_path: Option<&Path>, home: &Path, appdata: Option<&Path>, platform: &str) -> PathBuf {
     if let Some(exe) = exe_path {
@@ -64,13 +76,33 @@ pub fn status(base: &Path, tag: &str) -> Value {
 
 /// 从已下载并解压出的暂存目录(tpz 解压产物,含 templates/ 顶层)安装到 base。
 /// 返回 (files, versionDir)。调用方负责下载与暂存清理。
-pub fn install_from_stage(stage_dir: &Path, base: &Path, tag: &str, platform: &str) -> Result<(usize, String), String> {
+/// `vd_override` 提供时作为目标目录名(须过 `is_valid_version_dir_name` 白名单),
+/// 缺省 tag 派生 —— 与 JS 端同一条「统一取法」的显式参数半边(记录里已有的值由调用方先查)。
+pub fn install_from_stage(
+    stage_dir: &Path,
+    base: &Path,
+    tag: &str,
+    platform: &str,
+    vd_override: Option<&str>,
+) -> Result<(usize, String), String> {
     let src = stage_dir.join("templates");
     let src = if src.is_dir() { src } else { stage_dir.to_path_buf() };
     let n = verify_templates_dir(&src, platform)?;
-    let vd = version_dir_for_tag(tag);
+    let vd = match vd_override {
+        Some(d) => {
+            if !is_valid_version_dir_name(d) {
+                return Err(format!("模板目录名不合法({d}):只允许字母数字、点、下划线、连字符"));
+            }
+            d.to_string()
+        }
+        None => version_dir_for_tag(tag),
+    };
     let dest = base.join(&vd);
-    let _ = std::fs::remove_dir_all(&dest);
+    if dest.exists() {
+        // 覆盖 = 旧目录进回收站(与显式卸载同一通道)。remove_dir_all 是永久删除:
+        // 「装错了想退回」会变成不可能,移不走就报错让用户先手动卸载。
+        crate::fsutil::delete_to_trash(&dest).map_err(|e| format!("无法移走旧模板({e}),可先卸载后再装"))?;
+    }
     if let Some(p) = base.parent() {
         std::fs::create_dir_all(p).map_err(|e| format!("创建数据目录失败:{e}"))?;
     }
@@ -88,6 +120,21 @@ mod tests {
         assert_eq!(version_dir_for_tag("4.3.2-stable"), "4.3.2.stable");
         assert_eq!(version_dir_for_tag("4.3-stable"), "4.3.stable");
         assert_eq!(version_dir_for_tag("4.4-dev6"), "4.4.dev6");
+    }
+
+    #[test]
+    fn version_dir_name_whitelist() {
+        // 与 JS 端 isValidVersionDirName 镜像;穿越形态一律拒
+        assert!(is_valid_version_dir_name("4.3.stable"));
+        assert!(is_valid_version_dir_name("4.4.dev6"));
+        assert!(is_valid_version_dir_name("4.3.stable.mono"));
+        assert!(!is_valid_version_dir_name(""), "空串拒");
+        assert!(!is_valid_version_dir_name("../evil"), "『..』拒");
+        assert!(!is_valid_version_dir_name("a/b"), "分隔符拒");
+        assert!(!is_valid_version_dir_name("a\\b"), "分隔符拒");
+        assert!(!is_valid_version_dir_name(".hidden"), "点开头拒(隐匿目录)");
+        assert!(!is_valid_version_dir_name("带中文"), "非 ASCII 拒(版本串不含)");
+        assert!(!is_valid_version_dir_name(&"x".repeat(65)), "超长拒");
     }
 
     #[test]
@@ -116,10 +163,29 @@ mod tests {
         std::fs::write(stage.join("templates").join("windows_release_x86_64.exe"), "x").unwrap();
         std::fs::write(stage.join("templates").join("windows_debug_x86_64.exe"), "x").unwrap();
         // 平台校验:有 windows_ 前缀 → 通过
-        let (n, vd) = install_from_stage(&stage, &base, "4.3.2-stable", "windows").unwrap();
+        let (n, vd) = install_from_stage(&stage, &base, "4.3.2-stable", "windows", None).unwrap();
         assert_eq!(n, 2);
         assert_eq!(vd, "4.3.2.stable");
         assert!(base.join("4.3.2.stable").join("windows_release_x86_64.exe").is_file());
+        // vd_override:自定义目录名生效(装到指定目录而不是 tag 派生)。
+        // 注意第一次安装已把 stage/templates move 走(moveSync 语义),这里重建夹具
+        std::fs::create_dir_all(stage.join("templates")).unwrap();
+        std::fs::write(stage.join("templates").join("windows_release_x86_64.exe"), "x").unwrap();
+        std::fs::write(stage.join("templates").join("windows_debug_x86_64.exe"), "x").unwrap();
+        let (n2, vd2) = install_from_stage(&stage, &base, "4.3.2-stable", "windows", Some("4.3.stable.custom")).unwrap();
+        assert_eq!(vd2, "4.3.stable.custom");
+        assert_eq!(n2, 2);
+        assert!(base.join("4.3.stable.custom").is_dir());
+        // 非法目录名在动盘之前被拒(同样重建夹具:上一次安装又把 templates 移走了)
+        std::fs::create_dir_all(stage.join("templates")).unwrap();
+        std::fs::write(stage.join("templates").join("windows_release_x86_64.exe"), "x").unwrap();
+        assert!(install_from_stage(&stage, &base, "4.3.2-stable", "windows", Some("../evil")).is_err());
+        assert!(!base.parent().unwrap().join("evil").exists(), "穿越形态没被装到外面");
+        // 覆盖重装:旧目录(自定义名)被移走、新内容就位(delete_to_trash 在非 Windows 是直接删,效果一致)
+        let (n3, vd3) = install_from_stage(&stage, &base, "4.3.2-stable", "windows", Some("4.3.stable.custom")).unwrap();
+        assert_eq!(vd3, "4.3.stable.custom");
+        assert_eq!(n3, 1);
+        assert!(base.join("4.3.stable.custom").join("windows_release_x86_64.exe").is_file());
         // 错平台 → 拒绝
         std::fs::create_dir_all(stage.join("templates2")).unwrap();
         std::fs::write(stage.join("templates2").join("linux_release"), "x").unwrap();

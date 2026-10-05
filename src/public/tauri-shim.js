@@ -100,9 +100,40 @@
     },
     importLocalExe: () => Promise.resolve({ ok: false, error: 'Tauri 版即将支持' }),
     deleteVersion: () => Promise.resolve({ ok: false, error: 'Tauri 版即将支持' }),
-    exportTemplateStatus: (exePath, tag) => invoke('export_template_status', { exePath, tag }),
-    installExportTemplates: (p) => invoke('install_export_templates', { exePath: p.exePath || '', tag: p.tag || '', url: p.url || '' }).catch(() => ({ ok: false, error: '参数不完整' })),
-    uninstallExportTemplates: (p) => invoke('uninstall_export_templates', { exePath: p.exePath || '', tag: p.tag || p.versionTag || '' }).catch(() => ({ ok: false })),
+    // ---------- 导出模板三映射 ----------
+    // 渲染层(useExportTemplates)按 Services 契约传 **versionId**;JS 宿主的原语在 preload 里
+    // 自己查库,这里没有 store,先 db_get 拿引擎文档(exePath/tag)再转发命令。
+    // 旧签名(收 {exePath,tag} 对象)与契约对不上,三条在桌面端一直是坏的 —— 这次按契约修。
+    // 文档查不到时与 JS 原语同形:状态返回全空对象,操作返回 '未找到该引擎'。
+    exportTemplateStatus: async (versionId) => {
+      const v = await window.ztools.db.get(versionId).catch(() => null)
+      if (!v || !v.exePath || !v.tag) return { versionDir: '', installed: false, tracked: false, path: '' }
+      return invoke('export_template_status', { exePath: v.exePath, tag: v.tag })
+    },
+    installExportTemplates: async (versionId, opts) => {
+      const v = await window.ztools.db.get(versionId).catch(() => null)
+      if (!v || !v.exePath || !v.tag) return { ok: false, error: '未找到该引擎' }
+      const o = opts || {}
+      return invoke('install_export_templates', {
+        exePath: v.exePath,
+        tag: v.tag,
+        // srcPath 有值 = 本地导入(命令层不再下载),url 就不需要了
+        url: o.srcPath ? null : '',
+        srcPath: o.srcPath || null,
+        versionDir: o.versionDir || null
+      }).catch((e) => {
+        console.warn('[tauri-shim] installExportTemplates', String((e && e.message) || e))
+        return { ok: false, error: '安装失败' }
+      })
+    },
+    uninstallExportTemplates: async (versionId) => {
+      const v = await window.ztools.db.get(versionId).catch(() => null)
+      if (!v || !v.exePath || !v.tag) return { ok: false, error: '未找到该引擎' }
+      return invoke('uninstall_export_templates', { exePath: v.exePath, tag: v.tag }).catch((e) => {
+        console.warn('[tauri-shim] uninstallExportTemplates', String((e && e.message) || e))
+        return { ok: false, error: '卸载失败' }
+      })
+    },
     listExportPresets: (projectId) => invoke('list_export_presets', { projectId }),
     runExport: (p) => invoke('run_export', { projectId: p.projectId, presetName: p.presetName, outputPath: p.outputPath }),
     watchExportTasks: (fn) => { listeners.export.push(fn); return () => { listeners.export = listeners.export.filter((f) => f !== fn) } },
