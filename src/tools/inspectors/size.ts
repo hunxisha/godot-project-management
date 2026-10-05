@@ -4,7 +4,7 @@
 // 这样 src/tools/__tests__/tools.test.mjs 才能在 Node 里直接跑。
 import type { Finding, ToolContext } from '../types'
 import { truncatedFinding } from '../finding'
-import { fmtBytes, groupByExt, groupByTopDir, isCache, noCache, sumBytes, topFiles } from '../treeUtils'
+import { fmtBytes, groupByExt, groupByTopDir, isCache, isVcs, sourceFiles, sumBytes, topFiles } from '../treeUtils'
 
 /** 单文件超过它才单独成条 —— 20MB 是「值得看一眼」的经验线 */
 const BIG_FILE = 20 * 1024 * 1024
@@ -18,10 +18,12 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
   if (ctx.truncated) {
     out.push(truncatedFinding('size'))
   }
-  // 源文件口径 = 去掉 .godot:这条文案会写「源文件共 X」,把缓存算进去等于每次导入大纹理
-  // 都告诉用户「你的项目变大了」。(缓存体积另立一条,见下。)
-  const src = noCache(ctx.tree)
+  // 源文件口径 = 去掉 .godot **也**去掉 .git(共享在 treeUtils.sourceFiles):这条文案会写「源文件共 X」,
+  // 把缓存算进去等于每次导入大纹理都告诉用户「你的项目变大了」;把 VCS 对象算进去,
+  // 一个有二进制历史的历史仓库会直接把项目体积顶成几百 MB。(两者各另立一条,见下。)
+  const src = sourceFiles(ctx.tree)
   const cache = ctx.tree.filter((f) => isCache(f.rel))
+  const vcs = ctx.tree.filter((f) => isVcs(f.rel))
   const cacheBytes = sumBytes(cache)
 
   out.push({
@@ -39,6 +41,18 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
       title: `.godot 缓存 ${fmtBytes(cacheBytes)} · ${cache.length} 个文件`,
       detail: '缓存是引擎生成的可再生内容,不计入源文件体积。清理入口在「项目」页。',
       rel: '.godot'
+    })
+  }
+
+  // VCS 元数据同样不进源文件口径,但**不藏**:排除掉却不说,用户只会看见「源文件变小了」而不知道为什么。
+  if (vcs.length > 0) {
+    out.push({
+      id: 'size:vcs',
+      severity: 'info',
+      title: `.git 版本库 ${fmtBytes(sumBytes(vcs))} · ${vcs.length} 个文件`,
+      detail: '既不是引擎缓存也不是项目源文件,所以不计入上面那条「源文件共 X」。' +
+        ' 但体积照实报:项目目录越滚越大通常就是这里(未走 LFS 的二进制历史最常见),`git gc` 与 LFS 是两条常规出路。',
+      rel: '.git'
     })
   }
 

@@ -4,7 +4,7 @@
 // 红线:纯函数,只吃 ToolContext —— 不碰 window / services / vue / DOM。
 import type { Finding, ToolContext } from '../types'
 import { truncatedFinding } from '../finding'
-import { fmtBytes, isCache, noCache, sumBytes } from '../treeUtils'
+import { fmtBytes, isCache, sourceFiles, sumBytes } from '../treeUtils'
 
 /** 缓存体积超过源文件这个倍数才算异常膨胀 */
 const CACHE_OVER_SRC = 10
@@ -27,7 +27,7 @@ export async function run(ctx: ToolContext): Promise<Finding[]> {
   }
   const out: Finding[] = []
   const cache = ctx.tree.filter((f) => isCache(f.rel))
-  const src = noCache(ctx.tree)
+  const src = sourceFiles(ctx.tree)   // 同一份口径:缓存与 .git 都不算源文件(见 treeUtils.sourceFiles)
 
   // 清单里没有缓存条目 = 只能陈述「这份清单里没有」,不能断言磁盘上真没有(宿主可能没带
   // .godot、或清单被 exts/skipDirs 过滤过 —— 审查 F-2)。新克隆项目确实也没有,所以是

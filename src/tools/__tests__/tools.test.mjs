@@ -373,6 +373,45 @@ async function main() {
   // ---------- 4. cache 检查器 ----------
   // 为什么存在:.godot 陈旧是「编辑器里改了但插件看到的还是旧的」的根因之一。
   // 无缓存**不是**错误(新克隆项目就是没有),异常膨胀才是 warn。
+  section('3c. VCS 元数据不进「源文件」口径(size 与 cache 两处症状)')
+  // `.git/**` 也是清单里的一条文件(useTools.ts:221 传的是 includeCache:true 且没给 skipDirs,
+  // fsutil.js:267 的 makeExcluder(undefined) 返回 null = 什么都不排除)。
+  // 把它当源文件算,一个有二进制历史的项目会被体积卡报成「源文件几百 MB」,
+  // 而 cache 卡的膨胀分母也被撑大 → 真膨胀漏报。修法与 .godot 当初被拆出去是同一条理由。
+  {
+    const VCS_TREE = [
+      ['project.godot', 100],
+      ['scene/main.tscn', 500],
+      ['.git/objects/pack/pack-abc.pack', 40 * 1024 * 1024],
+      ['.git/config', 300],
+      ['.godot/imported/a.stex', 900, 5]
+    ]
+    const S = await T.runSize(makeCtx(VCS_TREE))
+    const total = S.find((f) => f.id === 'size:total')
+    ok(total.title.includes('600 B') && total.title.includes('2 个'),
+      '源文件体积/条数不含 .git(混进来会是 40.0 MB · 4 个)', total.title)
+    const bigs = S.filter((f) => String(f.id).startsWith('size:big:'))
+    ok(!bigs.some((f) => String(f.rel).startsWith('.git/')), 'pack 文件不被列成项目大文件', JSON.stringify(bigs.map((f) => f.rel)))
+    const vcs = S.find((f) => f.id === 'size:vcs')
+    ok(!!vcs && vcs.severity === 'info', 'VCS 元数据另立一条,不静默消失', JSON.stringify(S.map((f) => f.id)))
+    ok(!!vcs && vcs.title.includes('40.0 MB') && vcs.title.includes('2 个'),
+      '那条要说出体积与文件数(藏起来不等于不存在)', vcs && vcs.title)
+
+    // 分母口径:这条先证明 cache 卡自己说的「源文件共 X」不含 .git;
+    // 真正能测出「分母被撑大 → 漏报」的是下面 C2(30MB 缓存 ÷ 600B 源 = 5 万倍,必须报膨胀;
+    // 这份夹具只有 1.5 倍,拿它断言膨胀是我先把算术写错,不是实现的问题)。
+    const C = await T.runCache(makeCtx(VCS_TREE))
+    const csize = C.find((f) => f.id === 'cache:size')
+    ok(!!csize && csize.detail.includes('600 B') && !csize.detail.includes('40.0 MB'),
+      'cache 卡的「源文件共 X」同样不含 .git(混进来会是 40.0 MB)', csize && csize.detail)
+    const C2 = await T.runCache(makeCtx([
+      ['project.godot', 100], ['scene/main.tscn', 500],
+      ['.git/objects/pack/pack-x.pack', 400 * 1024 * 1024],
+      ['.godot/imported/a.stex', 30 * 1024 * 1024, 5]
+    ]))
+    ok(C2.some((f) => f.id === 'cache:bloat'), '400MB 的 VCS 对象不许把真膨胀糊掉', JSON.stringify(C2.map((f) => f.id)))
+  }
+
   section('4. cache:.godot 缓存体检')
   // 新鲜:缓存最新(off=5)晚于源(off=1)
   // ⚠ 夹具体积从 brief 原文的 9000 改为 900:源 600 B + 缓存 9000 B = 15 倍,

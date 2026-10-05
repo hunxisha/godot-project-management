@@ -26,6 +26,29 @@ export function noCache(tree: TreeEntry[]): TreeEntry[] {
   return tree.filter((f) => !isCache(f.rel))
 }
 
+/**
+ * 路径里任意一段是 `.git` ⇒ 这条是 VCS 元数据,不是项目的源文件。
+ *
+ * 为什么单独一份(spec §3.1 的口径修补,2026-10-05):`scanProjectTree(pid, { includeCache: true })`
+ * 不给 skipDirs,而 fsutil 的 `makeExcluder(undefined)` 返回 null = 什么都不排除,所以 `.git/**`
+ * 会整批进清单。混在「源文件」里的后果有两处,都不小:体积卡把一个有二进制历史的项目报成
+ * 「源文件几百 MB」,cache 卡的膨胀分母被 VCS 对象撑大到漏报。
+ * 与 `isCache` 同一条理由按**路径段**而不是子串判:`foo/gitbar/`、`my.git/` 都不算。
+ */
+export function isVcs(rel: string): boolean {
+  if (typeof rel !== 'string' || !rel) return false
+  return rel.split('/').some((c) => c === '.git')
+}
+
+/**
+ * 「源文件」的**唯一**口径:既不是引擎缓存、也不是 VCS 元数据。
+ * size 与 cache 两张卡共用它 —— 分叉成两份判据的话,两张卡会对同一个项目说两种话。
+ * 刻意不叫 `noCache` 的近义词:`noCache` 只排缓存,那一条另有「缓存 vs 源」二分处的用法。
+ */
+export function sourceFiles(tree: TreeEntry[]): TreeEntry[] {
+  return tree.filter((f) => f && !isCache(f.rel) && !isVcs(f.rel))
+}
+
 export function sumBytes(tree: TreeEntry[]): number {
   return tree.reduce((a, f) => a + f.size, 0)
 }

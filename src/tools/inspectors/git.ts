@@ -19,7 +19,7 @@
 // 红线:纯函数,只吃 ToolContext —— 不碰 window / services / vue / DOM,不起子进程。
 import type { Finding, ToolContext } from '../types'
 import { LIST_CAP } from '../finding'
-import { byText, fmtBytes, isCache, rootRelOf } from '../treeUtils'
+import { byText, fmtBytes, isCache, isVcs, rootRelOf } from '../treeUtils'
 
 /** 单文件超过这个体积就点名(20MB:Godot 项目里通常是视频/音频/未压纹理) */
 const BIG_FILE_BYTES = 20 * 1024 * 1024
@@ -34,17 +34,10 @@ const BIG_FILE_BYTES = 20 * 1024 * 1024
  */
 const GODOT_IGNORE_FORMS = new Set(['.godot', '.godot/', '/.godot', '/.godot/', '**/.godot/', '**/.godot'])
 
-/** 清单里有没有 `.git`:目录条目(`.git/HEAD`)与 submodule 的 gitdir 指针文件(裸 `.git`)都算 */
+/** 清单里有没有 `.git`:目录条目(`.git/HEAD`)与 submodule 的 gitdir 指针文件(裸 `.git`)都算。
+判据本身共享在 treeUtils.isVcs —— 体积卡与本页必须对「什么是 VCS 元数据」说同一句话。 */
 function hasGitEntry(tree: ToolContext['tree']): boolean {
-  for (const f of tree) {
-    const rel = f && typeof f.rel === 'string' ? f.rel : ''
-    if (rel === '.git' || rel.startsWith('.git/')) return true
-  }
-  return false
-}
-
-function isVcs(rel: string): boolean {
-  return rel === '.git' || rel.startsWith('.git/')
+  return tree.some((f) => !!f && typeof f.rel === 'string' && isVcs(f.rel))
 }
 
 /** .gitignore 里有没有一条**未被注释**的忽略行覆盖 .godot */
