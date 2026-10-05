@@ -170,6 +170,7 @@ function closeFix() {
       :progress="t.progress.value"
       :all-clean="outcome.showAllClean"
       @run-all="t.runAll()"
+      @report="t.copyReport()"
     />
 
     <!-- 扫描失败只上浮这一条口径(检查器不各出一行),所以错误横幅是唯一的失败出口;

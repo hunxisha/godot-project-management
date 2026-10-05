@@ -68,8 +68,18 @@ global.window = {
       return { ok: true, text: TEXTS[rel] ?? '', bytes: 1, truncated: false }
     }
   },
-  ztools: { db: { allDocs: async () => [{ ...PROJECT }] } }
+  ztools: {
+    db: {
+      allDocs: async () => [{ ...PROJECT }],
+      // #19 报告落库要的两条:put 记下写了什么,好让断言能看到内容而不是只看「调过」
+      get: (id) => (putLog.find((d) => d._id === id) ? { ...putLog.find((d) => d._id === id) } : null),
+      put: (doc) => { putLog.push({ ...doc }); return { ok: true, id: doc._id } }
+    },
+    showNotification: (body) => { notifyLog.push(body) }
+  }
 }
+const putLog = []
+const notifyLog = []
 
 // 第 8 节起的用例临时换桩,跑完必须还原,否则后面的计数断言会被前一节污染
 const BASE_SCAN = global.window.services.scanProjectTree
@@ -1331,6 +1341,37 @@ async function main() {
   ok(isoReads.length === beforeBack + 1, '切回来真的只重读了 p1 的那一个来源(缓存清空而不是无限增长)',
     isoReads.length - beforeBack)
   restore()
+
+  section('38. #19 报告:生成 / 落库 / 复制,三件事各自可验')
+  {
+    global.window.services.scanProjectTree = BASE_SCAN
+    global.window.services.readProjectText = BASE_READ
+    const t38 = M.useTools()
+    await t38.load()
+    const emptyMd = t38.reportMarkdown()
+    ok(emptyMd.includes('Godot 工坊'), '报告有标题', emptyMd.slice(0, 40).replace(/\n/g, '|'))
+    ok(emptyMd.includes('Demo') && emptyMd.includes('E:/proj'), '项目名与根目录都在头部', emptyMd.slice(0, 220))
+    ok(/没有跑过任何体检/.test(emptyMd), '一条都没跑时报告自己说清楚', emptyMd.match(/[^\n]*没有跑过[^\n]*/)?.[0])
+
+    await t38.runTool('size')
+    const md = t38.reportMarkdown()
+    ok(/已运行/.test(md) && md.includes('项目体积与大文件'), '跑过的工具在报告里是「已运行」', md.match(/\| 项目体积[^\n]*/)?.[0])
+    ok(md.includes('未运行'), '没跑的仍在表里(不静默少行)', '')
+
+    putLog.length = 0
+    notifyLog.length = 0
+    const copied = await t38.copyReport()
+    const doc = putLog.find((d) => d._id === 'godot/tools-report/p1')
+    ok(!!doc, '按项目落库到 godot/tools-report/<id>', putLog.map((d) => d._id).join(','))
+    ok(!!doc && /生成时间：/.test(doc.markdown) && doc.markdown.includes('项目体积与大文件'),
+      '落库的就是那份报告(有生成时间、有汇总表)', doc ? doc.markdown.slice(0, 70).replace(/\n/g, '|') : '(没落库)')
+    ok(typeof copied === 'boolean', '复制返回布尔值(Node 里没剪贴板,应当是 false 而不是抛)', String(copied))
+    ok(notifyLog.length === 1 && /报告/.test(notifyLog[0]), '复制成没成都要说一句', notifyLog.join('|'))
+    const stored = putLog[0]
+    ok(stored.projectId === 'godot/project/p1' && stored.projectName === 'Demo', '库里的元信息带项目', JSON.stringify([stored.projectId, stored.projectName]))
+    ok(stored.tools === M.TOOLS.length, '工具条数与注册表同源', stored.tools)
+    restore()
+  }
 }
 main().then(() => {
   console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)

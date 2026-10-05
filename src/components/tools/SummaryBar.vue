@@ -20,7 +20,7 @@ const props = defineProps<{
   /** 全部工具都跑成且零结论:由 outcomeOf(src/tools/outcome.ts)算好喂进来;组件不认识 useTools,判据也不在视图里 */
   allClean: boolean
 }>()
-const emit = defineEmits<{ (e: 'run-all'): void }>()
+const emit = defineEmits<{ (e: 'run-all'): void; (e: 'report'): void }>()
 
 // 截断时把标记和数字写进同一句:分两处渲染就等于让「N 项」被读成总数
 const filesText = computed(() =>
@@ -42,6 +42,11 @@ const filesText = computed(() =>
     <button class="btn small primary" :disabled="running || !hasProject" @click="emit('run-all')">
       <span v-if="running" class="spin"></span>
       {{ running ? '体检中…' : '一键全量体检' }}
+    </button>
+    <!-- 报告是**结果的一份快照**:复制到剪贴板 + 存进插件数据(每项目最近一次)。
+         没跑过也能复制 —— 报告里会写明「本轮没有跑过任何体检」,那本身就是有用的信息。 -->
+    <button class="btn small" :disabled="running || !hasProject" title="复制 Markdown 报告到剪贴板" @click="emit('report')">
+      复制报告
     </button>
   </div>
 </template>
@@ -87,5 +92,10 @@ const filesText = computed(() =>
 
 .sum-bar .btn {
   margin-left: auto;
+}
+
+/* 第二个按钮不该再往右推一次:两个按钮挨在一起才看得出是「同一组动作」 */
+.sum-bar .btn + .btn {
+  margin-left: 6px;
 }
 </style>

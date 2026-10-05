@@ -12,9 +12,10 @@
 // 红线:这是渲染层组合式函数,只用 vue 的 ref/computed,不碰 DOM;能力一律走
 // window.services 契约(两端 JS 宿主与 Tauri 宿主同一份签名)。
 import { computed, ref } from 'vue'
-import { isWindows, listDocs } from '../services/bridge'
+import { copyText, isWindows, listDocs, notify, putDoc } from '../services/bridge'
 import type { GodotProject, ScanTreeResult, TreeEntry } from '../types/godot'
 import type { Capability, Finding, Tool, ToolContext, ToolResult } from '../tools/types'
+import { buildToolReport, type ReportMeta } from '../tools/report'
 import { planFix, type FixService } from '../tools/fixPlan'
 import { subsetPlan } from '../tools/gate'
 import { buildRefIndex, type RefIndex } from '../tools/refIndex'
@@ -587,10 +588,58 @@ export function useTools() {
     return c
   })
 
+  /**
+   * 报告元信息只从现有状态取:宁可留空,也不拼一个可能对不上的字段
+   * (`selected()` 在项目还没 load 完时就是 undefined)。
+   */
+  function reportMeta(): ReportMeta {
+    const p = selected()
+    return {
+      projectId: projectId.value || '',
+      projectName: p?.name || '',
+      root: p?.path || '',
+      generatedAt: Date.now(),
+      truncated: truncated.value,
+      fileCount: tree.value.length,
+      caps: { tree: caps.tree, text: caps.text, write: caps.write, trash: caps.trash }
+    }
+  }
+
+  /** 当前结果 → Markdown。纯生成:不写库、不碰剪贴板,所以「先看一眼」也能用它 */
+  function reportMarkdown(): string {
+    return buildToolReport(tools.value, results.value, reportMeta())
+  }
+
+  /**
+   * 复制报告:先把这份快照存进插件 db(每项目一条,覆盖式),再往剪贴板放。
+   *
+   * 顺序是刻意的:剪贴板在部分宿主 webview 里会被拒(`bridge.ts:85` 的 execCommand 兜底也可能失败),
+   * 但「刚才那次体检的结果」不该跟着一起丢。落盘成文件要新契约方法(#27),本批不做。
+   */
+  async function copyReport(): Promise<boolean> {
+    const meta = reportMeta()
+    const md = buildToolReport(tools.value, results.value, meta)
+    const tail = meta.projectId.split('/').pop()
+    if (tail) {
+      await putDoc(`godot/tools-report/${tail}`, {
+        markdown: md,
+        projectId: meta.projectId,
+        projectName: meta.projectName,
+        generatedAt: meta.generatedAt,
+        tools: tools.value.length,
+        findings: counts.value.error + counts.value.warn + counts.value.info
+      })
+    }
+    const copied = copyText(md)
+    notify(copied ? '体检报告已复制到剪贴板' : '复制失败:报告已存进插件数据,可在「工具」页重试')
+    return copied
+  }
+
   return {
     projects, projectId, tree, truncated, running, allRunning, progress, error, results, tools, caps,
     fixing, fixResults,
     load, select, runTool, runAll, registerTool, findingsOf, counts, applyFix,
+    reportMarkdown, copyReport,
     /** 修完文件/外部改过项目后调用:下一次跑强制重扫(世代号同时作废在途的那次扫描,F-1) */
     invalidateTree
   }
