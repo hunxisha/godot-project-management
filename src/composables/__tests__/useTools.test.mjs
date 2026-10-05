@@ -130,7 +130,7 @@ function deferredScanner(treesByPid, counters) {
 
 async function main() {
   section('1. 注册表')
-  ok(Array.isArray(M.TOOLS) && M.TOOLS.length === 13, 'P0 的 9 条 + P1 第一批的 4 条 = 13 条', M.TOOLS.length)
+  ok(Array.isArray(M.TOOLS) && M.TOOLS.length === 15, 'P0 的 9 条 + P1 的 6 条 = 15 条', M.TOOLS.length)
   ok(new Set(M.TOOLS.map((t) => t.id)).size === M.TOOLS.length, '工具 id 不重复')
   ok(M.TOOLS.every((t) => t.name && t.summary && (t.phase === 'P0' || t.phase === 'P1') && Array.isArray(t.needs) && typeof t.run === 'function'),
     '每项都有 name/summary/phase/needs/run,且 phase 只可能是 P0/P1',
@@ -166,7 +166,9 @@ async function main() {
     scripts: ['tree', 'text'],
     scenes: ['tree', 'text'],
     inputMap: ['tree', 'text'],
-    i18n: ['tree', 'text']
+    i18n: ['tree', 'text'],
+    export: ['tree', 'text'],
+    git: ['tree', 'text']
   }
   for (const [id, needs] of Object.entries(P1_BY_ID)) {
     const tool = M.toolById(id)
@@ -177,8 +179,8 @@ async function main() {
   }
   // 全量体检的顺序不变式:会动盘的三条(trash/write)永远排在只读的 P1 四条之后(spec 待确认 #8)
   const ORDER = M.TOOLS.map((t) => t.id)
-  ok(ORDER.indexOf('i18n') < ORDER.indexOf('orphans') && ORDER.indexOf('i18n') < ORDER.indexOf('format'),
-    'P1 只读四条排在 orphans/imports/format 之前', ORDER.join('>'))
+  ok(ORDER.indexOf('git') < ORDER.indexOf('orphans') && ORDER.indexOf('git') < ORDER.indexOf('format'),
+    'P1 六条只读工具全部排在 orphans/imports/format 之前', ORDER.join('>'))
 
   // 缺 trash 的宿主:三条 trash 工具不支持,只吃 tree/text 的五条不受牵连
   const NO_TRASH = { tree: true, text: true, write: true, trash: false }
@@ -376,10 +378,10 @@ async function main() {
   ok(scanCalls === s0 + 2, 'invalidateTree 后下一次强制重扫', scanCalls - s0)
   const all8 = await t8.runAll()
   ok(scanCalls === s0 + 3, 'runAll 只再强制重扫一次', scanCalls - s0)
-  ok(all8.length === M.TOOLS.length, 'runAll 每个注册工具一行(P0 九条 + P1 四条 = 13 行)', all8.length)
+  ok(all8.length === M.TOOLS.length, 'runAll 每个注册工具一行(P0 九条 + P1 六条 = 15 行)', all8.length)
   // 缺原语的四条不扫树(isSupported 在 ensureTree 之前短路),所以 scanCalls 的计数与 3 条时代一致
-  ok(all8.filter((x) => x.ok).length === 9 && all8.filter((x) => x.error === '当前宿主不支持').length === 4,
-    '能跑的 9 条全绿、缺原语的 4 条按能力降级(不是失败,也不许冒充跑成)', JSON.stringify(all8.map((x) => [x.toolId, x.ok])))
+  ok(all8.filter((x) => x.ok).length === 11 && all8.filter((x) => x.error === '当前宿主不支持').length === 4,
+    '能跑的 11 条全绿、缺原语的 4 条按能力降级(不是失败,也不许冒充跑成)', JSON.stringify(all8.map((x) => [x.toolId, x.ok])))
   ok(t8.running.value === '' && t8.allRunning.value === false && t8.progress.value === '', '跑完进度归位',
     `${t8.running.value}|${t8.allRunning.value}|${t8.progress.value}`)
 
@@ -567,8 +569,8 @@ async function main() {
     '空项目的三张卡片都是正常成功而不是失败', JSON.stringify([e1.ok, e2.ok, e3.ok, e3.findings.length, e1.scannedFiles]))
   const allE = await tE.runAll()
   ok(emptyScans === 2, 'runAll 在空项目上也只重扫一次(1+N 次遍历的退化已消除)', emptyScans)
-  ok(allE.length === M.TOOLS.length && allE.filter((x) => x.ok).length === 9,
-    '空项目的全量体检:能跑的 9 行成功,缺原语的 4 行按能力降级(降级来自宿主而不是空清单)',
+  ok(allE.length === M.TOOLS.length && allE.filter((x) => x.ok).length === 11,
+    '空项目的全量体检:能跑的 11 行成功,缺原语的 4 行按能力降级(降级来自宿主而不是空清单)',
     JSON.stringify(allE.map((x) => [x.toolId, x.ok])))
   ok(allE.every((x) => x.ok === true || x.error === '当前宿主不支持'),
     '空项目不产生第三种状态:每一行要么跑成、要么明确「宿主不支持」',
@@ -673,8 +675,8 @@ async function main() {
   ok(duringScan !== '' && /体检/.test(duringScan), '强制重扫期间 progress 不是空串', JSON.stringify(duringScan))
   f22scan.settle('godot/project/p1')
   const rowsM2 = await runAllP
-  ok(rowsM2.length === M.TOOLS.length && rowsM2.filter((x) => x.ok).length === 9,
-    'deferred 收尾后 runAll 照常跑完(13 行:9 行跑成 + 4 行能力降级)', JSON.stringify(rowsM2.map((x) => [x.toolId, x.ok])))
+  ok(rowsM2.length === M.TOOLS.length && rowsM2.filter((x) => x.ok).length === 11,
+    'deferred 收尾后 runAll 照常跑完(15 行:11 行跑成 + 4 行能力降级)', JSON.stringify(rowsM2.map((x) => [x.toolId, x.ok])))
   restore()
 
   section('23. M-9 扫描失败路径复位 truncated')

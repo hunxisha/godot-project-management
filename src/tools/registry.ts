@@ -1,6 +1,6 @@
 // 工具注册表:一张表描述所有体检工具,UI 不认识任何具体工具(spec §2.1)。
 // P0a 登记 3 个只读工具;P0b-B10a 补 uid/addons/ini/orphans/imports/format 六条;
-// P1 第一批补 scripts/scenes/inputMap/i18n 四条(全部只读,见 docs/tools-page-plan.md 第三部分)。
+// P1 第一批补 scripts/scenes/inputMap/i18n 四条、第二批补 export/git 两条(全部只读,共 15 条)。
 import type { Capability, Tool } from './types'
 import { run as runSize } from './inspectors/size'
 import { run as runCache } from './inspectors/cache'
@@ -12,6 +12,8 @@ import { run as runScripts } from './inspectors/scripts'
 import { run as runScenes } from './inspectors/scenes'
 import { run as runInputMap } from './inspectors/inputMap'
 import { run as runI18n } from './inspectors/i18n'
+import { run as runExport } from './inspectors/export'
+import { run as runGit } from './inspectors/git'
 import { run as runOrphans } from './inspectors/orphans'
 import { run as runImports } from './inspectors/imports'
 import { run as runFormat } from './inspectors/format'
@@ -104,6 +106,22 @@ export const TOOLS: Tool[] = [
     phase: 'P1',
     needs: ['tree', 'text'],
     run: runI18n
+  },
+  {
+    id: 'export',
+    name: '导出预设体检',
+    summary: '预设名重复、预设点名的场景/图标不存在;模板齐全度在版本页',
+    phase: 'P1',
+    needs: ['tree', 'text'],
+    run: runExport
+  },
+  {
+    id: 'git',
+    name: '版本控制卫生',
+    summary: '.godot 是否被 .gitignore 忽略、缺 .editorconfig/.gitattributes、清单里的大文件',
+    phase: 'P1',
+    needs: ['tree', 'text'],
+    run: runGit
   },
   {
     id: 'orphans',
