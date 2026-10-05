@@ -3,7 +3,7 @@
 // 页面不认识任何具体工具:卡片与结论全部由注册表驱动,加检查器不改这一页(spec §2.1)。
 // 修复动作也只有「装配」这一层在这里:判据在 planFix、执行在 useTools.applyFix,
 // 视图负责把两者接起来并在修完之后重跑那一个检查器(spec §5.3)。
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import ToolCard from '../components/tools/ToolCard.vue'
@@ -23,6 +23,8 @@ const emit = defineEmits<{ (e: 'navigate', tab: string): void }>()
 const t = useTools()
 /** 当前展开结论的工具 id(空串 = 全部收起) */
 const open = ref('')
+/** 结论面板的 DOM:展开时把它滚进视口用 */
+const detailEl = ref<HTMLElement | null>(null)
 /** 当前要点开确认框的那条结论(null = 框关着) */
 const fixFinding = ref<Finding | null>(null)
 const fixBusy = ref(false)
@@ -78,9 +80,18 @@ const outcome = computed(() =>
   outcomeOf(t.results.value, t.tools.value.length, t.counts.value, t.error.value, busy.value)
 )
 
-/** 再点一次同一张卡片的「结果」= 收起 */
+/**
+ * 再点一次同一张卡片的「结果」= 收起。
+ * 展开时必须把面板滚进视口:面板排在整排卡片**之后**,点击点与反应处隔着一屏,
+ * 不滚的话点了就像没反应(2026-10 用户实测反馈)。nextTick 等面板真的挂上 DOM 再滚,
+ * 收起那一路不滚 —— 用户此刻在卡片附近,把页面拽走反而是打扰。
+ */
 function toggleResult(id: string) {
-  open.value = open.value === id ? '' : id
+  const opening = open.value !== id
+  open.value = opening ? id : ''
+  if (opening) {
+    void nextTick(() => detailEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }
 }
 
 /** 点结论上的修复按钮:每次都开一张干净的框(上一次的回执不许跟到下一条结论) */
@@ -200,12 +211,13 @@ function closeFix() {
           :running="t.running.value === tool.id"
           :busy="busy && t.running.value !== tool.id"
           :supported="isSupported(tool, t.caps)"
+          :open="open === tool.id"
           @run="(id) => t.runTool(id)"
           @open="toggleResult"
         />
       </div>
 
-      <section v-if="openTool && openFindings.length" class="detail card">
+      <section ref="detailEl" v-if="openTool && openFindings.length" class="detail card">
         <h3>{{ openTool.name }} · {{ openFindings.length }} 条结论</h3>
         <FindingList
           :findings="openFindings"

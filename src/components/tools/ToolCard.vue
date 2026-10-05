@@ -16,6 +16,8 @@ const props = defineProps<{
   busy: boolean
   /** 宿主能力是否齐备(isSupported 的产物;caps 是构造时快照,这里不调任何原语) */
   supported: boolean
+  /** 这个工具的结论面板当前是否展开:让「结果」按钮呈按下态,收起/展开在点击处就有反馈 */
+  open: boolean
 }>()
 const emit = defineEmits<{ (e: 'run', id: string): void; (e: 'open', id: string): void }>()
 
@@ -53,6 +55,7 @@ const done = computed(() => !!props.result && props.result.ok)
       <div class="acts">
         <button
           class="btn small ghost"
+          :class="{ on: open }"
           :disabled="!(result && result.findings.length)"
           title="展开这个工具的全部结论"
           @click="emit('open', tool.id)"
@@ -132,6 +135,14 @@ const done = computed(() => !!props.result && props.result.ok)
   display: flex;
   gap: 6px;
   flex-shrink: 0;
+}
+
+/* 展开态(与 .pill.run 同一套品牌色):面板在整排卡片之后,按钮自己的按下态
+   是「已经展开了」在点击处唯一可见的证据 */
+.acts .btn.on {
+  border-color: var(--brand);
+  background: var(--brand-weak);
+  color: var(--brand);
 }
 
 .pill {
