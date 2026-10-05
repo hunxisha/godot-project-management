@@ -189,6 +189,59 @@ section('9. 红线:畸形输入不抛')
   ok(Array.isArray(j), '裸 .git 文件(submodule 的 gitdir 指针)也算仓库,且不抛', j)
 }
 
+section('10. .gitignore 覆盖的大文件不进候选(#21/#22 拍板后的做法:不开执行面,用忽略表摘噪音)')
+{
+  const REPO = [['.git/HEAD', 23], ['.gitignore', 60], ['project.godot', 400],
+    ['.editorconfig', 180], ['.gitattributes', 40]]
+  const runWith = (rules, extra) => T.runGit(makeCtx([...REPO, ...(extra || [])], { texts: { '.gitignore': rules } }).ctx)
+
+  let fs = await runWith('dist/\n', [['dist/game.zip', 40 * MB]])
+  ok(bigOf(fs).length === 0 && fs.every((f) => f.id !== 'git:big-files'),
+    '目录规则覆盖的大文件不报', idsOf(fs))
+
+  fs = await runWith('*.zip\n', [['export/build.zip', 80 * MB], ['art/keep.webm', 30 * MB]])
+  let b = bigOf(fs)
+  ok(b.length === 1 && b[0].detail.includes('art/keep.webm') && !b[0].detail.includes('export/build.zip'),
+    '后缀规则只摘掉它覆盖的那一个', b[0] && b[0].detail)
+  ok(b[0].detail.includes('排除 1 个'), '排除数要说出口(静默少报等于把判据藏进实现)', b[0] && b[0].detail)
+
+  fs = await runWith('data/hero.psd\n', [['data/hero.psd', 55 * MB], ['other/hero.psd', 30 * MB]])
+  b = bigOf(fs)
+  ok(b.length === 1 && b[0].detail.includes('other/hero.psd'),
+    '含斜杠的规则按根锚定,不殃及别处的同名文件', b[0] && b[0].detail)
+
+  fs = await runWith('node_modules\n', [['node_modules/pkg/big.js', 25 * MB]])
+  ok(bigOf(fs).length === 0, '裸名规则匹配任意层级的同名段', idsOf(fs))
+
+  // 取反:!keep.bin 让它重新进候选;后写的规则赢(与 git 同向)
+  fs = await runWith('*.bin\n!data/keep.bin\n', [['data/keep.bin', 30 * MB], ['data/other.bin', 30 * MB]])
+  b = bigOf(fs)
+  ok(b.length === 1 && b[0].detail.includes('data/keep.bin') && !b[0].detail.includes('data/other.bin'),
+    '取反行点名的那个照旧上报,其余仍算已忽略', b[0] && b[0].detail)
+
+  fs = await runWith('[Ll]og/*.bin\n', [['log/a.bin', 30 * MB]])
+  b = bigOf(fs)
+  ok(b.length === 1, '字符类规则判不出来 → 当未覆盖(方向是多报,不是少报)', idsOf(fs))
+  ok(/判不了|不跑|git ls-files/.test(b[0].detail), '卡面继续自首「是否被跟踪判不了」', b[0].detail)
+
+  fs = await T.runGit(makeCtx([['.git/HEAD', 23], ['project.godot', 400], ['.editorconfig', 180],
+    ['.gitattributes', 40], ['assets/big.webm', 30 * MB]], { texts: {} }).ctx)
+  b = bigOf(fs)
+  ok(b.length === 1 && !/排除/.test(b[0].detail), '没有忽略表时不说「已排除几个」', b[0] && b[0].detail)
+}
+
+section('11. .godot 覆盖判定与大文件共用同一把尺子')
+{
+  const REPO = [['.git/HEAD', 23], ['.gitignore', 60], ['project.godot', 400],
+    ['.editorconfig', 180], ['.gitattributes', 40], ['.godot/x.cache', 10]]
+  for (const line of ['.godot', '.godot/', '/.godot', '/.godot/', '**/.godot/', '**/.godot']) {
+    const fs = await T.runGit(makeCtx(REPO, { texts: { '.gitignore': `tmp/\n${line}\n` } }).ctx)
+    ok(godotOf(fs).length === 0, `「${line}」在共用尺子下仍算已忽略`, idsOf(fs))
+  }
+  const weird = await T.runGit(makeCtx(REPO, { texts: { '.gitignore': '[.]godot/\n' } }).ctx)
+  ok(godotOf(weird).length === 1, '字符类写法仍判不出来 → 照旧出 warn(措辞已承认覆盖面有限)', idsOf(weird))
+}
+
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) { console.log('失败项:'); for (const f of failures) console.log('  - ' + f); process.exit(1) }
 console.log('全部通过')
