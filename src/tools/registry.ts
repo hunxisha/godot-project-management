@@ -14,6 +14,7 @@ import { run as runInputMap } from './inspectors/inputMap'
 import { run as runI18n } from './inspectors/i18n'
 import { run as runExport } from './inspectors/export'
 import { run as runGit } from './inspectors/git'
+import { run as runSecrets } from './inspectors/secrets'
 import { run as runOrphans } from './inspectors/orphans'
 import { run as runImports } from './inspectors/imports'
 import { run as runFormat } from './inspectors/format'
@@ -122,6 +123,14 @@ export const TOOLS: Tool[] = [
     phase: 'P1',
     needs: ['tree', 'text'],
     run: runGit
+  },
+  {
+    id: 'secrets',
+    name: '敏感信息扫描',
+    summary: '文件里写死的密钥/私钥(厂商前缀、私钥块、凭据赋值),结论只给掩码',
+    phase: 'P2',
+    needs: ['tree', 'text'],
+    run: runSecrets
   },
   {
     id: 'orphans',
