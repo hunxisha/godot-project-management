@@ -23,7 +23,7 @@
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 pub const DEFAULT_MAX_BYTES: u64 = 1024 * 1024;
@@ -447,6 +447,59 @@ fn trash_json_with(root: &Path, rels: &[String], del: &dyn Fn(&Path) -> Result<(
         moved += 1;
     }
     serde_json::json!({ "ok": failed.is_empty(), "moved": moved, "failed": failed })
+}
+
+
+/// hashPaths 的分块读大小(1 MiB),与 JS 侧 `HASH_CHUNK` 同值:任意大的文件也只占一块内存。
+const HASH_CHUNK: usize = 1024 * 1024;
+
+/// 批量计算项目内文件的 SHA-256(#17 重复文件检测)。流式分块读,单项失败不中断其余。
+///
+/// 三条与 JS 侧逐字对齐的约定(见 inspectfs.js 的 hashPaths):
+///   · 读语义走 `resolve_inside`,与 read_text_json 同一道闸 —— 项目内指向项目外的链接
+///     在字面闸看来合法,哈希它等于把别人家的文件读了进来。
+///   · 错误串逐字复用读原语那批('非法路径' / '路径无法解析' / '文件不存在' / '读取失败');
+///     闸拒绝项的 rel 回**调用方原样**,其余阶段回归一后的 rel(与 trash 同一两态约定)。
+///   · `ok` 仅在零失败时为 true;空清单是 ok:true + 空 hashes,不是错误。
+/// 与 JS 侧已知且刻意保留的分歧:非字符串 rel 在 `Vec<String>` 类型层就收不到,
+/// 「原样串」这一态在 Rust 恒为字符串(JS 还有 String(raw) 化的形态)。
+pub fn hash_json(root: &Path, rels: &[String]) -> Value {
+    let mut hashes: Vec<Value> = Vec::new();
+    let mut failed: Vec<Value> = Vec::new();
+    for raw in rels {
+        let rel = raw.replace('\\', "/");
+        let abs = match resolve_inside(root, &rel) {
+            Ok(p) => p,
+            Err(e) => { failed.push(serde_json::json!({ "rel": raw.clone(), "error": e })); continue; }
+        };
+        // 目录 / 特殊文件与「不存在」收敛到同一句(与 read_text_json 同口径)
+        let md = match fs::metadata(&abs) {
+            Ok(m) => m,
+            Err(_) => { failed.push(serde_json::json!({ "rel": rel, "error": "文件不存在" })); continue; }
+        };
+        if !md.is_file() {
+            failed.push(serde_json::json!({ "rel": rel, "error": "文件不存在" }));
+            continue;
+        }
+        match hash_file(&abs) {
+            Ok(d) => hashes.push(serde_json::json!({ "rel": rel, "sha256": d })),
+            Err(_) => failed.push(serde_json::json!({ "rel": rel, "error": "读取失败" })),
+        }
+    }
+    serde_json::json!({ "ok": failed.is_empty(), "hashes": hashes, "failed": failed })
+}
+
+fn hash_file(p: &Path) -> io::Result<String> {
+    use sha2::{Digest, Sha256};
+    let mut f = fs::File::open(p)?;
+    let mut h = Sha256::new();
+    let mut buf = vec![0u8; HASH_CHUNK];
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 { break; }
+        h.update(&buf[..n]);
+    }
+    Ok(format!("{:x}", h.finalize()))
 }
 
 
@@ -1575,6 +1628,58 @@ mod tests {
         let (files, tr) = collect_tree(&root, &ScanOpts::from_json(&serde_json::json!({ "maxEntries": 2 })));
         assert_eq!(files.len(), 2);
         assert!(tr);
+        fs::remove_dir_all(&root).ok();
+    }
+
+    // ---------- hash_json(#17 重复文件检测的原语半边)----------
+    #[test]
+    fn hash_json_digests_files_and_reports_failures_without_interrupting() {
+        let root = tmp("hash");
+        // 已知向量:空文件与 "x" 的 SHA-256(FIPS 180-4 标准向量,两头一起对)
+        touch(&root, "empty.bin", b"");
+        touch(&root, "x.bin", b"x");
+        touch(&root, "same/x2.bin", b"x");
+        let r = hash_json(&root, &rels(&["empty.bin", "x.bin", "same/x2.bin", "nope.txt", "../evil", "sub"]));
+        assert_eq!(r["ok"], false, "有失败项时 ok 必须是 false: {:?}", r);
+        let hashes = r["hashes"].as_array().unwrap();
+        assert_eq!(hashes.len(), 3, "成功项一个不少: {:?}", hashes);
+        let by_rel = |rel: &str| hashes.iter().find(|h| h["rel"] == rel).unwrap()["sha256"]
+            .as_str().unwrap().to_string();
+        assert_eq!(by_rel("empty.bin"), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "空串标准向量");
+        assert_eq!(by_rel("x.bin"), "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881", "单字节 'x' 标准向量");
+        assert_eq!(by_rel("x.bin"), by_rel("same/x2.bin"), "同内容不同名 → 同摘要(重复检测的立足点)");
+        // hex 小写 64 位:与 JS digest('hex') 同形
+        for h in hashes { assert_eq!(h["sha256"].as_str().unwrap().len(), 64); }
+        let failed = r["failed"].as_array().unwrap();
+        assert_eq!(failed.len(), 3, "缺失 + 越界 + 目录各一条: {:?}", failed);
+        assert!(failed.iter().any(|f| f["rel"] == "nope.txt" && f["error"] == "文件不存在"), "{:?}", failed);
+        assert!(failed.iter().any(|f| f["rel"] == "../evil" && f["error"] == "非法路径"),
+            "闸拒绝的那一项回报**调用方原样**的串: {:?}", failed);
+        assert!(failed.iter().any(|f| f["rel"] == "sub" && f["error"] == "文件不存在"),
+            "目录收敛到同一句(read_text_json 同口径): {:?}", failed);
+        // 失败不中断:成功项的顺序仍按点名顺序
+        assert_eq!(hashes[0]["rel"], "empty.bin");
+        // 空清单不是错误
+        let e = hash_json(&root, &[]);
+        assert_eq!(e["ok"], true);
+        assert_eq!(e["hashes"].as_array().unwrap().len(), 0);
+        assert_eq!(e["failed"].as_array().unwrap().len(), 0);
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn hash_json_streams_files_larger_than_one_chunk() {
+        let root = tmp("hashbig");
+        // 1 MiB 块 + 溢出块:分块循环必须接住跨块内容,而不是只哈希第一块
+        let mut big = vec![0u8; HASH_CHUNK + 17];
+        for (i, b) in big.iter_mut().enumerate() { *b = (i % 251) as u8; }
+        touch(&root, "big.bin", &big);
+        let r = hash_json(&root, &rels(&["big.bin"]));
+        assert_eq!(r["ok"], true, "{:?}", r);
+        let got = r["hashes"][0]["sha256"].as_str().unwrap();
+        // 参照值由 node 独立算出:node -e "const c=require('crypto');const b=Buffer.alloc(1048576+17);for(let i=0;i<b.length;i++)b[i]=i%251;console.log(c.createHash('sha256').update(b).digest('hex'))"
+        assert_eq!(got, "f4bf9b8dec6e3e28b2ec33266145d244fe97a6bce1ec054ace053bab67d2ef9a",
+            "跨块内容的摘要必须等于整文件一次性哈希(分块循环没接住就是这里红)");
         fs::remove_dir_all(&root).ok();
     }
 }

@@ -235,6 +235,15 @@ fn move_paths_to_trash(state: State<AppState>, project_id: String, rels: Vec<Str
     }
 }
 
+/// 批量计算项目内文件的 SHA-256:流式分块读,单项失败不中断其余,失败项如实带回。
+#[tauri::command]
+fn hash_paths(state: State<AppState>, project_id: String, rels: Vec<String>) -> Value {
+    match project_doc_root_of(&state.store, &project_id) {
+        Ok(r) => godot_workshop::inspectfs::hash_json(&r, &rels),
+        Err(e) => serde_json::json!({ "ok": false, "error": e }),
+    }
+}
+
 /// 读 / 写 / 删三命令共用:projectId → 项目根**文档里记的那个路径**(不查盘)。
 ///
 /// 与 JS 侧的分工逐字对齐:`projectRoot()` 只做 store 查询,目录还在不在**不归它管** ——
@@ -1211,7 +1220,7 @@ fn main() {
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, scan_project_tree, read_project_text, write_project_text, move_paths_to_trash, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets, create_project, uninstall_addon, install_asset, run_export, cancel_export_task, docs_generate, docs_import, docs_library_status, docs_list_classes, docs_get_class, docs_search, docs_search_full_text, docs_delete_library, docs_diff_libraries, fetch_releases_cmd, cancel_task, dismiss_task, search_assets, list_featured_cmd, list_all_assets_cmd, list_new_assets_cmd, list_recently_updated_cmd, list_project_assets_cmd, restore_backup])
+        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, scan_project_tree, read_project_text, write_project_text, move_paths_to_trash, hash_paths, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets, create_project, uninstall_addon, install_asset, run_export, cancel_export_task, docs_generate, docs_import, docs_library_status, docs_list_classes, docs_get_class, docs_search, docs_search_full_text, docs_delete_library, docs_diff_libraries, fetch_releases_cmd, cancel_task, dismiss_task, search_assets, list_featured_cmd, list_all_assets_cmd, list_new_assets_cmd, list_recently_updated_cmd, list_project_assets_cmd, restore_backup])
         .run(tauri::generate_context!())
         .expect("tauri 应用启动失败");
 }

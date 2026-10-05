@@ -12,11 +12,14 @@
 //   · 读 / 写 / 删原语都不抛异常,一律返回 { ok:false, error } —— 工具页要在结论里显示原因。
 const fs = require('node:fs')
 const path = require('node:path')
+const crypto = require('node:crypto')
 const { getDoc } = require('./store')
 const { walkFiles, makeExcluder, stampSec, rmQuiet, uniquePath, trashPaths } = require('./fsutil')
 
 const DEFAULT_MAX_BYTES = 1024 * 1024
 const DEFAULT_MAX_ENTRIES = 200000
+/** hashPaths 的分块读大小(1 MiB):重复检测的候选几百 MB 也只占这么点内存 */
+const HASH_CHUNK = 1024 * 1024
 
 /**
  * projectId(完整文档 id,如 godot/project/xxx)→ 项目根;拿不到返回 null
@@ -340,4 +343,67 @@ function movePathsToTrash(projectId, rels) {
   return { ok: failed.length === 0, moved, failed }
 }
 
-module.exports = { projectRoot, resolveRel, resolveInside, DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES, scanProjectTree, readProjectText, writeProjectText, movePathsToTrash }
+/**
+ * 批量计算项目内文件的 SHA-256(#17 重复文件检测)。
+ *
+ * 为什么必须是原语而不是渲染层自己算:readProjectText 只给文本、1MB 上限、且对含 NUL 的
+ * 二进制一律跳过 —— 而重复检测恰恰要在几百 MB 的二进制上工作。这里用 openSync/readSync
+ * 分块流式喂哈希(块大小 HASH_CHUNK),任意大的文件也只占一块的内存;两个 API 都在
+ * sandbox.d.ts 的既有声明面里,沙箱不因此扩大。
+ *
+ * 读语义走 resolveInside,与 readProjectText 同一道闸:项目内一条指向项目外的符号链接
+ * 在字面闸(resolveRel)看来完全合法,而哈希它等于把别人家的文件读了进来 —— 第二道闸
+ * (realpath 包含校验)是这里唯一能挡住它的东西。
+ *
+ * 错误串**逐字复用**读原语那批('项目不存在' / '非法路径' / '路径无法解析' /
+ * '目标目录不存在' / '文件不存在' / '读取失败'),不新增文案:Rust 侧镜像同一批串,
+ * parity 测试逐字段比对。单个失败不中断其余(failed 如实回报),ok 仅在零失败时为 true;
+ * 空清单不是错误(→ ok:true, hashes:[])。rels 非数组按空清单处理,与 movePathsToTrash
+ * 的判别同形 —— 字符串可迭代,`for (const raw of rels)` 会把 'a.txt' 拆成字符逐个哈希。
+ *
+ * **不去重**:与 trash 不同,这里没有「计数」要对账,幂等只读的哈希重复点名只是浪费一次读;
+ * 调用方(检查器)按组点名,天然无重复。rel 回报**调用方归一后的形态**(反斜杠已归一),
+ * 闸拒绝的那一项回**原样串**(与 trash 同一两态约定:没碰到盘的项,归一化后对不回用户点名的那条)。
+ * @param {string} projectId
+ * @param {string[]} rels
+ * @returns {import('../../../src/types/godot').HashPathsResult}
+ */
+function hashPaths(projectId, rels) {
+  const root = projectRoot(projectId)
+  if (!root) return { ok: false, error: '项目不存在' }
+  const list = Array.isArray(rels) ? rels : []
+  /** @type {{rel: string, sha256: string}[]} */
+  const hashes = []
+  /** @type {{rel: string, error: string}[]} */
+  const failed = []
+  for (const raw of list) {
+    const rel = typeof raw === 'string' ? raw.replace(/\\/g, '/') : ''
+    const g = resolveInside(root, rel)
+    const abs = g.abs
+    if (!abs) { failed.push({ rel: String(raw), error: g.error || '非法路径' }); continue }
+    let st
+    try { st = fs.statSync(abs) } catch (e) { failed.push({ rel, error: '文件不存在' }); continue }
+    if (!st.isFile()) { failed.push({ rel, error: '文件不存在' }); continue }
+    let fd = null
+    try {
+      const h = crypto.createHash('sha256')
+      const buf = Buffer.alloc(HASH_CHUNK)
+      fd = fs.openSync(abs, 'r')
+      let pos = 0
+      for (;;) {
+        const n = fs.readSync(fd, buf, 0, HASH_CHUNK, pos)
+        if (n <= 0) break
+        h.update(buf.subarray(0, n))
+        pos += n
+      }
+      hashes.push({ rel, sha256: h.digest('hex') })
+    } catch (e) {
+      failed.push({ rel, error: '读取失败' })
+    } finally {
+      if (fd !== null) { try { fs.closeSync(fd) } catch (e) { /* 句柄泄漏只影响这一次进程内资源,不再往失败里添一条 */ } }
+    }
+  }
+  return { ok: failed.length === 0, hashes, failed }
+}
+
+module.exports = { projectRoot, resolveRel, resolveInside, DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES, scanProjectTree, readProjectText, writeProjectText, movePathsToTrash, hashPaths }

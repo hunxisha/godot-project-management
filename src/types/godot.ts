@@ -639,3 +639,12 @@ export interface TrashResult {
   moved?: number
   failed?: { rel: string; error: string }[]
 }
+
+export interface HashPathsResult {
+  ok: boolean
+  error?: string
+  /** 成功项:rel 与它的 SHA-256(hex 小写)。顺序与调用方点名的顺序一致(失败项除外) */
+  hashes?: { rel: string; sha256: string }[]
+  /** 失败项:rel + 原语中文原因(闸拒绝回调用方原样,其余归一);单个失败不中断其余 */
+  failed?: { rel: string; error: string }[]
+}

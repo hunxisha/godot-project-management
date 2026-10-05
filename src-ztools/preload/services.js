@@ -77,6 +77,8 @@ const servicesImpl = {
   writeProjectText: (projectId, rel, text, opts) => inspectfs.writeProjectText(projectId, rel, text, opts),
   /** 批量移入回收站(工具页删除类修复的唯一出口) */
   movePathsToTrash: (projectId, rels) => inspectfs.movePathsToTrash(projectId, rels),
+  /** 批量计算项目内文件的 SHA-256(流式分块读;重复文件检测的真相通道) */
+  hashPaths: (projectId, rels) => inspectfs.hashPaths(projectId, rels),
   /** 列出项目的导出预设(解析 export_presets.cfg) */
   listExportPresets: (projectId) => exporter.listExportPresets(projectId),
   /** 发起导出(入队,进度走 watchExportTasks,任务 kind='export') */

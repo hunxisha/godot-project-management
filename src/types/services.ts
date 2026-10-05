@@ -40,6 +40,7 @@ import type {
   DocSearchHit,
   DocsCacheInfo,
   DocsTask,
+  HashPathsResult,
   TreeEntry,
   ScanTreeResult,
   ReadTextResult,
@@ -140,6 +141,8 @@ export interface Services {
   writeProjectText(projectId: string, rel: string, text: string, opts?: { backup?: boolean }): WriteTextResult
   /** 批量移入回收站(Windows)/永久删除(其他平台);单个失败不中断,失败项如实返回 */
   movePathsToTrash(projectId: string, rels: string[]): TrashResult
+  /** 批量计算项目内文件的 SHA-256(流式分块读,不整文件进内存;单个失败不中断,失败项如实返回) */
+  hashPaths(projectId: string, rels: string[]): HashPathsResult
   /** 添加项目(目录或 project.godot 文件路径) */
   addProject(inputPath: string): {
     ok: boolean

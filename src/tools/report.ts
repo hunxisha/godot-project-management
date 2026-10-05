@@ -130,7 +130,7 @@ export function buildToolReport(
   const j = buildToolReportJson(tools, results, meta)
   const m = j.meta
   const out: string[] = []
-  const capsLine = (['tree', 'text', 'write', 'trash'] as Capability[])
+  const capsLine = (['tree', 'text', 'write', 'trash', 'hash'] as Capability[])
     .map((c) => `${c} ${m.caps[c] === true ? '✓' : '✗'}`).join(' / ')
 
   out.push('# Godot 工坊 · 项目体检报告', '')

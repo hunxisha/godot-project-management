@@ -5,7 +5,7 @@ import type { RefIndex } from './refIndex'
 export type Severity = 'error' | 'warn' | 'info'
 
 /** 工具声明它需要什么宿主能力;缺失时卡片显示「当前宿主不支持」 */
-export type Capability = 'tree' | 'text' | 'write' | 'trash'
+export type Capability = 'tree' | 'text' | 'write' | 'trash' | 'hash'
 
 export type FixKind = 'none' | 'trash' | 'rewrite' | 'existing'
 
@@ -46,6 +46,12 @@ export interface ToolContext {
   truncated: boolean
   /** 读文本;LRU 由调用方(useTools)负责,这里只是通道 */
   readText(rel: string): Promise<{ text?: string; skipped?: boolean }>
+  /**
+   * 批量 SHA-256(#17 重复文件检测)。与 readText 同一待遇:通道由调用方接进宿主原语,
+   * 检查器不碰 window / services;失败不抛,统一收进 failed。
+   * 需要 'hash' 能力的工具,在 runTool 的 isSupported 那一步就已被旧宿主挡下。
+   */
+  hash(rels: string[]): Promise<{ hashes: { rel: string; sha256: string }[]; failed: { rel: string; error: string }[] }>
   /**
    * 引用索引的取用入口(B10a,spec §5.2):同一份索引只建一次,吃索引的工具共享它。
    *

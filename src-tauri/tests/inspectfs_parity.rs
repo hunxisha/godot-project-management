@@ -65,7 +65,7 @@
 #![cfg(test)]
 
 use godot_workshop::inspectfs::{
-    read_text_json, scan_json, trash_json, write_text_json, ScanOpts, DEFAULT_MAX_BYTES,
+    hash_json, read_text_json, scan_json, trash_json, write_text_json, ScanOpts, DEFAULT_MAX_BYTES,
 };
 use serde_json::{json, Value};
 use std::fs;
@@ -243,7 +243,7 @@ const F = require(path.join(cfg.repo, 'src-ztools', 'preload', 'lib', 'inspectfs
 const norm = (s) => String(s).replace(/gpm-bak-\d{8}_\d{4}_\d{2}/, 'gpm-bak-TS');
 const top = (dir) => fs.readdirSync(dir).map(norm).sort();
 
-const out = { meta: {}, scan: {}, read: {}, write: {}, trash: {}, disk: {}, jsOnly: {} };
+const out = { meta: {}, scan: {}, read: {}, write: {}, trash: {}, hash: {}, disk: {}, jsOnly: {} };
 const linkPath = cfg.roots.tree + '/evil-link';
 out.meta.hasLink = fs.existsSync(linkPath) && fs.existsSync(linkPath + '/evil.txt');
 
@@ -291,6 +291,12 @@ out.trash.dupMissing = F.movePathsToTrash('t', ['gone-a.txt', './gone-a.txt']);
 out.jsOnly.trashNotArray = F.movePathsToTrash('t', 'gone-a.txt');
 out.jsOnly.trashNoRoot = F.movePathsToTrash('nope', ['a.txt']);
 
+// ---------- hash(#17):成功项、闸拒绝、缺失、目录、空清单、非数组、无根 ----------
+out.hash.mixed = F.hashPaths('tree', ['tiny.svg', 'sub/child.gd', 'nope.txt', '../outside-secret', 'sub', 'nul.bin']);
+out.hash.empty = F.hashPaths('tree', []);
+out.jsOnly.hashNotArray = F.hashPaths('tree', 'a.txt');
+out.jsOnly.hashNoRoot = F.hashPaths('nope', ['tiny.svg']);
+
 out.disk.w = top(cfg.roots.w);
 out.disk.t = top(cfg.roots.t);
 out.disk.tree = top(cfg.roots.tree);
@@ -317,12 +323,14 @@ out.jsOnly.readBadRel = F.readProjectText('tree', null);
     read_project_text: { projectId: 'string!', rel: 'string!', maxBytes: 'uint?' },
     write_project_text: { projectId: 'string!', rel: 'string!', text: 'string!', backup: 'bool?' },
     move_paths_to_trash: { projectId: 'string!', rels: 'array!' },
+    hash_paths: { projectId: 'string!', rels: 'array!' },
   };
   const CMD_OK = {
     scan_project_tree: { ok: true, files: [], truncated: false },
     read_project_text: { ok: true, text: 'STUB', bytes: 5, truncated: false },
     write_project_text: { ok: true },
     move_paths_to_trash: { ok: true, moved: 0, failed: [] },
+    hash_paths: { ok: true, hashes: [], failed: [] },
   };
   const snap = (v) => (v === null ? 'null' : v === undefined ? 'undefined'
     : Array.isArray(v) ? 'array:' + v.length
@@ -416,10 +424,13 @@ out.jsOnly.readBadRel = F.readProjectText('tree', null);
   await call('write.good', () => S.writeProjectText(PID, 'a.txt', 'NEW', { backup: false }));
   await call('trash.good', () => S.movePathsToTrash(PID, ['a.txt', 'sub/b.txt']));
   await call('trash.notArray', () => S.movePathsToTrash(PID, 'a.txt'));
+  await call('hash.good', () => S.hashPaths(PID, ['a.txt', 'sub/b.txt']));
+  await call('hash.notArray', () => S.hashPaths(PID, 'a.txt'));
   // (2) 坏参数:JS 侧由原语给串,桌面侧必须由**守卫**在 IPC 之前给同一句
   await call('scan.badId', () => S.scanProjectTree(null));
   await call('read.badRel', () => S.readProjectText(PID, null));
   await call('write.badText', () => S.writeProjectText(PID, 'a.txt', 123));
+  await call('hash.badId', () => S.hashPaths(null, ['a.txt']));
   // (3) 拒绝分类:反序列化拒绝 → '参数不合法';通道断 / 命令没注册 → 各自的操作失败句
   for (const f of ['args', 'ipc']) {
     fault = f;
@@ -427,6 +438,7 @@ out.jsOnly.readBadRel = F.readProjectText('tree', null);
     await call('read.' + f, () => S.readProjectText(PID, 'a.txt', { maxBytes: 4 }));
     await call('write.' + f, () => S.writeProjectText(PID, 'a.txt', 'NEW'));
     await call('trash.' + f, () => S.movePathsToTrash(PID, ['a.txt']));
+    await call('hash.' + f, () => S.hashPaths(PID, ['a.txt']));
   }
   fault = null;
   console.warn = prevWarn;
@@ -555,6 +567,8 @@ const SHIM_SENT: &[(&str, &str, &[&str])] = &[
     ("write.good", "write_project_text", &["backup", "projectId", "rel", "text"]),
     ("trash.good", "move_paths_to_trash", &["projectId", "rels"]),
     ("trash.notArray", "move_paths_to_trash", &["projectId", "rels"]),
+    ("hash.good", "hash_paths", &["projectId", "rels"]),
+    ("hash.notArray", "hash_paths", &["projectId", "rels"]),
 ];
 
 /// payload 某个键**发出时的形态**(JS 侧 `snap()`):钉住限额值真带出去了,也钉住
@@ -566,10 +580,11 @@ const SHIM_VALS: &[(&str, &str, &str)] = &[
     ("read.neg", "maxBytes", "null"),
     ("write.good", "backup", "boolean:false"),
     ("trash.notArray", "rels", "array:0"),
+    ("hash.notArray", "rels", "array:0"),
 ];
 
 /// 守卫必须在 **IPC 之前**挡下的坏参数:这些 label 不该留下任何 invoke 记录。
-const SHIM_GUARDED: &[&str] = &["scan.badId", "read.badRel", "write.badText"];
+const SHIM_GUARDED: &[&str] = &["scan.badId", "read.badRel", "write.badText", "hash.badId"];
 
 /// label → 期望的 `{ ok, error }`。ok:true 的那几条期望不带 error。
 const SHIM_RESULT: &[(&str, bool, &str)] = &[
@@ -579,17 +594,22 @@ const SHIM_RESULT: &[(&str, bool, &str)] = &[
     ("write.good", true, ""),
     ("trash.good", true, ""),
     ("trash.notArray", true, ""),
+    ("hash.good", true, ""),
+    ("hash.notArray", true, ""),
     ("scan.badId", false, "项目不存在"),
     ("read.badRel", false, "非法路径"),
     ("write.badText", false, "内容不是文本"),
+    ("hash.badId", false, "项目不存在"),
     ("scan.args", false, "参数不合法"),
     ("read.args", false, "参数不合法"),
     ("write.args", false, "参数不合法"),
     ("trash.args", false, "参数不合法"),
+    ("hash.args", false, "参数不合法"),
     ("scan.ipc", false, "遍历失败"),
     ("read.ipc", false, "读取失败"),
     ("write.ipc", false, "写入失败"),
     ("trash.ipc", false, "移入回收站失败"),
+    ("hash.ipc", false, "读取失败"),
 ];
 
 /// 每条被收敛的拒绝都必须把**真实原因** console.warn 出来(F-2:原因不许只丢进 catch 的黑洞,
@@ -599,10 +619,12 @@ const SHIM_WARN: &[(&str, &str)] = &[
     ("read.args", "invalid args"),
     ("write.args", "invalid args"),
     ("trash.args", "invalid args"),
+    ("hash.args", "invalid args"),
     ("scan.ipc", "channel closed"),
     ("read.ipc", "channel closed"),
     ("write.ipc", "channel closed"),
     ("trash.ipc", "channel closed"),
+    ("hash.ipc", "channel closed"),
 ];
 
 /// F-3 的跨宿主对照:同一批坏参数,**JS 侧的那句出自原语、桌面侧的那句出自垫片守卫**,
@@ -611,6 +633,7 @@ const SHIM_VS_JS: &[(&str, &str)] = &[
     ("scan.badId", "scanBadId"),
     ("read.badRel", "readBadRel"),
     ("write.badText", "writeNotText"),
+    ("hash.badId", "hashNoRoot"),
 ];
 
 fn shim_method(label: &str) -> &'static str {
@@ -619,6 +642,7 @@ fn shim_method(label: &str) -> &'static str {
         "read" => "readProjectText",
         "write" => "writeProjectText",
         "trash" => "movePathsToTrash",
+        "hash" => "hashPaths",
         _ => "?",
     }
 }
@@ -773,7 +797,7 @@ fn compare(js: &Value, rs: &Value, links: &Links) -> (usize, usize, Vec<String>,
     let (mut passes, mut skips) = (0usize, 0usize);
 
     // 键集合一致:防止「某端悄悄少跑了一节」把红变成绿
-    for sec in ["scan", "read", "write", "trash", "disk"] {
+    for sec in ["scan", "read", "write", "trash", "hash", "disk"] {
         let (jk, rk) = (key_set(&js[sec]), key_set(&rs[sec]));
         if jk != rk {
             diffs.push(format!("{sec} 的用例键集合不一致(有一边漏跑):JS {jk:?} / Rust {rk:?}"));
@@ -855,6 +879,23 @@ fn compare(js: &Value, rs: &Value, links: &Links) -> (usize, usize, Vec<String>,
     } else {
         diffs.push(format!("trash[无根] 的 '项目不存在' 不再成立: {}", js["jsOnly"]["trashNoRoot"]));
     }
+    // hash(#17):成功/失败逐字段同形;非数组入参在垫片归一后与空清单同形(与 trash 同一条理由)
+    for name in ["mixed", "empty"] {
+        let before = diffs.len();
+        cmp_json(&format!("hash[{name}]"), &js["hash"][name], &rs["hash"][name], &mut diffs);
+        if diffs.len() == before { passes += 1; }
+    }
+    {
+        let before = diffs.len();
+        cmp_json("hash[非数组入参 ↔ Rust 空清单]", &js["jsOnly"]["hashNotArray"], &rs["hash"]["empty"], &mut diffs);
+        if diffs.len() == before { passes += 1; }
+    }
+    if js["jsOnly"]["hashNoRoot"].get("error").and_then(|e| e.as_str()) == Some("项目不存在") {
+        notes.push("  NOTE  hash[无根] 与 trash 同构:'项目不存在' 两端各有一份(JS 原语 / Rust 命令层),桌面侧由垫片守卫给出同句".into());
+        passes += 1;
+    } else {
+        diffs.push(format!("hash[无根] 的 '项目不存在' 不再成立: {}", js["jsOnly"]["hashNoRoot"]));
+    }
     for name in ["w", "t", "tree"] {
         let before = diffs.len();
         cmp_json(&format!("disk[{name}] 落盘后果"), &js["disk"][name], &rs["disk"][name], &mut diffs);
@@ -917,13 +958,17 @@ fn rust_side(tree: &Path, w: &Path, t: &Path, has_link: bool) -> Value {
     trash_map.insert("gates".into(), trash_json(t, &rels(&["..", "nope.txt", "./nope.txt", "sub/../../x.txt", "C:/Windows/x"])));
     trash_map.insert("dupMissing".into(), trash_json(t, &rels(&["gone-a.txt", "./gone-a.txt"])));
 
+    let mut hash_map = serde_json::Map::new();
+    hash_map.insert("mixed".into(), hash_json(tree, &rels(&["tiny.svg", "sub/child.gd", "nope.txt", "../outside-secret", "sub", "nul.bin"])));
+    hash_map.insert("empty".into(), hash_json(tree, &[]));
+
     let mut disk = serde_json::Map::new();
     disk.insert("w".into(), json!(top_names(w)));
     disk.insert("t".into(), json!(top_names(t)));
     disk.insert("tree".into(), json!(top_names(tree)));
 
     json!({ "scan": Value::Object(scan_map), "read": Value::Object(read_map), "write": Value::Object(write_map),
-            "trash": Value::Object(trash_map), "disk": Value::Object(disk) })
+            "trash": Value::Object(trash_map), "hash": Value::Object(hash_map), "disk": Value::Object(disk) })
 }
 
 /// 收尾:先**摘掉链接本身**(绝不能穿过它删到树外),再整棵清掉。

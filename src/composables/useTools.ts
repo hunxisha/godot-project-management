@@ -130,7 +130,8 @@ export function useTools() {
     tree: typeof window.services?.scanProjectTree === 'function',
     text: typeof window.services?.readProjectText === 'function',
     write: typeof window.services?.writeProjectText === 'function',
-    trash: typeof window.services?.movePathsToTrash === 'function'
+    trash: typeof window.services?.movePathsToTrash === 'function',
+    hash: typeof window.services?.hashPaths === 'function'
   }
 
   /**
@@ -316,7 +317,20 @@ export function useTools() {
        * 建索引复用**调用方那一份 context**(而不是在这里另建一份 ctx):索引读的就是这个工具正在用的
        * 那份清单与同一个文本 LRU,同源才能保证「同一代两次取用逐字节同一份」。
        */
-      refIndex: () => refIndexOf(context)
+      refIndex: () => refIndexOf(context),
+      /**
+       * 哈希通道(#17)。与 readText 同一条不抛约定:原语本身的失败在 failed 里如实回报,
+       * 通道层的意外(宿主实现抛异常 / 旧宿主缺方法被误调)收敛成一条 failed,
+       * 检查器把「没法比对的文件」说出口,而不是自己炸掉。
+       */
+      hash: async (rels: string[]) => {
+        try {
+          const r = await window.services.hashPaths(pid, Array.isArray(rels) ? rels : [])
+          return { hashes: r?.hashes ?? [], failed: r?.failed ?? [] }
+        } catch (e) {
+          return { hashes: [], failed: [{ rel: '', error: (e as Error)?.message || '哈希失败' }] }
+        }
+      }
     }
     return context
   }
@@ -601,7 +615,7 @@ export function useTools() {
       generatedAt: Date.now(),
       truncated: truncated.value,
       fileCount: tree.value.length,
-      caps: { tree: caps.tree, text: caps.text, write: caps.write, trash: caps.trash }
+      caps: { tree: caps.tree, text: caps.text, write: caps.write, trash: caps.trash, hash: caps.hash }
     }
   }
 

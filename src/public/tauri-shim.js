@@ -153,6 +153,17 @@
         rels: Array.isArray(rels) ? rels.filter((r) => typeof r === 'string') : []
       }))
     },
+    // 与 movePathsToTrash 同一条归一理由:Rust 的 rels: Vec<String> 在反序列化阶段拒非数组,
+    // 而 JS 原语把它当空清单回 { ok:true, hashes:[] } —— 垫片先归一,两端形态才一致。
+    // 兜底句 '读取失败' 取自 JS↔Rust 契约里哈希通道已有的那条;详见 inspectfs.js 的 hashPaths。
+    hashPaths: (projectId, rels) => {
+      const bad = badProject(projectId)
+      if (bad) return Promise.resolve(bad)
+      return guarded('hashPaths', '读取失败')(invoke('hash_paths', {
+        projectId,
+        rels: Array.isArray(rels) ? rels.filter((r) => typeof r === 'string') : []
+      }))
+    },
     addProject: (inputPath) => invoke('add_project', { inputPath }),
     scanProjects: (rootDir) => invoke('scan_projects', { rootDir }),
     createProject: (o) => invoke('create_project', { name: o.name, parentDir: o.parentDir, renderer: o.renderer, versionTag: o.versionTag, versionId: o.versionId, gitInit: !!o.gitInit }),

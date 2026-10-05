@@ -44,7 +44,7 @@ if (!HAS) {
   process.exit(1)
 }
 
-const CAPS = { tree: true, text: true, write: true, trash: true }
+const CAPS = { tree: true, text: true, write: true, trash: true, hash: true }
 const META = {
   projectId: 'godot/project/p1', projectName: '示例项目', root: 'E:/games/demo',
   generatedAt: Date.UTC(2026, 9, 5, 8, 30, 0), truncated: false, fileCount: 1234, caps: CAPS

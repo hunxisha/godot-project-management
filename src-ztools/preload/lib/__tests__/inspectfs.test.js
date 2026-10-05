@@ -840,6 +840,55 @@ async function main() {
     '删除流程不产生 .gpm-tmp-* 残骸')
   ok(!fs.existsSync(path.join(trashRoot, 'nodir')), '被拒绝的删除没在项目里长出目录树')
 
+  section('7. hashPaths(#17 重复文件检测的原语)')
+  {
+    const root = makeTree('hashproj', {
+      'a.bin': 'same-content',
+      'sub/a2.bin': 'same-content',
+      'b.bin': 'other-content',
+      'empty.bin': ''
+    })
+    DB.set('hashproj', { path: root })
+    const H = F.hashPaths('hashproj', ['a.bin', 'sub/a2.bin', 'b.bin', 'empty.bin'])
+    ok(H.ok === true, '全成功时 ok:true', JSON.stringify(H))
+    ok(Array.isArray(H.hashes) && H.hashes.length === 4, '点名四条回四条', String(H.hashes && H.hashes.length))
+    const sha = (rel) => H.hashes.find((x) => x.rel === rel).sha256
+    ok(sha('a.bin') === sha('sub/a2.bin'), '★同内容不同路径 → 同摘要(重复检测的立足点)', `${sha('a.bin')} vs ${sha('sub/a2.bin')}`)
+    ok(sha('a.bin') !== sha('b.bin'), '不同内容 → 不同摘要')
+    ok(sha('empty.bin') === 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+      '空文件 = SHA-256 标准向量(hex 小写 64 位)', sha('empty.bin'))
+    ok(/^[0-9a-f]{64}$/.test(sha('a.bin')), 'digest 是小写 hex(与 Rust 的 format!("{:x}") 同形)', sha('a.bin'))
+    ok(H.failed.length === 0, '没有失败项', JSON.stringify(H.failed))
+
+    // 失败不中断:缺失 / 越界 / 目录混在成功项之间
+    const M = F.hashPaths('hashproj', ['a.bin', 'nope.txt', '../outside', 'sub', 'b.bin'])
+    ok(M.ok === false, '有失败项时 ok:false', JSON.stringify(M))
+    ok(M.hashes.length === 2 && M.hashes[0].rel === 'a.bin' && M.hashes[1].rel === 'b.bin',
+      '★失败不中断其余,成功项按点名顺序', JSON.stringify(M.hashes))
+    ok(M.failed.length === 3, '三条失败如实回报', JSON.stringify(M.failed))
+    ok(M.failed.some((x) => x.rel === 'nope.txt' && x.error === '文件不存在'), '缺失 → 文件不存在')
+    ok(M.failed.some((x) => x.rel === '../outside' && x.error === '非法路径'), '越界 → 非法路径(回报调用方原样串)')
+    ok(M.failed.some((x) => x.rel === 'sub' && x.error === '文件不存在'), '目录与缺失收敛到同一句(readProjectText 同口径)')
+
+    // 空清单 / 非数组
+    const E = F.hashPaths('hashproj', [])
+    ok(E.ok === true && E.hashes.length === 0 && E.failed.length === 0, '空清单不是错误', JSON.stringify(E))
+    const NA = F.hashPaths('hashproj', 'a.bin')
+    ok(NA.ok === true && NA.hashes.length === 0, '非数组按空清单(与 movePathsToTrash 同判别,字符串可迭代不许拆字符)', JSON.stringify(NA))
+
+    // 无根
+    const NR = F.hashPaths('nope', ['a.bin'])
+    ok(NR.ok === false && NR.error === '项目不存在', 'projectId 查不到 → 项目不存在', JSON.stringify(NR))
+
+    // 大文件分块:1 MiB 块 + 溢出 17 字节,流式摘要必须等于整文件一次性哈希
+    const big = Buffer.alloc(1024 * 1024 + 17)
+    for (let i = 0; i < big.length; i++) big[i] = i % 251
+    fs.writeFileSync(path.join(root, 'big.bin'), big)
+    const B = F.hashPaths('hashproj', ['big.bin'])
+    ok(B.hashes[0].sha256 === 'f4bf9b8dec6e3e28b2ec33266145d244fe97a6bce1ec054ace053bab67d2ef9a',
+      '★跨 1MiB 块的大文件:分块哈希 = 整文件一次性哈希(参照值由 node 独立算出)', B.hashes[0] && B.hashes[0].sha256)
+  }
+
   console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
   console.log(`SKIP ${skips} 项未在本机执行(不计入上面的 PASS;>0 通常是本机没有创建符号链接的权限)`)
   if (failures.length) { console.log('失败项:'); for (const f of failures) console.log('  - ' + f); process.exit(1) }
