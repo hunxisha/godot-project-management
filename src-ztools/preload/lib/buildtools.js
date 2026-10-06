@@ -61,6 +61,8 @@ function parseSconsVersion(text) {
 
 /**
  * 从 vswhere 的输出(installationPath,每行一个)挑出第一个 vcvars64.bat 真实存在的安装位。
+ * 固定 win32 join:vswhere 只在 Windows 跑,路径全是 Windows 形态 —— 与运行检测的平台无关
+ * (Linux 上 path.join 会拼出正斜杠,断言与语义都乱,CI 首跑已踩)。
  * @param {string} vswhereOut vswhere -property installationPath 的原样输出
  * @param {string[]} fallbacks vswhere 不可用/空时的候选目录(逐个拼 VC\Auxiliary\Build\vcvars64.bat)
  * @param {(p: string) => boolean} exists 注入的 existsSync
@@ -69,11 +71,11 @@ function parseSconsVersion(text) {
 function pickVcvars(vswhereOut, fallbacks, exists) {
   const lines = String(vswhereOut || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
   for (const dir of lines) {
-    const p = path.join(dir, 'VC', 'Auxiliary', 'Build', 'vcvars64.bat')
+    const p = path.win32.join(dir, 'VC', 'Auxiliary', 'Build', 'vcvars64.bat')
     if (exists(p)) return p
   }
   for (const dir of fallbacks) {
-    const p = path.join(dir, 'VC', 'Auxiliary', 'Build', 'vcvars64.bat')
+    const p = path.win32.join(dir, 'VC', 'Auxiliary', 'Build', 'vcvars64.bat')
     if (exists(p)) return p
   }
   return ''
