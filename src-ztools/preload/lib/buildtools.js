@@ -116,7 +116,7 @@ function vcvarsFallbackDirs() {
 function checkTemplateBuildTools() {
   return checkTemplateBuildToolsWith(
     { platform: process.platform },
-    { execSync, cpuCount: os.cpus().length }
+    { execSync, cpuCount: os.cpus().length, existsSync: fs.existsSync }
   )
 }
 
@@ -124,7 +124,7 @@ function checkTemplateBuildTools() {
  * `checkTemplateBuildTools` 的实现体。execSync 与核数注入是测试接缝:
  * 检测的真实形态(python/py 回落、-m SCons、vswhere)在这里定死,测试传桩只验流程。
  * @param {{platform: string}} env
- * @param {{execSync: typeof execSync, cpuCount: number}} deps
+ * @param {{execSync: typeof execSync, cpuCount: number, existsSync: (p: string) => boolean}} deps
  */
 async function checkTemplateBuildToolsWith(env, deps) {
   const cpuCount = deps.cpuCount
@@ -160,7 +160,7 @@ async function checkTemplateBuildToolsWith(env, deps) {
   try {
     vsOut = String(deps.execSync(`"${VSWHERE}" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || '')
   } catch (e) { /* 没有 Installer 就直接走 fallback */ }
-  out.vcvarsPath = pickVcvars(vsOut, vcvarsFallbackDirs(), (p) => fs.existsSync(p))
+  out.vcvarsPath = pickVcvars(vsOut, vcvarsFallbackDirs(), (p) => deps.existsSync(p))
   if (!out.vcvarsPath) out.problems.push('没有找到 MSVC 工具链。请安装 Visual Studio(Community 即可)并在 Installer 里勾选「使用 C++ 的桌面开发」。')
   out.ok = out.problems.length === 0
   // 检测到的 vcvars 缓存给构建步;重跑检测会覆盖 —— 换了 VS 安装位后重检即可生效

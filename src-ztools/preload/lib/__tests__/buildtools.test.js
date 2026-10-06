@@ -111,7 +111,10 @@ async function main() {
       if (/vswhere/.test(cmd)) return 'D:\\apps\\Microsoft Visual Studio\\Community'
       throw new Error('unexpected: ' + cmd)
     }
-    const r = await B.checkTemplateBuildToolsWith({ platform: 'win32' }, { execSync: execStub, cpuCount: 16 })
+    // existsSync 桩:检测的 vcvars 落点是 Windows 路径,Linux CI 上真 existsSync 必然 false ——
+    // 注入桩让「三件套齐」的流程跨平台确定(真实存在性由真宿主的人工验收 T8 管)
+    const r = await B.checkTemplateBuildToolsWith({ platform: 'win32' },
+      { execSync: execStub, cpuCount: 16, existsSync: (p) => p.includes('D:') })
     ok(r.ok === true && r.pythonVersion === '3.12.13' && r.sconsVersion === '4.10.1' &&
       r.vcvarsPath.includes('D:\\apps\\Microsoft Visual Studio\\Community') && r.cpuCount === 16 && r.problems.length === 0,
       '★三件套齐:ok、版本、vcvars(经 vswhere 找到非默认盘安装位)、核数都对', JSON.stringify(r))
@@ -121,7 +124,8 @@ async function main() {
   }
   {
     const execStub = (cmd) => { throw new Error('no such file') }
-    const r = await B.checkTemplateBuildToolsWith({ platform: 'win32' }, { execSync: execStub, cpuCount: 4 })
+    const r = await B.checkTemplateBuildToolsWith({ platform: 'win32' },
+      { execSync: execStub, cpuCount: 4, existsSync: () => false })
     ok(r.ok === false && r.problems.length === 2 &&
       /Python 3/.test(r.problems[0]) && /C\+\+ 的桌面开发/.test(r.problems[1]),
       '★全缺:problems 各带下一步动作(python 缺时 SCons 没有运行入口,装好 python 重检才会轮到它)',
