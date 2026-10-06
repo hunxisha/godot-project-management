@@ -640,6 +640,27 @@ export interface TrashResult {
   failed?: { rel: string; error: string }[]
 }
 
+/** 自编译导出模板任务(buildtools,kind='tplbuild') */
+export interface TemplateBuildTask {
+  id: string
+  kind: 'tplbuild'
+  tag: string
+  srcDir: string
+  jobs: number
+  status: 'queued' | 'building' | 'done' | 'error' | 'canceled'
+  /** 构建输出尾部(失败诊断用) */
+  log: string
+  error?: string
+  /** 未经翻译的原始输出尾部(诊断用,界面展示 error) */
+  errorDetail?: string
+  /** 完成后:stage 根目录(内含 templates/ 顶层,交给 installExportTemplates 目录形态导入) */
+  stageDir?: string
+  /** 完成后:tag 派生的模板目录名 */
+  versionDir?: string
+  /** 完成后:stage 里的文件数 */
+  files?: number
+}
+
 export interface HashPathsResult {
   ok: boolean
   error?: string

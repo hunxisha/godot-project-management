@@ -18,6 +18,7 @@ const datatransfer = require('./lib/datatransfer')
 const diagnostics = require('./lib/diagnostics')
 const docs = require('./lib/docs')
 const inspectfs = require('./lib/inspectfs')
+const buildtools = require('./lib/buildtools')
 
 /**
  * 门面实现:仍以同步的 Services 接口为唯一权威做编译期校验。
@@ -50,6 +51,17 @@ const servicesImpl = {
   /** 查询已装引擎的导出模板状态 */
   exportTemplateStatus: (versionId) => templates.exportTemplateStatus({ versionId }),
   /** 下载安装导出模板(入队,进度走 watchTasks,任务 kind='templates') */
+  /** ---------- 导出模板自编译(裁剪向导) ---------- */
+  /** 工具链检测(python/SCons/vcvars) */
+  checkTemplateBuildTools: () => buildtools.checkTemplateBuildTools(),
+  /** 发起自编译(入队;完成后任务带 stageDir,渲染层走目录形态导入) */
+  buildTemplatePack: (params) => buildtools.buildTemplatePack(params),
+  /** 订阅自编译任务快照 */
+  watchTemplateBuildTasks: (fn) => buildtools.watchTemplateBuildTasks(fn),
+  /** 取消自编译任务 */
+  cancelTemplateBuildTask: (id) => buildtools.cancelTemplateBuildTask(id),
+  /** 移除已结束的自编译任务记录 */
+  dismissTemplateBuildTask: (id) => buildtools.dismissTemplateBuildTask(id),
   /** 安装导出模板:缺省从官方 release 下载;opts.srcPath 提供时从本地 .tpz/目录导入 */
   installExportTemplates: (versionId, opts) => templates.downloadAndInstallTemplates({
     versionId,

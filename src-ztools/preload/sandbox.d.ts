@@ -117,6 +117,8 @@ declare module 'node:fs' {
   export function cpSync(src: string, dest: string, opts?: any): void
   export function chmodSync(path: string, mode: number | string): void
   export function statSync(path: string): GpmStats
+  /** 源码盘剩余空间检查用(bsize × bavail = 剩余字节);不可用的文件系统会抛 */
+  export function statfsSync(path: string): { bsize: number; bavail: number }
   /** 解析真实路径(跟随符号链接 / Windows reparse point);路径不存在时抛异常 */
   export function realpathSync(path: string): string
   export function fstatSync(fd: number): GpmStats

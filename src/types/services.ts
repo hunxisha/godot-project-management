@@ -41,6 +41,7 @@ import type {
   DocsCacheInfo,
   DocsTask,
   HashPathsResult,
+  TemplateBuildTask,
   TreeEntry,
   ScanTreeResult,
   ReadTextResult,
@@ -96,6 +97,25 @@ export interface Services {
   installExportTemplates(versionId: string, opts?: { srcPath?: string; versionDir?: string }): { ok: boolean, error?: string, taskId?: string }
   /** 卸载导出模板(删除模板目录与记录) */
   uninstallExportTemplates(versionId: string): { ok: boolean, error?: string }
+  /** ---------- 导出模板自编译(裁剪向导;ZTools 插件宿主提供,其他宿主 ok:false 并说明) ---------- */
+  /** 工具链检测(python / SCons / MSVC vcvars64)。缺什么把「下一步动作」放进 problems */
+  checkTemplateBuildTools(): Promise<{
+    ok: boolean
+    pythonVersion: string
+    sconsVersion: string
+    vcvarsPath: string
+    cpuCount: number
+    problems: string[]
+  }>
+  /** 发起自编译(入队;srcDir 必须是 Godot 源码根)。完成后任务带 stageDir(templates/ 顶层)
+   *  与 versionDir,渲染层凭 stageDir 走 installExportTemplates 的目录形态导入 */
+  buildTemplatePack(params: { srcDir: string, tag: string, jobs?: number }): { ok: boolean, error?: string, taskId?: string }
+  /** 订阅自编译任务快照,返回取消订阅函数 */
+  watchTemplateBuildTasks(fn: (tasks: TemplateBuildTask[]) => void): () => void
+  /** 取消自编译任务(排队中直接取消;构建中 kill scons 子进程) */
+  cancelTemplateBuildTask(id: string): void
+  /** 移除已结束的自编译任务记录 */
+  dismissTemplateBuildTask(id: string): void
   /** 列出项目的导出预设(解析 export_presets.cfg;无该文件时返回空列表) */
   listExportPresets(projectId: string): { ok: boolean, error?: string, presets?: ExportPreset[] }
   /** 发起一键导出(入队;缺模板时返回 missingTemplates=true 不入队) */
@@ -416,6 +436,7 @@ type AsyncServices = {
     | 'watchExportTasks'
     | 'watchBackupTasks'
     | 'watchDocsTasks'
+    | 'watchTemplateBuildTasks'
     ? Services[K]
     : Services[K] extends (...args: infer A) => infer R
       ? (...args: A) => Promise<Awaited<R>>

@@ -4,6 +4,7 @@ import { getSettings, notify, pickDirectory, pickFile, isWindows, saveSettings, 
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import { useExportTemplates } from '../composables/useExportTemplates'
+import TemplateBuildWizard from '../components/versions/TemplateBuildWizard.vue'
 import { DEFAULT_SETTINGS, type DownloadTask, type GodotRelease, type GodotSettings, type GodotVersion, type ReleaseAsset, type Variant } from '../types/godot'
 
 // 设置异步读取(阶段 A):先给默认值,onMounted 后用持久化值覆盖
@@ -237,6 +238,9 @@ const {
   askUninstallTemplates
 } = useExportTemplates({ installed, tasks, notify })
 
+// ---------- 自编译模板向导(检测/构建/导入的判据都在宿主侧,这里只装配) ----------
+const tplWizardFor = ref('')
+
 // ---------- 展示 ----------
 
 function formatSize(n?: number): string {
@@ -351,6 +355,13 @@ function progressOf(t: DownloadTask): number {
             @click="startLocalImport(v)"
           ><Icon name="upload" :size="13" /> 导入本地模板</button>
           <button
+            v-if="isWindows()"
+            class="btn small ghost"
+            :disabled="!!tplTaskFor(v._id)"
+            title="在本机编译一份 2D-only 的导出模板(约 5 分钟,产物 ~56 MB);需要 Python/SCons/MSVC"
+            @click="tplWizardFor = v._id"
+          >自编译 2D 模板</button>
+          <button
             v-if="tplStatuses[v._id]?.installed"
             class="btn small ghost"
             :title="`卸载导出模板(${tplStatuses[v._id]?.versionDir})`"
@@ -384,6 +395,14 @@ function progressOf(t: DownloadTask): number {
       icon="package"
       title="尚未安装 Godot 引擎"
       desc="从下方「可用版本」下载官方引擎,或点击「导入本地引擎」使用已有的 Godot 可执行文件。"
+    />
+
+    <TemplateBuildWizard
+      :open="!!tplWizardFor"
+      :version-id="tplWizardFor"
+      :tag="installed.find((v) => v._id === tplWizardFor)?.tag || ''"
+      @close="tplWizardFor = ''"
+      @imported="(msg) => { notify(msg); void refreshTplStatuses() }"
     />
 
     <!-- 可用版本 -->

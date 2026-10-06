@@ -11,7 +11,7 @@
   const IS_MAC = navigator.userAgent.includes('Mac OS')
 
   // ---------- window.ztools ----------
-  const listeners = { tasks: [], backup: [], export: [], docs: [] }
+  const listeners = { tasks: [], backup: [], export: [], docs: [], tplbuild: [] }
   const channelFor = (fn) => {
     // 四类订阅共用 tasks://snapshot,按任务 kind 分流
     void fn
@@ -146,6 +146,18 @@
     runNetworkDiagnostics: () => invoke('run_network_diagnostics', { proxy: null }),
     getProjectCacheInfo: () => Promise.resolve({ ok: false, exists: false }),
     cleanProjectCache: () => Promise.resolve({ ok: false }),
+    // ---------- 导出模板自编译(裁剪向导) ----------
+    // 桌面版(Tauri)暂未实现构建管线(需要 vcvars/子进程/产物整理),如实告知而不是假成功;
+    // 渲染层对 ok:false + problems 的展示路径与缺工具链同一条。ZTools 插件宿主提供真实现。
+    checkTemplateBuildTools: () => Promise.resolve({
+      ok: false, pythonVersion: '', sconsVersion: '', vcvarsPath: '',
+      cpuCount: navigator.hardwareConcurrency || 0,
+      problems: ['桌面版暂不支持自编译模板构建,请使用 ZTools 插件版。']
+    }),
+    buildTemplatePack: () => Promise.resolve({ ok: false, error: '桌面版暂不支持自编译模板构建,请使用 ZTools 插件版。' }),
+    watchTemplateBuildTasks: (fn) => { listeners.tplbuild.push(fn); return () => { listeners.tplbuild = listeners.tplbuild.filter((f) => f !== fn) } },
+    cancelTemplateBuildTask: (id) => { void id },
+    dismissTemplateBuildTask: (id) => { void id },
     // ---------- 工具页原语(spec §5.4;rel 一律正斜杠相对路径) ----------
     // 参数名必须用**驼峰**传进 invoke(maxBytes / skipDirs / maxEntries):写成下划线会被
     // Tauri 静默反序列化成 None,限额直接失效(命令层拿不到就等于用户没设限)。
