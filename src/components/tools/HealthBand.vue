@@ -43,8 +43,8 @@ const VERDICT: Record<ToolsOutcome['kind'], { text: string; cls: string }> = {
 const verdict = computed(() => VERDICT[props.outcome.kind])
 
 // 相对时间要真的「相对」:computed 只在依赖变化时重算,不 tick 的话页面开着不动
-// 一小时,「3 分钟前」会一直挂着变成谎话。这一页每次进入都重新挂载(不在 KeepAlive 里,
-// 见 §D #12),所以 onMounted/onUnmounted 就足够,定时器不会漏在页外空转。
+// 一小时,「3 分钟前」会一直挂着变成谎话。这一页每次进入都重新挂载(§D #12),
+// 所以 onMounted/onUnmounted 就够 —— 定时器不会漏在页外空转。
 const now = ref(Date.now())
 let timer: number | null = null
 onMounted(() => {

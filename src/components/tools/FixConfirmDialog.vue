@@ -8,7 +8,7 @@
 // 自己项目文件的处置依据」,说错话的代价是删掉东西,必须可测。
 // 因此本文件也没有单测:仓库没有组件渲染测试框架,这里的职责就是把「已测过的判据」摆出来
 // —— 勾选交互只能靠人在真宿主里点一遍,判据部分(gate.ts / applyFix)全部另有断言。
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from '../Icon.vue'
 import { fmtBytes } from '../../tools/treeUtils'
 import type { FixPlan } from '../../tools/fixPlan'
@@ -105,6 +105,21 @@ const canRun = computed(() => {
 const runLabel = computed(() =>
   perItem.value ? `确认${props.plan.verb} ${selectedCount.value} 个文件` : `确认${props.plan.verb} ${props.plan.items.length} 个文件`
 )
+
+/**
+ * Esc 关闭。修复在途时不许关 —— 框一关用户就看不到回执,而磁盘那边还在动(spec §5.3 规则 4
+ * 要求「动了什么、备份去了哪」必须被看到)。
+ *
+ * 为什么手写 addEventListener 而不是模板上的 @keydown.window:实测这个 Vue 版本里
+ * `.window` 并没有把监听装到 window 上 —— 真实按键与冒泡到 window 的合成 keydown 都不触发,
+ * 而同一时刻点「取消」是能关的(说明 emit/close 这条链是通的)。判据这种「必须被看到」的
+ * 交互不能押在修饰符语义上,就显式挂删。
+ */
+function onKey(e: KeyboardEvent) {
+  if (e.key === 'Escape' && props.open && !props.busy) emit('close')
+}
+onMounted(() => window.addEventListener('keydown', onKey))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 </script>
 
 <template>

@@ -923,7 +923,12 @@ input[type='checkbox'].switch:checked::after {
   .fill.active::after,
   .bar.indet .fill,
   .spin,
-  .modal {
+  .modal,
+  /* 工具页重设计新增的过渡:行 hover 的底色、左栏选中态、摘要带按钮 */
+  .tools .row,
+  .tools .all,
+  .tools .band .v {
     animation: none;
+    transition: none;
   }
 }

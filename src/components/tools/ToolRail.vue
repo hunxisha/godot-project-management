@@ -54,10 +54,29 @@ const groups = computed(() => {
   }
   return out
 })
+
+/**
+ * 键盘走的是**屏幕上看得见**的顺序:先「全部问题」,再按分组视觉顺序逐行往下。
+ * 计划里原本写「按注册表顺序」(= 执行顺序),但那与分好组的版面不一致 ——
+ * 焦点会在一列里跳着走,按键盘的人无从预期下一站落在哪一行。
+ */
+const flat = computed(() => ['all', ...groups.value.flatMap((g) => g.tools.map((t) => t.id))])
+
+function onKey(e: KeyboardEvent) {
+  const i = flat.value.indexOf(props.selection)
+  const at = i < 0 ? 0 : i
+  if (e.key === 'ArrowDown') emit('select', flat.value[Math.min(flat.value.length - 1, at + 1)])
+  else if (e.key === 'ArrowUp') emit('select', flat.value[Math.max(0, at - 1)])
+  else if (e.key === 'Home') emit('select', flat.value[0])
+  else if (e.key === 'End') emit('select', flat.value[flat.value.length - 1])
+  else return
+  // 方向键默认会滚页面:这一列自己就在滚,别让页面跟着跳
+  e.preventDefault()
+}
 </script>
 
 <template>
-  <nav class="card rail" aria-label="体检项">
+  <nav class="card rail" tabindex="0" role="toolbar" aria-label="体检项（上下键切换检查项）" @keydown="onKey">
     <button :class="['all', { on: selection === 'all' }]" @click="emit('select', 'all')">
       <Icon name="list" :size="13" />
       <span>全部问题</span>
