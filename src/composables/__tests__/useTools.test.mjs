@@ -894,7 +894,7 @@ async function main() {
   //   ②(Important 1)越界/绝对 rel 必须**原样**送到原语面前 —— 改写成项目内名字就是绕过 resolveRel;
   //   ③(Minor 1)删除/改写都是逐个 await 的循环,第二次 applyFix 能插在两次 await 之间进来,
   //     于是两份清单同时改盘,后一份的 rel 可能已被前一份删掉,回执还各说各的;
-  //   ④(Minor 2)counts.fixable 说「可修复 N」,N 必须是本管线真能执行的条数,否则 SummaryBar
+  //   ④(Minor 2)counts.fixable 说「可修复 N」,N 必须是本管线真能执行的条数,否则摘要带
   //     报「可修复 5」而面板上只有 1 个按钮点得动(existing 是跳转、none 只报告、payload 认不出)。
   section('29. applyFix 的执行清单与预览同源(重复点名只写一次 / 越界串原样送闸)')
   const dupWriteLog = []
