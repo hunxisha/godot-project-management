@@ -77,3 +77,21 @@ export interface Tool {
   needs: Capability[]
   run(ctx: ToolContext): Promise<Finding[]>
 }
+
+/** 聚合流里的一条结论:结论本体 + 它的出处 + 能不能修 */
+export interface AggFinding {
+  finding: Finding
+  toolId: string
+  toolName: string
+  category: Category
+  fixable: boolean
+}
+
+/** 聚合流的一个类别组。counts 是该组的分档条数,筛选或裁剪后由产出方重算。 */
+export interface AggGroup {
+  category: Category
+  label: string
+  icon: string
+  counts: { error: number; warn: number; info: number }
+  items: AggFinding[]
+}
