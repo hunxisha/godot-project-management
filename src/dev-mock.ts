@@ -90,6 +90,20 @@ const docs = new Map<string, any>([
 
 const ok = <T,>(v: T) => Promise.resolve(v)
 
+/**
+ * 夹具专用:?forceNarrow=1 让 matchMedia 恒报「窄屏」。
+ * 为什么要在假宿主里改媒体查询:内置浏览器面板没开时视口是 0x0,
+ * `(max-width: 899px)` 在 0x0 下并不匹配,于是 ToolsView 的 chip 那一支在这里根本进不去 ——
+ * 能测的是「进了窄屏分支以后 DOM 与切换对不对」,真正的断点宽度只能在真宿主点。
+ */
+if (new URL(location.href).searchParams.get('forceNarrow')) {
+  const real = window.matchMedia.bind(window)
+  window.matchMedia = (query: string) =>
+    /max-width/.test(query)
+      ? ({ matches: true, media: query, addEventListener: () => {}, removeEventListener: () => {} } as unknown as MediaQueryList)
+      : real(query)
+}
+
 window.ztools = {
   setExpendHeight: () => {},
   setSubInput: () => {},

@@ -10,7 +10,7 @@
 //
 // 修复动作仍然只有「装配」这一层在这里:判据在 planFix、执行在 useTools.applyFix,
 // 视图把两者接起来,并在真改了盘之后重跑**那一条结论所属的检查器**(spec §5.3)。
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import HealthBand from '../components/tools/HealthBand.vue'
@@ -43,9 +43,25 @@ const fixOutcome = ref<FixOutcome | null>(null)
 // 装载项目列表与上次体检快照。这一页今天不在 KeepAlive 里(App.vue 的 include 实测对它
 // 不生效,根因记 docs/tools-ui-redesign-plan.md §D #12),每次进入都是重新挂载,
 // 所以 onMounted 一次就够 —— 不保留永远不会触发的 activated(那是死代码)。
+/**
+ * 窄宿主降级用 JS 判宽度,不用 CSS 藏栏:chip 导航与双栏是两棵不同的 DOM 树,
+ * 媒体查询只能「显示一棵、隐藏另一棵」,那会白留一整棵隐藏的树在 DOM 里
+ * (DocsView.vue:1105-1116 的 .narrow 也是这个思路)。
+ */
+const isNarrow = ref(false)
+let mq: MediaQueryList | null = null
+function syncNarrow() {
+  isNarrow.value = mq ? mq.matches : window.innerWidth < 900
+}
 onMounted(() => {
   void t.load()
   void t.loadLastReport()
+  mq = window.matchMedia('(max-width: 899px)')
+  mq.addEventListener('change', syncNarrow)
+  syncNarrow()
+})
+onBeforeUnmount(() => {
+  if (mq) mq.removeEventListener('change', syncNarrow)
 })
 
 /** 报告预览弹层:看的是本轮(现算)还是上次(读快照原文) */
@@ -265,8 +281,9 @@ function copyShownReport() {
         <Icon name="alert" :size="12" /> {{ outcome.error }}
       </p>
 
-      <div class="split">
+      <div class="split" :class="{ narrow: isNarrow }">
         <ToolRail
+          v-if="!isNarrow"
           class="rail-col"
           :tools="t.tools.value"
           :results="t.results.value"
@@ -276,6 +293,21 @@ function copyShownReport() {
           :total-findings="totalFindings"
           @select="selection = $event"
         />
+        <!-- 窄宿主:左栏整棵换成一排 chip,「全部问题」仍是第一个 -->
+        <nav v-else class="chips card" aria-label="体检项">
+          <button :class="['chip', { on: selection === 'all' }]" @click="selection = 'all'">
+            全部问题<b v-if="totalFindings" class="chip-count">{{ totalFindings }}</b>
+          </button>
+          <button
+            v-for="tool in t.tools.value"
+            :key="tool.id"
+            :class="['chip', { on: selection === tool.id }]"
+            :title="isSupported(tool, t.caps) ? '' : '当前宿主不支持'"
+            @click="selection = tool.id"
+          >
+            {{ tool.name }}
+          </button>
+        </nav>
         <FindingsRail
           class="main-col"
           :groups="railGroups"
@@ -329,6 +361,19 @@ function copyShownReport() {
   align-items: start;
 }
 
+.split.narrow {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* 窄宿主的 chip 行:横向自己滚,不把页面撑出横向滚动条 */
+.chips {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  overflow-x: auto;
+  min-width: 0;
+}
+
 .rail-col {
   align-self: stretch;
 }
@@ -365,11 +410,7 @@ function copyShownReport() {
   font-size: 12.5px;
 }
 
-@media (max-width: 900px) {
-  .split {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
+@media (max-width: 899px) {
   .pick {
     margin-left: auto;
   }
