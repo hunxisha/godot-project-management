@@ -48,15 +48,58 @@ export function aggregate(tools: Tool[], results: Record<string, ToolResult>, is
         }
         out.push(g)
       }
-      g.counts[finding.severity] += 1
       g.items.push(item)
     }
   }
-  for (const g of out) g.items.sort((a, b) => SEV_RANK[a.finding.severity] - SEV_RANK[b.finding.severity])
+  // 计数与排序都按「组内这一份 items」算一遍:分档计数只留一个算法,
+  // 聚合、筛选、裁剪三条路同源,否则三处数字会各自漂移
+  for (const g of out) {
+    g.items.sort((a, b) => SEV_RANK[a.finding.severity] - SEV_RANK[b.finding.severity])
+    g.counts = countsOf(g.items)
+  }
   const catOrder = CATEGORIES.map((c) => c.id)
   const rank = (g: AggGroup) => (g.items.length ? SEV_RANK[g.items[0].finding.severity] : 9)
   out.sort((a, b) => rank(a) - rank(b)
     || b.counts.error - a.counts.error
     || catOrder.indexOf(a.category) - catOrder.indexOf(b.category))
   return out
+}
+
+/** 聚合流的筛选条件。`sev: 'all'` 表示不按严重度筛。 */
+export interface FilterSel {
+  sev: 'all' | Severity
+  fixableOnly: boolean
+  query: string
+}
+
+/**
+ * 筛选判据也住纯函数层:「大小写敏不敏感」「匹配 title 还是 rel」是产品口径,不是视图细节
+ * —— 只有口径能进 Node 断言。
+ * 筛选后的 counts 重算并与 items.length 一致:组头数字若仍是筛选前的总数,
+ * 用户会拿它跟屏面上的行数对账而对不上。
+ */
+export function filterGroups(groups: AggGroup[], sel: FilterSel): AggGroup[] {
+  const q = sel.query.trim().toLowerCase()
+  const out: AggGroup[] = []
+  for (const g of groups) {
+    const items = g.items.filter((it) => {
+      if (sel.sev !== 'all' && it.finding.severity !== sel.sev) return false
+      if (sel.fixableOnly && !it.fixable) return false
+      if (q) {
+        const hay = `${it.finding.title}\n${it.finding.rel || ''}`.toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      return true
+    })
+    if (!items.length) continue
+    out.push({ ...g, items, counts: countsOf(items) })
+  }
+  return out
+}
+
+/** 分档计数只有一个算法:聚合、筛选、裁剪三条路都走它,否则三处数字会各自漂移 */
+function countsOf(items: AggFinding[]): { error: number; warn: number; info: number } {
+  const c = { error: 0, warn: 0, info: 0 }
+  for (const it of items) c[it.finding.severity] += 1
+  return c
 }

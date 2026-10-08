@@ -87,6 +87,44 @@ ok(T.aggregate([mkTool('size', 'weight')],
   { size: { toolId: 'size', ok: false, error: '检查失败', findings: [], scannedFiles: 0, ms: 1 } }, true).length === 0,
   '失败的工具不产组(失败在摘要带与左栏徽标上点名,不在问题流里冒充结论)')
 
+section('5. filterGroups 三态各一路')
+const tools5 = [mkTool('brokenRefs', 'refs'), mkTool('ini', 'config')]
+const res5 = {
+  brokenRefs: mkResult('brokenRefs', [
+    f('brokenRefs', 'err', 'error', { rel: 'scene/Main.tscn' }),
+    f('brokenRefs', 'wrn', 'warn', { rel: 'audio/bgm.ogg', fix: { kind: 'trash', label: '移入回收站', payload: ['audio/bgm.ogg'] } })
+  ]),
+  ini: mkResult('ini', [f('ini', 'k', 'info', { rel: 'project.godot' })])
+}
+const all5 = T.aggregate(tools5, res5, true)
+ok(JSON.stringify(T.filterGroups(all5, { sev: 'all', fixableOnly: false, query: '' })) === JSON.stringify(all5),
+  '全通过时与原聚合结果同形(筛选不许顺手重排、不许改动组结构)',
+  JSON.stringify(T.filterGroups(all5, { sev: 'all', fixableOnly: false, query: '' })))
+const onlyErr = T.filterGroups(all5, { sev: 'error', fixableOnly: false, query: '' })
+ok(onlyErr.length === 1 && onlyErr[0].category === 'refs' && onlyErr[0].items.length === 1,
+  '只看 error:config 整组消失(它只有 info)', JSON.stringify(onlyErr.map((x) => [x.category, x.items.length])))
+ok(onlyErr[0].counts.error === 1 && onlyErr[0].counts.warn === 0 && onlyErr[0].counts.info === 0,
+  '筛选后 counts 重算,与屏上行数对得上(留旧数字用户会拿它对账而对不上)', JSON.stringify(onlyErr[0].counts))
+const fxOnly = T.filterGroups(all5, { sev: 'all', fixableOnly: true, query: '' })
+ok(fxOnly.reduce((n, x) => n + x.items.length, 0) === 1 && fxOnly[0].items[0].finding.id === 'brokenRefs:wrn',
+  '只看待修复 = planFix 判可执行那一条,不是 fix 字段非空那条(error 那条带的是别的 fix)',
+  JSON.stringify(fxOnly.map((x) => x.items.map((i) => i.finding.id))))
+const q1 = T.filterGroups(all5, { sev: 'all', fixableOnly: false, query: 'main' })
+ok(q1.length === 1 && q1[0].items[0].finding.id === 'brokenRefs:err',
+  '关键词大小写不敏感,匹配 rel(入参 main,数据里是 Main.tscn)', JSON.stringify(q1.map((x) => x.items.map((i) => i.finding.id))))
+const q1b = T.filterGroups(all5, { sev: 'all', fixableOnly: false, query: 'MAIN' })
+ok(q1b.length === 1 && q1b[0].items[0].finding.id === 'brokenRefs:err',
+  '查询串大写也命中(两侧都归一:去掉任何一侧 toLowerCase 都会转红)',
+  JSON.stringify(q1b.map((x) => x.items.map((i) => i.finding.id))))
+const q2 = T.filterGroups(all5, { sev: 'all', fixableOnly: false, query: 'ini 的' })
+ok(q2.length === 1 && q2[0].category === 'config',
+  '关键词也匹配 title(中文短语)', JSON.stringify(q2.map((x) => x.items.map((i) => i.finding.id))))
+ok(T.filterGroups(all5, { sev: 'all', fixableOnly: false, query: '不存在的东西' }).length === 0,
+  '全筛空时返回空数组,不留空组')
+const before5 = JSON.stringify(all5)
+T.filterGroups(all5, { sev: 'error', fixableOnly: true, query: 'main' })
+ok(JSON.stringify(all5) === before5, '不改入参:聚合结果原样不动(视图会在渲染期反复调它)')
+
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) { console.log('失败项:'); for (const m of failures) console.log('  - ' + m); process.exit(1) }
 console.log('全部通过')
