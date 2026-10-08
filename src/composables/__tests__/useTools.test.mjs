@@ -1457,30 +1457,32 @@ async function main() {
     restore()
   }
 
-  section('40. 世代诚实:改过盘要承认其余结论是旧的(treeStale)')
+  section('40. 世代诚实:改过盘按工具记账哪些结论是旧的(staleCount)')
   {
     global.window.services.movePathsToTrash = () => ({ ok: true, moved: 1, failed: [] })
     const tSt = M.useTools()
     await tSt.load()
     await tSt.runTool('size')
-    ok(tSt.treeStale.value === false, '扫完就复位:一轮干净体检不该挂着陈旧提示')
+    await tSt.runTool('cache')
+    ok(tSt.staleCount.value === 0, '一轮跑完没有旧账:两项结论都对应现在的清单', String(tSt.staleCount.value))
     await tSt.applyFix(
       { id: 'orphans:sub', severity: 'warn', title: '未引用资源', fix: { kind: 'trash', label: '移入回收站', payload: ['scene/main.tscn'] } },
       ['scene/main.tscn'], { isWin: true })
-    ok(tSt.treeStale.value === true,
-      '修复真改了盘 → 其余工具的结论就成了旧世代的账(聚合流把它们并排显示,不说就是骗人)',
-      String(tSt.treeStale.value))
+    ok(tSt.staleCount.value === 2,
+      '改过盘 → 已有结论的两项都成了旧世代的账(不是「重扫一次就全清白」)', String(tSt.staleCount.value))
     await tSt.runTool('cache')
-    ok(tSt.treeStale.value === false, '重扫之后复位:清单又是新的了')
-    // 什么都没改成的失败不配推进世代:白扫一遍,而且提示会说谎
+    ok(tSt.staleCount.value === 1,
+      '重跑 cache 后只剩 size 是旧的 —— 这一格布尔量表达不了:旧写法把复位挂在「重扫成功」上,' +
+      '而视图修完会立刻重跑那一个工具,提示还没被看见就消失了,可 size 的结论仍然是改动之前的账',
+      String(tSt.staleCount.value))
+    // 什么都没改成的失败不配推进世代:磁盘没变,旧账数目不该涨
     global.window.services.movePathsToTrash = () => ({ ok: false, moved: 0, failed: [{ rel: 'x', error: '占用中' }] })
-    const tSt2 = M.useTools()
-    await tSt2.load()
-    await tSt2.runTool('size')
-    await tSt2.applyFix(
+    await tSt.applyFix(
       { id: 'orphans:fail', severity: 'warn', title: '未引用资源', fix: { kind: 'trash', label: '移入回收站', payload: ['scene/main.tscn'] } },
       ['scene/main.tscn'], { isWin: true })
-    ok(tSt2.treeStale.value === false, '一项都没动的失败不许置陈旧:磁盘没变,旧结论仍然算数')
+    ok(tSt.staleCount.value === 1, '磁盘没变 → 陈旧计数不涨:失败不配多出来的一条提示', String(tSt.staleCount.value))
+    tSt.select('')
+    ok(tSt.staleCount.value === 0, '换项目 → 结果表与陈旧记账一起归零', String(tSt.staleCount.value))
     restore()
   }
 

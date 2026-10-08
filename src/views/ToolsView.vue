@@ -228,7 +228,7 @@ async function onReport() {
         :progress="t.progress.value"
         :outcome="outcome"
         :last-report="t.lastReport.value"
-        :stale="t.treeStale.value"
+        :stale-count="t.staleCount.value"
         @run-all="t.runAll()"
         @report="onReport()"
       />

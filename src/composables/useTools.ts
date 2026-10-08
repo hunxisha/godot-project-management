@@ -158,11 +158,21 @@ export function useTools() {
    */
   const lastReport = ref<ReportSnapshot | null>(null)
   /**
-   * 文件清单是否已经落后于磁盘:改过盘置真,重扫成功置假。
-   * 聚合问题流把 18 项结论并排显示,而只有被重跑的那一项对应新的磁盘状态 ——
-   * 不把这件事说出来,界面就是在骗人(spec §5.1 世代不变量在版面上的那一笔延伸)。
+   * 已经对「当前这一代清单」出过结论的工具。改过盘或换项目就整份清空。
+   *
+   * 为什么不是一个布尔量:「清单新不新」与「哪些结论还对应这份清单」是两件事。
+   * 修完文件之后视图会立刻重跑**那一个**工具(§5.3),而重跑必然带一次重扫 ——
+   * 布尔量若挂在「重扫成功」上复位,提示还没被看见就消失了,可其余工具的结论仍然是
+   * 改动之前的账(spec §6 R1 要说的正是这一批)。用集合按工具记账才说得出「还剩几项是旧的」。
    */
-  const treeStale = ref(false)
+  const freshOwners = ref<Set<string>>(new Set())
+
+  /** 与当前清单不同代的结论数:摘要带陈旧提示的唯一数字来源 */
+  const staleCount = computed(() => {
+    let n = 0
+    for (const [id, r] of Object.entries(results.value)) if (r.ok && !freshOwners.value.has(id)) n++
+    return n
+  })
 
   /**
    * 宿主能力探测:方法不存在(旧宿主/未移植)就是不支持,而不是静默假成功。
@@ -295,9 +305,6 @@ export function useTools() {
       return false
     }
     error.value = ''
-    // 陈旧提示只在「清单真的重新扫成」这一处复位:TTL 命中那条路根本没刷新清单,
-    // 在那里复位等于把还挂着的那行悄悄擦掉
-    treeStale.value = false
     // ScanTreeResult 的 files/truncated 在契约里是**可选**字段(两端都可能不给),
     // 在这里归一成必填的形状,下游检查器拿到的 ctx.tree/ctx.truncated 才是诚实的。
     tree.value = r.files ?? []
@@ -422,6 +429,13 @@ export function useTools() {
       // 判据是 finding.id 的 `${toolId}:` 前缀约定(types.ts:13),不是另建一份账。
       // 失败重跑不清:什么都没变,旧回执仍然算数。
       if (res.ok) {
+        // 这一项已经对当前这一代清单跑过,从旧账里划出去
+        const nx = new Set(freshOwners.value)
+        nx.add(id)
+        freshOwners.value = nx
+        // 同时作废它的旧修复回执:挂着「已移入回收站 3 项」会让人以为刚才又动过一次盘。
+        // 判据是 finding.id 的 `${toolId}:` 前缀约定(types.ts:13),不是另建一份账。
+        // 失败重跑不清:什么都没变,旧回执仍然算数。
         const prefix = `${id}:`
         const kept: Record<string, FixOutcome> = {}
         for (const k of Object.keys(fixResults.value)) if (!k.startsWith(prefix)) kept[k] = fixResults.value[k]
@@ -477,8 +491,8 @@ export function useTools() {
     // error 同样按项目成立:扫描失败的横幅(「项目目录无法读取」)属于**上一个**项目,
     // 不清的话切到正常项目后它会一直挂着,直到下一次扫描成功才消失(Task 16 修复)。
     error.value = ''
-    // 新项目没有「旧结论」可言:陈旧提示同样归零
-    treeStale.value = false
+    // 新项目没有「旧结论」可言:结果表刚被清空,记账集合同步归零
+    freshOwners.value = new Set()
   }
 
   function registerTool(t: Tool) {
@@ -492,7 +506,9 @@ export function useTools() {
   function invalidateTree() {
     scanGen += 1
     treeAt.value = 0
-    treeStale.value = true
+    // 磁盘动了 → 已有结论全部与新一代清单不同代。这里只清记账,不在重扫时自动复原:
+    // 复原只发生在「某个工具真的对新一代清单跑过一次」那一处(见 runTool)
+    freshOwners.value = new Set()
     textCache.clear()
     // 引用索引的键含 scanGen,推进后自然取不到;显式清一次是为了不把上一个世代的引用图留在内存里
     // (修完文件的那一代索引说的正是「已经被删掉的那些文件还被引用」,这种旧图绝不能被下一个工具复用)
@@ -729,7 +745,7 @@ export function useTools() {
 
   return {
     projects, projectId, tree, truncated, running, allRunning, progress, error, results, tools, caps,
-    fixing, fixResults, lastReport, treeStale,
+    fixing, fixResults, lastReport, staleCount,
     load, select, runTool, runAll, registerTool, findingsOf, counts, applyFix,
     reportMarkdown, copyReport, loadLastReport,
     /** 修完文件/外部改过项目后调用:下一次跑强制重扫(世代号同时作废在途的那次扫描,F-1) */

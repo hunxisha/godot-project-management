@@ -22,7 +22,8 @@ const props = defineProps<{
   outcome: ToolsOutcome
   lastReport: ReportSnapshot | null
   /** 清单已落后于磁盘(刚修过文件):其余结论是旧世代的账,必须说出来(spec §6 R1) */
-  stale: boolean
+  /** 与当前清单不同代的结论数(判据在 useTools 的 freshOwners 账上):说得出「还剩几项是旧的」 */
+  staleCount: number
   /** 报告弹层在 Task 14 才接线;默认关,免得先摆一个点了没反应的按钮 */
   canOpenReport?: boolean
 }>()
@@ -68,16 +69,12 @@ const lastText = computed(() => {
 const lastCounts = computed(() => props.lastReport?.counts || null)
 
 /**
- * 陈旧句里的条数 = 已有结论的全部项数。
- * 理由是复位时机:任何一次 runTool 都会强制重扫并把 treeStale 归假，所以陈旧提示为真的
- * 那段时间里**一个工具都还没重跑**，不存在「除了刚重跑的那项」这种算法。
- * 也不看 total - ran：修完文件后 ran 并不减少（18 项仍各有结论），那样会说出「其余 0 项」。
+ * 陈旧句里的条数直接取 staleCount:它是「已有结论但没对新一代清单重跑过」的工具数。
+ * 布尔量在这里会说两种谎:修完文件后视图立刻重跑那一个工具,而重跑必然带一次重扫 ——
+ * 挂在「重扫成功」上复位的话,提示还没被看见就消失了,可其余工具的结论仍然是旧账;
+ * 反过来挂在不复位上,又会把「全部重跑完」那种清白状态也说成陈旧。
  */
-const staleText = computed(() =>
-  props.ran > 0
-    ? `文件清单已更新，这 ${props.ran} 项结论来自改动之前的扫描`
-    : '文件清单已更新，跑一次体检让结论跟上新状态'
-)
+const staleText = computed(() => `文件已改动，另外 ${props.staleCount} 项结论仍是之前的扫描结果`)
 </script>
 
 <template>
@@ -94,7 +91,7 @@ const staleText = computed(() =>
 
     <div class="right">
       <!-- 陈旧提示只在这里说(全页唯一出口):它一出现就说明下面那条流混着两代结论 -->
-      <span v-if="stale" class="stale">
+      <span v-if="staleCount" class="stale">
         <Icon name="alert" :size="12" /> {{ staleText }}
       </span>
       <span v-else-if="progress" class="prog">{{ progress }}</span>
@@ -117,7 +114,7 @@ const staleText = computed(() =>
       </button>
       <button class="btn small primary" :disabled="running || !hasProject" @click="emit('run-all')">
         <span v-if="running" class="spin"></span>
-        {{ running ? '体检中…' : stale || ran < total ? '重新全量体检' : '一键全量体检' }}
+        {{ running ? '体检中…' : staleCount || ran < total ? '重新全量体检' : '一键全量体检' }}
       </button>
     </div>
   </div>
