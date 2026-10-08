@@ -1401,6 +1401,61 @@ async function main() {
     ok(stored.tools === M.TOOLS.length, '工具条数与注册表同源', stored.tools)
     restore()
   }
+
+  section('39. 上次体检快照:写侧补 counts,读侧按项目认门')
+  {
+    global.window.services.scanProjectTree = BASE_SCAN
+    global.window.services.readProjectText = BASE_READ
+    putLog.length = 0
+    const t39 = M.useTools()
+    await t39.load()
+    await t39.runTool('size')
+    await t39.copyReport()
+    const doc = putLog.find((d) => d._id === 'godot/tools-report/p1')
+    ok(!!doc && !!doc.counts && typeof doc.counts.error === 'number' && typeof doc.counts.fixable === 'number',
+      '快照补分档计数:摘要带要说「错误 2 / 警告 11」,而原来只存了三档之和', JSON.stringify(doc && doc.counts))
+    ok(!!doc && !!doc.counts && doc.findings === doc.counts.error + doc.counts.warn + doc.counts.info,
+      '总数与三档必须自洽,不一致就是写错了账', JSON.stringify(doc && [doc.findings, doc.counts]))
+
+    putLog.length = 0
+    const wrote0 = 0
+    const t39r = M.useTools()
+    await t39r.load()
+    ok(t39r.lastReport.value === null, '没读之前是 null,不是 undefined 也不是假对象')
+    putLog.push({ _id: 'godot/tools-report/p1', markdown: '# 上次的', projectId: 'godot/project/p1',
+      projectName: 'Demo', generatedAt: 1234, tools: 18, findings: 3, counts: { error: 1, warn: 2, info: 0, fixable: 1 } })
+    await t39r.loadLastReport()
+    ok(!!t39r.lastReport.value && t39r.lastReport.value.counts.error === 1 && t39r.lastReport.value.generatedAt === 1234,
+      '把上次那份读回来(零新原语:走 bridge 现成的 getDoc)', JSON.stringify(t39r.lastReport.value && t39r.lastReport.value.counts))
+    ok(putLog.length === 1, '读快照不许再写库:每次进页面都覆盖上一次结果,等于根本没有历史', String(putLog.length - wrote0))
+
+    putLog.length = 0
+    putLog.push({ _id: 'godot/tools-report/p1', markdown: '# 别的项目', projectId: 'godot/project/OTHER',
+      projectName: 'Other', generatedAt: 1, tools: 18, findings: 9 })
+    const t39x = M.useTools()
+    await t39x.load()
+    await t39x.loadLastReport()
+    ok(t39x.lastReport.value === null,
+      '按 projectId 认门:尾 id 撞车时宁可不显示,也不把别的项目的结果当本项目的(跨项目串树同一条红线)',
+      JSON.stringify(t39x.lastReport.value))
+
+    putLog.length = 0
+    putLog.push({ _id: 'godot/tools-report/p1', markdown: '# 旧', projectId: 'godot/project/p1',
+      projectName: 'Demo', generatedAt: 1, tools: 18, findings: 7 })
+    const t39o = M.useTools()
+    await t39o.load()
+    await t39o.loadLastReport()
+    ok(t39o.lastReport.value.findings === 7 && t39o.lastReport.value.counts === undefined,
+      '缺 counts 的老快照原样读回,视图按「共 7 条」降级而不是把缺字段当 0', JSON.stringify(t39o.lastReport.value.counts))
+
+    const t39s = M.useTools()
+    await t39s.load()
+    await t39s.loadLastReport()
+    ok(!!t39s.lastReport.value, '前置:当前项目读到了快照')
+    t39s.select('')
+    ok(t39s.lastReport.value === null, '切项目 = 快照跟着作废(与 results / error 同一口径,理由见 select 的注释)')
+    restore()
+  }
 }
 main().then(() => {
   console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)

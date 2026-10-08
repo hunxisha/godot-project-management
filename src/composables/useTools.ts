@@ -12,7 +12,7 @@
 // 红线:这是渲染层组合式函数,只用 vue 的 ref/computed,不碰 DOM;能力一律走
 // window.services 契约(两端 JS 宿主与 Tauri 宿主同一份签名)。
 import { computed, ref } from 'vue'
-import { copyText, isWindows, listDocs, notify, putDoc } from '../services/bridge'
+import { copyText, getDoc, isWindows, listDocs, notify, putDoc } from '../services/bridge'
 import type { GodotProject, ScanTreeResult, TreeEntry } from '../types/godot'
 import type { Capability, Finding, Tool, ToolContext, ToolResult } from '../tools/types'
 import { buildToolReport, type ReportMeta } from '../tools/report'
@@ -83,6 +83,21 @@ export interface FixOutcome {
   at: number
 }
 
+/**
+ * 每项目一条的体检快照(godot/tools-report/<尾id>)。
+ * `counts` 是 2026-10-08 重设计时补的字段 —— 此前只存三档之和,摘要带说不出「错误 2 / 警告 11」。
+ * **老快照缺这个字段**,读侧一律按可选处理,不许当 0(把「不知道」说成「没有」是另一种骗)。
+ */
+export interface ReportSnapshot {
+  markdown: string
+  projectId: string
+  projectName: string
+  generatedAt: number
+  tools: number
+  findings: number
+  counts?: { error: number; warn: number; info: number; fixable: number }
+}
+
 /** 失败项的一行汇总:`rel:原语原话`,多项用分号隔开 */
 function failedText(failed: { rel: string; error: string }[]): string {
   return failed.map((x) => `${x.rel}:${x.error}`).join(';')
@@ -119,6 +134,11 @@ export function useTools() {
   const fixing = ref('')
   /** 按 finding id 记账的修复回执:结论面板要回显「已移入回收站 3 项 / 1 项失败」并据此重跑检查器 */
   const fixResults = ref<Record<string, FixOutcome>>({})
+  /**
+   * 上一次体检的快照。首屏不许全零,靠的是这份而不是自动跑体检 ——
+   * 待确认 #1 至今没有 10 万文件的扫描耗时实测,进页面就扫一次树是拿未验证的成本换便利。
+   */
+  const lastReport = ref<ReportSnapshot | null>(null)
 
   /**
    * 宿主能力探测:方法不存在(旧宿主/未移植)就是不支持,而不是静默假成功。
@@ -412,6 +432,7 @@ export function useTools() {
     truncated.value = false
     results.value = {}
     fixResults.value = {}
+    lastReport.value = null
     textCache.clear()
     refCache = null // 引用索引同样按项目成立(B10a):scanGen 已经推进,键不会再命中,这里连内存一起还
     // error 同样按项目成立:扫描失败的横幅(「项目目录无法读取」)属于**上一个**项目,
@@ -641,7 +662,9 @@ export function useTools() {
         projectName: meta.projectName,
         generatedAt: meta.generatedAt,
         tools: tools.value.length,
-        findings: counts.value.error + counts.value.warn + counts.value.info
+        findings: counts.value.error + counts.value.warn + counts.value.info,
+        // 摘要带要说分档数字。直接取现成的 counts(它的 fixable 已是 planFix 口径),不另算一套
+        counts: { ...counts.value }
       })
     }
     const copied = copyText(md)
@@ -649,11 +672,24 @@ export function useTools() {
     return copied
   }
 
+  /**
+   * 读回上一次体检的快照(只读不写:覆盖写只在 copyReport,那里才是「本轮结果」的记账点)。
+   * 按 projectId 认门:尾 id 撞车时宁可不显示,也不把别的项目的结果当本项目的
+   * —— 与「一份 tree 只属于发起它的那个项目」(审查 F-1)同一条红线。
+   */
+  async function loadLastReport(): Promise<void> {
+    const p = selected()
+    const tail = projectId.value.split('/').pop()
+    if (!p || !tail) { lastReport.value = null; return }
+    const doc = await getDoc<ReportSnapshot>(`godot/tools-report/${tail}`)
+    lastReport.value = doc && doc.projectId === p._id ? doc : null
+  }
+
   return {
     projects, projectId, tree, truncated, running, allRunning, progress, error, results, tools, caps,
-    fixing, fixResults,
+    fixing, fixResults, lastReport,
     load, select, runTool, runAll, registerTool, findingsOf, counts, applyFix,
-    reportMarkdown, copyReport,
+    reportMarkdown, copyReport, loadLastReport,
     /** 修完文件/外部改过项目后调用:下一次跑强制重扫(世代号同时作废在途的那次扫描,F-1) */
     invalidateTree
   }
