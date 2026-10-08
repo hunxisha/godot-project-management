@@ -5,6 +5,9 @@ import { CATEGORIES } from './registry'
 import { planFix } from './fixPlan'
 import type { AggFinding, AggGroup, Severity, Tool, ToolResult } from './types'
 
+/** 本模块的输入输出类型住在 types.ts(与 Finding/ToolResult 同层),这里转出统一的取用面 */
+export type { AggFinding, AggGroup } from './types'
+
 /** 严重度从重到轻的档位;组的排序、组内的排序、陈旧判定都只看这一个表 */
 export const SEV_RANK: Record<Severity, number> = { error: 0, warn: 1, info: 2 }
 
