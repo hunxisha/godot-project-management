@@ -95,9 +95,29 @@ export function filterGroups(groups: AggGroup[], sel: FilterSel): AggGroup[] {
       return true
     })
     if (!items.length) continue
-    out.push({ ...g, items, counts: countsOf(items) })
+    out.push(regroup(g, items))
   }
   return out
+}
+
+/**
+ * 单工具模式:把聚合结果裁成「只有那一项」的组。
+ * 住在纯函数层而不是视图里 —— 视图一旦把组压平再自己筛,组头计数与「展开其余 N 条」
+ * 就得重算第二遍,而这两处数字与聚合模式必须同源,否则同一批数据两处对不上账。
+ */
+export function filterToTool(groups: AggGroup[], toolId: string): AggGroup[] {
+  const out: AggGroup[] = []
+  for (const g of groups) {
+    const items = g.items.filter((it) => it.toolId === toolId)
+    if (!items.length) continue
+    out.push(regroup(g, items))
+  }
+  return out
+}
+
+/** 换掉一组的成员时,计数只有这一种重算方式(筛选与裁剪两条路共用,防止两处数字各自漂移) */
+function regroup(g: AggGroup, items: AggFinding[]): AggGroup {
+  return { ...g, items, counts: countsOf(items) }
 }
 
 /** 分档计数只有一个算法:聚合、筛选、裁剪三条路都走它,否则三处数字会各自漂移 */

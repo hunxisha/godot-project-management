@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 左栏的一行:只显示状态,不显示动作。
-// 旧版每张卡两个按钮(ToolCard.vue:56-73),18 张卡就是 36 个按钮;双栏后动作收在右栏头部,
+// 旧版的卡片(已删的 ToolCard.vue:56-73)每张两个按钮,18 张卡就是 36 个按钮;双栏后动作收在右栏头部,
 // 这一行只回答「这项跑过没有、出了几条」。
 import { computed } from 'vue'
 import type { Tool, ToolResult } from '../../tools/types'

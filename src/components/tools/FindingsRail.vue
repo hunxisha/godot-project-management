@@ -34,7 +34,7 @@ const shown = computed(() => view.value.reduce((n, g) => n + g.items.length, 0))
 const isTool = computed(() => props.toolName !== '')
 
 /**
- * 组内渲染上限。旧版 FindingList.vue:53 直接 v-for 全量,单个工具出几百条就整页卡。
+ * 组内渲染上限。旧版结论列表(已删的 FindingList.vue:53)直接 v-for 全量,单个工具出几百条就整页卡。
  * 只裁画出来的行:组头计数与「其余 N 条」都按完整 items 算,预览的账必须还是完整的账。
  */
 const CAP = 50
@@ -112,7 +112,7 @@ function setSev(sev: FilterSel['sev']) {
         </span>
       </h4>
       <!-- key 带组内序号:Finding.id 只由证据推导,同一文件里两行字节相同的声明会算出同一个 id,
-           纯 :key 会让 Vue 报重复 key 并错误复用 DOM(旧版 FindingList.vue:49-52 的教训) -->
+           纯 :key 会让 Vue 报重复 key 并错误复用 DOM(旧版结论列表里踩过的坑) -->
       <FindingRow
         v-for="(it, i) in visibleOf(g)"
         :key="`${it.finding.id}#${g.category}${i}`"

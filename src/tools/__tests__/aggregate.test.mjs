@@ -125,6 +125,25 @@ const before5 = JSON.stringify(all5)
 T.filterGroups(all5, { sev: 'error', fixableOnly: true, query: 'main' })
 ok(JSON.stringify(all5) === before5, '不改入参:聚合结果原样不动(视图会在渲染期反复调它)')
 
+section('6. filterToTool:单工具模式仍按组返回')
+const t6 = [mkTool('brokenRefs', 'refs'), mkTool('ini', 'config'), mkTool('size', 'weight')]
+const r6 = {
+  brokenRefs: mkResult('brokenRefs', [f('brokenRefs', 'a', 'warn'), f('brokenRefs', 'b', 'info')]),
+  ini: mkResult('ini', [f('ini', 'c', 'error')]),
+  size: mkResult('size', [])
+}
+const g6 = T.aggregate(t6, r6, true)
+const only = T.filterToTool(g6, 'brokenRefs')
+ok(only.length === 1 && only[0].category === 'refs' && only[0].items.length === 2,
+  '只留那一个工具的组,组内条数与顺序不变', JSON.stringify(only.map((x) => [x.category, x.items.length])))
+ok(only[0].counts.error === 0 && only[0].counts.warn === 1 && only[0].counts.info === 1,
+  'counts 跟着重算:组头数字必须与屏上行数对得上(与 filterGroups 同一条规矩)', JSON.stringify(only[0].counts))
+ok(T.filterToTool(g6, 'size').length === 0, '那一项零结论 → 空数组,不留空组')
+ok(T.filterToTool(g6, '不存在的工具').length === 0, '认不出的 toolId 回空数组而不是抛')
+const before6 = JSON.stringify(g6)
+T.filterToTool(g6, 'ini')
+ok(JSON.stringify(g6) === before6, '不改入参:原 groups 逐字节不变(视图会在渲染期反复调它)')
+
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) { console.log('失败项:'); for (const m of failures) console.log('  - ' + m); process.exit(1) }
 console.log('全部通过')

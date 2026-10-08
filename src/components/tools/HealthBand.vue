@@ -4,7 +4,7 @@
 // 不新增第二条 verdict 判据(五态早就存在并被六条断言钉住)。
 // 上次体检的结果来自快照(godot/tools-report/<尾id>),不是自动跑体检:
 // 待确认 #1 没有大项目的扫描耗时实测,进页面就扫一次树是拿未验证的成本换便利。
-import { computed, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import Icon from '../Icon.vue'
 import type { ToolsOutcome } from '../../tools/outcome'
 import type { ReportSnapshot } from '../../composables/useTools'
@@ -42,22 +42,17 @@ const VERDICT: Record<ToolsOutcome['kind'], { text: string; cls: string }> = {
 const verdict = computed(() => VERDICT[props.outcome.kind])
 
 // 相对时间要真的「相对」:computed 只在依赖变化时重算,不 tick 的话页面开着不动
-// 一小时,「3 分钟前」会一直挂着变成谎话。ToolsView 现在进 KeepAlive,所以失活时要停表。
+// 一小时,「3 分钟前」会一直挂着变成谎话。这一页每次进入都重新挂载(不在 KeepAlive 里,
+// 见 §D #12),所以 onMounted/onUnmounted 就足够,定时器不会漏在页外空转。
 const now = ref(Date.now())
 let timer: number | null = null
-function startTick() {
-  if (timer === null) timer = window.setInterval(() => (now.value = Date.now()), 60000)
-}
-function stopTick() {
-  if (timer !== null) {
-    clearInterval(timer)
-    timer = null
-  }
-}
-onMounted(startTick)
-onUnmounted(stopTick)
-onActivated(startTick)
-onDeactivated(stopTick)
+onMounted(() => {
+  timer = window.setInterval(() => (now.value = Date.now()), 60000)
+})
+onUnmounted(() => {
+  if (timer !== null) clearInterval(timer)
+  timer = null
+})
 
 /** 直说「多久之前」:摘要带要回答的是「旧不旧」,不是「几点」 */
 const lastText = computed(() => {

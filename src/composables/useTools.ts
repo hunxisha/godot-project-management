@@ -52,7 +52,7 @@ function scanErrorText(raw?: string): string {
 
 /**
  * 一次修复的回执:成败、动了什么、哪几项失败、备份去哪了,全部在这里定好,
- * FindingList / FixConfirmDialog 只渲染字段,不再自己判「这算不算成功」。
+ * 结论列表与 FixConfirmDialog 只渲染字段,不再自己判「这算不算成功」。
  * message 里的失败原因是**原语原话**(inspectfs.js 的中文错误串),不重译、不改写。
  */
 export interface FixOutcome {
@@ -636,7 +636,7 @@ export function useTools() {
         c[f.severity] += 1
         // 「可修复」的口径必须是 planFix 自己的判定,而不是 fix.kind !== 'none':
         // kind 为 existing 的结论是一次跳转、payload 认不出或缺新内容的结论执行不了,
-        // 把它们数进去就等于 SummaryBar 报「可修复 5」而面板上只有 1 个按钮点得动。
+        // 把它们数进去就等于摘要带报「可修复 5」而面板上只有 1 个按钮点得动。
         // tree 传空数组有两个理由:可执行性本来就与清单无关(fixPlan 的 Important 3 约束,
         // 否则这条计数会随清单新鲜度漂移),而 planFix 里那趟 O(tree) 的体积建表若为每条结论
         // 重做一遍,10 万文件的项目会把一个 computed 变成 findings × tree 的二次方。

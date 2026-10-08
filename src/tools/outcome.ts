@@ -15,7 +15,7 @@ export type ToolsOutcomeKind = 'idle' | 'running' | 'failed' | 'allClean' | 'par
 
 export interface ToolsOutcome {
   kind: ToolsOutcomeKind
-  /** SummaryBar 的「体检完成 · 未发现问题」显隐 —— 这条线唯一的生产判据 */
+  /** 摘要带的「体检完成 · 未发现问题」显隐 —— 这条线唯一的生产判据 */
   showAllClean: boolean
   /** 扫描失败横幅文案(R-C 归一口径,由 useTools 产出;空串 = 无扫描层失败) */
   error: string

@@ -294,7 +294,12 @@ function gotoCreateBackup(id: string) {
   <div class="app">
     <TabBar :model-value="tab" @update:model-value="onTabBar" />
     <main class="content">
-      <!-- 仅缓存市场页:切走再切回保留浏览状态(模式/标签/页码/数据),直到插件重启 -->
+      <!-- 仅缓存市场页:切走再切回保留浏览状态(模式/标签/页码/数据),直到插件重启。
+           工具页试过加进 include(字符串与数组两种写法、并给组件补了 defineOptions name),
+           实测不生效:dev-mock 里切页回来后 .rail 与 .pick select 的元素身份都是新的,
+           而 select 的 value 前后一致(排除了「change 事件把结论清空」这条路);
+           同一次实验里市场页的元素身份是保留的。根因未定,记 docs/tools-ui-redesign-plan.md §D #12。
+           在根因清楚之前,不把无效配置留在模板里。 -->
       <KeepAlive include="MarketplaceView">
         <Dashboard v-if="tab === 'dashboard'" @navigate="tab = $event" @create="gotoCreate" />
         <ProjectsView
