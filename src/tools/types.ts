@@ -7,6 +7,9 @@ export type Severity = 'error' | 'warn' | 'info'
 /** 工具声明它需要什么宿主能力;缺失时卡片显示「当前宿主不支持」 */
 export type Capability = 'tree' | 'text' | 'write' | 'trash' | 'hash'
 
+/** 阅读分组(与执行顺序无关):聚合问题流按它分组 */
+export type Category = 'refs' | 'config' | 'assets' | 'weight' | 'repo' | 'style'
+
 export type FixKind = 'none' | 'trash' | 'rewrite' | 'existing'
 
 export interface Finding {
@@ -69,6 +72,8 @@ export interface Tool {
   /** 卡片上的一句话 */
   summary: string
   phase: 'P0' | 'P1' | 'P2'
+  /** 聚合流的分组归属;数组顺序仍是执行顺序,两者刻意分开 */
+  category: Category
   needs: Capability[]
   run(ctx: ToolContext): Promise<Finding[]>
 }

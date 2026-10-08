@@ -23,7 +23,7 @@ import { TOOLS as BASE_TOOLS, isSupported, toolById } from '../tools/registry'
 
 // 注册表跟着本模块一起导出:视图只要 useTools 这一处,就能同时拿到「有哪些工具」和「怎么跑」。
 // (不要改去 import `../tools/index.ts` —— 那个 barrel 只为渲染层测试存在,会把无关模块拖进 chunk。)
-export { TOOLS, isSupported, toolById } from '../tools/registry'
+export { TOOLS, CATEGORIES, isSupported, toolById } from '../tools/registry'
 
 /** 超过它就重扫;修完文件要手动 invalidate */
 const TREE_TTL = 60000

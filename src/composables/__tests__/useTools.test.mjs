@@ -237,6 +237,20 @@ async function main() {
     M.TOOLS.map((x) => x.id).join('>'))
   ok(['size', 'cache', 'brokenRefs'].every((a) => WRITE_LAST.every((b) => idx(a) < idx(b))),
     'P0a 的三条只读工具同样排在动盘三条之前', M.TOOLS.map((x) => x.id).join('>'))
+  // 类别元数据:阅读分组(CATEGORIES)与执行顺序(TOOLS 数组)是两个正交概念。
+  // 不重复写顺序断言 —— 上面 :212-239 已经钉住数组顺序,再写一条同义断言只是噪音。
+  const CAT_IDS = ['refs', 'config', 'assets', 'weight', 'repo', 'style']
+  ok(Array.isArray(M.CATEGORIES) && M.CATEGORIES.length === CAT_IDS.length,
+    'CATEGORIES 六项且顺序即阅读分组顺序', JSON.stringify((M.CATEGORIES || []).map((c) => c.id)))
+  ok((M.CATEGORIES || []).every((c) => CAT_IDS.includes(c.id) && c.label && c.icon),
+    '每个类别都有 id/显示名/图标', JSON.stringify(M.CATEGORIES))
+  ok(M.TOOLS.every((t) => typeof t.category === 'string' && CAT_IDS.includes(t.category)),
+    '18 项工具全部登记了合法 category', JSON.stringify(M.TOOLS.map((t) => [t.id, t.category])))
+  const byCat = {}
+  for (const t of M.TOOLS) byCat[t.category] = (byCat[t.category] || 0) + 1
+  ok(M.TOOLS.length === 18 && CAT_IDS.every((c) => (byCat[c] || 0) >= 2),
+    '每类 ≥2 项,没有孤零零的单项分组', JSON.stringify(byCat))
+
   // 卡面(name/summary 是用户唯一看到的两个字面)不许出现实现术语
   const JARGON = /rewrite|聚合卡|payload|service|needs|\bctx\b|LRU|引用索引/
   ok(M.TOOLS.every((x) => !JARGON.test(x.name) && !JARGON.test(x.summary)),
