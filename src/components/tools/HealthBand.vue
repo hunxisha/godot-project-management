@@ -31,6 +31,7 @@ const emit = defineEmits<{
   (e: 'run-all'): void
   (e: 'report'): void
   (e: 'last-report'): void
+  (e: 'report-now'): void
 }>()
 
 const VERDICT: Record<ToolsOutcome['kind'], { text: string; cls: string }> = {
@@ -104,6 +105,9 @@ const staleText = computed(() => `文件已改动，另外 ${props.staleCount} �
         <span v-else class="c meta">共 {{ lastReport.findings }} 条</span>
         <button v-if="canOpenReport" class="btn small ghost" @click="emit('last-report')">看上次报告</button>
       </template>
+      <button v-if="canOpenReport" class="btn small ghost" title="在看板里读一遍本轮结果,不用去别处粘" @click="emit('report-now')">
+        看本轮报告
+      </button>
       <button
         class="btn small"
         :disabled="running || !hasProject"

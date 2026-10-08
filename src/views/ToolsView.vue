@@ -17,11 +17,12 @@ import HealthBand from '../components/tools/HealthBand.vue'
 import ToolRail from '../components/tools/ToolRail.vue'
 import FindingsRail from '../components/tools/FindingsRail.vue'
 import FixConfirmDialog from '../components/tools/FixConfirmDialog.vue'
+import ReportDialog from '../components/tools/ReportDialog.vue'
 import { isSupported } from '../tools/registry'
 import { aggregate, filterToTool, type AggFinding, type FilterSel } from '../tools/aggregate'
 import { outcomeOf } from '../tools/outcome'
 import { planFix, type FixPlan } from '../tools/fixPlan'
-import { isWindows } from '../services/bridge'
+import { copyText, isWindows, notify } from '../services/bridge'
 import { useToolsShared } from '../composables/useTools'
 import type { Finding } from '../tools/types'
 import type { FixOutcome } from '../composables/useTools'
@@ -46,6 +47,14 @@ onMounted(() => {
   void t.load()
   void t.loadLastReport()
 })
+
+/** 报告预览弹层:看的是本轮(现算)还是上次(读快照原文) */
+const reportOpen = ref(false)
+const reportView = ref<'current' | 'last'>('current')
+const reportTitle = computed(() => (reportView.value === 'last' ? '上次体检报告' : '本轮体检报告'))
+const reportText = computed(() =>
+  reportView.value === 'last' ? t.lastReport.value?.markdown || '' : t.reportMarkdown()
+)
 
 /** 换项目:结论、清单、快照都是按项目成立的,右栏回到聚合流,筛选保留(那是用户的偏好) */
 watch(
@@ -181,6 +190,20 @@ async function onReport() {
   await t.copyReport()
   await t.loadLastReport()
 }
+
+/**
+ * 弹层里的「复制」复制的是**屏幕上那一份**。
+ * 不看这条就会说错话:预览上次报告时直接调 copyReport(),粘出去的却是本轮现算的内容,
+ * 而用户以为拿到的是他刚读完的那份。current 模式仍走 onReport(它顺带刷新快照)。
+ */
+function copyShownReport() {
+  if (reportView.value === 'current') {
+    void onReport()
+    return
+  }
+  const md = t.lastReport.value?.markdown || ''
+  notify(copyText(md) ? '上次报告已复制到剪贴板' : '复制失败:内容没变,可重试')
+}
 </script>
 
 <template>
@@ -229,8 +252,11 @@ async function onReport() {
         :outcome="outcome"
         :last-report="t.lastReport.value"
         :stale-count="t.staleCount.value"
+        :can-open-report="true"
         @run-all="t.runAll()"
         @report="onReport()"
+        @last-report="reportView = 'last'; reportOpen = true"
+        @report-now="reportView = 'current'; reportOpen = true"
       />
 
       <!-- 扫描失败只上浮这一条口径(检查器不各出一行),所以错误横幅是唯一的失败出口;
@@ -276,6 +302,15 @@ async function onReport() {
         :outcome="fixOutcome"
         @confirm="runFix"
         @close="closeFix"
+      />
+
+      <!-- 报告预览:reportMarkdown() 自 #19 起有导出没调用点,这里才是「先看一眼」那条路 -->
+      <ReportDialog
+        :open="reportOpen"
+        :markdown="reportText"
+        :title="reportTitle"
+        @close="reportOpen = false"
+        @copy="copyShownReport()"
       />
     </template>
   </div>
