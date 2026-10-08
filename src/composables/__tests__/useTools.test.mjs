@@ -1456,6 +1456,73 @@ async function main() {
     ok(t39s.lastReport.value === null, '切项目 = 快照跟着作废(与 results / error 同一口径,理由见 select 的注释)')
     restore()
   }
+
+  section('40. 世代诚实:改过盘要承认其余结论是旧的(treeStale)')
+  {
+    global.window.services.movePathsToTrash = () => ({ ok: true, moved: 1, failed: [] })
+    const tSt = M.useTools()
+    await tSt.load()
+    await tSt.runTool('size')
+    ok(tSt.treeStale.value === false, '扫完就复位:一轮干净体检不该挂着陈旧提示')
+    await tSt.applyFix(
+      { id: 'orphans:sub', severity: 'warn', title: '未引用资源', fix: { kind: 'trash', label: '移入回收站', payload: ['scene/main.tscn'] } },
+      ['scene/main.tscn'], { isWin: true })
+    ok(tSt.treeStale.value === true,
+      '修复真改了盘 → 其余工具的结论就成了旧世代的账(聚合流把它们并排显示,不说就是骗人)',
+      String(tSt.treeStale.value))
+    await tSt.runTool('cache')
+    ok(tSt.treeStale.value === false, '重扫之后复位:清单又是新的了')
+    // 什么都没改成的失败不配推进世代:白扫一遍,而且提示会说谎
+    global.window.services.movePathsToTrash = () => ({ ok: false, moved: 0, failed: [{ rel: 'x', error: '占用中' }] })
+    const tSt2 = M.useTools()
+    await tSt2.load()
+    await tSt2.runTool('size')
+    await tSt2.applyFix(
+      { id: 'orphans:fail', severity: 'warn', title: '未引用资源', fix: { kind: 'trash', label: '移入回收站', payload: ['scene/main.tscn'] } },
+      ['scene/main.tscn'], { isWin: true })
+    ok(tSt2.treeStale.value === false, '一项都没动的失败不许置陈旧:磁盘没变,旧结论仍然算数')
+    restore()
+  }
+
+  section('41. 重跑一个工具只清它自己的旧回执')
+  {
+    global.window.services.movePathsToTrash = () => ({ ok: true, moved: 1, failed: [] })
+    const tRc = M.useTools()
+    await tRc.load()
+    await tRc.runTool('size')
+    await tRc.applyFix(
+      { id: 'uid:r1', severity: 'warn', title: '孤儿 .uid', fix: { kind: 'trash', label: '移入回收站', payload: ['scene/main.tscn'] } },
+      ['scene/main.tscn'], { isWin: true })
+    await tRc.applyFix(
+      { id: 'orphans:r2', severity: 'warn', title: '未引用资源', fix: { kind: 'trash', label: '移入回收站', payload: ['scene/main.tscn'] } },
+      ['scene/main.tscn'], { isWin: true })
+    ok(!!tRc.fixResults.value['uid:r1'] && !!tRc.fixResults.value['orphans:r2'],
+      '两个工具各有一笔账,才有资格谈「只清谁」', JSON.stringify(Object.keys(tRc.fixResults.value)))
+    await tRc.runTool('uid')
+    ok(tRc.fixResults.value['uid:r1'] === undefined && !!tRc.fixResults.value['orphans:r2'],
+      '重跑 uid 只清 uid 那一批:挂着「已移入回收站 1 项」像是刚刚又动过一次盘,而 orphans 的账没被这次重跑否定',
+      JSON.stringify(Object.keys(tRc.fixResults.value)))
+    restore()
+  }
+
+  section('42. toolId 是修复后重跑的唯一依据')
+  {
+    global.window.services.movePathsToTrash = () => ({ ok: true, moved: 1, failed: [] })
+    const tId = M.useTools()
+    await tId.load()
+    await tId.runTool('size')
+    const oId = await tId.applyFix(
+      { id: 'imports:k', severity: 'warn', title: '失效边车', fix: { kind: 'trash', label: '移入回收站', payload: ['scene/main.tscn'] } },
+      ['scene/main.tscn'], { isWin: true })
+    ok(oId.toolId === 'imports',
+      '回执带 toolId(从 finding.id 前缀反推):聚合视图里没有「当前展开的工具」可记', oId.toolId)
+    const oBad = await tId.applyFix(
+      { id: 'no-colon-id', severity: 'warn', title: '异常 id', fix: { kind: 'trash', label: '移入回收站', payload: ['scene/main.tscn'] } },
+      ['scene/main.tscn'], { isWin: true })
+    ok(oBad.toolId === '',
+      'id 不含冒号时 toolId 是空串:视图据此不重跑,而不是去猜一个工具跑', JSON.stringify(oBad.toolId))
+    restore()
+  }
 }
 main().then(() => {
   console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
