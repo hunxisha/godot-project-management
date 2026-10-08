@@ -1523,6 +1523,21 @@ async function main() {
       'id 不含冒号时 toolId 是空串:视图据此不重跑,而不是去猜一个工具跑', JSON.stringify(oBad.toolId))
     restore()
   }
+  section('43. useToolsShared:视图拿同一份状态,工厂仍每次新建')
+  {
+    const a1 = M.useToolsShared()
+    const a2 = M.useToolsShared()
+    ok(a1 === a2, '两次调用返回同一个实例(切页重挂载不丢结论的根据)')
+    ok(a1 !== M.useTools(), '工厂本身仍是每次新建:本文件 30+ 处 const t = M.useTools() 的实例隔离不许被牵连')
+    await a1.load()
+    await a1.runTool('size')
+    ok(Object.keys(M.useToolsShared().results.value).length > 0,
+      '跑过的结论留在共享实例上 —— 下一个挂载视图看到的还是这一轮',
+      JSON.stringify(Object.keys(M.useToolsShared().results.value)))
+    const fresh = M.useTools()
+    ok(Object.keys(fresh.results.value).length === 0,
+      '新建的工厂实例不读共享那份(测试隔离与「按需另开一份」都还成立)', JSON.stringify(Object.keys(fresh.results.value)))
+  }
 }
 main().then(() => {
   console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)

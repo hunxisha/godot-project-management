@@ -25,6 +25,24 @@ import { TOOLS as BASE_TOOLS, isSupported, toolById } from '../tools/registry'
 // (不要改去 import `../tools/index.ts` —— 那个 barrel 只为渲染层测试存在,会把无关模块拖进 chunk。)
 export { TOOLS, CATEGORIES, isSupported, toolById } from '../tools/registry'
 
+/** useTools() 的对外状态面;共享入口复用同一个类型,不另立形状 */
+export type ToolsApi = ReturnType<typeof useTools>
+
+/**
+ * 视图专用:整应用共享一份工具页状态。
+ * 为什么需要它:App.vue 的 KeepAlive 实测不缓存这一页(证据与三次尝试见
+ * docs/tools-ui-redesign-plan.md §D #12),切页回来就是新挂载,而新挂载 = 新 useTools()
+ * = 18 项结论与文件清单全丢,用户每回来都得手动重跑一遍。
+ * 工厂 useTools() 一行不改:本文件里 30+ 处 `const t = M.useTools()` 依赖实例互相隔离,
+ * 把默认行为改成共享会整体动摇那批断言,第三方宿主也再拿不到独立的一份。
+ */
+let shared: ToolsApi | null = null
+
+export function useToolsShared(): ToolsApi {
+  if (!shared) shared = useTools()
+  return shared
+}
+
 /** 超过它就重扫;修完文件要手动 invalidate */
 const TREE_TTL = 60000
 /** 文本读取的 LRU 上限:一次全量体检最多驻留这么多文件的内容 */

@@ -22,13 +22,15 @@ import { aggregate, filterToTool, type AggFinding, type FilterSel } from '../too
 import { outcomeOf } from '../tools/outcome'
 import { planFix, type FixPlan } from '../tools/fixPlan'
 import { isWindows } from '../services/bridge'
-import { useTools } from '../composables/useTools'
+import { useToolsShared } from '../composables/useTools'
 import type { Finding } from '../tools/types'
 import type { FixOutcome } from '../composables/useTools'
 
 const emit = defineEmits<{ (e: 'navigate', tab: string): void }>()
 
-const t = useTools()
+// 状态是模块级共享的一份(App.vue 的 KeepAlive 实测不缓存这一页,见 §D #12):
+// 切页回来虽然重新挂载,但结论与文件清单还在,不用重跑一遍。
+const t = useToolsShared()
 /** 右栏在看什么:'all' = 聚合问题流,其余是 toolId。取代旧版那个只能单值收起的 open */
 const selection = ref('all')
 const sel = ref<FilterSel>({ sev: 'all', fixableOnly: false, query: '' })
