@@ -169,6 +169,16 @@ function copySignature(text: string, kind: string, symbol: string) {
   notify(ok ? '已复制签名与文档链接' : '复制失败,请手动选中复制')
 }
 
+/**
+ * 收藏/取消:失败要出声。
+ * 桌面版的写失败是一个正常 resolve 的 `{ok:false,error}`(store.rs 把 conflict 当值返回,不 reject),
+ * 所以这里判返回值,不能指望 catch。不给这条提示,用户看到的就是「点了没反应」。
+ */
+async function onToggleFav(name: string) {
+  const r = await toggleFavorite(name)
+  if (!r.ok) notify(`收藏失败:${r.error || '未知原因'}`)
+}
+
 /** 方法/成员/信号的在线锚点(未知 kind 回退类页) */
 function onlineDocsAnchorSafe(kind: string, symbol: string): string {
   const base = onlineDocsUrl(currentTag.value, detail.value?.name ?? props.className)
@@ -205,7 +215,7 @@ function signature(m: { name: string, returnType: string, params: { name: string
           <button class="icon-btn" title="在官方在线文档中打开" @click="openOnline">
             <Icon name="external" :size="14" />
           </button>
-          <button class="icon-btn" :class="{ on: isFav }" :title="isFav ? '取消收藏' : '收藏'" @click="toggleFavorite(detail.name)">
+          <button class="icon-btn" :class="{ on: isFav }" :title="isFav ? '取消收藏' : '收藏'" @click="onToggleFav(detail.name)">
             <Icon name="star" :size="15" />
           </button>
         </div>

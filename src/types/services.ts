@@ -134,7 +134,7 @@ export interface Services {
   /** 导出历史(时间倒序;projectId 省略时返回全部) */
   listExportHistory(projectId?: string): ExportHistoryEntry[]
   /** 删除一条导出历史记录(只删记录,不动产物文件) */
-  removeExportHistoryEntry(id: string): { ok: boolean }
+  removeExportHistoryEntry(id: string): { ok: boolean, error?: string }
   /** 导出插件数据(设置+项目清单+市场收藏)到 JSON 文件 */
   exportPluginData(destPath: string): { ok: boolean, error?: string, projects?: number, favorites?: number }
   /** 从 JSON 文件导入插件数据(项目仅登记本机存在的路径;收藏合并;设置只补缺失键) */
@@ -326,9 +326,9 @@ export interface Services {
     onProgress?: (p: { stage: 'downloading' | 'extracting', received?: number, total?: number }) => void
   ): Promise<{ ok: boolean, error?: string, stageId?: string, title?: string, versionString?: string, plan?: InstallPlan }>
   /** 取消进行中的预览下载(幂等;无在途下载时空操作) */
-  cancelAssetPreview(assetId: string): { ok: boolean }
+  cancelAssetPreview(assetId: string): { ok: boolean, error?: string }
   /** 释放预览暂存的安装包(取消确认时调用;幂等) */
-  cancelStagedAsset(stageId: string): { ok: boolean }
+  cancelStagedAsset(stageId: string): { ok: boolean, error?: string }
   /** 安装市场资产(version 指定 release 版本,缺省为最新;含 plugin.cfg 走插件链路,否则按纯素材落项目根)
    *  stageId=复用预览暂存的包;stripTopDir=素材唯一顶层目录是否并入项目根(缺省沿用上次选择) */
   installAsset(
@@ -408,7 +408,12 @@ export interface Services {
   /** 单类在两库之间的成员级差异 */
   docsDiffClass(versionA: string, versionB: string, className: string): { ok: boolean, error?: string, diff?: DocClassDiff }
   /** 收藏/取消收藏(全局,按类名跨版本) */
-  docsToggleFavorite(className: string, fav: boolean): { ok: boolean }
+  /**
+   * 收藏/取消收藏。写失败的形状两端不同:JS 宿主可能抛,ztools/Rust 侧是把
+   * `{error:true,name:'conflict'}` **正常 resolve** 回来(见 src-tauri/src/store.rs:31-33),
+   * 所以调用方必须读返回值,不能只等 catch。
+   */
+  docsToggleFavorite(className: string, fav: boolean): { ok: boolean, error?: string }
   /** 收藏列表 */
   docsListFavorites(): string[]
   /** 最近浏览(最新在前,上限 30) */
@@ -418,7 +423,7 @@ export interface Services {
   /** 文档库缓存统计(设置页清理用) */
   docsCacheInfo(): DocsCacheInfo
   /** 清理文档库缓存(versionIds 省略时清全部;收藏/历史不受影响) */
-  docsCleanCache(versionIds?: string[]): { ok: boolean, removed?: number }
+  docsCleanCache(versionIds?: string[]): { ok: boolean, removed?: number, error?: string }
 }
 
 /**

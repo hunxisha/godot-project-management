@@ -390,7 +390,7 @@ function openStore(a: AddonInfo) {
 
           <template v-else>
             <p v-if="!scan.rows.value.length" class="copy-tip">
-              {{ scan.scanned.value ? '所有项目的已装内容都是最新版本。' : '尚无扫描结果。' }}
+              {{ scan.blocked.value || (scan.scanned.value ? '所有项目的已装内容都是最新版本。' : '尚无扫描结果。') }}
             </p>
             <div v-else class="copy-list">
               <div v-for="r in scan.rows.value" :key="`${r.projectId}/${r.dirName}`" class="copy-item scan-row">

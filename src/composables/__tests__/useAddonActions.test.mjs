@@ -34,6 +34,8 @@ let uninstallResult = { ok: true }
 let copyResult = null
 let copyAssetResult = { ok: true, copied: 3, skipped: [] }
 let checkResult = { hasUpdate: false }
+/** 逐项排队返回(测「一部分查成、一部分宿主没查」的混合现场);用队列而不是替换桩,免得漏到后面几节 */
+let checkQueue = []
 let updateResult = null
 let installResult = null
 let progressCb = null
@@ -49,7 +51,7 @@ global.window = {
     uninstallAddon(o) { calls.push(['uninstall', o]); return uninstallResult },
     copyAddonsToProject(o) { calls.push(['copy', o]); return copyResult },
     copyAssetToProject(o) { calls.push(['copyAsset', o]); return copyAssetResult },
-    checkAddonUpdate(o) { calls.push(['check', o]); return Promise.resolve(checkResult) },
+    checkAddonUpdate(o) { calls.push(['check', o]); return Promise.resolve(checkQueue.length ? checkQueue.shift() : checkResult) },
     updateAsset(o, cb) {
       calls.push(['update', o])
       progressCb = cb
@@ -77,6 +79,7 @@ function reset() {
   copyResult = { ok: true, copied: 2, targetName: 'Beta' }
   copyAssetResult = { ok: true, copied: 3, skipped: [] }
   checkResult = { hasUpdate: false }
+  checkQueue = []
   updateResult = { ok: true, addon: { versionString: '2.0.0' } }
   installResult = { ok: true, addon: { versionString: '1.5.0' } }
 }
@@ -222,6 +225,27 @@ async function main() {
     await s2.actions.checkUpdates()
     ok(Object.keys(s2.actions.updateInfo.value).length === 0, '无更新时 updateInfo 为空')
     ok(notifications[0] === '所有插件均为最新版本', '提示「均为最新」', String(notifications[0]))
+
+    // 宿主**没查**却回了「没更新」的形状(tauri-shim.js 的 checkAddonUpdate 就是这个空壳)。
+    // 这一节是本批的红线:带 error 的回值不能当成「均为最新」这个结论。
+    reset()
+    checkResult = { hasUpdate: false, error: '桌面版暂不支持检查插件更新,请使用 ZTools 插件版。' }
+    const s3 = make({ addons: [A('d1', { fromMarket: true, assetId: 'a/1' })] })
+    await s3.actions.checkUpdates()
+    ok(!/所有插件均为最新/.test(notifications.join(' | ')), '宿主报 error 时不许说「均为最新」', notifications.join(' | '))
+    ok(/不支持/.test(notifications[0] || ''), '把宿主给的原因原样递到用户眼前', String(notifications[0]))
+    ok(s3.actions.checking.value === false, '出错这条路也要复位 checking(否则按钮永久卡住)', String(s3.actions.checking.value))
+
+    // 部分失败不许被成功那半边盖过去
+    reset()
+    checkQueue = [
+      { hasUpdate: true, latest: '2.1.0' },
+      { hasUpdate: false, error: '桌面版暂不支持检查插件更新,请使用 ZTools 插件版。' }
+    ]
+    const s4 = make({ addons: [A('d1', { fromMarket: true, assetId: 'a/1' }), A('d2', { fromMarket: true, assetId: 'a/2' })] })
+    await s4.actions.checkUpdates()
+    ok(/1 个插件有新版本/.test(notifications.join(' | ')), '有真结果时照常报数量', notifications.join(' | '))
+    ok(/不支持/.test(notifications.join(' | ')), '同时要说清有几项没查成', notifications.join(' | '))
   }
 
   // ---------- 5. 更新 ----------

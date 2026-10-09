@@ -188,11 +188,18 @@ export function useAddonActions(opts: UseAddonActionsOptions) {
     checking.value = true
     const jobs = opts.addons.value.filter((a) => a.fromMarket && a.assetId)
     const next: Record<string, { hasUpdate: boolean, latest?: string }> = {}
+    /** 宿主**没查**却回了值的次数与首个原因(桌面版垫片就是这条空壳) */
+    let failed = 0
+    let firstErr = ''
     try {
       await Promise.all(
         jobs.map(async (a) => {
           const r = await window.services.checkAddonUpdate({ projectId: projectId(), assetId: a.assetId! })
           if (r.hasUpdate) next[a.dirName] = { hasUpdate: true, latest: r.latest }
+          else if (r.error) {
+            failed++
+            if (!firstErr) firstErr = r.error
+          }
         })
       )
     } finally {
@@ -200,7 +207,9 @@ export function useAddonActions(opts: UseAddonActionsOptions) {
     }
     updateInfo.value = next
     const count = Object.keys(next).length
-    opts.notify(count ? `${count} 个插件有新版本` : '所有插件均为最新版本')
+    // 没查成的那部分不能并进「均为最新」:那是一句结论,而这里根本没得出结论。
+    if (!failed) opts.notify(count ? `${count} 个插件有新版本` : '所有插件均为最新版本')
+    else opts.notify(`${count ? `${count} 个插件有新版本,` : ''}${failed} 个没查成:${firstErr}`)
   }
 
   async function update(a: AddonInfo) {

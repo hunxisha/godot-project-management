@@ -164,7 +164,7 @@ npm test           # 全部断言（数量随版本增长,各套件实况见下�
 | `npm run test:preload` / `:sandbox` | 备份领域层全套（后者先删掉 `setImmediate` 模拟宿主沙箱） |
 | `npm run test:preload:unit` | 版本解析、任务队列、文件工具、HTTP 下载与**断点续传**、引擎安装、**导出模板**、**一键导出**、启动参数拆分、**数据迁移/网络诊断**、**引擎文档库**、services 契约一致性、**文档存储 `_rev` 语义** |
 | `npm run test:addons` | 插件/素材来源、安装分流、清单卸载、复制过户（默认 + 沙箱各一遍） |
-| `npm run test:renderer` | 渲染层:市场搜索(分页/竞态守卫)/浏览/安装确认层、项目列表、已装操作、备份、文档数据层与 **BBCode 解析**、纯工具,**工具页十八项体检 + 修复管线 + 聚合判据**(引用索引、`project.godot`/`.import`/GDScript 解析、GDScript 顶层声明与场景 `[node]` 段解析、翻译 csv 首列、结论判定、按条勾选门;工具页目录内共 28 个 harness(27 个挂链),性能基准 `perf.test.mjs` 刻意不挂链) |
+| `npm run test:renderer` | 渲染层:市场搜索(分页/竞态守卫)/浏览/安装确认层、项目列表、已装操作、备份、文档数据层与 **BBCode 解析**、纯工具,**工具页十八项体检 + 修复管线 + 聚合判据**(引用索引、`project.godot`/`.import`/GDScript 解析、GDScript 顶层声明与场景 `[node]` 段解析、翻译 csv 首列、结论判定、按条勾选门;工具页目录内共 28 个 harness(27 个挂链),性能基准 `perf.test.mjs` 刻意不挂链;另有跨项目巡检 `useUpdateScan` 与桌面版垫片诚实性静态扫描 `tauriShimHonesty`) |
 
 提交与 PR 由 GitHub Actions 跑同一条命令（见 `.github/workflows/ci.yml`）。
 

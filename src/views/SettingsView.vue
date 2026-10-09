@@ -87,6 +87,9 @@ async function cleanDocsCache(versionIds?: string[]) {
   if (r.ok) {
     notify(`已清理 ${r.removed ?? 0} 个文档库(收藏与浏览历史保留)`)
     await refreshDocsCache()
+  } else {
+    // 没有这一句,桌面版点「清理缓存」就是按钮转一下什么都不发生(垫片正是回 ok:false 的那一侧)
+    notify(r.error || '清理失败')
   }
 }
 

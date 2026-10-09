@@ -53,6 +53,7 @@ await build({
         useaddonselection: path.join(root, 'src', 'composables', 'useAddonSelection.ts'),
         useaddonactions: path.join(root, 'src', 'composables', 'useAddonActions.ts'),
         usebackuppageactions: path.join(root, 'src', 'composables', 'useBackupPageActions.ts'),
+        useupdatescan: path.join(root, 'src', 'composables', 'useUpdateScan.ts'),
         usedocs: path.join(root, 'src', 'composables', 'useDocs.ts'),
         usetools: path.join(root, 'src', 'composables', 'useTools.ts'),
         format: path.join(root, 'src', 'utils', 'format.ts'),
@@ -74,6 +75,6 @@ await build({
   }
 })
 
-for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'usedocs', 'usetools', 'format', 'godotversion', 'markettags', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'vueshim', 'tools']) {
+for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'usetools', 'format', 'godotversion', 'markettags', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'vueshim', 'tools']) {
   console.log(`bundle built: ${path.join(root, OUT_DIR, `${name}.mjs`)}`)
 }

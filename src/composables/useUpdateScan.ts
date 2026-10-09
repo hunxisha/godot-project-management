@@ -26,11 +26,18 @@ export function useUpdateScan() {
   const rows = ref<UpdateScanRow[]>([])
   /** 是否完成过一次扫描(区分「还没扫」与「没有可更新」) */
   const scanned = ref(false)
+  /**
+   * 首个「根本没查成」的原因(桌面版没有 check_addon_update 命令,宿主会回 error)。
+   * 空列表有两种含义:真的都是最新 / 一条都没查。少了这个字段,巡检面板就会把后者说成
+   * 「所有项目的已装内容都是最新版本」—— 那是一句结论,不是这里得到的东西。
+   */
+  const blocked = ref('')
 
   async function scanAll(projects: ScanProjectInput[]) {
     if (scanning.value) return
     scanning.value = true
     rows.value = []
+    blocked.value = ''
     scanned.value = false
     try {
       for (let i = 0; i < projects.length; i++) {
@@ -42,7 +49,10 @@ export function useUpdateScan() {
           jobs.map(async (a) => {
             try {
               const r = await window.services.checkAddonUpdate({ projectId: p.id, assetId: a.assetId! })
-              if (r.hasUpdate) {
+              // error 优先于 hasUpdate:false:宿主明说没查成时,这条不能计成「已确认是最新」
+              if (r.error) {
+                if (!blocked.value) blocked.value = r.error
+              } else if (r.hasUpdate) {
                 rows.value.push({
                   projectId: p.id,
                   projectName: p.name,
@@ -55,7 +65,8 @@ export function useUpdateScan() {
                 })
               }
             } catch (e) {
-              // 单个资产检查失败不中断整体巡检
+              // 单个资产检查失败不中断整体巡检,但原因要留一份:否则空列表会被读成「都是最新」
+              if (!blocked.value) blocked.value = String((e as any)?.message || e)
             }
           })
         )
@@ -67,5 +78,5 @@ export function useUpdateScan() {
     }
   }
 
-  return { scanning, progress, rows, scanned, scanAll }
+  return { scanning, progress, rows, scanned, blocked, scanAll }
 }

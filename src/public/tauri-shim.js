@@ -87,6 +87,26 @@
   // 让命令层回落默认限额 —— 与 JS 原语 `o.maxBytes && o.maxBytes > 0 ? … : DEFAULT`
   // (inspectfs.js:118)同归一,而不是把它变成一次 IPC 边界的裸拒绝。
   const toMaxBytes = (v) => (Number.isSafeInteger(v) && v > 0 ? v : null)
+  // ---------- db_put / db_remove:失败是**返回值**,不是 rejection ----------
+  // Rust 侧一律 `return err(name, message)`(src-tauri/src/store.rs:31-33 → {error:true,name,message}),
+  // invoke 于是**正常 resolve**。所以 `.then(() => ({ ok: true }))` 和 `.catch(...)` 都接不到失败 ——
+  // 原先 docsToggleFavorite 与 updateBackup 就是这么把 conflict 报成成功的,而且两个都没带 _rev
+  // (对已存在的文档必 conflict,store.rs:98-101)。同一批坑在 ZTools 侧早踩过一遍:
+  // 见 src-ztools/preload/lib/assets.js 的 putDocVerbose「写库失败必须抛出原因」。
+  const writeFailed = (r) => !r || r.error === true || r.ok === false
+  const writeReason = (r) => String((r && (r.message || r.name)) || '写入失败')
+  /**
+   * 带 _rev 的读-改-写:把 body **合并**进现有文档再落库。
+   * 两件事必须一起做:不带 _rev 对已存在的文档必 conflict;整份替换则会抹掉没写进 body 的字段
+   * (updateBackup 原先只送 {_id, label},改一次标签就把 projectId/size/createdAt 全丢了)。
+   */
+  const putMerged = (id, body, cur) => {
+    const doc = { ...(cur || {}), ...body, _id: id }
+    if (cur && cur._rev) doc._rev = cur._rev
+    return invoke('db_put', { doc })
+  }
+  const readThenPut = (id, body) => invoke('db_get', { id }).then((cur) => putMerged(id, body, cur))
+  const DOCS_FAV_ID = 'godot/docs-favorites'
   window.services = {
     currentPlatform: () => (IS_WIN ? 'windows' : IS_MAC ? 'macos' : 'linux'),
     fetchReleases: (force) => invoke('fetch_releases_cmd', { force: !!force, proxy: null }).catch(() => []),
@@ -140,11 +160,16 @@
     cancelExportTask: (id) => invoke('cancel_export_task', { id }),
     dismissExportTask: (id) => { void id },
     listExportHistory: () => Promise.resolve([]),
-    removeExportHistoryEntry: () => Promise.resolve({ ok: true }),
+    // 导出历史在桌面版没有后端(命令表里既没有 list_export_history 也没有 remove_...),
+    // 所以列表恒空、删除也不可达。这里仍如实报而不是 {ok:true}:哪天列表接上了,
+    // 「删除成功」不能靠一条没做事的桩。
+    removeExportHistoryEntry: () => Promise.resolve({ ok: false, error: '桌面版暂不支持导出历史,请使用 ZTools 插件版。' }),
     exportPluginData: () => Promise.resolve({ ok: false, error: 'Tauri 版即将支持' }),
     importPluginData: () => Promise.resolve({ ok: false, error: 'Tauri 版即将支持' }),
     runNetworkDiagnostics: () => invoke('run_network_diagnostics', { proxy: null }),
-    getProjectCacheInfo: () => Promise.resolve({ ok: false, exists: false }),
+    // 桌面版没有缓存统计命令,也**不回 exists** —— 给了就等于替用户回答「这个项目没有缓存」。
+    // 项目页缓存弹窗据此显示「不支持」而不是「还没有 .godot 缓存」(ProjectsView.vue 的第三态)。
+    getProjectCacheInfo: () => Promise.resolve({ ok: false, error: '桌面版暂不支持缓存统计,请使用 ZTools 插件版。' }),
     cleanProjectCache: () => Promise.resolve({ ok: false }),
     // ---------- 导出模板自编译(裁剪向导) ----------
     // 桌面版(Tauri)暂未实现构建管线(需要 vcvars/子进程/产物整理),如实告知而不是假成功;
@@ -232,7 +257,9 @@
       stats.coveredProjects = projects.size
       return stats
     }),
-    updateBackup: (id, patch) => invoke('db_put', { doc: { _id: id, label: patch.label } }).then(() => ({ ok: true })).catch((e) => ({ ok: false, error: String(e) })),
+    updateBackup: (id, patch) => readThenPut(id, { label: patch.label })
+      .then((r) => (writeFailed(r) ? { ok: false, error: writeReason(r) } : { ok: true }))
+      .catch((e) => ({ ok: false, error: String((e && e.message) || e) })),
     verifyBackup: (id) => invoke('verify_backup', { backupId: id }),
     deleteBackup: (id, opts) => invoke('delete_backup', { backupId: id, keepRecordOnly: !!(opts && opts.keepRecordOnly) }),
     deleteBackups: (ids, opts) => Promise.all(ids.map((id) => invoke('delete_backup', { backupId: id, keepRecordOnly: !!(opts && opts.keepRecordOnly) }))).then((rs) => ({ ok: true, removed: rs.filter((r) => r.ok).length, failed: [] })),
@@ -269,13 +296,18 @@
     }),
     getAssetDetail: () => Promise.resolve({ ok: false }),
     previewAssetInstall: () => Promise.resolve({ ok: false, error: 'Tauri 版即将支持' }),
-    cancelAssetPreview: () => Promise.resolve({ ok: true }),
-    cancelStagedAsset: () => Promise.resolve({ ok: true }),
+    // 预览与暂存在桌面版都没有命令(previewAssetInstall 就是同一句不支持),
+    // 所以「取消」无事可做 —— 报成功等于凭空造一次没发生的清理。
+    cancelAssetPreview: () => Promise.resolve({ ok: false, error: '桌面版暂不支持安装预览,请使用 ZTools 插件版。' }),
+    cancelStagedAsset: () => Promise.resolve({ ok: false, error: '桌面版暂不支持安装暂存,请使用 ZTools 插件版。' }),
     installAsset: (opts) => invoke('install_asset', { projectId: opts.projectId, assetId: opts.assetId, version: opts.version, stripTopDir: opts.stripTopDir, autoEnable: true, assetMeta: opts.assetMeta || null }),
     saveAssetAsProject: () => Promise.resolve({ ok: false, error: 'Tauri 版即将支持' }),
     downloadAssetZip: () => Promise.resolve({ ok: false, error: 'Tauri 版即将支持' }),
     updateAsset: () => invoke('install_asset', {}).catch(() => ({ ok: false, error: 'Tauri 版即将支持' })),
-    checkAddonUpdate: () => Promise.resolve({ hasUpdate: false }),
+    // 没有 check_addon_update 命令(Rust 侧 generate_handler 里就没有),所以如实回「没查」并带原因。
+    // 契约里 `error?: string` 就是为这种情况留的:渲染层(useAddonActions / useUpdateScan)读它,
+    // 不能把这条回值并进「所有插件均为最新版本」那句结论 —— 原先只给 hasUpdate:false,就是这么谎报的。
+    checkAddonUpdate: () => Promise.resolve({ hasUpdate: false, error: '桌面版暂不支持检查插件更新,请使用 ZTools 插件版。' }),
     uninstallAddon: (p) => invoke('uninstall_addon', { projectId: p.projectId, dirName: p.dirName, assetId: p.assetId }),
     setAddonEnabled: () => Promise.resolve({ ok: false, error: 'Tauri 版即将支持' }),
     docsGenerate: (versionId, opts) => invoke('docs_generate', { versionId, exePath: '', forceTranslation: !!(opts && opts.forceTranslation) }).catch((e) => ({ ok: false, error: String(e) })),
@@ -293,11 +325,26 @@
     docsSearchFullText: (versionId, query, limit) => invoke('docs_search_full_text', { versionId, query, limit }),
     docsDiffLibraries: (a, b) => invoke('docs_diff_libraries', { versionA: a, versionB: b }),
     docsDiffClass: () => Promise.resolve({ ok: false }),
-    docsToggleFavorite: (className, fav) => invoke('db_put', { doc: { _id: 'godot/docs-favorites', _rev: undefined } }).then(() => ({ ok: true })).catch(() => ({ ok: true })),
-    docsListFavorites: () => invoke('db_get', { id: 'godot/docs-favorites' }).then((d) => (d && d.items) || []).catch(() => []),
+    // 文档收藏**真实现**(照 preload/lib/docs.js:162-169:Set 增删 → 排序写回),不是占位:
+    // db_get/db_put 在 Rust 侧是注册了的命令,这条没有「后端不存在」的借口。
+    // 旧写法把 className/fav 两个入参整个丢掉,写的文档连 items 都没有,还把 .catch 收敛成
+    // {ok:true} —— 点收藏永远没反应却报成功,和 2026-10-09 修的市场收藏是同一个形状。
+    docsToggleFavorite: (className, fav) => invoke('db_get', { id: DOCS_FAV_ID })
+      .then((cur) => {
+        const set = new Set((cur && cur.items) || [])
+        if (fav) set.add(className)
+        else set.delete(className)
+        return putMerged(DOCS_FAV_ID, { items: [...set].sort() }, cur)
+      })
+      .then((r) => (writeFailed(r) ? { ok: false, error: writeReason(r) } : { ok: true }))
+      .catch((e) => ({ ok: false, error: String((e && e.message) || e) })),
+    docsListFavorites: () => invoke('db_get', { id: DOCS_FAV_ID }).then((d) => (d && d.items) || []).catch(() => []),
     docsListHistory: () => invoke('db_get', { id: 'godot/docs-history' }).then((d) => (d && d.items) || []).catch(() => []),
     docsPushHistory: () => {},
     docsCacheInfo: () => Promise.resolve({ totalSize: 0, libraries: 0 }),
-    docsCleanCache: () => Promise.resolve({ ok: true, removed: 0 }),
+    // 如实占位:原先回 {ok:true, removed:0},设置页于是提示「已清理 0 个文档库」——
+    // 什么都没删却说删好了。真实现要和 docsCacheInfo 一起做(它连返回形状都不对,
+    // {totalSize,libraries:0} 对不上 JS 侧的 {sizeBytes, libraries[]}),归到界面文案那一批。
+    docsCleanCache: () => Promise.resolve({ ok: false, error: '桌面版暂不支持清理文档库缓存,请使用 ZTools 插件版。' }),
   }
 })()

@@ -155,6 +155,18 @@ async function main() {
   ok(d4.favorites.value.includes('Node'), '收藏生效')
   await d4.toggleFavorite('Node')
   ok(!d4.favorites.value.includes('Node'), '再点取消收藏')
+
+  // 桌面版的写失败是**正常 resolve 的一个 {error:true,name:'conflict'}**(src-tauri/src/store.rs:31-33),
+  // 不走 rejection。原先组合式函数把返回值整个丢掉,于是「没写进去」和「写好了」在界面上同一个样子。
+  const saveToggle = servicesApi.docsToggleFavorite
+  servicesApi.docsToggleFavorite = () => ({ ok: false, error: 'Document update conflict' })
+  const rFail = await d4.toggleFavorite('Sprite2D')
+  ok(rFail.ok === false && /conflict/.test(rFail.error || ''), '写失败要把原因交回调用方(不许静默)', JSON.stringify(rFail))
+  ok(!d4.favorites.value.includes('Sprite2D'), '失败后星标不许自己亮起来')
+  servicesApi.docsToggleFavorite = saveToggle
+  const rOk = await d4.toggleFavorite('Node')
+  ok(rOk.ok === true && rOk.error === undefined, '成功路径仍回 ok:true', JSON.stringify(rOk))
+
   await d4.pushHistory('Vector2')
   ok(d4.history.value.length === 1 && d4.history.value[0].name === 'Vector2', '历史记录')
 

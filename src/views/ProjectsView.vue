@@ -257,14 +257,25 @@ const cacheTarget = ref<Row | null>(null)
 const cacheLoading = ref(false)
 const cacheExists = ref(false)
 const cacheSize = ref(0)
+/**
+ * 宿主没给答案时的原因(桌面版没有缓存统计命令)。
+ * 少了这一格,`{ok:false}` 会被 `!!r.exists` 读成「该项目还没有 .godot 缓存」——
+ * 那是个事实断言,而这里其实什么都没查。
+ */
+const cacheBlocked = ref('')
 const cleaning = ref(false)
 
 async function openCache(p: Row) {
   cacheTarget.value = p
   showCache.value = true
   cacheLoading.value = true
+  // 每轮先清账:await 失败(旧宿主抛错)时才不会把上一个项目的数字显示成这个项目的
+  cacheBlocked.value = ''
+  cacheExists.value = false
+  cacheSize.value = 0
   try {
     const r = await window.services.getProjectCacheInfo(p._id)
+    cacheBlocked.value = r.error || ''
     cacheExists.value = !!r.exists
     cacheSize.value = r.size || 0
   } finally {
@@ -672,7 +683,7 @@ function onKeyDown(e: KeyboardEvent) {
           </div>
 
           <p class="del-text">
-            {{ cacheLoading ? '统计中…' : cacheExists ? `.godot 缓存占用 ${fmtSize(cacheSize)}` : '该项目还没有 .godot 缓存' }}
+            {{ cacheLoading ? '统计中…' : cacheBlocked ? cacheBlocked : cacheExists ? `.godot 缓存占用 ${fmtSize(cacheSize)}` : '该项目还没有 .godot 缓存' }}
           </p>
           <div class="del-hint">
             导入资源卡住、图标丢失时清缓存是常见的自救手段;清理后下次打开编辑器会自动重建,
@@ -682,7 +693,7 @@ function onKeyDown(e: KeyboardEvent) {
           <div class="modal-foot">
             <span class="grow"></span>
             <button type="button" class="btn ghost" @click="showCache = false">关闭</button>
-            <button type="button" class="btn del-confirm" :disabled="!cacheExists || cleaning" @click="cleanCache">
+            <button type="button" class="btn del-confirm" :disabled="!!cacheBlocked || !cacheExists || cleaning" @click="cleanCache">
               <span v-if="cleaning" class="spin"></span>
               {{ cleaning ? '清理中…' : '清理缓存' }}
             </button>
