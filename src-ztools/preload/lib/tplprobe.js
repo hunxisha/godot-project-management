@@ -56,6 +56,14 @@ const IS_ENABLED = /def\s+is_enabled\s*\(\s*\)\s*:\s*(?:#[^\n]*\n\s*)?return\s+(
  * `AttributeError` 才保持 True。4.7.2 全量 57 个模块目录里只有 `mono` 与 `text_server_fb` 定义了它。
  * (注:`SConstruct:476` 外面还套着 `if env["modules_enabled_by_default"]:`,那个选项默认 True,
  * 用户显式设成 no 时全部模块默认 False —— 那是 profile 层的事,本层只管源码声明的默认形态。)
+ *
+ * **已核实的边界(Ruling #24,改这里之前先读)**:`IS_ENABLED` 里那个 `(?:#[^\n]*\n\s*)?`
+ * 只容**一行**注释。已逐棵树核过 4.3-stable / 4.5-stable / 4.7.2-stable 的全部 6 处
+ * `is_enabled()`(每棵树各 `mono` + `text_server_fb` 两处),**每处都恰好是"一行注释 + return False"**,
+ * 所以当前实现与源码严格对齐。若哪天某个版本在 `def is_enabled():` 与 `return` 之间夹**两行**注释,
+ * 正则就匹配不到,本函数会**静默回落 `true`** —— 那等于面板替用户把 mono 打了勾。
+ * 不加宽容度也不造两行注释的合成夹具:那违反本文件"夹具必须逐字摘自真实源码"的硬约束,
+ * 给一个源码里不存在的形态写实现同样是猜。真出现两行注释的版本时,拿那两行的真实摘录来改正则。
  * @param {string} configText
  * @returns {boolean}
  */
@@ -138,4 +146,132 @@ function parseCascades(text) {
   return out
 }
 
-module.exports = { parseSconsOptions, parseIsEnabled, detectBuiltinModules, parseCascades, MODULE_MARKERS }
+/**
+ * 读 version.py 拼版本串。缺任一字段就返回空串 —— 这个值用来做版本闸,
+ * 猜一个"看起来对"的串比承认读不出来更糟(它会放行一份错版本源码)。
+ *
+ * **patch 为 0 时不进版本串**,这是官方形态不是我们定的:
+ * tag `4.3-stable` 的 version.py:3-6 逐字是 `major = 4 / minor = 3 / patch = 0 / status = "stable"`
+ * (4.5-stable 同形,均已从 tar 包实读),而对外用的串是 `4.3-stable` / `4.3.stable` ——
+ * 见本仓库 `godotExe.js:146`(`Godot_v4.3-stable_win64.exe → 4.3-stable`)与
+ * `templates.js:39`(`4.3-stable → 4.3.stable`、`4.2.2-stable → 4.2.2.stable`)。
+ * 若把 patch 0 拼成 `4.3.0-stable`,Task 7 那道版本闸会把 4.3 / 4.5 的源码**一律判成版本不符**。
+ * @param {string} text
+ * @returns {string}
+ */
+function parseVersionPy(text) {
+  const s = String(text || '')
+  /** @param {string} k @returns {string} 读到返回数字串,没读到返回空串 */
+  const num = (k) => { const m = new RegExp('^\\s*' + k + '\\s*=\\s*(\\d+)\\s*$', 'm').exec(s); return m ? m[1] : '' }
+  const st = /^\s*status\s*=\s*["']([^"']+)["']\s*$/m.exec(s)
+  const major = num('major'), minor = num('minor'), patch = num('patch')
+  // 三个数字字段一律按"读没读到"判,不按真假值判。注:`patch = 0` 时 `!patch` 恰好也放行
+  // (num() 返回的是字符串,`!'0'` 为 false),所以两种写法在 4.x 上等价 —— 统一成 === '' 是为了
+  // 万一 major/minor 真为 0 时不误判成缺失,也是为了读代码的人不必去推哪种写法管哪种输入。
+  if (major === '' || minor === '' || patch === '' || !st) return ''
+  return patch === '0' ? `${major}.${minor}-${st[1]}` : `${major}.${minor}.${patch}-${st[1]}`
+}
+
+/**
+ * 目标引擎 tag → 可比对的版本串。本仓库的 tag 就是版本串形态(`4.7.2-stable`/`4.7-stable`,
+ * 由 releases.js 从 GitHub tag 直接取),所以这里只做裁剪不去规范化 ——
+ * patch 0 的省略发生在 parseVersionPy 那一侧,两侧同形态才能对上。
+ * @param {string} tag @returns {string}
+ */
+function versionStringFromTag(tag) {
+  return String(tag || '').trim()
+}
+
+// 已实测版本表(策划书附录 B)。**只放真编译过并核对过产物的版本**,它只回答
+// "这个版本我们替它背过书吗",不参与存在性判断 —— 存在性永远由探测回答。
+const TESTED_VERSIONS = ['4.7.2-stable']
+
+// 只做过**静态核对**(逐条比对源码声明,没有编译产物背书)的版本,附录 B 分档如此。
+// 混进 TESTED_VERSIONS 会给 4.3/4.5 的用户一个我们没背过的书,故另立一张表(Ruling #8)。
+// 与 TESTED_VERSIONS 一样不参与存在性判断,只影响文案强度。
+const STATIC_CHECKED_VERSIONS = ['4.5-stable', '4.3-stable']
+
+// P0 恒为 `scons platform=windows`(策划书 §2 决策 6),所以平台脚本只读 windows 那份。
+// 为什么非读不可:能力表里 `optStaticCpp` 的 flag `use_static_cpp` **声明**在
+// `platform/windows/detect.py:229`(BoolVariable,默认 True),SConstruct 里只有 :675 那句
+// `methods.get_cmdline_bool("use_static_cpp", True)` 的读取 —— 不读平台脚本就探不到这条声明,
+// 该面板项永远标灰。非 Windows 源码树里这个文件不存在,readOpt 拿到空串,合入空表,其余结果不受影响。
+const PLATFORM_BUILD_SCRIPTS = ['platform/windows/detect.py']
+
+/**
+ * 合并两份 OptionMap:**同名先到先得**,后出现的**不覆盖**先出现的。
+ * 这条规则在单文件里由 parseSconsOptions 内部 `if (m[1] in out) continue` 实现,
+ * 但探测层要合并多份脚本(SConstruct + platform/windows/detect.py + 模块开关),
+ * "谁覆盖谁"直接决定 profile 里写什么 —— 所以合并口径与单文件必须一致(裁定 A)。
+ * 真实 4.7.2 跨文件重名 0 处(用本层的 parseSconsOptions 实跑核过:SConstruct 90 个名字
+ * ∩ platform/windows/detect.py 12 个 = 空,∩ 各 config.py 声明的 4 个
+ * (graphite / mp3_extra_formats / betsy_export_templates / cvtt_export_templates)= 空,
+ * ∩ 57 个 module_*_enabled = 空),所以这条规则当下是防御性的;
+ * 但防御规则一旦被改成"后者覆盖",没有任何真实源码会喊,只有测试钉得住。
+ * @param {OptionMap} target 先声明的那份(原地写入)
+ * @param {OptionMap} extra 后读到的那份
+ * @returns {OptionMap}
+ */
+function mergeOptionsFirstWins(target, extra) {
+  for (const k of Object.keys(extra || {})) if (!(k in target)) target[k] = extra[k]
+  return target
+}
+
+/**
+ * 探测一份源码树 —— 本层**唯一**做 IO 的函数,且 IO 全部走可注入的 deps
+ * (readFileSync / existsSync / readdirSync),只有不传 deps 时才回落到真 node:fs。
+ * 返回值喂给输出层:`options` 是「这个开关在这份源码里存不存在 + 源码默认值」的唯一真源,
+ * `cascades` 是这份源码自己的连带图(4.3 与 4.7.2 形态不同,故不内置)。
+ * `sourceVersion` 读不出为空串(版本闸的判据,不猜);`tested` 只回答在不在已实测表里;
+ * `tagMatched` 只在调用方给了 `targetTag` 时才参与比对,没给就留 false。
+ * @param {string} srcDir
+ * @param {{readFileSync?: (fp: string, enc: string) => string, existsSync?: (fp: string) => boolean,
+ *   readdirSync?: (fp: string) => string[], targetTag?: string}} [deps]
+ * @returns {Promise<{ok: boolean, error: string, sourceVersion: string, tested: boolean,
+ *   tagMatched: boolean, options: OptionMap, cascades: Record<string, string[]>, testedVersions: string[]}>}
+ */
+async function probeSource(srcDir, deps) {
+  const d = deps || {}
+  /** @type {(fp: string, enc: string) => string} */
+  const readFileSync = d.readFileSync || ((fp, enc) => String(require('node:fs').readFileSync(fp, enc)))
+  /** @type {(fp: string) => boolean} */
+  const existsSync = d.existsSync || ((fp) => require('node:fs').existsSync(fp))
+  /** @type {(fp: string) => string[]} */
+  const readdirSync = d.readdirSync || ((fp) => require('node:fs').readdirSync(fp).map((x) => String(x)))
+  /** @param {...string} seg @returns {string} */
+  function p(...seg) { return require('node:path').join(srcDir, ...seg) }
+  const out = { ok: false, error: '', sourceVersion: '', tested: false, tagMatched: false, options: {}, cascades: {}, testedVersions: TESTED_VERSIONS }
+  // SConstruct 是"这是不是 Godot 源码根"的唯一判据(与 buildtools.js 现有那道同步校验同一条)。
+  if (!srcDir || !safeExists(existsSync, p('SConstruct'))) {
+    out.error = '所选目录不是 Godot 源码根(缺 SConstruct),无法探测构建选项'
+    return out
+  }
+  /** @param {string} rel @returns {string} 读不到(不存在/被占用/是目录)一律给空串,不抛 */
+  const readOpt = (rel) => { try { return String(readFileSync(p(rel), 'utf8')) } catch (e) { return '' } }
+  const sc = readOpt('SConstruct')
+  mergeOptionsFirstWins(out.options, parseSconsOptions(sc))
+  for (const rel of PLATFORM_BUILD_SCRIPTS) {
+    mergeOptionsFirstWins(out.options, parseSconsOptions(readOpt(rel)))
+  }
+  mergeOptionsFirstWins(out.options, detectBuiltinModules(
+    (rel) => { try { return rel === 'modules' ? readdirSync(p('modules')).map((x) => String(x)) : [] } catch (e) { return [] } },
+    (rel) => safeExists(existsSync, p(rel)),
+    (rel) => readOpt(rel)
+  ))
+  // 连带块都在 SConstruct 顶层(parseCascades 认顶格 `if env["x"]:),平台脚本里那些是缩进的,
+  // 喂进去恒为空 —— 只从 SConstruct 解析一次。
+  out.cascades = parseCascades(sc)
+  out.sourceVersion = parseVersionPy(readOpt('version.py'))
+  // tested 只回答"这个版本在附录 B 的已实测表里吗";不在表里照样探测成功,由渲染层给保守提示。
+  out.tested = TESTED_VERSIONS.includes(out.sourceVersion)
+  // targetTag 可选:调用方带来要比的目标引擎时才算 tagMatched,没带就留 false ——
+  // 不能无条件置 true,那等于谎报"版本对得上"。
+  if (d.targetTag) out.tagMatched = out.sourceVersion === versionStringFromTag(d.targetTag)
+  out.ok = true
+  return out
+}
+
+module.exports = {
+  parseSconsOptions, parseIsEnabled, detectBuiltinModules, parseCascades, MODULE_MARKERS,
+  parseVersionPy, versionStringFromTag, probeSource, TESTED_VERSIONS, STATIC_CHECKED_VERSIONS
+}

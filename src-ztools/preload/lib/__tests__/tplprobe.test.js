@@ -2,13 +2,21 @@
 // 这层唯一的价值就是"和源码写得一样",夹具编错了实现就跟着错。
 // 片段取自 godotengine/godot tag 4.7.2-stable 的 SConstruct(sha256 已核,见策划书附录 B)。
 // 用法: node src-ztools/preload/lib/__tests__/tplprobe.test.js
-// 不是「单文件原样摘录」的夹具目前有六处,每处就在原位写明合成在哪、真实出处又是哪一行:
+// 不是「单文件原样摘录」的夹具目前有九处,每处就在原位写明合成在哪、真实出处又是哪一行:
 //   1) 单引号 BoolVariable 声明 —— 4.7.2 全树 0 处,只验正则的跨版本防御支;
 //   2) modules 探测里的 broken_module / .gitkeep —— 真实 modules/ 下没有这两个条目,是造的假目录;
 //   3) 4.3 那段里的 disable_advanced_gui 块 —— 真实 4.3(:969-977)是嵌套 if/else,这里借了 4.7.2 的平铺写法占位;
 //   4) MONO_CFG —— mono/config.py:31-33 与 webp/config.py:1-2 两段真实摘录的**拼接**,不是单文件原文;
 //   5) jolt_physics 的 config.py 置空 —— 真实文件有 can_build 逻辑,本条只验键名,属简化;
-//   6) 三条「注入回调抛 EPERM」的 —— 验的是回调契约不是文件形态,真实源码里不存在这种 config.py。
+//   6) 三条「注入回调抛 EPERM」的 —— 验的是回调契约不是文件形态,真实源码里不存在这种 config.py;
+//   7) probeSource 那三棵临时树(主树 / dup 树 / 4.3 树)与注入用的 fakeTree —— 整棵目录树都是造的
+//      (fakeTree 尤其:它压根不在磁盘上),但每一**行内容**要么逐字摘自真实源码,要么按下一条标明;
+//   8) dup 树里的四处重名声明(disable_3d 在平台脚本再声明一遍、module_webp_enabled 写进 SConstruct、
+//      only_in_detect 与 dup_in_file)—— 合成形态:真实 4.7.2 跨文件重名 0 处、同文件重名 0 处
+//      (用本层 parseSconsOptions 实跑:SConstruct 90 名 ∩ detect.py 12 名 ∩ 各 config.py 4 名
+//      ∩ 57 个 module_*_enabled,四组交集全空),造它们只为钉住合并顺序;
+//   9) '4.6-dev' 那份 version.py —— 字段形态真实,数值是把真实 4.3 摘录的 minor 改 6、status 改 dev。
+// 另有两处对简报的更正(不改结论,只把冒充摘录的文本改回真实文本 / 补漏掉的换行),见原位注释。
 const P = require('../tplprobe.js')
 
 let pass = 0
@@ -205,7 +213,172 @@ const cExit = P.parseCascades(EXIT_FIX)
 ok(Object.keys(cExit).length === 0, '出块靠缩进判断:SConstruct:580 块在 :583 顶行处停住,:589 的赋值不算它的连带',
    JSON.stringify(cExit))
 
-console.log(`\n${'='.repeat(56)}`)
-console.log(`PASS ${pass}  FAIL ${failures.length}`)
-if (failures.length) { for (const f of failures) console.log('  - ' + f); process.exit(1) }
-console.log('全部通过')
+section('version.py 解析(源码版本闸的判据)')
+// 逐字取自真实 version.py:1-6(4.7.2-stable)。注意真实第 2 行是 `name = "Godot Engine"`,
+// 不是简报里写的 `engine_name` —— 简报那份自称"逐字取自 version.py:1-6"却把键名抄错了,
+// 这里按真实文件更正(本函数只读 major/minor/patch/status,两种写法的解析结果相同)。
+const VERSION_PY = 'short_name = "godot"\nname = "Godot Engine"\nmajor = 4\nminor = 7\npatch = 2\nstatus = "stable"\n'
+ok(P.parseVersionPy(VERSION_PY) === '4.7.2-stable', '4.7.2-stable', P.parseVersionPy(VERSION_PY))
+// 半合成夹具:字段形态真实,数值是把上面 4.3 那份的 minor 换成 6、status 换成 dev,并少一行 `name = ...`
+// (真实源码里 status = "dev" 的是 master 那份,本地没有那棵树,不冒充它的摘录)。
+ok(P.parseVersionPy('short_name = "godot"\nmajor = 4\nminor = 6\npatch = 0\nstatus = "dev"\n') === '4.6-dev',
+   'patch 0 时只拼两段(换 status 通道也一样)', P.parseVersionPy('short_name = "godot"\nmajor = 4\nminor = 6\npatch = 0\nstatus = "dev"\n'))
+// 逐字取自真实 4.3-stable 的 version.py:1-6(从 godot-4.3-stable.tar.xz 实读;4.5-stable 同形只换 minor)。
+// 这条钉的是「patch = 0 不进版本串」—— 官方 tag 就是 `4.3-stable`,拼成 `4.3.0-stable` 会让
+// Task 7 那道版本闸把 4.3 / 4.5 的源码一律判成版本不符(依据见 tplprobe.js 的 parseVersionPy 注释)。
+const VERSION_PY_43 = 'short_name = "godot"\nname = "Godot Engine"\nmajor = 4\nminor = 3\npatch = 0\nstatus = "stable"\n'
+ok(P.parseVersionPy(VERSION_PY_43) === '4.3-stable', '真实 4.3-stable version.py:1-6 → 4.3-stable(patch 0 不拼)',
+   P.parseVersionPy(VERSION_PY_43))
+ok(P.parseVersionPy('major = 4\n') === '', '信息不全 → 空串(不猜)', P.parseVersionPy('major = 4\n'))
+ok(P.parseVersionPy('major = 4\nminor = 7\npatch = 2\n') === '', '缺 status 同样给空串,不补一个"看起来对"的通道',
+   P.parseVersionPy('major = 4\nminor = 7\npatch = 2\n'))
+ok(P.versionStringFromTag('4.7.2-stable') === '4.7.2-stable', 'tag 已是同形态时原样')
+ok(P.versionStringFromTag('4.7-stable') === '4.7-stable', '无 patch 段的 tag 原样')
+ok(P.versionStringFromTag('  4.7.2-stable  ') === '4.7.2-stable', '两侧空白裁掉(否则版本闸拿带空格的 tag 比必不匹配)',
+   JSON.stringify(P.versionStringFromTag('  4.7.2-stable  ')))
+ok(P.versionStringFromTag(undefined) === '', '没有 tag → 空串而不是 "undefined"', String(P.versionStringFromTag(undefined)))
+
+section('probeSource 汇总')
+const fs = require('node:fs')
+const os = require('node:os')
+const path = require('node:path')
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gpm-tplprobe-'))
+// 建一棵临时树(mk 是它的快捷方式,绑定到主夹具树根 root)
+const mkAt = (dir) => (rel, body) => {
+  const p = path.join(dir, rel)
+  fs.mkdirSync(path.dirname(p), { recursive: true })
+  fs.writeFileSync(p, body)
+}
+const mk = mkAt(root)
+// SCORE 结尾没有换行、C472 开头是顶格 `if env[...]`,直接相加会得到 `)if env["disable_3d"]:` 一行,
+// parseCascades 认的是顶格头行 → 连带图恒空。简报漏了这个换行,这里补上(否则下面 cascade 那条必红)。
+mk('SConstruct', SCORE + '\n' + C472)
+mk('version.py', VERSION_PY)
+mk('modules/webp/register_types.h', ''); mk('modules/webp/SCsub', ''); mk('modules/webp/config.py', 'def can_build(env, platform):\n    return True\n')
+mk('modules/mono/register_types.h', ''); mk('modules/mono/SCsub', ''); mk('modules/mono/config.py', MONO_CFG)
+
+;(async () => {
+  const r = await P.probeSource(root)
+  ok(r.ok === true, '探测成功', r.error)
+  ok(r.sourceVersion === '4.7.2-stable', '读出源码版本', r.sourceVersion)
+  ok(r.tagMatched === false, '没带 targetTag 时不谎报匹配', String(r.tagMatched))
+  ok(r.tested === true, '4.7.2-stable 在已实测表内(附录 B)')
+  const rTag = await P.probeSource(root, { targetTag: '4.6-stable' })
+  ok(rTag.tagMatched === false, '带一个不符的 targetTag → tagMatched false')
+  const rTag2 = await P.probeSource(root, { targetTag: '4.7.2-stable' })
+  ok(rTag2.tagMatched === true, '带相符的 targetTag → tagMatched true')
+  ok(!!r.options.disable_3d, '核心开关进了结果')
+  ok(!!r.options.module_webp_enabled, '模块开关进了结果')
+  ok(JSON.stringify(r.cascades.disable_3d) === JSON.stringify(['disable_navigation_3d', 'disable_physics_3d', 'disable_xr']), 'cascade 进了结果')
+  ok(Array.isArray(r.testedVersions) && r.testedVersions.includes('4.7.2-stable'), '带上已实测版本表(策划书附录 B)')
+  // 缺 SConstruct 的目录:如实失败,不返回半成品
+  const bad = fs.mkdtempSync(path.join(os.tmpdir(), 'gpm-tplprobe-bad-'))
+  const r2 = await P.probeSource(bad)
+  ok(r2.ok === false && /SConstruct/.test(r2.error || ''), '缺 SConstruct → ok:false + 带原因', r2.error)
+
+  // ---- 跨文件重名:合并口径必须与单文件那条「同名只取第一次」一致(裁定 A / Ruling #20) ----
+  // 真实 4.7.2 里跨文件重名是 0 处(SConstruct 的 90 个名字 ∩ platform/windows/detect.py 的 12 个 = 空,
+  // ∩ 各 config.py 声明的 graphite / mp3_extra_formats / betsy_export_templates / cvtt_export_templates 也空,
+  // 已实跑核过)。所以这两份夹具里的同名声明是**合成形态,非真实摘录**,造的是一份后读进来的脚本。
+  const dupRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gpm-tplprobe-dup-'))
+  const mkDup = mkAt(dupRoot)
+  // SConstruct 那份用真实摘录的那一行(:264),默认 False
+  mkDup('SConstruct', 'opts.Add(BoolVariable("disable_3d", "Disable 3D nodes for a smaller executable", False))\n' +
+    'opts.Add(BoolVariable("module_webp_enabled", "Enable the WebP image format module (合成形态:SConstruct 里这条是 f-string 生成的,不会有字面量名)", False))\n')
+  // 平台脚本那份:同名 disable_3d 默认改成 True(合成形态;行式取自 detect.py:224-235 的缩进列表项形态)
+  mkDup('platform/windows/detect.py', '        BoolVariable("disable_3d", "同名重写(合成形态)", True),\n' +
+    '        BoolVariable("only_in_detect", "平台脚本独有的开关(合成形态)", True),\n' +
+    '        BoolVariable("dup_in_file", "同文件里第一次声明(合成形态)", True),\n' +
+    '        BoolVariable("dup_in_file", "同文件里第二次重名声明(合成形态)", False),')
+  // 模块那份:webp 的 config.py 没有 is_enabled() → detectBuiltinModules 会给出 default true
+  mkDup('modules/webp/register_types.h', ''); mkDup('modules/webp/SCsub', ''); mkDup('modules/webp/config.py', 'def can_build(env, platform):\n    return True\n')
+  const dup = await P.probeSource(dupRoot)
+  ok(dup.ok === true, '重名树照样探测成功(重名不是错误)', dup.error)
+  ok(dup.options.disable_3d.default === false,
+     '跨文件重名取**先声明的那份**(SConstruct 先读),后读的平台脚本没有把它覆盖成 True',
+     JSON.stringify(dup.options.disable_3d))
+  ok(dup.options.only_in_detect && dup.options.only_in_detect.default === true,
+     '后读脚本独有的开关仍然并进结果 —— 先到先得不是「只读第一份」',
+     JSON.stringify(dup.options.only_in_detect))
+  // 同一份脚本里重名(dup_in_file 声明了两次,True 在前 False 在后)—— 这条专门看守
+  // parseSconsOptions 里那句 `if (m[1] in out) continue`(Ruling #20 说它至今零回归保护)。
+  // 上面三条都碰不到它:那三条测的是**跨文件**合并,把 continue 删掉它们照绿。
+  ok(dup.options.dup_in_file && dup.options.dup_in_file.default === true,
+     '同文件内重名也只取第一次(parseSconsOptions 的 continue 从此有人看守)',
+     JSON.stringify(dup.options.dup_in_file))
+  ok(dup.options.module_webp_enabled.default === false,
+     '模块开关那一路也遵守先到先得:SConstruct 先声明的 False 不被 config.py 推出的 True 覆盖',
+     JSON.stringify(dup.options.module_webp_enabled))
+
+  // ---- 静态核对过的版本不占「已实测」的名额(Ruling #8) ----
+  ok(P.TESTED_VERSIONS.join(',') === '4.7.2-stable',
+     '已实测表只有真编过的 4.7.2-stable', P.TESTED_VERSIONS.join(','))
+  ok(P.STATIC_CHECKED_VERSIONS.join(',') === '4.5-stable,4.3-stable',
+     '只做过静态核对的两档另立一张表', P.STATIC_CHECKED_VERSIONS.join(','))
+  // 4.3 那份树:只给 SConstruct + version.py,不给 modules/(顺带钉「缺 modules 不是失败」)
+  const root43 = fs.mkdtempSync(path.join(os.tmpdir(), 'gpm-tplprobe-43-'))
+  mkAt(root43)('SConstruct', SCORE + '\n' + C472)
+  mkAt(root43)('version.py', VERSION_PY_43)
+  const r43 = await P.probeSource(root43)
+  ok(r43.ok === true && r43.sourceVersion === '4.3-stable',
+     '真实 4.3 那份 version.py 走完 IO 后是 4.3-stable;缺 modules/ 目录也算探测成功',
+     `${r43.ok} / ${r43.sourceVersion} / ${r43.error}`)
+  ok(r43.tested === false, '4.3-stable 不在已实测表内 → tested 为 false(静态核对不背书)', String(r43.tested))
+
+  // ---- IO 全走注入的 deps:一个真实文件都不碰也得出同一份结论 ----
+  const SRC = 'fake-src-root'
+  const seen = []
+  const fakeTree = {
+    'SConstruct': SCORE + '\n' + C472,
+    'version.py': VERSION_PY,
+    'modules': ['webp', 'mono'],
+    'modules/webp/register_types.h': '', 'modules/webp/SCsub': '', 'modules/webp/config.py': 'def can_build(env, platform):\n    return True\n',
+    'modules/mono/register_types.h': '', 'modules/mono/SCsub': '', 'modules/mono/config.py': MONO_CFG,
+    // detect.py 这一行逐字取自 platform/windows/detect.py:229
+    'platform/windows/detect.py': '        BoolVariable("use_static_cpp", "Link MinGW/MSVC C++ runtime libraries statically", True),'
+  }
+  const rel = (fp) => String(fp).replace(/\\/g, '/').replace(SRC + '/', '')
+  const inj = {
+    readFileSync: (fp) => { const k = rel(fp); seen.push(k); if (typeof fakeTree[k] !== 'string') throw new Error('ENOENT ' + k); return fakeTree[k] },
+    existsSync: (fp) => typeof fakeTree[rel(fp)] === 'string',
+    readdirSync: (fp) => { const v = fakeTree[rel(fp)]; if (!Array.isArray(v)) throw new Error('ENOTDIR ' + rel(fp)); return v }
+  }
+  const ri = await P.probeSource(SRC, inj)
+  ok(ri.ok === true && ri.options.module_mono_enabled.default === false,
+     '注入的 readdirSync + readFileSync 一路流到模块开关(磁盘上没有这棵树也能探测)',
+     `${ri.ok} / ${JSON.stringify(ri.options.module_mono_enabled)} / ${ri.error}`)
+  ok(ri.options.use_static_cpp && ri.options.use_static_cpp.default === true,
+     '注入的 detect.py 内容进了结果 —— 能力表里 optStaticCpp 的 flag 就靠这一路',
+     JSON.stringify(ri.options.use_static_cpp))
+  ok(seen.includes('platform/windows/detect.py') && seen.includes('modules/mono/config.py'),
+     '读过的确实是注入的那两份文件(若实现绕开 deps 去 require node:fs,这份表里不会有它们)', seen.join(','))
+
+  // ---- 注入的 IO 抛异常时如实失败,不把异常抛给调用方(Windows 上源码树常被 git/杀软占用) ----
+  let thrown = null
+  let rLock = null
+  try { rLock = await P.probeSource(root, { existsSync: () => { throw new Error('EPERM: operation not permitted') } }) }
+  catch (e) { thrown = e }
+  ok(thrown === null && !!rLock && rLock.ok === false && /SConstruct/.test(rLock.error || ''),
+     'existsSync 抛异常 → ok:false 带原因,不抛出去', thrown ? String(thrown) : `${rLock && rLock.ok} / ${rLock && rLock.error}`)
+
+  fs.rmSync(root, { recursive: true, force: true })
+  fs.rmSync(bad, { recursive: true, force: true })
+  fs.rmSync(dupRoot, { recursive: true, force: true })
+  fs.rmSync(root43, { recursive: true, force: true })
+  report()
+})().catch((e) => {
+  // async 节里任何一处抛出(含未捕获的 rejection)都必须把整轮判红 ——
+  // 否则断言没跑完也照样显示"全部通过"。
+  ok(false, 'probeSource 测试节抛出异常,整节作废', e && e.stack)
+  report()
+})
+
+// 汇总只能在 probeSource 那节(async)跑完之后打。简报原先把这三行留在文件末尾同步执行,
+// 那是个真缺陷:async 断言一行都还没跑就已经打印了 PASS,而且那节里的 FAIL 再也触发不了
+// process.exit(1) —— 整节挂掉也照样显示"全部通过"。改成函数声明(靠提升在 async 里调)。
+function report() {
+  console.log(`\n${'='.repeat(56)}`)
+  console.log(`PASS ${pass}  FAIL ${failures.length}`)
+  if (failures.length) { for (const f of failures) console.log('  - ' + f); process.exit(1) }
+  console.log('全部通过')
+}
