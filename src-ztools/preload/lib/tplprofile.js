@@ -1,45 +1,58 @@
-// 自编译模板 · 输出层:勾选 + 探测结果 → Godot 的 feature build profile。
+// 自编译模板 · 输出层:勾选 + 探测结果 → Godot 的 feature build profile + scons 命令行键。
 //
-// 为什么走 profile 文件而不是往命令行上拼(策划书 §2 决策 6):
-//   · 命令预览不随勾选线性变长 —— 但"那一行恒定"要按 Ruling #32 改成**只随预设模式变**:
-//     default-on(全量 / 2D 轻量)那两套一个额外 token 都不发,default-off 多发 `commandExtras`
-//     里那一条(它在 profile 里不生效,见文件头第 (1) 条);
-//   · 渲染层交的是勾选状态,参数由本文件查表生成 —— `buildtools.js:18-19` 那条
+// 为什么走 profile 文件而不是整行都往命令行上拼(策划书 §2 决策 6):
+//   · 面板上看得见的是 46 个模块开关,它们进 profile 后命令预览不随模块勾选线性变长;
+//     核心 flag 按 Ruling #38 走命令行,**token 数随勾选变化** —— 上一轮"那一行只随预设模式变"的
+//     承诺已作废,T10 的命令预览要按"本层查表生成"来写,不是按"恒定一行"来写;
+//   · 渲染层交的是勾选状态,两个通道的参数都由本文件查表生成 —— `buildtools.js:18-19` 那条
 //     "不接受渲染层传命令串"的红线原样守住;
-//   · 生成的 JSON 能整份存进模板库记录,"当时编了什么"可回查。
-// 生效时机已核实:profile 在 SConstruct:655-658 落到 env(`for c in dbo: env[c] = dbo[c]`),
-// 而模块开关到 :1112-1113 `if not env[f"module_{name}_enabled"]: continue` 才被消费。
+//   · 生成的 JSON 能整份存进模板库记录,"当时编了什么"可回查(profile 键 + 命令行键都在返回值里)。
+// 生效时机已核实:profile 在 `SConstruct:655-658` 落到 env(`for c in dbo: env[c] = dbo[c]`),
+// 而模块开关到 `:1112-1113` `if not env[f"module_{name}_enabled"]: continue` 才被消费。
 //
 // **纯函数**:不做 IO、不 require node:fs。输入是 tplprobe.js 的 OptionMap,输出是 JSON 对象。
 //
-// 唯一的输出规则:**用户选择 ≠ 探测到的源码默认值时才写**。
+// 唯一的输出规则:**用户选择 ≠ 探测到的源码默认值时才写** —— 对两个通道都成立。
 // 反面教材见策划书 §5.3 —— 无脑全选还照"保留=输出"去拼,会得到一个带调试符号、
 // 开着 d3d12 与 xaudio2 的"全量"模板,既不是官方等价物也把省体积反着做了一遍。
 //
 // ================ 交给执行层(T7)与校验层(T6)的四条硬事实,都在这里记一次 =================
-// (1) `modules_enabled_by_default` **在 profile 里是惰性的**:全树只有 `SConstruct:282` 声明、
-//     `:476` 读取(`if env["modules_enabled_by_default"]:` 决定模块默认开还是关),而那一步在
-//     `:496 opts.Update` 之前就把 57 个 `module_*_enabled` 的默认值算完了;profile 到 `:655-658`
-//     才开始 `env[c] = dbo[c]` —— 晚一百多行,写进去是 no-op。官方 CI 同一条也写在**命令行
-//     scons-flags** 上(`linux_builds.yml:108`),不在任何 profile 里。
-//     → 这类键由本层交进返回值 `commandExtras`(见 COMMAND_ONLY_FLAGS),**不再写进 profile**:
-//       留一个不生效的键在归档 profile 里,会让后来人误以为它靠 profile 生效(Ruling #32/#35)。
-//       T7 负责把该数组附到 scons 行尾;"那一行恒定"的承诺因此改成"只随预设模式变、不随勾选组合变"。
+// (1) **通道划分只认前缀,不认行号白名单(Ruling #38)**:flag 名是 `module_*` 的写进 profile
+//     (`disabled_build_options`),**其余一切 flag 一律发进 `commandExtras`**(scons 命令行 token)。
+//     为什么不维护"谁在 `:655` 之后被读"那张表:
+//       · profile 到 `SConstruct:655-658` 才 `env[c] = dbo[c]`,在那之前被读完的键写进 profile 是
+//         **静默 no-op**。控制器把 23 个核心 flag 的首个读取点全核了一遍,结论是"早于 655 的"有
+//         **一整类 13 个**(use_static_cpp / modules_enabled_by_default / accesskit / vulkan / sdl /
+//         d3d12 / opengl3 / optimize / angle / debug_symbols / lto / deprecated / precision),
+//         **四个渲染驱动全在这一类里** —— 不是上一轮以为的三个孤例;
+//       · 这张表要随 Godot 版本维护,而漂移的表现是**不报错地不生效**(见本仓库 §9.11 与 §10.4:
+//         控制器给的行号里有 8 个其实出自 `platform/windows/detect.py`,那些读取点在
+//         `SConstruct:701 detect.configure(env)` 里跑、其实晚于 :658 —— 恰好证明按行号判断容易出错);
+//       · 命令行参数在 `SConstruct:440` / `:499` 的 `opts.Update(env, {**ARGUMENTS, …})` 就落进 env,
+//         **早于所有读取点**,对任何消费时机都正确 —— 所以"拿不准的键一律走命令行"永远是安全侧;
+//       · 按前缀切是一条**可机械检查**的规则:本文件测试里有两条遍历性断言(
+//         「profile 里不得出现非 `module_*` 键」+「commandExtras 里不得出现 `module_*` 键」)钉着它。
+//     `modules_enabled_by_default` 因此只是这条规则的一个普通成员(它不是 `module_*`,且
+//     `SConstruct:476` 确实在 profile 之前读 —— 上一轮为它单独设的 COMMAND_ONLY_FLAGS 白名单已删,
+//     它现在由"预设模式"这条来源进命令行,见 MODE_COMMAND_FLAGS)。
+//     → T7 负责把 `commandExtras` 附到 scons 行尾;这些键**只走这条路**,不留进 profile。
 // (2) 反向白名单下**保留的模块必须显式点名 `true`**:没被点名的在 modules_enabled_by_default=no 之下
 //     整体关闭(`SConstruct:1112-1113` 只认显式值)。没保留的模块则与"有效默认(关)"相同 → 按差值规则
 //     不写。官方 CI 那句 `module_text_server_fb_enabled=no`(`linux_builds.yml:109`)就是这种冗余防御:
 //     它自己的 `is_enabled()` 返回 False(`modules/text_server_fb/config.py:9-11`),硬发反而违反
 //     "与默认相同就不输出"(Ruling #36)。
-// (3) `production=yes` 会把 `use_static_cpp` / `debug_symbols` 按 `get_cmdline_bool` 重设、把 `lto`
-//     按 **ARGUMENTS**(不是 env)重设(`SConstruct:674-680`,在 :658 之后),所以同一份 profile 里
-//     这些键与 `production` 并存时会被覆盖。本层不拦(拦了就把探测事实藏起来了)→ 交 T6 静态校验。
-// (4) **已核实、待裁定的两条同类事实**:全树只在 :658 之前被读完、因此写进 profile 同样不生效的还有
-//     `deprecated`(唯一读点 `SConstruct:593`,决定 `DISABLE_DEPRECATED` 宏)与 `precision`(`:596` 定
-//     `REAL_T_IS_DOUBLE` 宏;`:1043` 在 profile 之后但只用来加 `.double` 文件名后缀)。
-//     当前代码按 Ruling #36 的字面口径**仍把 `deprecated` 写进 profile**(minimal 的键集合要与官方那 9 条
-//     逐字对齐),也就是 4.7.2 上那份 `deprecated:false` 只是归档记录、不改变产物。要不要把它(以及
-//     `precision`)一并挪进 COMMAND_ONLY_FLAGS 属规格级改动,已在 T5 修复轮 1 上报等裁定;挪之前 T6
-//     应当先出一条静态校验,别让用户以为关掉了兼容层。
+// (3) `production=yes` 会把 `use_static_cpp` / `debug_symbols` 按 `methods.get_cmdline_bool`(它读
+//     **ARGUMENTS**,`methods.py:225-233`)重设、把 `lto` 按 `ARGUMENTS.get("lto","auto")` 重设
+//     (`SConstruct:674-680`,在 :658 之后)。上一轮这是"profile 里的值被覆盖回默认"的隐患;
+//     **#38 把这四个键都搬到命令行之后 ARGUMENTS 里就有用户那一条 → 重设取到的正是所选值,隐患消除**。
+//     仍然留给 T6 一条交叉校验:若哪天 profile 里同时出现 `production` 与这三键,那才是真冲突
+//     (#38 之后本层不会再产出这种形态)。
+// (4) **#38 之后不再有"profile 里不生效"的键**,所以上一轮登记的那两条(
+//     `deprecated` 唯一读点 `SConstruct:593`、`precision` 宏读点 `:596`,都早于 :658,写进 profile
+//     只是归档记录)自动消解:两个键现在都发命令行,`deprecated=no` / `precision=double` 真改产物。
+//     上一轮交给 T6 的那条"profile 里出现 deprecated/precision 要提示"的软校验**不再需要**,
+//     换成一条更硬的:静态校验层若看到 profile 里出现非 `module_*` 键,应当直接判错(本层已保证不会,
+//     那是交叉防线)。
 //     表外开关(gdscript / freetype / text_server_adv / threads / xaudio2 / disable_exceptions …)本层
 //     **绝不代写** —— 面板没有它们,替用户关就是废模板(策划书 §3 负范围补条)。
 const { TPL_FEATURES, flagsOf } = require('./tplfeatures.js')
@@ -47,7 +60,7 @@ const { TPL_FEATURES, flagsOf } = require('./tplfeatures.js')
 /** @typedef {Record<string, {exists: true, default: boolean|string}>} OptionMap */
 /** @typedef {'default-on'|'default-off'} ProfileMode */
 
-/** 与源码默认相同时用的哨兵:调用方据此决定"这个 flag 不写进 profile"。 */
+/** 与源码默认相同时用的哨兵:调用方据此决定"这个 flag 两个通道都不输出"。 */
 const SAME_AS_SOURCE = Symbol('same')
 
 /**
@@ -63,15 +76,14 @@ const ENUM_VALUES = {
 }
 
 /**
- * 必须上命令行的键 —— profile 到 `SConstruct:655-658` 才赋值,而这些键在那之前就读完了,
- * 写进 profile 是静默 no-op(见文件头第 (1) 条)。`buildProfile` 把命中的条目生成 `commandExtras`,
- * 由 T7 附到 scons 行尾;这些键**只走这条路**,不留进 profile(Ruling #32/#35)。
- * 顺序即数组顺序:与本表声明序一致,与勾选顺序无关,所以是稳定输出。
+ * 由**预设模式**追加、不由面板勾选项派生的命令行键 —— `modules_enabled_by_default` 在功能表里没有
+ * 对应项(它是"模块默认开还是关"的总闸,不是一个功能),所以不能靠 Ruling #38 的前缀判定从勾选项派生,
+ * 只能在这一声明处补上。它同样**不是** `module_*` → 按 #38 落命令行,与文件头第 (1) 条一致。
+ * default-on 那两套预设不动模块默认,发这个键会整体关掉模块 → 用 mode 限定只在反向白名单下发。
  * @type {{flag: string, value: boolean|string, mode?: ProfileMode}[]}
  */
-const COMMAND_ONLY_FLAGS = [
+const MODE_COMMAND_FLAGS = [
   // SConstruct:282 声明 / :476 唯一读点,都在 profile 落 env 之前;官方 CI 放在命令行(linux_builds.yml:108)。
-  // 只有反向白名单模式需要它:default-on 那两套预设不动模块默认,发这个键会整体关掉模块。
   { flag: 'modules_enabled_by_default', value: false, mode: 'default-off' }
 ]
 
@@ -90,6 +102,20 @@ function isNegatedFlag(flag) {
 /** @param {string} flag @returns {boolean} 模块开关(`module_<目录名>_enabled`,methods.py:258 + SConstruct:485) */
 function isModuleFlag(flag) {
   return /^module_.*_enabled$/.test(flag)
+}
+
+/**
+ * **Ruling #38 的唯一通道判据**:这个 flag 进 profile 还是进命令行。
+ * `module_*` → profile(`disabled_build_options`);其余一律 → 命令行 token。
+ * 判据是**前缀**而不是行号白名单,理由见文件头第 (1) 条:命令行对任何消费时机都正确,
+ * 而"profile 是否赶得上"这个知识随版本漂移且漂移成静默不生效。
+ * 与 `isModuleFlag` 共用同一个正则,是为了让"表内 `module_` 前缀 ⇔ `_enabled` 结尾"这条
+ * tplfeatures 侧已钉死的等价关系继续成立(见报告§10 等价变异清单);换成 `startsWith('module_')`
+ * 不会改变任何可达输入上的集合,但会把"面板表里出现裸 module_x"这种错误悄悄放过。
+ * @param {string} flag @returns {boolean} true = 写进 profile,false = 发进 commandExtras
+ */
+function goesToProfile(flag) {
+  return isModuleFlag(flag)
 }
 
 /**
@@ -148,7 +174,7 @@ function initialSelection(options) {
 }
 
 /**
- * 勾选 → profile 对象。
+ * 勾选 → 两份产物:profile 对象(`module_*`)与命令行 token(其余一切),按 Ruling #38 分通道。
  * @param {Record<string, boolean>} selection 面板勾选(id → 是否保留);缺整个对象按"什么都没勾"处理,不猜
  * @param {OptionMap} options 探测结果(tplprobe.js probeSource().options);缺整个对象按"什么都没探到"处理
  * @param {{mode?: ProfileMode}} [opts] default-off = 最小可跑那种反向白名单
@@ -158,24 +184,26 @@ function buildProfile(selection, options, opts) {
   const mode = /** @type {ProfileMode} */ ((opts && opts.mode) || 'default-on')
   const sel = selection || {}
   const srcOpts = options || {}
-  /** @type {Record<string, boolean|string>} */
+  /** @type {Record<string, boolean|string>} profile 通道:只装 `module_*`(Ruling #38) */
   const dbo = {}
   /** @type {string[]} */
   const written = []
   /** @type {{flag: string, why: string}[]} */
   const skipped = []
-  // 必须上命令行的键(文件头第 (1) 条)。不写进 dbo:profile 里那份是不生效的归档(Ruling #35)。
-  /** @type {string[]} */
-  const commandExtras = []
-  for (const k of COMMAND_ONLY_FLAGS) {
+  // 命令行通道:非 `module_*` 的一切都走这里(文件头第 (1) 条)。先攒成 flag→值的映射再统一排序发 token,
+  // 是为了让"同一个键不因来源(模式表 / 勾选项)或勾选顺序而落到不同位置"由构造保证。
+  /** @type {Record<string, boolean|string>} */
+  const cmd = {}
+  for (const k of MODE_COMMAND_FLAGS) {
     if (k.mode && k.mode !== mode) continue
-    commandExtras.push(sconsToken(k.flag, k.value))
+    cmd[k.flag] = k.value
+    written.push(k.flag)
   }
 
   for (const f of TPL_FEATURES) {
     if (!(f.id in sel)) {
       // 面板没给这一项的勾选态:按源码默认不写任何东西(宁缺勿错),而不是当成"用户取消了它"
-      // —— 后者会让一个拼错的 id 直接把 disable_3d=yes 写进 profile,方向是多删不是多留。
+      // —— 后者会让一个拼错的 id 直接把 disable_3d=yes 发进命令行,方向是多删不是多留。
       for (const flag of flagsOf(f)) skipped.push({ flag, why: `面板未提供 ${f.id} 的勾选态,按源码默认不写(宁缺勿错)` })
       continue
     }
@@ -183,16 +211,22 @@ function buildProfile(selection, options, opts) {
     for (const flag of flagsOf(f)) {
       const o = srcOpts[flag]
       if (!o || !o.exists) {
-        skipped.push({ flag, why: '此版本源码未探到该开关,不写进 profile(未声明的 scons 变量是静默失效的)' })
+        skipped.push({ flag, why: '此版本源码未探到该开关,两个通道都不写(未声明的 scons 变量是静默失效的)' })
         continue
       }
       const want = desiredValue(flag, o.default, keep, mode)
       if (want === SAME_AS_SOURCE) continue
-      dbo[flag] = /** @type {boolean|string} */ (want)
+      // Ruling #38:`module_*` 进 profile,其余进命令行。命令行在 SConstruct:440/:499 就落 env,
+      // 早于所有读取点,所以对任何消费时机都正确;profile 只对 :655 之后才被读的键正确。
+      if (goesToProfile(flag)) dbo[flag] = /** @type {boolean|string} */ (want)
+      else cmd[flag] = /** @type {boolean|string} */ (want)
       written.push(flag)
     }
   }
 
+  // 两个通道各自稳定序列化:profile 键字典序,命令行按 flag 名字典序生成 token
+  // (token 串本身也因此在字典序上,Rust 双端逐字节比的就是这两份)。
+  const commandExtras = Object.keys(cmd).sort().map((flag) => sconsToken(flag, cmd[flag]))
   return { json: { disabled_build_options: sortKeys(dbo) }, written: written.sort(), skipped, commandExtras }
 }
 
@@ -268,9 +302,11 @@ const LITE2D_OFF_IDS = ['sys3d', 'accesskit']
 /**
  * minimal(官方 CI 的 Minimal template)真正取消的面板项,逐条对齐 `linux_builds.yml:110-116`
  * 那 7 条 scons-flags(`id` ↔ 官方 `flag` 成对写死,所以"改了一条却动了另一项"这种漂移能被照出来)。
- * 官方 9 条里另外两条的处理:
- *   · `modules_enabled_by_default=no`(:108)走 `commandExtras`,profile 里那份不生效(Ruling #32/#35);
+ * **这 7 条按 Ruling #38 全部落在 `commandExtras`**(它们都不是 `module_*`),产物与官方那行 scons-flags
+ * 逐字相同;官方 9 条里另外两条:
+ *   · `modules_enabled_by_default=no`(:108)同样走 `commandExtras`(见 MODE_COMMAND_FLAGS);
  *   · `module_text_server_fb_enabled=no`(:109)不发,它默认就是 False(Ruling #36)。
+ * → 新规则下 minimal 的 profile 里**只剩"保留的模块显式点名 true"**那一类键。
  * **渲染与输入驱动(vulkan / opengl3 / angle / sdl / accesskit)一条都不碰** —— 官方那 9 条里没有它们,
  * 关驱动交给策划书 §5.5 的硬拦,不在预设里替用户关。
  * @type {{id: string, flag: string, ciLine: string}[]}
@@ -288,7 +324,8 @@ const MINIMAL_OFF = [
 /**
  * 三个预设(策划书 §5.4b)。
  * full = 全部回到源码默认;lite2d = 附录实测那组(只动 LITE2D_OFF_IDS 那两项);
- * minimal = 键集合逐条对齐官方 CI 的 Minimal template(见 MINIMAL_OFF 与文件头第 (1)(2) 条),
+ * minimal = 官方 CI Minimal template 的 9 条 scons-flags 逐条对齐(见 MINIMAL_OFF 与文件头第 (1)(2) 条):
+ * 新规则下那 8 条要发的都发在 `commandExtras`,profile 只带保留模块的显式点名。
  * 表内其余项一律保持源码默认 —— 不关渲染驱动,不关表外模块。
  */
 const PRESETS = {
