@@ -1,8 +1,14 @@
 // 探测层(tplprobe.js)的测试。全部用**逐字摘自真实源码**的片段当夹具,不自己编形态 ——
 // 这层唯一的价值就是"和源码写得一样",夹具编错了实现就跟着错。
 // 片段取自 godotengine/godot tag 4.7.2-stable 的 SConstruct(sha256 已核,见策划书附录 B)。
-// 唯一的例外是下面标了「合成夹具」的那条单引号声明:4.7.2 全树没有这种形态,它只验正则的防御支。
 // 用法: node src-ztools/preload/lib/__tests__/tplprobe.test.js
+// 不是「单文件原样摘录」的夹具目前有六处,每处就在原位写明合成在哪、真实出处又是哪一行:
+//   1) 单引号 BoolVariable 声明 —— 4.7.2 全树 0 处,只验正则的跨版本防御支;
+//   2) modules 探测里的 broken_module / .gitkeep —— 真实 modules/ 下没有这两个条目,是造的假目录;
+//   3) 4.3 那段里的 disable_advanced_gui 块 —— 真实 4.3(:969-977)是嵌套 if/else,这里借了 4.7.2 的平铺写法占位;
+//   4) MONO_CFG —— mono/config.py:31-33 与 webp/config.py:1-2 两段真实摘录的**拼接**,不是单文件原文;
+//   5) jolt_physics 的 config.py 置空 —— 真实文件有 can_build 逻辑,本条只验键名,属简化;
+//   6) 三条「注入回调抛 EPERM」的 —— 验的是回调契约不是文件形态,真实源码里不存在这种 config.py。
 const P = require('../tplprobe.js')
 
 let pass = 0
@@ -103,6 +109,101 @@ ok(Object.keys(w).sort().join(',') === 'debug_crt,incremental_link,silence_msvc,
    '平台文件逐键精确：元组形态不作声明；带括号 help 与带裸撇号 help 照旧解析', Object.keys(w).sort().join(','))
 ok(w.use_static_cpp && w.use_static_cpp.default === true && w.windows_subsystem && w.windows_subsystem.default === 'gui',
    'detect.py 探针:use_static_cpp=True 且 windows_subsystem="gui"', JSON.stringify({ u: w.use_static_cpp, s: w.windows_subsystem }))
+
+section('is_enabled() 解析(模块默认值)')
+// MONO_CFG 是**拼接夹具**,不是单文件原样摘录,两段各自的出处:
+//   - `def is_enabled():` + 那行注释 + `return False` 逐字取自 modules/mono/config.py:31-33
+//     (modules/text_server_fb/config.py:10-12 是同一个形态,注释里换了自己的选项名);
+//   - 头两行 `def can_build(env, platform): / return True` 逐字取自 modules/webp/config.py:1-2。
+//     mono 自己的 can_build 里还夹着 env.module_add_dependencies("mono", ["regex"]),与本条要验的
+//     is_enabled() 形态无关,所以借 webp 的那两行 —— 别把它当作 mono/config.py 的原文。
+// 这条真正要钉住的是 `def is_enabled():` 与 `return` 之间夹注释行也要认得:4.7.2 全树只有
+// mono 与 text_server_fb 两个模块定义 is_enabled(),而且两个都是这个带注释的写法。
+const MONO_CFG = 'def can_build(env, platform):\n    return True\n\n\ndef is_enabled():\n    # The module is disabled by default. Use module_mono_enabled=yes to enable it.\n    return False\n'
+ok(P.parseIsEnabled(MONO_CFG) === false, 'mono/text_server_fb 的 is_enabled() 带注释行也认得 → False')
+// 这个夹具逐字取自 modules/webp/config.py:1-2(真实文件 :1-6 还有 configure(env): pass,没有 is_enabled())。
+// 4.7.2 另外 55 个模块的 config.py 都没有 is_enabled() —— 依据 SConstruct:476-483,先置 True,
+// 再 try 调 config.is_enabled(),只有 AttributeError 才保持 True。
+ok(P.parseIsEnabled('def can_build(env, platform):\n    return True\n') === true, '没有 is_enabled() → 默认 True(SConstruct:476-483)')
+
+section('内置模块探测:目录名即模块名')
+// methods.py:258 `module_name = os.path.basename(path)` —— 没有名字翻译层;
+// SConstruct:485 `opts.Add(BoolVariable(f"module_{name}_enabled", ...))` 就是键名的出处。
+// 检测门槛 methods.py:302-309 is_module()(文档见 :244):必须是目录,且 register_types.h / SCsub /
+// config.py 三件齐。少一件就不是模块,给它生成 module_x_enabled 是在猜。
+// 夹具各条目的真实程度:
+//   - webp / jolt_physics / mono:真实 4.7.2 modules/ 下确有这三个目录,三件文件齐(tar 清单已核)。
+//     webp 的 config.py 内容逐字取自 modules/webp/config.py:1-2;mono 的用上面的 MONO_CFG;
+//     jolt_physics 的 config.py 置空是**简化**(真实文件有 can_build 逻辑),本条只验它的键名不验默认值。
+//   - broken_module / .gitkeep:**合成形态,真实 modules/ 下没有这两个条目**。
+//     broken_module 只给 register_types.h(缺另两件)→ 验三件齐的门槛;
+//     .gitkeep 故意三件齐、只让名字以点开头 → 验点规则。若不给它配齐三件,把它挡掉的就是
+//     "三件不齐"而不是点规则,那条断言在任何点规则变异下都会 PASS(等于没验)。
+//     点目录该被跳过的依据:methods.py:273 用 glob.glob(os.path.join(path, "*")) 枚举子项,
+//     glob 的 `*` 天然不匹配点开头条目。
+const tree = {
+  'modules/webp/register_types.h': '', 'modules/webp/SCsub': '', 'modules/webp/config.py': 'def can_build(env, platform):\n    return True\n',
+  'modules/jolt_physics/register_types.h': '', 'modules/jolt_physics/SCsub': '', 'modules/jolt_physics/config.py': '',
+  'modules/mono/register_types.h': '', 'modules/mono/SCsub': '', 'modules/mono/config.py': MONO_CFG,
+  'modules/broken_module/register_types.h': '', // 缺 SCsub 与 config.py → 不算模块
+  'modules/.gitkeep/register_types.h': '', 'modules/.gitkeep/SCsub': '', 'modules/.gitkeep/config.py': '' // 三件齐但以点开头 → 不算模块
+}
+const dirs = ['webp', 'jolt_physics', 'mono', 'broken_module', '.gitkeep']
+const mods = P.detectBuiltinModules(
+  (rel) => (rel === 'modules' ? dirs : []),
+  (rel) => Object.prototype.hasOwnProperty.call(tree, rel),
+  (rel) => tree[rel] || ''
+)
+ok(mods.module_webp_enabled && mods.module_webp_enabled.default === true, 'webp → module_webp_enabled 默认 True')
+ok(!!mods.module_jolt_physics_enabled, 'jolt_physics → module_jolt_physics_enabled(不是 module_jolt_enabled)')
+ok(mods.module_mono_enabled && mods.module_mono_enabled.default === false, 'mono 默认 False → 面板初始不勾')
+// 形状钉一条:输出层的规则(策划书 §5.3「选择 ≠ 默认才输出」)读的就是 exists + default 这两个字段,
+// 上面几条只看了 default,把 exists 改成 false 谁都不会喊 —— 这条专门盯它。
+ok(mods.module_webp_enabled.exists === true && mods.module_mono_enabled.exists === true,
+   '两条开关都按 OptionMap 形状给出 exists:true(default 由上面两条分别钉 True/False)')
+ok(!('module_broken_module_enabled' in mods), '三件不齐的目录不当它是模块')
+// 键名按 `module_${name}_enabled` 拼接,name='.gitkeep' 时点是原样带进去的,
+// 所以这里断言的是实现真正会写出的那个键(不是把点吞掉后的 module__gitkeep_enabled)。
+ok(!('module_.gitkeep_enabled' in mods), '点开头目录不当模块(按实现会写成 module_.gitkeep_enabled)')
+// 逐键精确钉一遍全表:多生成一个键(broken_module 或 .gitkeep 漏进来)或漏一个都会红。
+ok(Object.keys(mods).sort().join(',') === 'module_jolt_physics_enabled,module_mono_enabled,module_webp_enabled',
+   'detectBuiltinModules 逐键精确:只出这三个键', Object.keys(mods).sort().join(','))
+// 下面三条是**合成形态,非真实源码摘录**:验的不是某种 config.py 写法,而是「注入回调抛异常」这个
+// 注入行为 —— 真实源码树里不存在这样一种文件形态。要它是因为 Task 4 的 probeSource 会把
+// fs.existsSync / fs.readFileSync / fs.readdirSync 原样传进来,而 Windows 上用户的源码树正在被
+// git checkout、或被杀软锁文件时这些调用会抛 EPERM;探测层抛出去整个面板就崩了。
+ok(Object.keys(P.detectBuiltinModules(() => { throw new Error('EPERM') }, () => true, () => '')).length === 0,
+   'listDir(readdirSync) 抛异常 → 返回空表,不把异常抛给调用方')
+ok(P.detectBuiltinModules(() => ['webp'], () => true, () => { throw new Error('EPERM') }).module_webp_enabled.default === true,
+   'config.py 读失败(readFileSync 抛) → 键照常出,default 回落 True(SConstruct:476-483 那个 AttributeError 分支同义)',
+   JSON.stringify(P.detectBuiltinModules(() => ['webp'], () => true, () => { throw new Error('EPERM') })))
+ok(Object.keys(P.detectBuiltinModules(() => ['webp'], () => { throw new Error('EPERM') }, () => '')).length === 0,
+   '标记文件探测抛异常(existsSync 抛) → 该模块当作不是模块,不把异常抛给调用方')
+
+section('cascade:4.3 与 4.7.2 形态不同,必须探不能内置(策划书 §5.4)')
+// C472 逐字摘自 4.7.2 的 SConstruct:1076-1082(disable_3d 块 1076-1080 + disable_advanced_gui 块 1081-1082)。
+// C43 的 disable_3d 块:结构与 4.3-stable 的 SConstruct:963-968 一致(嵌套 if/else + Exit(255)),
+//   只把 :965 那句长 print_error 文案截成 "nope",缩进层级照原文。
+// C43 的 disable_advanced_gui 块是**合成形态,非真实摘录**:真实 4.3(:969-977)那个块同样是
+//   嵌套 if/else,这里用的是 4.7.2 的平铺写法,只当占位用 —— 验走完 4.3 那个嵌套块后能正确出块。
+const C43 = 'if env["disable_3d"]:\n    if env.editor_build:\n        print_error("nope")\n        Exit(255)\n    else:\n        env.Append(CPPDEFINES=["_3D_DISABLED"])\nif env["disable_advanced_gui"]:\n    env.Append(CPPDEFINES=["ADVANCED_GUI_DISABLED"])\n'
+const C472 = 'if env["disable_3d"]:\n    env.Append(CPPDEFINES=["_3D_DISABLED"])\n    env["disable_navigation_3d"] = True\n    env["disable_physics_3d"] = True\n    env["disable_xr"] = True\nif env["disable_advanced_gui"]:\n    env.Append(CPPDEFINES=["ADVANCED_GUI_DISABLED"])\n'
+const c43 = P.parseCascades(C43)
+const c472 = P.parseCascades(C472)
+ok(!c43.disable_3d, '4.3:disable_3d 不连带任何东西', JSON.stringify(c43))
+// 上面那条只盯 disable_3d 一个键,实现若对整个 4.3 夹具乱生出别的键它就沉默;
+// 这条把整份结果钉成空对象 —— 这是"cascade 必须探测而非内置"的实证依据(真实 4.3 全量 SConstruct 同样为空)。
+ok(JSON.stringify(c43) === '{}', '4.3 夹具逐键精确:整份结果一个连带都不产出', JSON.stringify(c43))
+ok(JSON.stringify(c472.disable_3d) === JSON.stringify(['disable_navigation_3d', 'disable_physics_3d', 'disable_xr']), '4.7.2:连带那三项且保持源码里的顺序', JSON.stringify(c472.disable_3d))
+ok(!c472.disable_advanced_gui, 'disable_advanced_gui 无连带(SConstruct:1081-1082 只加宏)')
+// 逐字摘自 4.7.2 的 SConstruct:580-589。这段专门钉「出块判据」::580 那个块只有一行 Append,
+// :583 回到顶格就该停;而 :589 那条 `env["no_editor_splash"] = True` 缩进更深、离它只有六行,
+// 出块判据一失效(见变异 M10),它就会被算成 use_precise_math_checks 的连带。
+// 上面三条 cascade 断言都碰不到它 —— 那三段夹具里没有任何跨块的赋值行。
+const EXIT_FIX = 'if env["use_precise_math_checks"]:\n    env.Append(CPPDEFINES=["PRECISE_MATH_CHECKS"])\n\nif env.editor_build:\n    if env["engine_update_check"]:\n        env.Append(CPPDEFINES=["ENGINE_UPDATE_CHECK_ENABLED"])\n\n    if not env.File("#main/splash_editor.png").exists():\n        # Force disabling editor splash if missing.\n        env["no_editor_splash"] = True\n'
+const cExit = P.parseCascades(EXIT_FIX)
+ok(Object.keys(cExit).length === 0, '出块靠缩进判断:SConstruct:580 块在 :583 顶行处停住,:589 的赋值不算它的连带',
+   JSON.stringify(cExit))
 
 console.log(`\n${'='.repeat(56)}`)
 console.log(`PASS ${pass}  FAIL ${failures.length}`)
