@@ -16,7 +16,7 @@
 // 直接 `import { ref } from './vue-shim.mjs'` 会让 Node 去加载 node_modules 的 vue,
 // 那是与产物内联 vue **不同的实例**,于是组合式函数里的 computed 永远看不到测试创建的 ref
 // —— 表现就是「收藏成功了但 isFav 还是 false」,看起来像业务 bug,其实是测试自坑。
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { types } from 'node:util'
@@ -223,6 +223,29 @@ const fav3 = useMarketFavorites({
 })
 ok(await fav3.toggleFav(assetOf('no/save', 'N')) === false, '写入没落地时返回 false')
 ok(/收藏未生效/.test(fav3.favDiag.value), '写入真没落地时诊断仍在(修复不许把探针弄哑)', fav3.favDiag.value)
+
+// ---------- 8. 桌面版垫片:未移植的动作不许静默假成功 ----------
+section('8. Tauri 垫片:收藏必须是「如实不支持」,不是返回 true')
+// 为什么在渲染层测试里扫源码:垫片是 index.html 的浏览器全局脚本(第 6 行 `!window.__TAURI__` 直接让位),
+// Node 里载不进来,做不了运行时断言。同 format.test.mjs:741-744 的先例,用源码扫描钉住这条红线。
+// 它钉的是形状,不是效果:2026-10-09 修渲染层竞态时发现垫片里 `toggleFavorite: () => Promise.resolve(true)`
+// —— 桌面版点星标既不写库又报成功,随后 reload 读到空列表,于是**必然**长红「收藏未生效」,
+// 与垫片自己第 3 行写的「未移植方法如实报错(而不是静默假成功)」正好相反。
+// 真机表现仍记在 docs/manual-verification.md 的 M9-4。
+const shimSrc = readFileSync(path.resolve(__dirname, '../../public/tauri-shim.js'), 'utf8')
+const shimLine = (key) =>
+  (shimSrc.split(/\r?\n/).find((l) => l.trim().startsWith(`${key}:`)) || '').trim()
+const shimToggle = shimLine('toggleFavorite')
+const shimIsFav = shimLine('isFavorite')
+ok(shimToggle !== '' && shimIsFav !== '', '前置:垫片里找得到这两行(挪走或改名要让本节显式失败,不许空过)',
+  `toggle=${shimToggle} isFavorite=${shimIsFav}`)
+ok(/toggleFavorite:\s*\(\)\s*=>\s*\{?\s*throw\b/.test(shimToggle),
+  '收藏动作必须抛错:返回 Promise/true 都到不了渲染层的同步 try/catch', shimToggle)
+ok(!/Promise\.resolve\(/.test(shimToggle), '不许把「假成功」包进 Promise 里躲开 try/catch', shimToggle)
+ok(/不支持/.test(shimToggle) && /ZTools/.test(shimToggle),
+  '抛出的原因要说清「不支持」并给出可用的宿主', shimToggle)
+ok(/isFavorite:\s*\(\)\s*=>\s*false\b/.test(shimIsFav),
+  '查询侧保持「一律未收藏」:动作不支持时声称收藏过就是撒谎', shimIsFav)
 
 // ---------- 结果 ----------
 console.log(`\n${'='.repeat(56)}`)
