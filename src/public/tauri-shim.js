@@ -277,10 +277,11 @@
     listRecentlyUpdated: () => invoke('list_recently_updated_cmd').catch(() => []),
     listProjectAssets: () => invoke('list_project_assets_cmd').catch(() => ({ result: [], page: 1, pages: 1 })),
     listFavorites: () => invoke('db_all_docs', { prefix: 'godot/market/favorites' }).then((l) => (l[0] && l[0].items) || []),
-    // 契约是**同步** boolean、失败即抛(services.ts:306;preload 侧见 lib/assets.js 的 toggleFavorite),
-    // 所以这里如实 throw,不能包进 Promise —— 渲染层用的是同步 try/catch,包进 Promise 就躲开了它,
-    // 于是既不写库又报成功,随后 reload 读到空列表,必然长红「收藏未生效」。
-    // 与本文件开头「未移植方法如实报错(而不是静默假成功)」对齐。
+    // 这里必须**同步抛**:渲染层的 useMarketFavorites.toggleFav 用的是同步 try/catch 且不 await
+    // (契约的同步面是 services.ts:306,preload 侧见 lib/assets.js)。注意「垫片一律不许返回 Promise」
+    // 是误读 —— AsyncServices(services.ts:424-443)就是把每个数据方法包成 Promise 的渲染层视图,
+    // 像 docsToggleFavorite 那样 await 的调用点返回 Promise 完全正确。这条只针对不 await 的本调用点。
+    // 原先写成 () => Promise.resolve(true):既不写库又报成功,reload 后读到空列表,必然长红「收藏未生效」。
     toggleFavorite: () => { throw new Error('桌面版暂不支持收藏,请使用 ZTools 插件版。') },
     isFavorite: () => false,
     getReleaseInfos: () => Promise.resolve({}),
