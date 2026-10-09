@@ -174,6 +174,11 @@
     // ---------- 导出模板自编译(裁剪向导) ----------
     // 桌面版(Tauri)暂未实现构建管线(需要 vcvars/子进程/产物整理),如实告知而不是假成功;
     // 渲染层对 ok:false + problems 的展示路径与缺工具链同一条。ZTools 插件宿主提供真实现。
+    // 这一组占位同一条规矩:Rust 侧命令注册之前不给任何真通道 —— 缺能力是状态不是假成功;
+    // 而返回形状必须与契约对齐(字段齐、类型对),否则渲染层对 undefined 取属性就是 TypeError。
+    probeTemplateSource: () => Promise.resolve({ ok: false, error: '桌面版暂不支持源码探测,请使用 ZTools 插件版。', sourceVersion: '', tested: false, options: {}, cascades: {}, testedVersions: [] }),
+    listTemplateFeatures: () => Promise.resolve({ ok: false, error: '桌面版暂不支持自编译模板,请使用 ZTools 插件版。', items: [] }),
+    validateTemplateConfig: () => Promise.resolve({ ok: false, issues: [], hardBlocks: [{ itemId: 'source', flag: '', why: '桌面版暂不支持自编译模板', action: '请使用 ZTools 插件版', skippable: false }] }),
     checkTemplateBuildTools: () => Promise.resolve({
       ok: false, pythonVersion: '', sconsVersion: '', vcvarsPath: '',
       cpuCount: navigator.hardwareConcurrency || 0,

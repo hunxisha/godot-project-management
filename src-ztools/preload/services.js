@@ -19,6 +19,9 @@ const diagnostics = require('./lib/diagnostics')
 const docs = require('./lib/docs')
 const inspectfs = require('./lib/inspectfs')
 const buildtools = require('./lib/buildtools')
+const tplfeatures = require('./lib/tplfeatures')
+const tplprobe = require('./lib/tplprobe')
+const tplprofile = require('./lib/tplprofile')
 
 /**
  * 门面实现:仍以同步的 Services 接口为唯一权威做编译期校验。
@@ -52,6 +55,54 @@ const servicesImpl = {
   exportTemplateStatus: (versionId) => templates.exportTemplateStatus({ versionId }),
   /** 下载安装导出模板(入队,进度走 watchTasks,任务 kind='templates') */
   /** ---------- 导出模板自编译(裁剪向导) ---------- */
+  /** 探测一份源码树。原样透传探测层:契约层在这里不加任何产品语言(策划书 §5.2「探测层不含产品语言」) */
+  probeTemplateSource: (srcDir) => tplprobe.probeSource(srcDir),
+  /** 面板数据:能力表(语义)+ 探测结果(这份源码认不认)合成,渲染层不自己判存在性 */
+  listTemplateFeatures: async (srcDir) => {
+    const probe = await tplprobe.probeSource(srcDir)
+    // 两支闸的成因不同,建议也就不同,不合并成一支:
+    //   ① 不是源码根 → 把探测层原句带回(缺 SConstruct / 读不到);
+    //   ② 是源码根却一个构建选项都没解析出来 → 策划书 §5.2 那道「拒绝进面板」的闸(Ruling #26)。
+    //      这一支不返回 items:给一张 69 项全灰的面板,等于让用户以为「这版什么都不支持」,
+    //      比拒绝更坏。判据用 options 的键数而不是「69 个 flag 全 absent」—— 后者会把能力表
+    //      拖进契约层,破掉「两层接缝只有 flag 名」那条约定。
+    if (!probe.ok) return { ok: false, error: probe.error }
+    if (Object.keys(probe.options).length === 0) {
+      return { ok: false, error: '无法解析此版本源码的构建选项（源码结构可能已变）' }
+    }
+    // defaultOn 由输出层按探测到的源码默认值算(Ruling #4),契约里不留第二套默认值判据。
+    // 反面教材:把「字符串默认值 ≠ none/auto」当成「已开」—— precision 的真实默认是 "single",
+    // 那样判会替用户勾上双精度,方向是多塞东西而不是少。
+    const sel = tplprofile.initialSelection(probe.options)
+    const cascadeSources = Object.keys(probe.cascades)
+    const items = tplfeatures.TPL_FEATURES.map((f) => {
+      const present = f.flags.some((k) => probe.options[k] && probe.options[k].exists)
+      const cascadedBy = cascadeSources.find((srcFlag) => probe.cascades[srcFlag].some((t) => f.flags.includes(t)))
+      return {
+        id: f.id, label: f.label, group: f.group, desc: f.desc,
+        sizeImpact: f.sizeImpact, risk: f.risk, flags: f.flags,
+        present,
+        defaultOn: !!sel[f.id],
+        // 连带关系只报这份源码自己声明的(4.3 与 4.7.2 就不一样),没探到就不给这个键。
+        ...(cascadedBy ? { cascadedBy } : {})
+      }
+    })
+    return { ok: true, items }
+  },
+  /** 编译前静态校验:勾选 + 探测结果 → 软问题与硬拦 */
+  validateTemplateConfig: async (params) => {
+    const probe = await tplprobe.probeSource(params.srcDir)
+    // untestedSource 由**宿主**按 version.py 与已实测表算,不接受渲染层传来的同名键(护栏:渲染层塞
+    // `untestedSource: false` 就能一键抹掉「版本未实测」这条提示,而它报的是我们自己的无知)。
+    const untestedSource = !probe.ok || !probe.testedVersions.includes(probe.sourceVersion)
+    const r = tplprofile.validateSelection(params.features, probe.options || {}, {
+      mode: params.mode,
+      d3d12SdkInstalled: params.d3d12SdkInstalled,
+      accesskitSdkInstalled: params.accesskitSdkInstalled,
+      untestedSource
+    })
+    return { ok: r.hardBlocks.length === 0, issues: r.issues, hardBlocks: r.hardBlocks }
+  },
   /** 工具链检测(python/SCons/vcvars) */
   checkTemplateBuildTools: () => buildtools.checkTemplateBuildTools(),
   /** 发起自编译(入队;完成后任务带 stageDir,渲染层走目录形态导入) */

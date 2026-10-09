@@ -63,7 +63,13 @@ const NAMED = {
   listAssetReleases: '恒空列表:版本选择会说成「没有可用版本」(界面已按宿主给如实文案,数据侧等命令)',
   getReleaseInfos: '恒空对象:卡片版本/兼容信息缺失(不构成假结论,等 Rust 侧 release 命令)',
   docsGetClassExtras: '回 null 且不说为什么(详情扩展区静默)',
-  listBackupTasks: '恒空列表:桌面版任务走 watchBackupTasks 通道,视为如实,留此备案'
+  listBackupTasks: '恒空列表:桌面版任务走 watchBackupTasks 通道,视为如实,留此备案',
+  // 这条不是欠账而是**形状盲区**:占位确实给了原因(见 tauri-shim.js 里 hardBlocks[0].why/action),
+  // 但这条契约的返回类型是 { ok, issues, hardBlocks } —— 没有 error/problems 两个字段,
+  // BARE 那条句法代理只认这两个键名,于是把「原因写在 TplIssue.why 里」读成了「不给原因」。
+  // 不放宽 BARE(它抓的是真债),也不往契约里塞一个渲染层不读的 error 字段;记名等 Rust 侧命令,
+  // 命令一注册,这个占位连同本条一起删(stale 反向检查会盯着)。
+  validateTemplateConfig: 'ok:false 的原因走契约自己的 hardBlocks[].why(BARE 只认 error/problems 两个键名);Rust 侧注册 validate_template_config 后连占位带这条一起删'
 }
 
 // 「做了事」的证据:真发命令、走那条带 _rev 的读-改-写辅助、或如实抛错。

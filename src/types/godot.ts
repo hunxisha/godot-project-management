@@ -661,6 +661,10 @@ export interface TemplateBuildTask {
   versionDir?: string
   /** 完成后:stage 里的文件数 */
   files?: number
+  /** 本次编译下发的 profile 文件路径(任务记录里仍在供回查;那个临时文件本身在构建终态就删了) */
+  profilePath?: string
+  /** 实际下发的 scons 变量名(profile 键与命令行 token **两条通道**都算,不含被跳过的与同源码默认的) */
+  writtenFlags?: string[]
 }
 
 export interface HashPathsResult {
@@ -670,4 +674,57 @@ export interface HashPathsResult {
   hashes?: { rel: string; sha256: string }[]
   /** 失败项:rel + 原语中文原因(闸拒绝回调用方原样,其余归一);单个失败不中断其余 */
   failed?: { rel: string; error: string }[]
+}
+
+/** ---------- 导出模板自编译:探测层 / 面板 / 静态校验的返回值(策划书 §5.1 三层模型) ---------- */
+
+/**
+ * 裁剪模式:`default-on` = 模块默认开,取消的那项写 false;
+ * `default-off` = 反向白名单(命令行发 `modules_enabled_by_default=no` 整体关掉,保留的模块显式点名 true)。
+ * 与 `tplprofile.js:61` 的 `@typedef ProfileMode` 同名同形 —— 这里是渲染层可见的那一份,
+ * 两处必须一起改:校验层的第 3 条硬拦只在 `default-off` 下才可能触发。
+ */
+export type TplProfileMode = 'default-on' | 'default-off'
+
+/** 探测层输出:某个 scons 变量在这份源码里的存在性与默认值 */
+export interface TplOptionInfo {
+  exists: true
+  default: boolean | string
+}
+
+/** 面板项 + 探测结果,渲染层直接渲染这一份 */
+export interface FeatureWithProbe {
+  id: string
+  label: string
+  group: string
+  desc: string
+  sizeImpact: 'large' | 'medium' | 'small' | 'tiny' | 'none'
+  risk: 'safe' | 'notice' | 'danger'
+  flags: string[]
+  /** 任一 flag 探到即为 true;false → 面板禁用并标「此版本源码无对应开关」 */
+  present: boolean
+  /** 由源码默认值推出的初始勾选态 */
+  defaultOn: boolean
+  /** 被哪个伞项连带(仅当探测到该连带关系) */
+  cascadedBy?: string
+}
+
+/** 一份源码树的探测结果(tplprobe.probeSource 原样透传,契约层不改写) */
+export interface ProbeResult {
+  ok: boolean
+  error?: string
+  sourceVersion: string
+  tested: boolean
+  options: Record<string, TplOptionInfo>
+  cascades: Record<string, string[]>
+  testedVersions: string[]
+}
+
+/** 编译前校验的一条判定。`skippable: false` = 硬拦,UI 不给「仍然继续」这条路 */
+export interface TplIssue {
+  itemId: string
+  flag: string
+  why: string
+  action: string
+  skippable: boolean
 }

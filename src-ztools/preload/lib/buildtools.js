@@ -249,9 +249,9 @@ async function runProbe(fn, srcDir) {
 /**
  * 发起自编译(入队,立即返回)。完成后任务上带 stageDir(含 templates/ 顶层)与
  * versionDir(tag 派生),渲染层直接 installExportTemplates(versionId, { srcPath: stageDir })。
- * @param {{srcDir: string, tag: string, jobs?: number, features?: Record<string, boolean>, mode?: 'default-on' | 'default-off'}} params
- *   `features` 在**运行时是必填的**(见下面那道闸),类型侧标可选只因为既有的 services.js / services.ts
- *   契约还没带上它 —— 那是 T8 的改动面(不在此文件里放宽成长期契约)。
+ * @param {{srcDir: string, tag: string, jobs?: number, features: Record<string, boolean>, mode?: 'default-on' | 'default-off'}} params
+ *   `features` 由契约(T8 起)收成必填,下面那道闸是它的双保险(运行时仍然先拒为妙);
+ *   `mode` 真可选:省略时 buildProfile 归到保守那一侧(default-on)。
  * @returns {{ok: boolean, error?: string, taskId?: string}}
  */
 function buildTemplatePack(params) {
@@ -263,7 +263,7 @@ function buildTemplatePack(params) {
  * (profile 与 bat 的生成、两条裁剪通道的划分、尾行收集、取消、产物 stage)在 Node 里就能钉住,
  * 不必真跑 40 分钟的 scons;而 probeSource 这一格是为了让"两条通道"的用例不必在夹具里
  * 重造一棵探得出选项的源码树(逐字 SConstruct + modules 三件套的形态由 tplprobe.test.js 守着)。
- * @param {{srcDir: string, tag: string, jobs?: number, features?: Record<string, boolean>, mode?: 'default-on' | 'default-off'}} params
+ * @param {{srcDir: string, tag: string, jobs?: number, features: Record<string, boolean>, mode?: 'default-on' | 'default-off'}} params
  * @param {{spawn: typeof spawn, statfsSync: (p: string) => {bsize: number, bavail: number}, probeSource?: (srcDir: string) => any}} deps
  */
 function buildTemplatePackWith(params, deps) {

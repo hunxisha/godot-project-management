@@ -42,6 +42,10 @@ import type {
   DocsTask,
   HashPathsResult,
   TemplateBuildTask,
+  FeatureWithProbe,
+  ProbeResult,
+  TplIssue,
+  TplProfileMode,
   TreeEntry,
   ScanTreeResult,
   ReadTextResult,
@@ -98,6 +102,19 @@ export interface Services {
   /** 卸载导出模板(删除模板目录与记录) */
   uninstallExportTemplates(versionId: string): { ok: boolean, error?: string }
   /** ---------- 导出模板自编译(裁剪向导;ZTools 插件宿主提供,其他宿主 ok:false 并说明) ---------- */
+  /** 探测一份源码树:选项存在性、源码默认值、该版本真实的连带关系、version.py 版本串 */
+  probeTemplateSource(srcDir: string): Promise<ProbeResult>
+  /** 面板数据:功能表 + 探测结果合成,渲染层不自己判存在性。
+   *  ok:false 有两种成因,建议不同:① 不是 Godot 源码根(错误串出自探测层原句);
+   *  ② 源码根成立但一个构建选项都没解析出来 →「无法解析此版本源码的构建选项（源码结构可能已变）」。
+   *  第 ② 支是策划书 §5.2 那道「拒绝进面板」的闸(Ruling #26):不给渲染层一张 69 项全灰的面板。 */
+  listTemplateFeatures(srcDir: string): Promise<{ ok: boolean, error?: string, items?: FeatureWithProbe[] }>
+  /** 编译前静态校验。hardBlocks 非空时不允许发起编译。
+   *  `mode` 是**顶层具名入参**而不是埋在 `ctx: Record<string, any>` 里(Ruling #53):三条硬拦的第 3 条
+   *  (反向白名单 + 一个模块都没点名保留)只在 `default-off` 下才可能触发,埋在松散对象里漏传编译器抓不到,
+   *  表现是那条硬拦永不响。宿主负责组装 ctx,其中 `untestedSource` 由宿主按 version.py 算,不接受外部同名键。 */
+  validateTemplateConfig(params: { srcDir: string, features: Record<string, boolean>, mode?: TplProfileMode, d3d12SdkInstalled?: boolean, accesskitSdkInstalled?: boolean }):
+    Promise<{ ok: boolean, issues: TplIssue[], hardBlocks: TplIssue[] }>
   /** 工具链检测(python / SCons / MSVC vcvars64)。缺什么把「下一步动作」放进 problems */
   checkTemplateBuildTools(): Promise<{
     ok: boolean
@@ -108,8 +125,10 @@ export interface Services {
     problems: string[]
   }>
   /** 发起自编译(入队;srcDir 必须是 Godot 源码根)。完成后任务带 stageDir(templates/ 顶层)
-   *  与 versionDir,渲染层凭 stageDir 走 installExportTemplates 的目录形态导入 */
-  buildTemplatePack(params: { srcDir: string, tag: string, jobs?: number }): { ok: boolean, error?: string, taskId?: string }
+   *  与 versionDir,渲染层凭 stageDir 走 installExportTemplates 的目录形态导入。
+   *  `features` 是**必填**(执行层没有它就等于替面板猜一套默认值,同步拒绝 `缺少功能勾选结果`);
+   *  `mode` 省略 = `default-on`,与 validateTemplateConfig 那一个必须是同一套,否则校验的不是将要发出去的产物 */
+  buildTemplatePack(params: { srcDir: string, tag: string, jobs?: number, features: Record<string, boolean>, mode?: TplProfileMode }): { ok: boolean, error?: string, taskId?: string }
   /** 订阅自编译任务快照,返回取消订阅函数 */
   watchTemplateBuildTasks(fn: (tasks: TemplateBuildTask[]) => void): () => void
   /** 取消自编译任务(排队中直接取消;构建中 kill scons 子进程) */
