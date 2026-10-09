@@ -562,7 +562,7 @@ ok(v.hardBlocks.length === 0, '未实测不硬拦(策划书 §1 第 13 条)')
 const VCOL = []
 const vk = (label, x) => { VCOL.push([label, x]); return x }
 
-section('硬拦第三条(裁定①):反向白名单 + 一个模块都没探到 = 零模块废产物')
+section('硬拦第三条(裁定①):反向白名单开着却没有模块被点名保留 = 零模块废产物')
 // CORE_ONLY = OPTS2 去掉全部 module_* 键,正是本机那棵裁剪树 probeSource 的真实形态(102 键 / 0 个模块)。
 // T5 轮 1 之前 modules_enabled_by_default=no 写进 profile 是**惰性 no-op**;#38 把它送上命令行后它是活的
 // (SConstruct:476 唯一读点早于 profile 落 env 的 :655),而 buildProfile 照发不误 ——
@@ -589,9 +589,35 @@ const REV_MIN_OPTS = Object.assign({ modules_enabled_by_default: { exists: true,
 v = T.validateSelection(T.PRESETS.minimalSelection(REV_MIN_OPTS), REV_MIN_OPTS, { mode: 'default-off' })
 ok(v.hardBlocks.every((i) => i.flag !== 'modules_enabled_by_default'),
    '反向模式但保留的模块被点名了(webp)→ 不是零模块产物 → 不硬拦(删掉"有没有点名"这半边判据这条就红)', JSON.stringify(v.hardBlocks))
-v = T.validateSelection(T.initialSelection(CORE_ONLY), CORE_ONLY, { mode: 'default-off' })
-ok(!v.hardBlocks.some((i) => i.flag === 'modules_enabled_by_default'),
-   '这份源码根本没声明 modules_enabled_by_default → 发出去也是静默忽略 → 不拦(未声明的键不存在,拿"我记得有"当依据就是猜)', JSON.stringify(v.hardBlocks))
+v = vk('反向+options 里没有该键→照样硬拦', T.validateSelection(T.initialSelection(CORE_ONLY), CORE_ONLY, { mode: 'default-off' }))
+// 上一轮这里断言的是「不拦」,理由是「这份源码根本没声明 modules_enabled_by_default → 发出去也是静默忽略」。
+// 那个理由是站不住的:`OptionMap` 的键**只可能在探到时才出现**,键缺席永远等于"我没探到",
+// 它表达不了"这份源码没声明" —— 拿"我记得有"当依据是猜,拿"我没看见"当"它没有"同样是猜,
+// 而且这一次否定掉的是一个**已经发生的事实**(MODE_COMMAND_FLAGS 不查 options,default-off 就无条件发 token)。
+// → 如实改判:探测没看见 ≠ 源码没声明,判据只能看 token 是否已发出,所以这一份**必须硬拦**。
+ok(v.hardBlocks.some((i) => i.flag === 'modules_enabled_by_default' && i.skippable === false),
+   'options 里没有 modules_enabled_by_default 这个键 → 判据只看 token 是否已发出 → 仍然硬拦(探测没看见 ≠ 源码没声明)', JSON.stringify(v.hardBlocks))
+// —— P2 的失效形态本体(派发点名要直接跑的输入):探测整体失败 + 反向模式 + 只勾着一个渲染驱动 ——
+// buildProfile 交出 modules_enabled_by_default=no、profile 点名 0 个模块 → 零模块废产物。
+// 旧实现里那个 exists 合取项在这里恰好为假 → hardBlocks 为空 → 废产物照样能编。
+const p2Shape = vk('反向+空 options+只勾 vulkan', T.validateSelection({ vulkan: true }, {}, { mode: 'default-off' }))
+ok(p2Shape.hardBlocks.some((i) => i.flag === 'modules_enabled_by_default' && i.skippable === false),
+   'P2 失效形态实跑:token 已发出 + 点名 0 个模块 + options 是空表 → 必须硬拦(把 exists 前置加回去这里就是空的)', JSON.stringify(p2Shape.hardBlocks))
+// —— 成因分岔(评审 P3-1):同一条硬拦有两种成因,建议不能给同一句话 ——
+// 甲:一个模块开关都没探到(→ 换源码);乙:模块开关探到了、但用户把所有模块项都取消了(→ 勾回面板项)。
+// 乙这份夹具:全表探到(ALL_ON_OPTS)+ 反向模式 + 凡映射到 module_* 的面板项一律取消 → 点名数 0。
+const REV_PROBED = Object.assign({ modules_enabled_by_default: { exists: true, default: true } }, ALL_ON_OPTS)
+const noModuleSel = Object.assign({}, T.initialSelection(REV_PROBED))
+for (const f of F.TPL_FEATURES) if (F.flagsOf(f).some(isModulePrefix)) noModuleSel[f.id] = false
+const hbProbed = vk('反向+模块探到但全部取消', T.validateSelection(noModuleSel, REV_PROBED, { mode: 'default-off' }))
+  .hardBlocks.find((i) => i.flag === 'modules_enabled_by_default')
+const hbNoProbe = p2Shape.hardBlocks.find((i) => i.flag === 'modules_enabled_by_default')
+ok(!!hbProbed && !!hbNoProbe && hbProbed.why !== hbNoProbe.why && hbProbed.action !== hbNoProbe.action,
+   '两种成因各给各的 why/action(合并回单一文案就红 —— 上一轮只叙述成因甲)', JSON.stringify([hbProbed, hbNoProbe]))
+ok(!!hbProbed && /探到 [0-9]+ 个模块开关/.test(hbProbed.why) && !/换一份完整解压/.test(hbProbed.action),
+   '成因乙(探到了却没点名保留)→ 建议是「勾回面板项」而不是「换一份完整解压的源码」(源码本身没坏)', JSON.stringify(hbProbed))
+ok(!!hbNoProbe && /一个模块开关都没探到/.test(hbNoProbe.why) && /换一份完整解压/.test(hbNoProbe.action),
+   '成因甲(一个都没探到)→ 才建议换源码(把两条对调就红)', JSON.stringify(hbNoProbe))
 
 section('反向白名单下「面板保留但源码没探到」的模块 → 软问题(不硬拦)')
 // 真实形态:fmtCompressed 一项映射 7 个模块开关(dds/ktx/tinyexr/astcenc/bcdec/etcpak/cvtt),
@@ -668,6 +694,10 @@ const mbBase = T.initialSelection(MB_OPTS)
 v = vk('关 mbedTLS', T.validateSelection(Object.assign({}, mbBase, { netMbedtls: false }), MB_OPTS, {}))
 ok(v.issues.some((i) => i.itemId === 'netMbedtls' && i.flag === 'module_mbedtls_enabled' && i.skippable === true),
    '取消 mbedTLS → 软问题(#38:它是 module_*,产物在 profile 通道里)', JSON.stringify(v.issues))
+// `action` 是"建议动作"而不是 `why` 的第二种说法(简报逐字那句「项目有联网就用不上该项」语义反了:
+// 这一条报的正是"已经被取消",要联网时的正确动作是**把它勾回来**)。
+ok(v.issues.some((i) => i.itemId === 'netMbedtls' && /勾回该项/.test(i.action) && /联网/.test(i.action)),
+   'mbedTLS 那条的 action 给的是可执行动作(勾回该项 / 确认不联网),不是把 why 复述一遍', JSON.stringify(v.issues.find((i) => i.itemId === 'netMbedtls')))
 v = T.validateSelection(Object.assign({}, mbBase, { netMbedtls: false }), {}, {})
 ok(!v.issues.some((i) => i.itemId === 'netMbedtls'), '这份源码没探到 module_mbedtls_enabled → 什么都没被关掉 → 不报')
 
@@ -690,6 +720,17 @@ ok(allIss.every((p) => p[1].itemId === 'source' || !!F.featureById(p[1].itemId))
    'itemId 必须是功能表里的面板项 id(全局项只允许 source)——拼错的 id 让 T9 找不到行', JSON.stringify(allIss.filter((p) => p[1].itemId !== 'source' && !F.featureById(p[1].itemId)).map((p) => p[1].itemId)))
 ok(allIss.every((p) => p[1].flag === '' || p[1].flag === 'modules_enabled_by_default' || TABLE_FLAGS.includes(p[1].flag)),
    'flag(非空时)必须是功能表里的真实 flag 名,或模式级那一条 —— 与实现真正会写出的键名对不上就红', JSON.stringify(allIss.filter((p) => p[1].flag !== '' && p[1].flag !== 'modules_enabled_by_default' && !TABLE_FLAGS.includes(p[1].flag)).map((p) => p[1].flag)))
+// 上一条只核"flag 是不是真名",不核"这个 flag 属不属于这个 itemId" —— 把物理那条的 flag 换成
+// 别项的真名 disable_physics_2d,上一条照样绿,而 T9 按 itemId 找到面板行之后会标出一个对不上的键名。
+// 所以这里补上归属关系(itemId 是面板项时,它的 flag 必须是该面板项自己映射到的 flag 之一)。
+ok(allIss.every((p) => {
+  const i = p[1]
+  if (i.itemId === 'source' || i.flag === '') return true
+  const f = F.featureById(i.itemId)
+  return !!f && F.flagsOf(f).includes(i.flag)
+}), 'itemId 与 flag 必须同属一个面板项(只核"flag 是真名"抓不到"flag 张冠李戴")',
+   JSON.stringify(allIss.filter((p) => p[1].itemId !== 'source' && p[1].flag !== '' &&
+     !(F.featureById(p[1].itemId) && F.flagsOf(p[1].itemId).includes(p[1].flag))).map((p) => [p[1].itemId, p[1].flag])))
 ok(VCOL.every((pair) => pair[1].issues.every((i) => i.skippable === true) && pair[1].hardBlocks.every((i) => i.skippable === false)),
    '软问题一律 skippable:true、硬拦一律 false(T10 就靠这个字段决定给不给「仍然继续」)')
 const allHard = VCOL.flatMap((pair) => pair[1].hardBlocks)

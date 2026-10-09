@@ -459,13 +459,30 @@ function validateSelection(selection, options, ctx) {
   }
 
   // —— 硬拦 3:反向白名单开着却没有任何模块被点名保留(裁定①)——
-  // 三个条件各挡一种误判:token 真的发出去了(命令行才是活通道)、这份源码确实声明了它
-  // (未声明 = 静默忽略,白名单压根不生效)、且 profile 里没有任何 `module_*` 点名(全被整体关掉)。
-  const whitelistLive = built.commandExtras.indexOf('modules_enabled_by_default=no') !== -1 &&
-    !!(srcOpts.modules_enabled_by_default && srcOpts.modules_enabled_by_default.exists)
+  // 判据两条:token 真的发出去了(命令行才是活通道)、且 profile 里没有任何 `module_*` 点名(全被整体关掉)。
+  // **不再要求"这份源码声明了 modules_enabled_by_default"**(上一轮这里多叠了一个 exists 前置,评审订正):
+  //   · `OptionMap` 的键**只可能在探到时才出现**,所以"键缺席"永远等于"我没探到",它压根表达不了
+  //     "这份源码没声明该键" —— 拿它做推断正是本文件其余部分反复禁止的方向(`productOff` 的注释自己写着
+  //     「未探到 ≠ 已关闭」);
+  //   · 而 token 发没发**由 `buildProfile` 独立决定**:`MODE_COMMAND_FLAGS` 不查 `options`,`mode`
+  //     是 default-off 就无条件发。用一个"不知道"去否定一个"已经发生",结果是"探测整体失败 + 反向模式"
+  //     这份**零模块废产物**照样能编 —— 那恰好是这条硬拦存在的唯一理由。
+  //   · scons 对未声明的键静默忽略,最坏是白名单没生效(产物偏大),不会编出跑不起来的东西;
+  //     而漏拦零模块产物是几十分钟后交一个废件。两侧代价不对称,判据只看已发出的 token。
+  const whitelistLive = built.commandExtras.indexOf('modules_enabled_by_default=no') !== -1
   const namedModules = Object.keys(built.json.disabled_build_options).filter(isModuleFlag)
   if (whitelistLive && namedModules.length === 0) {
-    hard.push({ itemId: 'source', flag: 'modules_enabled_by_default', why: '「最小可跑」会整体关掉所有模块,而这次一个模块开关都没探到、无法点名保留 —— 产物会是没有脚本也没有文字的零模块模板', action: '换一份完整解压、能探到 modules/ 的源码再编,或改用「默认开」的预设', skippable: false })
+    // 同一个分支有两种成因,**建议不能给同一句话**(给错建议等于让用户去修一个没坏的东西):
+    //   · 一个模块开关都没探到 → 不是用户不想点名,是我们没法点名 → 换源码 / 换预设;
+    //   · 模块开关探到了、但面板上所有模块项都被取消 → 源码没问题,是勾选的问题 → 点名保留 / 换预设。
+    const probedModuleCount = new Set(TPL_FEATURES.flatMap((f) => flagsOf(f))
+      .filter((k) => isModuleFlag(k) && !!srcOpts[k] && srcOpts[k].exists)).size
+    const branch = probedModuleCount === 0
+      ? { why: '「最小可跑」会整体关掉所有模块,而这次一个模块开关都没探到、无法点名保留 —— 产物会是没有脚本也没有文字的零模块模板',
+          action: '换一份完整解压、能探到 modules/ 的源码再编,或改用「默认开」的预设' }
+      : { why: `「最小可跑」会整体关掉所有模块,这次探到 ${probedModuleCount} 个模块开关但一个都没点名保留 —— 产物会是没有脚本也没有文字的零模块模板`,
+          action: '至少点名保留脚本与文字渲染要用的模块(勾回对应面板项),或改用「默认开」的预设' }
+    hard.push({ itemId: 'source', flag: 'modules_enabled_by_default', why: branch.why, action: branch.action, skippable: false })
   }
 
   // —— 软问题:以下每条都带「仍然继续」——
@@ -489,7 +506,9 @@ function validateSelection(selection, options, ctx) {
     issues.push({ itemId: 'accesskit', flag: 'accesskit', why: '保留 AccessKit,但本机没装它的依赖 —— 实测会撞 accesskit 报错', action: '取消该项(无障碍树对导出模板通常无关)', skippable: true })
   }
   if (gone('netMbedtls')) {
-    issues.push({ itemId: 'netMbedtls', flag: 'module_mbedtls_enabled', why: '关掉 mbedTLS 后 HTTPS / TLS 全断,任何联网需求都会静默失败', action: '项目有联网就用不上该项', skippable: true })
+    // `action` 必须是**可执行的建议动作**,不是把 `why` 换个说法复述一遍(简报逐字那句
+    // 「项目有联网就用不上该项」语义反了:读起来像"要联网就别保留",而这一条报的正是"已经被取消")。
+    issues.push({ itemId: 'netMbedtls', flag: 'module_mbedtls_enabled', why: '关掉 mbedTLS 后 HTTPS / TLS 全断,任何联网需求都会静默失败', action: '勾回该项,或确认项目不含任何联网调用', skippable: true })
   }
 
   // 反向白名单的"半个瞎":白名单活着、也确实点名了一些模块(硬拦 3 没触发),但用户勾着的某一项里
