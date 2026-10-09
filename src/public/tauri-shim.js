@@ -170,7 +170,7 @@
     // 桌面版没有缓存统计命令,也**不回 exists** —— 给了就等于替用户回答「这个项目没有缓存」。
     // 项目页缓存弹窗据此显示「不支持」而不是「还没有 .godot 缓存」(ProjectsView.vue 的第三态)。
     getProjectCacheInfo: () => Promise.resolve({ ok: false, error: '桌面版暂不支持缓存统计,请使用 ZTools 插件版。' }),
-    cleanProjectCache: () => Promise.resolve({ ok: false }),
+    cleanProjectCache: () => Promise.resolve({ ok: false, error: '桌面版暂不支持清理 .godot 缓存,请使用 ZTools 插件版。' }),
     // ---------- 导出模板自编译(裁剪向导) ----------
     // 桌面版(Tauri)暂未实现构建管线(需要 vcvars/子进程/产物整理),如实告知而不是假成功;
     // 渲染层对 ok:false + problems 的展示路径与缺工具链同一条。ZTools 插件宿主提供真实现。
@@ -262,7 +262,20 @@
       .catch((e) => ({ ok: false, error: String((e && e.message) || e) })),
     verifyBackup: (id) => invoke('verify_backup', { backupId: id }),
     deleteBackup: (id, opts) => invoke('delete_backup', { backupId: id, keepRecordOnly: !!(opts && opts.keepRecordOnly) }),
-    deleteBackups: (ids, opts) => Promise.all(ids.map((id) => invoke('delete_backup', { backupId: id, keepRecordOnly: !!(opts && opts.keepRecordOnly) }))).then((rs) => ({ ok: true, removed: rs.filter((r) => r.ok).length, failed: [] })),
+    // failed 必须从每条结果里数出来。原先硬编码 `failed: []`,于是「批量 5 条只删成 2 条」
+    // 也照样报 ok:true 且没有一条失败可看。delete_backup 返回的是 Value 而不是 Result
+    // (main.rs:394),失败同样是**正常 resolve 的一个值**(记录不存在时按幂等回 ok:true),
+    // 所以 resolve 分支与 rejection 分支都要接住。
+    deleteBackups: (ids, opts) => {
+      const list = Array.isArray(ids) ? ids : []
+      return Promise.all(list.map((id) => invoke('delete_backup', { backupId: id, keepRecordOnly: !!(opts && opts.keepRecordOnly) })
+        .then((r) => (r && r.ok === false ? { id, error: String(r.error || '删除失败') } : null))
+        .catch((e) => ({ id, error: String((e && e.message) || e) }))
+      )).then((errs) => {
+        const failed = errs.filter(Boolean)
+        return { ok: failed.length === 0, removed: list.length - failed.length, failed }
+      })
+    },
     pruneBackups: (o) => invoke('prune_backups', { keepPerProject: o.keepPerProject, olderThanDays: o.olderThanDays, dryRun: o.dryRun !== false }),
     restoreBackup: () => Promise.resolve({ ok: false, error: 'Tauri 版即将支持' }),
     listBackupTasks: () => Promise.resolve([]),
@@ -286,7 +299,9 @@
     isFavorite: () => false,
     getReleaseInfos: () => Promise.resolve({}),
     listAssetReleases: () => Promise.resolve([]),
-    verifyApiKey: () => Promise.resolve({ authenticated: false }),
+    // 桌面版没有账号校验通道,但也不能只回 {authenticated:false}:设置页读的是成功分支,
+    // 没有 error 就变成「点验证转一下,什么都不发生」(和最初那条「点收藏没反应」同一个症状)。
+    verifyApiKey: () => Promise.resolve({ authenticated: false, error: '桌面版暂不支持 Asset Store 账号校验,请使用 ZTools 插件版。' }),
     listAddons: (projectId) => invoke('db_all_docs', { prefix: 'godot/asset/' + projectId }).then((l) => {
       const out = []
       for (const doc of l) {
@@ -295,7 +310,11 @@
       }
       return out
     }),
-    getAssetDetail: () => Promise.resolve({ ok: false }),
+    // 商店详情要读资产页的媒体/许可/评分等扩展字段,桌面版没有对应的抓取命令。
+    // 原先回 {ok:false}:AssetDetailDialog 拿到后直接读 detail.media[0],于是弹层里显示的是
+    // 「加载失败:Cannot read properties of undefined (reading '0')」——把 JS 内部错误给了用户。
+    // 回 null 让调用点能区分「没有详情」,原因由弹层按宿主说。
+    getAssetDetail: () => Promise.resolve(null),
     previewAssetInstall: () => Promise.resolve({ ok: false, error: 'Tauri 版即将支持' }),
     // 预览与暂存在桌面版都没有命令(previewAssetInstall 就是同一句不支持),
     // 所以「取消」无事可做 —— 报成功等于凭空造一次没发生的清理。
@@ -304,7 +323,11 @@
     installAsset: (opts) => invoke('install_asset', { projectId: opts.projectId, assetId: opts.assetId, version: opts.version, stripTopDir: opts.stripTopDir, autoEnable: true, assetMeta: opts.assetMeta || null }),
     saveAssetAsProject: () => Promise.resolve({ ok: false, error: 'Tauri 版即将支持' }),
     downloadAssetZip: () => Promise.resolve({ ok: false, error: 'Tauri 版即将支持' }),
-    updateAsset: () => invoke('install_asset', {}).catch(() => ({ ok: false, error: 'Tauri 版即将支持' })),
+    // 旧写法是 `invoke('install_asset', {})`:两个必填参数全丢,必在 Tauri 反序列化阶段被拒,
+    // 于是 catch 把**任何**错误都改写成「即将支持」——真网络断了也是那句话。而且覆盖安装还要沿用
+    // 首次安装时的 stripTopDir 选择,垫片拿不到那条安装记录,拼不出正确的 payload。
+    // 所以这里如实占位并给出可操作的替代(市场页重装),不再假装调了一次命令。
+    updateAsset: () => Promise.resolve({ ok: false, error: '桌面版暂不支持单独更新插件,请在市场页重新安装。' }),
     // 没有 check_addon_update 命令(Rust 侧 generate_handler 里就没有),所以如实回「没查」并带原因。
     // 契约里 `error?: string` 就是为这种情况留的:渲染层(useAddonActions / useUpdateScan)读它,
     // 不能把这条回值并进「所有插件均为最新版本」那句结论 —— 原先只给 hasUpdate:false,就是这么谎报的。
@@ -325,7 +348,7 @@
     docsSearch: (versionId, query, limit) => invoke('docs_search', { versionId, query, limit }),
     docsSearchFullText: (versionId, query, limit) => invoke('docs_search_full_text', { versionId, query, limit }),
     docsDiffLibraries: (a, b) => invoke('docs_diff_libraries', { versionA: a, versionB: b }),
-    docsDiffClass: () => Promise.resolve({ ok: false }),
+    docsDiffClass: () => Promise.resolve({ ok: false, error: '桌面版暂不支持单类差异对比,请使用 ZTools 插件版。' }),
     // 文档收藏**真实现**(照 preload/lib/docs.js:162-169:Set 增删 → 排序写回),不是占位:
     // db_get/db_put 在 Rust 侧是注册了的命令,这条没有「后端不存在」的借口。
     // 旧写法把 className/fav 两个入参整个丢掉,写的文档连 items 都没有,还把 .catch 收敛成
@@ -341,11 +364,33 @@
       .catch((e) => ({ ok: false, error: String((e && e.message) || e) })),
     docsListFavorites: () => invoke('db_get', { id: DOCS_FAV_ID }).then((d) => (d && d.items) || []).catch(() => []),
     docsListHistory: () => invoke('db_get', { id: 'godot/docs-history' }).then((d) => (d && d.items) || []).catch(() => []),
-    docsPushHistory: () => {},
-    docsCacheInfo: () => Promise.resolve({ totalSize: 0, libraries: 0 }),
+    // 浏览历史**真实现**,照 preload/lib/docs.js:182-186:去重置顶、上限 30 条。
+    // 原先是 `() => {}` —— 不报错也不记录,文档页的「最近浏览」在桌面版永远空着。
+    docsPushHistory: (className) => {
+      const id = 'godot/docs-history'
+      return invoke('db_get', { id })
+        .then((cur) => {
+          const rest = ((cur && cur.items) || []).filter((x) => x && x.name !== className)
+          return putMerged(id, { items: [{ name: className, at: Date.now() }, ...rest].slice(0, 30) }, cur)
+        })
+        .catch((e) => {
+          const why = String((e && e.message) || e)
+          console.warn('[tauri-shim] docsPushHistory', why)
+          return { ok: false, error: why }
+        })
+    },
+    // 形状要对得上 JS 侧的 DocsCacheInfo({ sizeBytes, libraries[] })。
+    // 原先回 { totalSize, libraries: 0 }:设置页读 sizeBytes → undefined → fmtSize 显示「0 B」,
+    // 而清理按钮的判据 `libraries.length` 在数字 0 上是 undefined,于是永远禁用 —— 看着像「没有缓存」。
+    // 库文件尺寸在 Rust 侧没有命令可问,所以整条如实回不支持。
+    docsCacheInfo: () => Promise.resolve({
+      sizeBytes: 0,
+      libraries: [],
+      error: '桌面版暂不支持文档库缓存统计,请使用 ZTools 插件版。'
+    }),
     // 如实占位:原先回 {ok:true, removed:0},设置页于是提示「已清理 0 个文档库」——
-    // 什么都没删却说删好了。真实现要和 docsCacheInfo 一起做(它连返回形状都不对,
-    // {totalSize,libraries:0} 对不上 JS 侧的 {sizeBytes, libraries[]}),归到界面文案那一批。
+    // 什么都没删却说删好了。逐库删除本身有命令(docs_delete_library),但「清哪些、能省多少」要按库目录
+    // 算尺寸,Rust 侧没这个口子,所以和 docsCacheInfo 一起如实。
     docsCleanCache: () => Promise.resolve({ ok: false, error: '桌面版暂不支持清理文档库缓存,请使用 ZTools 插件版。' }),
   }
 })()

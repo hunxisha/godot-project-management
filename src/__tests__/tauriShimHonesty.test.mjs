@@ -55,18 +55,14 @@ ok(methods.length > 80, `拆出 ${methods.length} 个方法(不足 81 个说明�
 
 /**
  * 已记名的欠账(不属于本轮修复范围,但也不许被当成通过)。
- * 改好一条就从这里删一条;新出现的「失败但没原因」不在名单里的一律算回归。
+ * 改好一条就从这里删一条 —— 第 4 节会反向检查「名单里的条目是否还是债」,挂着不清同样红。
  */
 const NAMED = {
-  cleanProjectCache: '{ok:false} 无 error → 项目页清理失败说不出原因(D 批)',
-  getAssetDetail: '{ok:false} 无 error(C 批:与卡片详情一起做)',
-  docsDiffClass: '{ok:false} 无 error(C 批)',
-  verifyApiKey: '回 {authenticated:false} 而无原因,设置页只有成功分支 → 点了没反应(D 批)',
-  docsPushHistory: '空操作,浏览历史静默缺失(C 批)',
-  listExportHistory: '恒空列表:导出历史缺功能但不声明(D 批;与 removeExportHistoryEntry 同一片)',
-  listAssetReleases: '恒空列表:版本选择会说成「没有可用版本」(D 批)',
-  getReleaseInfos: '恒空对象:卡片版本/兼容信息缺失(与上一条同批)',
-  docsCacheInfo: '形状就对不上 JS 侧({totalSize,libraries:0} vs {sizeBytes,libraries[]})(D 批)',
+  getAssetDetail: '取不到详情回 null(形状对了,但功能仍缺:等 Rust 侧抓取命令);原因由弹层按宿主说,不再是 TypeError',
+  listExportHistory: '恒空列表:导出历史缺功能但不声明(等 Rust 侧命令;界面已按宿主标注不支持)',
+  listAssetReleases: '恒空列表:版本选择会说成「没有可用版本」(界面已按宿主给如实文案,数据侧等命令)',
+  getReleaseInfos: '恒空对象:卡片版本/兼容信息缺失(不构成假结论,等 Rust 侧 release 命令)',
+  docsGetClassExtras: '回 null 且不说为什么(详情扩展区静默)',
   listBackupTasks: '恒空列表:桌面版任务走 watchBackupTasks 通道,视为如实,留此备案'
 }
 
@@ -77,6 +73,14 @@ const SUCCESS = /\bok:\s*true\b|=>\s*true\b|Promise\.resolve\(\s*true\s*\)/
 const DISCARD = /\.then\(\s*\(\)\s*=>\s*\(\s*\{\s*ok:\s*true/
 const NOSOURCE = (body) => /hasUpdate:\s*false/.test(body) && !/\binvoke\(|\berror\b/.test(body)
 const BARE = (body) => /\{\s*ok:\s*false\s*[,}]/.test(body) && !/\berror\b|\bproblems\b/.test(body)
+/**
+ * 「静默缺失」的形状:失败却不给原因 / 恒空的列表·对象·null / 干脆空操作。
+ * 注意不含 `.catch(() => [])` —— 那是两端共有的取数兜底(preload 也这么吞,见 assetapi.js:105,225),
+ * 不是桌面版独有的谎报,拿它算债会把名单糊成一片噪音。
+ */
+const looksLikeDebt = (body) => BARE(body)
+  || /Promise\.resolve\(\s*(?:\[\s*\]|\{\s*\}|null)\s*\)/.test(body)
+  || /:\s*\(\)\s*=>\s*\{\s*\}/.test(body)
 
 section('0. 自检:规则抓得住本次审计里真实存在的三个旧形状')
 // 这几条不是装饰:如果判定式被谁放松了,下面几节会一起变绿,而问题还在。
@@ -100,6 +104,10 @@ section('1. 没做事却宣布成功')
 
   const discard = methods.filter((m) => DISCARD.test(m.body))
   ok(discard.length === 0, '不存在「丢掉 IPC 返回值再报成功」', discard.map((m) => m.name).join(','))
+
+  // 硬编码的空失败清单:批量动作里「有几条没成」必须数得出来。deleteBackups 原来就是这么写的。
+  const fakeClean = methods.filter((m) => /failed:\s*\[\s*\]/.test(m.body))
+  ok(fakeClean.length === 0, '不存在「硬编码 failed:[]」', fakeClean.map((m) => m.name).join(','))
 }
 
 section('2. 定性结论要么有出处、要么带原因')
@@ -109,9 +117,10 @@ section('2. 定性结论要么有出处、要么带原因')
   const verdict = methods.filter((m) => NOSOURCE(m.body))
   ok(verdict.length === 0, '不许出现「没查过也没给原因」的 hasUpdate:false', verdict.map((m) => m.name).join(','))
 
-  // 同理:authenticated:false 会被设置页读成「密钥无效」。这条已在记名欠账里,单独放行。
-  const auth = methods.filter((m) => /authenticated:\s*false/.test(m.body) && !/\binvoke\(|\berror\b/.test(m.body) && !NAMED[m.name])
-  ok(auth.length === 0, 'authenticated:false 要么有出处要么带原因(verifyApiKey 已记名)', auth.map((m) => m.name).join(','))
+  // 同理:authenticated:false 会被设置页读成「密钥无效」;桌面版根本没这条通道,必须带原因。
+  const auth = methods.filter((m) => /authenticated:\s*false/.test(m.body) && !/\binvoke\(|\berror\b/.test(m.body))
+  ok(auth.length === 0, 'authenticated:false 要么有出处要么带原因(否则界面只有成功分支 = 点了没反应)',
+    auth.map((m) => m.name).join(','))
 }
 
 section('3. 写库必须走带 _rev 的读-改-写')
@@ -124,15 +133,36 @@ section('3. 写库必须走带 _rev 的读-改-写')
     'putMerged / readThenPut 两个入口仍然存在(缺一节就成摆设)')
 }
 
-section('4. 失败但没原因:只许是记名欠账')
+section('4. 静默缺失:只许是记名欠账,而且记了的必须还是债')
 {
-  // 有 error 或有 problems(向导那条走的就是 problems 通道)都算给了原因。
-  const bare = methods.filter((m) => /\{\s*ok:\s*false\s*[,}]/.test(m.body) && !/\berror\b|\bproblems\b/.test(m.body))
-  const unknown = bare.filter((m) => !NAMED[m.name])
-  ok(unknown.length === 0, '新增的「{ok:false} 而无原因」算回归', unknown.map((m) => m.name).join(','))
-  const stale = Object.keys(NAMED).filter((n) => !methods.some((m) => m.name === n))
-  ok(stale.length === 0, '记名欠账都还得对应上一个真方法(方法没了就说明名单该清)', stale.join(','))
-  console.log(`  注:名单里现有 ${Object.keys(NAMED).length} 条欠账,不参与本节通过与否的判定`)
+  const debts = methods.filter((m) => looksLikeDebt(m.body))
+  const unknown = debts.filter((m) => !NAMED[m.name])
+  ok(unknown.length === 0, '新出现的「静默缺失」算回归(要修,或写明理由记进名单)',
+    unknown.map((m) => m.name).join(','))
+  // 反向账:修好了却还挂在名单上,同样是被忽略的债 —— 名单不能只进不出。
+  const stale = Object.keys(NAMED).filter((n) => {
+    const m = methods.find((x) => x.name === n)
+    return m && !looksLikeDebt(m.body)
+  })
+  ok(stale.length === 0, '名单里已有条目不再成立,应删掉', stale.join(','))
+  const missing = Object.keys(NAMED).filter((n) => !methods.some((m) => m.name === n))
+  ok(missing.length === 0, '名单条目要对应得上一个真方法(方法没了就说明名单该清)', missing.join(','))
+  console.log(`  注:名单现有 ${Object.keys(NAMED).length} 条欠账(${Object.keys(NAMED).join(' / ')}),另检出 ${debts.length} 处静默形状`)
+}
+
+section('5. 返回形状要对得上契约(不是「像就行」)')
+{
+  // docsCacheInfo 原来回 { totalSize, libraries: 0 }:JS 侧是 { sizeBytes, libraries[] },
+  // 于是设置页显示「共 0 B」,而清理按钮判据 `libraries.length` 落在数字 0 上 = undefined,永远禁用。
+  // 键名错了不会有任何报错,只会长得像「没有缓存」——所以把键名钉住。
+  const cache = methods.find((m) => m.name === 'docsCacheInfo')
+  ok(!!cache && /sizeBytes/.test(cache.body) && /libraries:\s*\[\s*\]/.test(cache.body),
+    'docsCacheInfo 用 JS 侧的键名与数组形状', cache ? cache.body.split('\n')[0].trim() : '没找到该方法')
+  // getAssetDetail 取不到时要的是 null(调用点能分辨),不是一个假对象 —— 回 {ok:false} 会让
+  // 弹层读 detail.media[0] 抛 TypeError,把内部错误显示给用户。
+  const detail = methods.find((m) => m.name === 'getAssetDetail')
+  ok(!!detail && /Promise\.resolve\(\s*null\s*\)/.test(detail.body) && !/ok:\s*false/.test(detail.body),
+    'getAssetDetail 取不到回 null,不回带 ok 的假对象', detail ? detail.body.split('\n')[0].trim() : '没找到该方法')
 }
 
 console.log(`\n${'='.repeat(56)}`)

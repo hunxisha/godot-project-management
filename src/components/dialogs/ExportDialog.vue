@@ -5,6 +5,7 @@
 import { computed, ref, watch } from 'vue'
 import Icon from '../Icon.vue'
 import { showInFolder } from '../../services/bridge'
+import { IS_DESKTOP } from '../../services/desktop'
 import { fmtSize, formatRelative } from '../../utils/format'
 import { useExport } from '../../composables/useExport'
 import type { ExportHistoryEntry, ExportPreset, GodotProject } from '../../types/godot'
@@ -194,8 +195,14 @@ async function removeHistory(id: string) {
           ><Icon name="upload" :size="12" /> 开始导出</button>
         </div>
 
+        <!-- 桌面版不记录导出历史(入库那步在 preload 侧),静悄悄少一块面板会被读成「从没导出过」 -->
+        <div v-if="IS_DESKTOP" class="ed-history">
+          <div class="ed-hist-title">导出历史</div>
+          <div class="ed-hist-row"><span class="ed-hist-meta">桌面版暂不记录导出历史,请使用 ZTools 插件版。</span></div>
+        </div>
+
         <!-- 导出历史(本项目,最近 8 条) -->
-        <div v-if="history.length" class="ed-history">
+        <div v-else-if="history.length" class="ed-history">
           <div class="ed-hist-title">导出历史</div>
           <div v-for="h in history" :key="h.id" class="ed-hist-row">
             <Icon name="archive" :size="12" />

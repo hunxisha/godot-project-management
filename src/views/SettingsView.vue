@@ -156,6 +156,10 @@ async function saveApiKey() {
       patchNow()
       apiKeyInput.value = ''
       notify(`已连接 Asset Store:${r.name || '已认证用户'}`)
+    } else {
+      // 少了这一句就是「按钮转一下,什么都不发生」:桌面版根本没有校验通道,宿主回的是
+      // {authenticated:false,error},而这里过去只有成功分支。密钥错也走同一句话。
+      notify(r.error || '验证失败,请检查 API Key')
     }
   } catch (e: any) {
     notify(e?.message || '验证失败,请检查 API Key')
@@ -545,7 +549,8 @@ onBeforeUnmount(() => {
         >
           <Icon name="trash" :size="13" /> 清理全部
         </button>
-        <span v-if="docsCache" class="dt-size">共 {{ fmtSize(docsCache.sizeBytes) }}</span>
+        <span v-if="docsCache && docsCache.error" class="dt-size">{{ docsCache.error }}</span>
+        <span v-else-if="docsCache" class="dt-size">共 {{ fmtSize(docsCache.sizeBytes) }}</span>
       </div>
       <div v-if="docsCache && docsCache.libraries.length" class="docs-cache-list">
         <div v-for="l in docsCache.libraries" :key="l.versionId" class="dc-row">

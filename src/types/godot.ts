@@ -261,6 +261,8 @@ export interface DocHistoryItem {
 /** 文档库缓存统计(设置页清理用) */
 export interface DocsCacheInfo {
   sizeBytes: number
+  /** 宿主没统计时的原因(桌面版问不到库目录尺寸):面板据此说「不支持」而不是「0 B」 */
+  error?: string
   libraries: {
     versionId: string
     tag: string

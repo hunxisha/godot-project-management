@@ -315,11 +315,11 @@ export interface Services {
     { version: string, created: string, stable: boolean, minGodot: string, maxGodot: string, size: number }[]
   >
   /** 验证 Asset Store API Key */
-  verifyApiKey(key: string): Promise<{ authenticated: boolean, name?: string }>
+  verifyApiKey(key: string): Promise<{ authenticated: boolean, name?: string, error?: string }>
   /** 列出项目已安装插件 */
   listAddons(projectId: string): AddonInfo[]
-  /** 资产详情(含媒体/许可/评分等扩展字段,详情弹层用) */
-  getAssetDetail(assetId: string, version?: string): Promise<AssetDetail>
+  /** 资产详情(含媒体/许可/评分等扩展字段,详情弹层用);宿主取不到时回 null,不是回一个假对象 */
+  getAssetDetail(assetId: string, version?: string): Promise<AssetDetail | null>
   /** 安装预览:预下载 zip 并归纳安装计划(kind/顶层条目/冲突);确认后凭 stageId 安装,取消后释放 */
   previewAssetInstall(
     opts: { projectId: string, assetId: string, version?: string },

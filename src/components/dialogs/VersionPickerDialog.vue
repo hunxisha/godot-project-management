@@ -4,6 +4,7 @@
 import { ref, watch } from 'vue'
 import Icon from '../Icon.vue'
 import { fmtSize, normVersion } from '../../utils/format'
+import { IS_DESKTOP } from '../../services/desktop'
 
 type ReleaseRow = {
   version: string
@@ -96,7 +97,9 @@ function pick(r: ReleaseRow) {
           <span>加载失败:{{ error }}</span>
         </div>
 
-        <div v-else-if="!list.length" class="hint-line">该资产没有可用版本</div>
+        <div v-else-if="!list.length" class="hint-line">
+          {{ IS_DESKTOP ? '桌面版还没有 release 列表,这里会是空的;安装会按商店最新版走。' : '该资产没有可用版本' }}
+        </div>
 
         <div v-else class="vp-list">
           <button
