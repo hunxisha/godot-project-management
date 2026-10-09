@@ -98,7 +98,7 @@ ok(types.isProxy(reactiveAsset), '夹具本身是响应式 Proxy(否则本节没
 ok(types.isProxy(reactiveAsset.tagSlugs), '嵌套数组也是 Proxy(浅拷贝脱不掉)')
 
 captured = null
-fav.toggleFav(reactiveAsset)
+await fav.toggleFav(reactiveAsset)
 ok(captured !== null, '入参已送达跨层服务')
 ok(!types.isProxy(captured), '送达的是纯对象,不是 Proxy')
 ok(!types.isProxy(captured.tagSlugs), '嵌套数组也已脱离响应式')
@@ -121,7 +121,7 @@ notifies.length = 0
 
 const A = assetOf('a/plug', 'Plug A')
 ok(fav.isFav(A.assetId) === false, '收藏前 isFav 为 false')
-ok(fav.toggleFav(A) === true, 'toggleFav 返回 true')
+ok(await fav.toggleFav(A) === true, 'toggleFav 返回 true')
 ok(fav.isFav(A.assetId) === true, '收藏后 isFav 为 true')
 ok(fav.favIds.value.has('a/plug'), '星标集合包含该 assetId')
 ok(fav.favDiag.value === '', '成功时没有诊断信息')
@@ -131,7 +131,7 @@ ok(notifies.length === 1 && notifies[0] === '已收藏 Plug A', '提示文案正
 section('3. 取消收藏')
 
 notifies.length = 0
-ok(fav.toggleFav(A) === false, '再点一次返回 false(表示已取消)')
+ok(await fav.toggleFav(A) === false, '再点一次返回 false(表示已取消)')
 ok(fav.isFav(A.assetId) === false, '取消后 isFav 为 false')
 ok(notifies[0] === '已取消收藏', '提示文案正确', notifies.join(' | '))
 
@@ -142,7 +142,7 @@ favDb.clear()
 reloadFavorites()
 notifies.length = 0
 shouldThrow = 'An object could not be cloned.'
-const failedReturn = fav.toggleFav(assetOf('x/y', 'Y'))
+const failedReturn = await fav.toggleFav(assetOf('x/y', 'Y'))
 shouldThrow = ''
 
 ok(failedReturn === false, '失败时返回 false')
@@ -160,7 +160,7 @@ const favNoop = useMarketFavorites({
   reloadFavorites: () => { /* 列表始终为空 */ },
   notify
 })
-ok(favNoop.toggleFav(assetOf('z/w', 'W')) === false, '返回 false')
+ok(await favNoop.toggleFav(assetOf('z/w', 'W')) === false, '返回 false')
 ok(/收藏未生效/.test(favNoop.favDiag.value), '诊断信息点明「收藏未生效」', favNoop.favDiag.value)
 ok(/收藏数=0/.test(favNoop.favDiag.value), '诊断信息带上可核对的收藏数', favNoop.favDiag.value)
 ok(notifies.length === 1 && notifies[0] === '收藏失败,请重试', '提示文案可读', notifies.join(' | '))
@@ -174,6 +174,55 @@ reloadFavorites()
 ok(fav.isFav(998877) === true, '数字 id 能匹配到字符串存储')
 ok(fav.isFav('998877') === true, '字符串 id 也能匹配')
 ok(fav.favIds.value.has('998877'), '集合里存的是字符串形式')
+
+// ---------- 7. 竞态:生产接线的 reloadFavorites 是 async 的 ----------
+section('7. reloadFavorites 是 async 时,验证必须等它落地')
+// MarketplaceView 传进来的是 useMarketBrowse.ts:163 那个 `async reloadFavorites()`
+// (内部 `favorites.value = await window.services.listFavorites()`)。
+// 上面几节的桩是同步的,所以这条竞态一直没被覆盖:同步读回必然看到旧列表,
+// 于是**写入成功也会**报「收藏未生效」—— 2026-10 用户截图就是这条:
+// 顶部收藏徽标已经从 2 变 3(写进去了),红条却写着「前=false 后=false 收藏数=2」。
+const favDb2 = new Set()
+const favorites2 = ref([])
+const notify2 = []
+// 全局那个 toggleFavorite 桩写的是 favDb(见文件顶部),本节要的是同一份库;
+// 前面几节往里留过条目,这里先清干净,否则「收藏数」这个字段就不是它看起来的那个意思。
+favDb.clear()
+const reloadAsync = async () => {
+  // 先 await 再赋值:赋值落在微任务里,与生产同形(少了这个 await 就等于没建模竞态)
+  const list = await Promise.resolve([...favDb].map((id) => ({ assetId: id, title: id })))
+  favorites2.value = list
+}
+const fav2 = useMarketFavorites({
+  favorites: favorites2,
+  reloadFavorites: reloadAsync,
+  notify: (m) => notify2.push(m)
+})
+const retAdd = await fav2.toggleFav(assetOf('q/r', 'QR'))
+ok(retAdd === true, '写入成功时返回 true(而不是被微任务抢跑报成失败)', String(retAdd))
+ok(fav2.favDiag.value === '', '不得误报「收藏未生效」', fav2.favDiag.value)
+ok(notify2.length === 1 && notify2[0] === '已收藏 QR', '提示说的是成功', notify2.join(' | '))
+ok(fav2.isFav('q/r') === true, '星标状态为已收藏')
+
+// 取消收藏同样要等:否则「已取消」会被报成失败
+const retDel = await fav2.toggleFav(assetOf('q/r', 'QR'))
+ok(retDel === false, '取消收藏返回 false(表示当前未收藏)', String(retDel))
+ok(fav2.favDiag.value === '', '取消这条路径也不许误报', fav2.favDiag.value)
+ok(notify2[1] === '已取消收藏', '取消的提示文案正确', notify2.join(' | '))
+
+// 真的没生效时仍要报出来(修复不能让诊断变哑):库什么都不存
+const favorites3 = ref([])
+const notify3 = []
+const fav3 = useMarketFavorites({
+  favorites: favorites3,
+  reloadFavorites: async () => {
+    const list = await Promise.resolve([])
+    favorites3.value = list
+  },
+  notify: (m) => notify3.push(m)
+})
+ok(await fav3.toggleFav(assetOf('no/save', 'N')) === false, '写入没落地时返回 false')
+ok(/收藏未生效/.test(fav3.favDiag.value), '写入真没落地时诊断仍在(修复不许把探针弄哑)', fav3.favDiag.value)
 
 // ---------- 结果 ----------
 console.log(`\n${'='.repeat(56)}`)

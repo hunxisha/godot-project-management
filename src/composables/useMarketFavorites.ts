@@ -24,8 +24,12 @@ export function toBridgeData<T>(v: T): T {
 export interface MarketFavoritesOpts {
   /** 浏览层的收藏列表(星标状态的唯一真相) */
   favorites: Ref<FavoriteAsset[]>
-  /** 重新读库刷新上面那份列表 */
-  reloadFavorites: () => void
+  /**
+   * 重新读库刷新上面那份列表。
+   * 生产接的是 `useMarketBrowse.ts:163` 那个 `async reloadFavorites()` ——
+   * 它的赋值发生在 `await listFavorites()` 之后,也就是**至少一个微任务之后**。
+   */
+  reloadFavorites: () => unknown | Promise<unknown>
   notify: (msg: string) => void
 }
 
@@ -47,9 +51,18 @@ export function useMarketFavorites(opts: MarketFavoritesOpts) {
 
   /**
    * 收藏/取消收藏。
+   *
+   * **必须 await 完 reload 再验证**(2026-10 修掉的竞态):`favorites` 是星标的唯一真相,
+   * 而生产接的 `reloadFavorites` 是 async —— 它在 `await listFavorites()` 之后才赋值。
+   * 之前这里写完就同步读 `isFav()`,读到的永远是上一轮的列表,于是**写入成功也会**
+   * 判定「前 === 后」并报「收藏未生效」:用户截图里顶部徽标已经从 2 变 3(写进去了),
+   * 红条却写着「前=false 后=false 收藏数=2」。
+   * 注意这不是「把探针调灵敏度」:真没落地时(下面 reload 后仍相等)照样会报,
+   * 那条对照断言在 useMarketFavorites.test.mjs 第 7 节里钉着。
+   *
    * @returns 操作后是否处于「已收藏」状态(失败时为 false),与 Services.toggleFavorite 同语义
    */
-  function toggleFav(asset: MarketAsset): boolean {
+  async function toggleFav(asset: MarketAsset): Promise<boolean> {
     const before = isFav(asset.assetId)
     favDiag.value = ''
     try {
@@ -60,7 +73,7 @@ export function useMarketFavorites(opts: MarketFavoritesOpts) {
       opts.notify(favDiag.value)
       return false
     }
-    opts.reloadFavorites()
+    await opts.reloadFavorites()
     const after = isFav(asset.assetId)
     if (after === before) {
       // 没抛错但状态没变:写入既没报错也没生效,附上可核对的现场
