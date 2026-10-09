@@ -120,6 +120,42 @@ function regroup(g: AggGroup, items: AggFinding[]): AggGroup {
   return { ...g, items, counts: countsOf(items) }
 }
 
+export interface PaneEmptyCtx {
+  /** 右栏在看单个工具(而非聚合流) */
+  isTool: boolean
+  /**
+   * 那个工具本轮的状态。三态而不是一个布尔:失败的工具在 results 里**有**记录却没有结论,
+   * 按「跑过且干净」说它就是第二句假话 —— 与左栏那枚「失败」徽标对不上。
+   */
+  toolState: 'idle' | 'clean' | 'fail'
+  running: boolean
+  /** 有组但被当前筛选条件筛空了 */
+  filtered: boolean
+  /** 本轮已出结论的工具数(聚合模式用它区分「什么都没跑」与「跑完且干净」) */
+  ranCount: number
+}
+
+/**
+ * 右栏空态该说哪句话。判据住纯函数层而不是模板里的三元套娃 —— 先例见 outcome.ts:1-4,
+ * 那里的判据曾写在视图 computed 里,于是「扫描失败 + 陈旧全绿」并排显示只能靠肉眼发现。
+ * 这里防的是同一类话:aggregate 只对**有结论的**工具建组,groups 为空既可能是「没跑」
+ * 也可能是「跑过且没问题」,不分开说就会与左栏那一枚 ✓ 当街打脸。
+ */
+export function emptyPaneText(c: PaneEmptyCtx): string {
+  if (c.running) return '正在检查…'
+  // filtered 必须排在 isTool 之前:单工具模式下把「有结论的工具」筛到一条不剩时,
+  // 先走 isTool 会说出「这一项跑过了,没有发现问题」—— 它有问题,只是被筛掉了。
+  if (c.filtered) return '没有符合当前筛选条件的结论。'
+  if (c.isTool) {
+    if (c.toolState === 'fail') return '这一项没跑成。失败原因在左栏那一行上悬停可见,修好宿主能力后点「重跑本项」。'
+    if (c.toolState === 'clean') return '这一项跑过了，没有发现问题。'
+    return '这一项还没跑过，点上面的「重跑本项」开始。'
+  }
+  return c.ranCount > 0
+    ? `本轮 ${c.ranCount} 项都跑过了，未发现问题。`
+    : '还没有任何结论 —— 跑一次全量体检看看。'
+}
+
 /** 分档计数只有一个算法:聚合、筛选、裁剪三条路都走它,否则三处数字会各自漂移 */
 function countsOf(items: AggFinding[]): { error: number; warn: number; info: number } {
   const c = { error: 0, warn: 0, info: 0 }

@@ -144,6 +144,35 @@ const before6 = JSON.stringify(g6)
 T.filterToTool(g6, 'ini')
 ok(JSON.stringify(g6) === before6, '不改入参:原 groups 逐字节不变(视图会在渲染期反复调它)')
 
+section('7. emptyPaneText:右栏空态不许把「跑过且干净」说成「没跑过」')
+// aggregate 只对**有结论的**工具建组,所以 groups 为空既可能是「没跑」也可能是「跑过且没问题」。
+// 左栏那一行明明画着 ✓,右栏却说「还没跑过」= 同一屏两句话互相打脸(旧版零结论时禁用「结果」按钮是同一类病)。
+const base7 = { isTool: false, toolState: 'idle', running: false, filtered: false, ranCount: 0 }
+ok(/正在检查/.test(T.emptyPaneText({ ...base7, running: true })),
+  '在途优先说「正在检查」,不抢答结论', T.emptyPaneText({ ...base7, running: true }))
+ok(/还没跑过/.test(T.emptyPaneText({ ...base7, isTool: true })),
+  '单工具且真没跑过 → 说没跑过', T.emptyPaneText({ ...base7, isTool: true }))
+const ran = T.emptyPaneText({ ...base7, isTool: true, toolState: 'clean' })
+ok(/没有发现问题/.test(ran) && !/还没跑过/.test(ran),
+  '单工具跑过且干净 → 必须说「没有发现问题」而不是「还没跑过」(左栏同一行是 ✓)', ran)
+const fail = T.emptyPaneText({ ...base7, isTool: true, toolState: 'fail' })
+ok(/没跑成/.test(fail) && !/没发现问题/.test(fail),
+  '跑失败的工具 results 里有记录却没结论,按「跑过且干净」说是第二句假话', fail)
+ok(/筛选/.test(T.emptyPaneText({ ...base7, filtered: true })),
+  '聚合模式被筛空 → 说的是筛选条件,不是「没跑」', T.emptyPaneText({ ...base7, filtered: true }))
+ok(/全量体检/.test(T.emptyPaneText(base7)),
+  '聚合模式一项都没跑 → 引导去跑体检', T.emptyPaneText(base7))
+const all7 = T.emptyPaneText({ ...base7, ranCount: 18 })
+ok(/未发现问题/.test(all7) && all7.includes('18'),
+  '聚合模式全跑完且零结论 → 说清「18 项都跑过了」,不能与「什么都没跑」同一句话', all7)
+ok(T.emptyPaneText({ ...base7, running: true, isTool: true, toolState: 'idle' }) === '正在检查…',
+  '优先级:在途 > 筛选 > 单工具态 > 计数(不能两个条件各说各话)', T.emptyPaneText({ ...base7, running: true, isTool: true }))
+// 这一条是顺序判据:单工具模式下把「有结论的工具」筛到一条不剩,先走 isTool 会宣布「没有发现问题」,
+// 而它明明有问题、只是被筛掉了 —— filtered 必须排在 isTool 前面。
+const tf = T.emptyPaneText({ isTool: true, toolState: 'clean', running: false, filtered: true, ranCount: 3 })
+ok(/筛选/.test(tf) && !/没有发现问题/.test(tf),
+  '单工具 + 被筛空 → 说筛选条件,不许说「没有发现问题」', tf)
+
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) { console.log('失败项:'); for (const m of failures) console.log('  - ' + m); process.exit(1) }
 console.log('全部通过')

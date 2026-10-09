@@ -33,6 +33,9 @@ const groups = computed(() => {
     tools: Tool[]
     error: number
     warn: number
+    /** 也要数:一组全是 info 时若只判 error+warn,组头会亮出一个光秃秃的 ✓,等于说「没问题」,
+     *  而下面每一行明明带着提示数 —— 同一列里两处口径不能打架 */
+    info: number
     ran: number
   }[] = []
   for (const c of CATEGORIES) {
@@ -40,6 +43,7 @@ const groups = computed(() => {
     if (!list.length) continue
     let error = 0
     let warn = 0
+    let info = 0
     let ran = 0
     for (const t of list) {
       const r = props.results[t.id]
@@ -48,9 +52,10 @@ const groups = computed(() => {
       for (const f of r.findings) {
         if (f.severity === 'error') error++
         else if (f.severity === 'warn') warn++
+        else info++
       }
     }
-    out.push({ id: c.id, label: c.label, icon: c.icon, tools: list, error, warn, ran })
+    out.push({ id: c.id, label: c.label, icon: c.icon, tools: list, error, warn, info, ran })
   }
   return out
 })
@@ -88,6 +93,7 @@ function onKey(e: KeyboardEvent) {
         <Icon :name="g.icon" :size="12" />
         <span class="gl">{{ g.label }}</span>
         <span v-if="g.error + g.warn" class="gc mono">{{ g.error }}/{{ g.warn }}</span>
+        <span v-else-if="g.info" class="gc mono">{{ g.info }} 条提示</span>
         <span v-else-if="g.ran === g.tools.length" class="gd">✓</span>
       </h5>
       <ToolRow

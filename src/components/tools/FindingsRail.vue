@@ -5,7 +5,7 @@
 import { computed, ref } from 'vue'
 import Icon from '../Icon.vue'
 import FindingRow from './FindingRow.vue'
-import { filterGroups } from '../../tools/aggregate'
+import { filterGroups, emptyPaneText } from '../../tools/aggregate'
 import type { AggFinding, AggGroup, FilterSel } from '../../tools/aggregate'
 import type { FixPlan } from '../../tools/fixPlan'
 import type { FixOutcome } from '../../composables/useTools'
@@ -20,6 +20,10 @@ const props = defineProps<{
   busy: boolean
   /** 单工具模式下的工具名;聚合模式传空串 */
   toolName: string
+  /** 那个工具本轮的状态(聚合模式传 'idle' 也无所谓:isTool 为假时用不到它) */
+  toolState: 'idle' | 'clean' | 'fail'
+  /** 本轮已出结论的工具数(空态话术要区分「什么都没跑」与「跑完且干净」) */
+  ranCount: number
   running: boolean
   supported: boolean
 }>()
@@ -45,6 +49,17 @@ function visibleOf(g: AggGroup) {
 function setSev(sev: FilterSel['sev']) {
   emit('update:sel', { ...props.sel, sev })
 }
+
+/** 空态那句话由 aggregate 的纯函数定,判据不在模板里(理由见 emptyPaneText 的注释) */
+const emptyText = computed(() =>
+  emptyPaneText({
+    isTool: isTool.value,
+    toolState: props.toolState,
+    running: props.running,
+    filtered: props.groups.length > 0,
+    ranCount: props.ranCount
+  })
+)
 </script>
 
 <template>
@@ -88,17 +103,7 @@ function setSev(sev: FilterSel['sev']) {
       当前宿主缺这一项需要的能力,所以跑不了 —— 能力缺失是状态,不是异常,这里不调任何原语。
     </p>
 
-    <div v-else-if="!view.length" class="empty">
-      {{
-        groups.length
-          ? '没有符合当前筛选条件的结论。'
-          : isTool
-            ? running
-              ? '正在检查…'
-              : '这一项还没跑过,点上面的「重跑本项」开始。'
-            : '还没有任何结论 —— 跑一次全量体检看看。'
-      }}
-    </div>
+    <div v-else-if="!view.length" class="empty">{{ emptyText }}</div>
 
     <section v-for="g in view" :key="g.category" class="grp">
       <h4>

@@ -86,6 +86,8 @@ const busy = computed(() => t.allRunning.value || t.running.value !== '')
 /** 修复在途,或修复刚把清单作废:这段时间冻结论面板上的所有动作 */
 const anyBusy = computed(() => busy.value || t.fixing.value !== '')
 const ranCount = computed(() => Object.keys(t.results.value).length)
+/** 只数**跑成的**那几项:空态要说「N 项都跑过了，未发现问题」,把失败项算进去就是夸大覆盖 */
+const okCount = computed(() => Object.values(t.results.value).filter((r) => r.ok).length)
 /** 结论面板里的 rel 要拼成绝对路径才能「打开所在目录」;根路径来自项目记录 */
 const rootPath = computed(() => t.projects.value.find((p) => p._id === t.projectId.value)?.path || '')
 
@@ -141,6 +143,17 @@ const currentTool = computed(() =>
 const currentSupported = computed(() =>
   selection.value === 'all' ? true : !!currentTool.value && isSupported(currentTool.value, t.caps)
 )
+/**
+ * 空态话术的入参:看的是**有没有这一项的结果记录**,而不是有没有结论。
+ * 跑过且没问题的工具在 results 里有记录、findings 为空 —— 按「没记录」判就会对它说「还没跑过」,
+ * 而同一行左栏画着 ✓。(aggregate 只对有结论的工具建组,所以这个信息它给不了。)
+ */
+const currentToolState = computed<'idle' | 'clean' | 'fail'>(() => {
+  if (selection.value === 'all') return 'idle'
+  const r = t.results.value[selection.value]
+  if (!r) return 'idle'
+  return r.ok ? 'clean' : 'fail'
+})
 
 /** 右栏头部那一个主操作:聚合 = 全量体检,单工具 = 重跑本项 */
 function runCurrent() {
@@ -317,6 +330,8 @@ function copyShownReport() {
           :receipts="t.fixResults.value"
           :busy="anyBusy"
           :tool-name="currentTool ? currentTool.name : ''"
+          :tool-state="currentToolState"
+          :ran-count="okCount"
           :running="busy"
           :supported="currentSupported"
           @update:sel="sel = $event"
