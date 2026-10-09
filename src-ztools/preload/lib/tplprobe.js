@@ -7,8 +7,8 @@
 // 对不上不会报错,只会让用户拿到一个"以为裁了其实没裁"的产物。
 //
 // 这些解析函数本身都不做 IO:纯文本函数吃源码片段,`detectBuiltinModules` 把「列目录 / 探文件 /
-// 读文件」三件事收进参数里由调用方注入(本层不 require('fs'))。真正的 IO 由 probeSource() 那层
-// 负责,测试直接喂真实源码片段、或喂一棵假目录树。
+// 读文件」三件事收进参数里由调用方注入。IO 只在 probeSource() 这一处,而且只在调用方没注入 deps
+// 时才 `require('node:fs')` 回落 —— 注入 deps 的调用方(测试、非 Windows 宿主)一个真实文件都不碰。
 /** @typedef {Record<string, {exists: true, default: boolean|string}>} OptionMap */
 
 // 双引号与单引号两种写法都要认:4.7.2 的 SConstruct 用双引号,
@@ -165,9 +165,10 @@ function parseVersionPy(text) {
   const num = (k) => { const m = new RegExp('^\\s*' + k + '\\s*=\\s*(\\d+)\\s*$', 'm').exec(s); return m ? m[1] : '' }
   const st = /^\s*status\s*=\s*["']([^"']+)["']\s*$/m.exec(s)
   const major = num('major'), minor = num('minor'), patch = num('patch')
-  // 三个数字字段一律按"读没读到"判,不按真假值判。注:`patch = 0` 时 `!patch` 恰好也放行
-  // (num() 返回的是字符串,`!'0'` 为 false),所以两种写法在 4.x 上等价 —— 统一成 === '' 是为了
-  // 万一 major/minor 真为 0 时不误判成缺失,也是为了读代码的人不必去推哪种写法管哪种输入。
+  // 三个数字字段一律按"读没读到"判,不按真假值判。注:`num()` 的值域只有**空串**与**非空数字串**,
+  // 而 `!'0'` 为 `false`,所以 `x === ''` 与 `!x` 在整个值域上**恒等价**(把 major/minor 写成 0
+  // 也杀不掉这条,别把它当修了一个真实存在的误判)—— 变异自检里它记为等价变异 V-M5。
+  // 统一成 `=== ''` 是让读代码的人不必先去推 `num()` 的返回类型。
   if (major === '' || minor === '' || patch === '' || !st) return ''
   return patch === '0' ? `${major}.${minor}-${st[1]}` : `${major}.${minor}.${patch}-${st[1]}`
 }
@@ -240,7 +241,10 @@ async function probeSource(srcDir, deps) {
   const readdirSync = d.readdirSync || ((fp) => require('node:fs').readdirSync(fp).map((x) => String(x)))
   /** @param {...string} seg @returns {string} */
   function p(...seg) { return require('node:path').join(srcDir, ...seg) }
-  const out = { ok: false, error: '', sourceVersion: '', tested: false, tagMatched: false, options: {}, cascades: {}, testedVersions: TESTED_VERSIONS }
+  // testedVersions 交出去的是**副本**:按引用交模块级常量,下游一次 .push() 就永久污染已实测表,
+  // 而下面 `tested` 的判定用的正是同一个数组(计划书里 T8 只 `.includes` 读,不是活 bug,但不留给下游)。
+  // STATIC_CHECKED_VERSIONS 不进返回值,所以不用同样处理。
+  const out = { ok: false, error: '', sourceVersion: '', tested: false, tagMatched: false, options: {}, cascades: {}, testedVersions: TESTED_VERSIONS.slice() }
   // SConstruct 是"这是不是 Godot 源码根"的唯一判据(与 buildtools.js 现有那道同步校验同一条)。
   if (!srcDir || !safeExists(existsSync, p('SConstruct'))) {
     out.error = '所选目录不是 Godot 源码根(缺 SConstruct),无法探测构建选项'
@@ -265,7 +269,9 @@ async function probeSource(srcDir, deps) {
   // tested 只回答"这个版本在附录 B 的已实测表里吗";不在表里照样探测成功,由渲染层给保守提示。
   out.tested = TESTED_VERSIONS.includes(out.sourceVersion)
   // targetTag 可选:调用方带来要比的目标引擎时才算 tagMatched,没带就留 false ——
-  // 不能无条件置 true,那等于谎报"版本对得上"。
+  // 不能无条件置 true,那等于谎报"版本对得上"。这道守卫最要紧的一支在**读不出 version.py** 的树上:
+  // 那时 sourceVersion='' 而 versionStringFromTag(undefined)='' 两侧同为空串,少了守卫就会把
+  // "版本不明"算成"版本对得上"。
   if (d.targetTag) out.tagMatched = out.sourceVersion === versionStringFromTag(d.targetTag)
   out.ok = true
   return out

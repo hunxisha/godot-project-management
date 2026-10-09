@@ -2,20 +2,23 @@
 // 这层唯一的价值就是"和源码写得一样",夹具编错了实现就跟着错。
 // 片段取自 godotengine/godot tag 4.7.2-stable 的 SConstruct(sha256 已核,见策划书附录 B)。
 // 用法: node src-ztools/preload/lib/__tests__/tplprobe.test.js
-// 不是「单文件原样摘录」的夹具目前有九处,每处就在原位写明合成在哪、真实出处又是哪一行:
+// 不是「单文件原样摘录」的夹具目前有十处,每处就在原位写明合成在哪、真实出处又是哪一行:
 //   1) 单引号 BoolVariable 声明 —— 4.7.2 全树 0 处,只验正则的跨版本防御支;
 //   2) modules 探测里的 broken_module / .gitkeep —— 真实 modules/ 下没有这两个条目,是造的假目录;
 //   3) 4.3 那段里的 disable_advanced_gui 块 —— 真实 4.3(:969-977)是嵌套 if/else,这里借了 4.7.2 的平铺写法占位;
 //   4) MONO_CFG —— mono/config.py:31-33 与 webp/config.py:1-2 两段真实摘录的**拼接**,不是单文件原文;
 //   5) jolt_physics 的 config.py 置空 —— 真实文件有 can_build 逻辑,本条只验键名,属简化;
 //   6) 三条「注入回调抛 EPERM」的 —— 验的是回调契约不是文件形态,真实源码里不存在这种 config.py;
-//   7) probeSource 那三棵临时树(主树 / dup 树 / 4.3 树)与注入用的 fakeTree —— 整棵目录树都是造的
-//      (fakeTree 尤其:它压根不在磁盘上),但每一**行内容**要么逐字摘自真实源码,要么按下一条标明;
+//   7) probeSource 那四棵临时树(主树 / dup 树 / 4.3 树 / 只有 SConstruct 的 nover 树)与注入用的 fakeTree
+//      —— 整棵目录树都是造的(fakeTree 尤其:它压根不在磁盘上),但每一**行内容**要么逐字摘自真实源码,
+//      要么按下一条标明;
 //   8) dup 树里的四处重名声明(disable_3d 在平台脚本再声明一遍、module_webp_enabled 写进 SConstruct、
 //      only_in_detect 与 dup_in_file)—— 合成形态:真实 4.7.2 跨文件重名 0 处、同文件重名 0 处
 //      (用本层 parseSconsOptions 实跑:SConstruct 90 名 ∩ detect.py 12 名 ∩ 各 config.py 4 名
 //      ∩ 57 个 module_*_enabled,四组交集全空),造它们只为钉住合并顺序;
 //   9) '4.6-dev' 那份 version.py —— 字段形态真实,数值是把真实 4.3 摘录的 minor 改 6、status 改 dev。
+//  10) version.py 的两条防御支夹具(status 用单引号 / patch 写成 2x)—— 真实 version.py 恒用双引号、
+//      数字字段恒为纯数字,这两份是为正则的单引号支与行尾锚造的,只验分支本身。
 // 另有两处对简报的更正(不改结论,只把冒充摘录的文本改回真实文本 / 补漏掉的换行),见原位注释。
 const P = require('../tplprobe.js')
 
@@ -237,6 +240,21 @@ ok(P.versionStringFromTag('4.7-stable') === '4.7-stable', '无 patch 段的 tag 
 ok(P.versionStringFromTag('  4.7.2-stable  ') === '4.7.2-stable', '两侧空白裁掉(否则版本闸拿带空格的 tag 比必不匹配)',
    JSON.stringify(P.versionStringFromTag('  4.7.2-stable  ')))
 ok(P.versionStringFromTag(undefined) === '', '没有 tag → 空串而不是 "undefined"', String(P.versionStringFromTag(undefined)))
+// 合成形态,非真实源码摘录:真实 4.x 的 version.py 里 status 恒用**双**引号(4.7.2 的 version.py:6
+// `status = "stable"`,4.3-stable 从 tar 实读同形),正则的单引号支是跨版本防御支。
+// 上面三条走 status 的断言全用双引号 —— 把正则里的单引号支持删掉,62 条照绿(评审实测),这条补那支的牙。
+// 与「不该被误认的东西」节里那条单引号 BoolVariable 夹具同口径:标明合成、只验分支本身。
+const VP_SQ = 'major = 4\nminor = 7\npatch = 2\nstatus = \'stable\'\n'
+ok(P.parseVersionPy(VP_SQ) === '4.7.2-stable',
+   "status 的单引号写法也认(合成形态,验证正则的单引号支,非真实源码摘录)", P.parseVersionPy(VP_SQ))
+// 合成形态,非真实源码摘录:真实 version.py 的 major/minor/patch 恒为纯数字字面量。
+// 这条钉 num() 那个正则的行尾锚 `\s*$`:数字后面跟了杂质(`patch = 2x`)说明这一行不是我们认的那种
+// 赋值,该判"读不出"(空串)而不是把前导数字截下来当一个版本 —— 版本闸宁缺勿猜。
+// 去掉行尾锚后它会被读成 '4.7.2-stable',这条必红(修复轮 1 已实测确认)。
+const VP_JUNK = 'major = 4\nminor = 7\npatch = 2x\nstatus = "stable"\n'
+ok(P.parseVersionPy(VP_JUNK) === '',
+   '数字字段带行尾杂质 → 判读不出(钉 num() 的行尾锚 \\s*$,合成形态)',
+   JSON.stringify(P.parseVersionPy(VP_JUNK)))
 
 section('probeSource 汇总')
 const fs = require('node:fs')
@@ -361,10 +379,39 @@ mk('modules/mono/register_types.h', ''); mk('modules/mono/SCsub', ''); mk('modul
   ok(thrown === null && !!rLock && rLock.ok === false && /SConstruct/.test(rLock.error || ''),
      'existsSync 抛异常 → ok:false 带原因,不抛出去', thrown ? String(thrown) : `${rLock && rLock.ok} / ${rLock && rLock.error}`)
 
+  // ---- 读不出 version.py 的那一支:守卫唯一看得见的位置(修复轮 1 补的洞) ----
+  // 上面「没带 targetTag 时不谎报匹配」跑在版本**读得出**的树上:那时 sourceVersion='4.7.2-stable',
+  // 而 versionStringFromTag(undefined)='' —— 两侧本就不相等,把 `if (d.targetTag)` 守卫整个拆掉、
+  // 改成无条件比对,那条断言照绿(评审实测:拆守卫后 62 条全绿、exit 0)。
+  // 只有版本读不出来时两侧才同为空串,无守卫的实现会算出 tagMatched=true —— 等于对一份版本不明的
+  // 源码宣称"版本对得上",正落在这条约束最在意的地方。
+  // 合成形态,非真实源码摘录:真实源码树恒有 version.py,这里造的是一份**只有 SConstruct** 的树。
+  const noVerRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gpm-tplprobe-nover-'))
+  mkAt(noVerRoot)('SConstruct', SCORE + '\n' + C472)
+  const rNoVer = await P.probeSource(noVerRoot)
+  ok(rNoVer.ok === true && rNoVer.sourceVersion === '' && rNoVer.tagMatched === false,
+     '读不出 version.py 的树 + 不带 targetTag → tagMatched 仍 false(空串不算"版本对得上")',
+     `ok=${rNoVer.ok} / sourceVersion=${JSON.stringify(rNoVer.sourceVersion)} / tagMatched=${rNoVer.tagMatched} / ${rNoVer.error}`)
+
+  // ---- 已实测表不得按引用交出去(跨调用共享可变状态,修复轮 1) ----
+  // 交引用给下游,一次 .push() 就永久污染模块常量,而 tested 判定用的正是同一个数组。
+  // 第二条 push 的是 '4.3-stable' 而不是中性串:只有"push 一个探测真会问到的版本"才能把
+  // tested 被污染那件事跑出来(中性串只被引用比对看得见)。放在所有探测之后,不回头污染上面的断言。
+  ok(r.testedVersions !== P.TESTED_VERSIONS,
+     'testedVersions 是副本而不是模块常量本体(交引用出去 = 下游可写脏全局表)',
+     `同一引用? ${r.testedVersions === P.TESTED_VERSIONS}`)
+  r.testedVersions.push('4.3-stable')
+  ok(P.TESTED_VERSIONS.join(',') === '4.7.2-stable',
+     '下游对返回值 testedVersions 的 push 没有改到模块常量', P.TESTED_VERSIONS.join(','))
+  const rPushed = await P.probeSource(root43)
+  ok(rPushed.tested === false,
+     '污染动作之后再探一次:4.3-stable 仍判为未实测(tested 用的还是那张干净的表)', String(rPushed.tested))
+
   fs.rmSync(root, { recursive: true, force: true })
   fs.rmSync(bad, { recursive: true, force: true })
   fs.rmSync(dupRoot, { recursive: true, force: true })
   fs.rmSync(root43, { recursive: true, force: true })
+  fs.rmSync(noVerRoot, { recursive: true, force: true })
   report()
 })().catch((e) => {
   // async 节里任何一处抛出(含未捕获的 rejection)都必须把整轮判红 ——
