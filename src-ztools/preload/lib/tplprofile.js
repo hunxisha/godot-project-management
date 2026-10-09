@@ -55,7 +55,7 @@
 //     那是交叉防线)。
 //     表外开关(gdscript / freetype / text_server_adv / threads / xaudio2 / disable_exceptions …)本层
 //     **绝不代写** —— 面板没有它们,替用户关就是废模板(策划书 §3 负范围补条)。
-const { TPL_FEATURES, flagsOf } = require('./tplfeatures.js')
+const { TPL_FEATURES, flagsOf, featureById } = require('./tplfeatures.js')
 
 /** @typedef {Record<string, {exists: true, default: boolean|string}>} OptionMap */
 /** @typedef {'default-on'|'default-off'} ProfileMode */
@@ -322,6 +322,201 @@ const MINIMAL_OFF = [
 ]
 
 /**
+ * 至少要有其一、否则产物没有任何画面的四个渲染驱动(策划书 §5.5 的第一条硬拦)。
+ * `d3d12` 必须在名单里但**不能反过来算**:它源码默认 False(SConstruct:199),
+ * "用户没动它"不等于"有它" —— 所以判定看的是产物里的生效值而不是"勾没勾"。
+ * @type {string[]}
+ */
+const RENDER_DRIVERS = ['vulkan', 'opengl3', 'angle', 'd3d12']
+
+/**
+ * 校验用的「这个 flag 在**将要发出的那份产物**里生效到什么值」—— **两个通道的并集**。
+ *
+ * 为什么必须从产物读、且必须两个通道一起读:Ruling #38 之后 `vulkan` / `opengl3` / `angle` / `d3d12`
+ * 这些核心键**只出现在 `commandExtras`**,`disabled_build_options` 里永远没有它们;
+ * 只查 profile 的校验会把"四个驱动全关"看成"什么都没关"(策划书 §5.5 这一层最容易踩的坑)。
+ * 两个通道都没发出去的键回落到**探测到的源码默认值**(§5.3 差值规则:不发 = 保持默认);
+ * 两处都没有、options 里也没探到 → `undefined`,含义是"这份源码里没有这个变量"——
+ * 未声明的 scons 变量是**静默忽略**的(本机实测:值不进 env、无 warning、退出码 0),
+ * 所以校验一律按未知处理,不基于"我记得 Godot 有这个选项"下判断。
+ * @param {string} flag @param {ReturnType<typeof buildProfile>} built @param {OptionMap} options
+ * @returns {boolean|string|undefined} 布尔或枚举串;`undefined` = 这份源码里未知
+ */
+function productValue(flag, built, options) {
+  const dbo = built.json.disabled_build_options
+  if (flag in dbo) return dbo[flag]
+  const tok = built.commandExtras.find((t) => t.slice(0, t.indexOf('=')) === flag)
+  if (tok !== undefined) {
+    const raw = tok.slice(tok.indexOf('=') + 1)
+    if (raw === 'yes') return true
+    if (raw === 'no') return false
+    return raw // 枚举型 token 原样交给 isOnByDefault 查 ENUM_VALUES
+  }
+  const o = options[flag]
+  return o && o.exists ? o.default : undefined
+}
+
+/**
+ * 该 flag 在产物里**算不算开着**(有事实才回答)。`null` = 未知。
+ * 判定复用输出层唯一的 `isOnByDefault`,不在这里再写一遍枚举/布尔的分别。
+ * @param {string} flag @param {ReturnType<typeof buildProfile>} built @param {OptionMap} options
+ * @returns {boolean|null}
+ */
+function productOn(flag, built, options) {
+  const v = productValue(flag, built, options)
+  return v === undefined ? null : isOnByDefault(flag, { exists: true, default: v })
+}
+
+/**
+ * 该 flag 在产物里是否**确定把这项能力关掉**:`disable_*` 的值为真 = 关掉,其余(`module_*_enabled`、
+ * 裸名)的值为假 = 关掉。**方向只在这一处翻**(与 E3 那条教训同一条:两处翻就会有一处够不着)。
+ * 未知一律返回 false —— "没探到"不等于"已关闭",拿它当已关闭去硬拦就是替用户的源码做假设。
+ * @param {string} flag @param {ReturnType<typeof buildProfile>} built @param {OptionMap} options
+ * @returns {boolean}
+ */
+function productOff(flag, built, options) {
+  const st = productOn(flag, built, options)
+  if (st === null) return false
+  return isNegatedFlag(flag) ? st : !st
+}
+
+/**
+ * 面板项在产物里是否**确定不可用**(一项多 flag 时:任一 flag 被确定关掉,这项就没了)。
+ * @param {string} id @param {ReturnType<typeof buildProfile>} built @param {OptionMap} options
+ * @returns {boolean}
+ */
+function itemOffInProduct(id, built, options) {
+  const f = featureById(id)
+  if (!f) return false
+  return flagsOf(f).some((k) => productOff(k, built, options))
+}
+
+/**
+ * @typedef {Object} TplIssue
+ * @property {string} itemId   面板项 id(或 'source' 这类全局项)
+ * @property {string} flag
+ * @property {string} why      为什么这是个问题(面向用户的一句话,不是日志)
+ * @property {string} action   建议动作
+ * @property {boolean} skippable  false = 硬拦,不给「仍然继续」
+ */
+
+/**
+ * 编译前静态校验(策划书 §5.5)。
+ *
+ * 除三条硬拦外一律可越过 —— 我们对源码的了解不如用户可能了解的多,锁死他是拿我们的
+ * 无知换他的选择权。三条硬拦的共同点是"编出来的东西必然跑不起来":
+ * 用户在那儿承担的不是风险,是几十分钟后拿到一个废产物。
+ * 1. 四个渲染驱动全关(没有任何画面);
+ * 2. 面板一项不剩;
+ * 3. **反向白名单(`mode:'default-off'`)开着、而这份产物一个模块都没点名保留** ——
+ *    `modules_enabled_by_default=no` 自 #38 起是**活的**(命令行,`SConstruct:476` 读点早于 profile
+ *    落 env 的 `:655`),探测失败时它会真把 57 个模块整体关掉(gdscript / freetype / text_server_adv
+ *    全没),而 `buildProfile` 照发不误(它的契约是"按勾选与探测生成",拦不拦不归它)。
+ *
+ * **不做的一条(策划书 §5.5 交下来、已被 Ruling #38/#39 消解)**:「`production=yes` 会把
+ * `lto` / `use_static_cpp` / `debug_symbols` 覆盖回默认」不需要出软问题 —— 这三个键上命令行后
+ * `SConstruct:675` / `:680` 用 `ARGUMENTS` 重设时取到的正是用户所选值,覆盖不发生。
+ *
+ * **不重复实现的一条**:"`disabled_build_options` 里出现非 `module_*` 键"是实现 bug 而非用户选择,
+ * 已由本文件测试里的遍历性守卫(跑在每一份产物上 + 防空转)守着;混进这里会让"用户能勾出坏组合"
+ * 和"我们写错了"两件事分不开。
+ *
+ * @param {Record<string, boolean>} selection 面板勾选;缺整个对象按"什么都没勾"处理,不抛
+ * @param {OptionMap} options 探测结果(tplprobe.js probeSource().options);缺整个对象按"什么都没探到"处理
+ * @param {{mode?: ProfileMode, d3d12SdkInstalled?: boolean, accesskitSdkInstalled?: boolean, untestedSource?: boolean}} [ctx]
+ *   `mode` **必须与 T7 发起编译时传给 buildProfile 的那一个相同**,否则第 3 条判的不是将要发出去的产物
+ * @returns {{issues: TplIssue[], hardBlocks: TplIssue[]}}
+ */
+function validateSelection(selection, options, ctx) {
+  const c = ctx || {}
+  const mode = /** @type {ProfileMode} */ (c.mode || 'default-on')
+  const sel = selection || {}
+  const srcOpts = options || {}
+  /** @type {TplIssue[]} */
+  const issues = []
+  /** @type {TplIssue[]} */
+  const hard = []
+  // 校验的对象是"将要发出去的那份产物",所以先把两通道算出来再判 —— 与 T7 走的是同一个生成器,
+  // 不会出现"校验以为会这样、实际发出去那样"的两份真源。
+  // 也正因为如此,这里**不直接读 `selection` 的真值**:勾着但没探到的项什么都不会发,
+  // 产物里的能力由源码默认决定,而不是由面板上那个勾决定。
+  const built = buildProfile(sel, srcOpts, { mode })
+  /** @type {(flag: string) => boolean} 该 flag 在产物里确定被关掉 */
+  const off = (flag) => productOff(flag, built, srcOpts)
+  /** @type {(id: string) => boolean} 该面板项在产物里确定不可用 */
+  const gone = (id) => itemOffInProduct(id, built, srcOpts)
+
+  // —— 硬拦 1:渲染后端。四个里至少要有一个;**只按有事实的那几个下判断** ——
+  // 未探到的驱动不算"已关闭"(它是源码默认),所以这里是 every(确定为关)而不是 filter(没开着)→ 长度 0。
+  if (RENDER_DRIVERS.every(gone)) {
+    hard.push({ itemId: 'vulkan', flag: 'vulkan', why: '四个渲染驱动全关,编出来的模板不会有任何画面', action: '至少保留一个;Windows 上建议保留 Vulkan', skippable: false })
+  }
+
+  // —— 硬拦 2:一项不剩 ——
+  const kept = Object.keys(sel).filter((k) => sel[k])
+  if (kept.length === 0) {
+    hard.push({ itemId: 'source', flag: '', why: '一项都没保留,这不是一个能跑的模板', action: '至少保留渲染驱动与文字渲染', skippable: false })
+  }
+
+  // —— 硬拦 3:反向白名单开着却没有任何模块被点名保留(裁定①)——
+  // 三个条件各挡一种误判:token 真的发出去了(命令行才是活通道)、这份源码确实声明了它
+  // (未声明 = 静默忽略,白名单压根不生效)、且 profile 里没有任何 `module_*` 点名(全被整体关掉)。
+  const whitelistLive = built.commandExtras.indexOf('modules_enabled_by_default=no') !== -1 &&
+    !!(srcOpts.modules_enabled_by_default && srcOpts.modules_enabled_by_default.exists)
+  const namedModules = Object.keys(built.json.disabled_build_options).filter(isModuleFlag)
+  if (whitelistLive && namedModules.length === 0) {
+    hard.push({ itemId: 'source', flag: 'modules_enabled_by_default', why: '「最小可跑」会整体关掉所有模块,而这次一个模块开关都没探到、无法点名保留 —— 产物会是没有脚本也没有文字的零模块模板', action: '换一份完整解压、能探到 modules/ 的源码再编,或改用「默认开」的预设', skippable: false })
+  }
+
+  // —— 软问题:以下每条都带「仍然继续」——
+  // 物理:2D 那条轴 = 伞项关掉 或 自带 2D 后端关掉;3D 那条轴 = 伞项关掉 或(自带 3D 后端与 Jolt 同时关掉)
+  // (Jolt 只提供 3D 后端,救不了 2D)。两条轴都没了才是"没有任何碰撞"。
+  const phys2dGone = off('disable_physics_2d') || off('module_godot_physics_2d_enabled')
+  const phys3dGone = off('disable_physics_3d') ||
+    (off('module_godot_physics_3d_enabled') && off('module_jolt_physics_enabled'))
+  if (phys2dGone && phys3dGone) {
+    issues.push({ itemId: 'a3GodotPhys', flag: 'module_godot_physics_2d_enabled', why: '2D 与 3D 物理后端都被关掉了,CharacterBody/RigidBody 不会有任何碰撞', action: '至少保留一套物理后端', skippable: true })
+  }
+
+  // 依赖缺失:只在"这个驱动真会被编进产物"时报。判据只留 `productOn(flag) === true` 一处 ——
+  // 它已经把"用户取消了它"(值确定为假)与"这份源码里没有它"(未知)都排除了,
+  // 再叠一道 `on(id)` 是永远够不着的第二守卫(本项目已栽过一次两道守卫只有一道在干活)。
+  // 没探到却硬报 = 把我们自己的无知说成用户的选择。
+  if (productOn('d3d12', built, srcOpts) === true && c.d3d12SdkInstalled === false) {
+    issues.push({ itemId: 'd3d12', flag: 'd3d12', why: '保留 Direct3D 12 驱动,但本机没装它的依赖 —— 实测这样会直接编译失败', action: '取消该项,或先跑 python misc\\scripts\\install_d3d12_sdk_windows.py', skippable: true })
+  }
+  if (productOn('accesskit', built, srcOpts) === true && c.accesskitSdkInstalled === false) {
+    issues.push({ itemId: 'accesskit', flag: 'accesskit', why: '保留 AccessKit,但本机没装它的依赖 —— 实测会撞 accesskit 报错', action: '取消该项(无障碍树对导出模板通常无关)', skippable: true })
+  }
+  if (gone('netMbedtls')) {
+    issues.push({ itemId: 'netMbedtls', flag: 'module_mbedtls_enabled', why: '关掉 mbedTLS 后 HTTPS / TLS 全断,任何联网需求都会静默失败', action: '项目有联网就用不上该项', skippable: true })
+  }
+
+  // 反向白名单的"半个瞎":白名单活着、也确实点名了一些模块(硬拦 3 没触发),但用户勾着的某一项里
+  // 有模块 flag 在这份源码里没探到 → 它不会出现在任何通道里,于是被 modules_enabled_by_default 整体关掉。
+  // 面板显示"保留"、产物里没有,这是静默丢功能,不是用户的选择 → 汇成一条软问题报出来。
+  // 判据用 some 而不是 every:一项多 flag 时**只要有一个没探到就少一个后端**(真实形态:
+  // `fmtCompressed` 映射 7 个模块开关,源码里少一个目录就是"压缩纹理"整项看着勾着、实际缺一块)。
+  if (whitelistLive && namedModules.length > 0) {
+    /** @type {string[]} */
+    const lostIds = []
+    for (const f of TPL_FEATURES) {
+      if (!sel[f.id]) continue
+      const mods = flagsOf(f).filter(isModuleFlag)
+      if (mods.some((k) => productValue(k, built, srcOpts) === undefined)) lostIds.push(f.id)
+    }
+    if (lostIds.length > 0) {
+      issues.push({ itemId: 'source', flag: 'modules_enabled_by_default', why: `反向白名单下有 ${lostIds.length} 项你保留的模块没在这份源码里探到,它们会被整体关掉(面板显示保留、产物里没有)`, action: '把这些项取消勾选,或改用「默认开」的预设', skippable: true })
+    }
+  }
+
+  if (c.untestedSource) {
+    issues.push({ itemId: 'source', flag: '', why: '这份源码的版本不在已实测表内,面板按探测结果工作;未识别的项保持源码默认,不猜参数', action: '如产物异常,先按已实测版本复现', skippable: true })
+  }
+  return { issues, hardBlocks: hard }
+}
+
+/**
  * 三个预设(策划书 §5.4b)。
  * full = 全部回到源码默认;lite2d = 附录实测那组(只动 LITE2D_OFF_IDS 那两项);
  * minimal = 官方 CI Minimal template 的 9 条 scons-flags 逐条对齐(见 MINIMAL_OFF 与文件头第 (1)(2) 条):
@@ -340,4 +535,4 @@ const PRESETS = {
   minimalSelection(options) { return selectionTurningOff(options, MINIMAL_OFF.map((x) => x.id)) }
 }
 
-module.exports = { initialSelection, buildProfile, profileText, PRESETS, ENUM_VALUES }
+module.exports = { initialSelection, buildProfile, profileText, PRESETS, ENUM_VALUES, validateSelection }

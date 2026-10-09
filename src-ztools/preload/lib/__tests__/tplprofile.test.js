@@ -529,6 +529,198 @@ if (fs.existsSync(realSC)) {
   console.log(`\n(跳过真实源码核对:未找到 ${realSC})`)
 }
 
+// ==================== Task 6 · 静态校验 validateSelection ====================
+// 本节是**同步**的:validateSelection 与被它复用的 buildProfile 都是纯函数,没有 async 断言节,
+// 所以汇总仍留在文件末尾(Ruling #25 那个「async 节里的断言不计入 PASS 也不改退出码」的坑在这里不存在)。
+// 校验判的是「将要发出去的那份产物」→ 一律两通道并集看(#38:四个渲染驱动只在命令行里)。
+section('静态校验:可越过的软问题')
+const OPTS2 = Object.assign({}, OPTS, {
+  vulkan: { exists: true, default: true }, opengl3: { exists: true, default: true }, angle: { exists: true, default: true },
+  module_godot_physics_2d_enabled: { exists: true, default: true }, module_godot_physics_3d_enabled: { exists: true, default: true },
+  disable_physics_2d: { exists: true, default: false }, disable_physics_3d: { exists: true, default: false }
+})
+let v = T.validateSelection(sel({ d3d12: true }), OPTS2, { d3d12SdkInstalled: false })
+ok(v.issues.some((i) => i.itemId === 'd3d12' && i.skippable === true), '保留 d3d12 但缺依赖 → 软问题带「仍然继续」', JSON.stringify(v.issues))
+ok(v.hardBlocks.length === 0, '软问题不进硬拦')
+
+section('硬拦:无渲染后端 / 一项不剩(共三条,第三条见下面那节)')
+v = T.validateSelection(sel({ vulkan: false, opengl3: false, angle: false, d3d12: false }), OPTS2, {})
+ok(v.hardBlocks.some((i) => i.itemId === 'vulkan'), '渲染驱动全关 → 硬拦(编出来的东西必然没有画面)', JSON.stringify(v.hardBlocks))
+const none = {}
+for (const f of F.TPL_FEATURES) none[f.id] = false
+v = T.validateSelection(none, OPTS2, {})
+ok(v.hardBlocks.length > 0, '面板一项不剩 → 硬拦')
+
+section('探测未识别的项不算问题,但要在 ctx.untestedSource 时提示')
+v = T.validateSelection(sel({ sys3d: false }), {}, { untestedSource: true })
+ok(v.issues.some((i) => /未实测|未识别/.test(i.why)), '未实测版本 → 出一条保守提示', JSON.stringify(v.issues))
+ok(v.hardBlocks.length === 0, '未实测不硬拦(策划书 §1 第 13 条)')
+// ↑ 这一条同时钉住简报 Step 3 原式的一处误拦:它把「没探到」当「已关闭」,
+//   options 传 {} 时 drivers 数组为空 → 会对一份什么都没探到的源码报「四个驱动全关」硬拦。
+
+// 校验结果的收集表:本节末尾的「Issue 形状契约」对它做遍历性断言(防空转)。
+const VCOL = []
+const vk = (label, x) => { VCOL.push([label, x]); return x }
+
+section('硬拦第三条(裁定①):反向白名单 + 一个模块都没探到 = 零模块废产物')
+// CORE_ONLY = OPTS2 去掉全部 module_* 键,正是本机那棵裁剪树 probeSource 的真实形态(102 键 / 0 个模块)。
+// T5 轮 1 之前 modules_enabled_by_default=no 写进 profile 是**惰性 no-op**;#38 把它送上命令行后它是活的
+// (SConstruct:476 唯一读点早于 profile 落 env 的 :655),而 buildProfile 照发不误 ——
+// 现有测试甚至钉死了 buildProfile(undefined, undefined, {mode:'default-off'}) 也交这条 token。
+// → 拦它的责任在 T6:用户承担的不是风险,是几十分钟后拿到一个没有 gdscript、没有文字的产物。
+const CORE_ONLY = {}
+for (const k of Object.keys(OPTS2)) if (!isModulePrefix(k)) CORE_ONLY[k] = OPTS2[k]
+ok(Object.keys(CORE_ONLY).every((k) => !isModulePrefix(k)) && Object.keys(CORE_ONLY).length > 0,
+   '夹具 CORE_ONLY 确实一个 module_* 都没探到但核心键在(下面那条硬拦的前提,空夹具会让它变成空转)', JSON.stringify(Object.keys(CORE_ONLY)))
+const REV_OPTS = Object.assign({ modules_enabled_by_default: { exists: true, default: true } }, CORE_ONLY)
+// 夹具里额外勾着 fmtWebp:它对应的 module_webp_enabled 在这份源码里探不到 →
+// 这正是「用户以为保留了 webp、反向白名单把它整体关掉」的现场形态,也是硬拦与 S5 软问题的分工点
+// (硬拦兜住"一个都没点名",S5 只在"还能点名别的"时才补一句)。
+const revBadSel = Object.assign(T.initialSelection(REV_OPTS), { fmtWebp: true })
+v = vk('反向+0 模块→硬拦', T.validateSelection(revBadSel, REV_OPTS, { mode: 'default-off' }))
+ok(v.hardBlocks.some((i) => i.flag === 'modules_enabled_by_default' && i.skippable === false),
+   '反向模式 + 零模块点名 → 硬拦(不给「仍然继续」)', JSON.stringify(v.hardBlocks))
+ok(!v.issues.some((i) => /反向白名单/.test(i.why)),
+   '硬拦已经说了这件事就不再重复出软问题(去掉两条规则的互斥门,这里就多一条同义反复)', JSON.stringify(v.issues))
+v = T.validateSelection(T.initialSelection(REV_OPTS), REV_OPTS, {})
+ok(!v.hardBlocks.some((i) => i.flag === 'modules_enabled_by_default'),
+   '同一份选项表在 default-on 下不拦:那条 token 根本没发出去(把 mode/token 判据删掉这条就红)', JSON.stringify(v.hardBlocks))
+const REV_MIN_OPTS = Object.assign({ modules_enabled_by_default: { exists: true, default: true } }, MIN_OPTS)
+v = T.validateSelection(T.PRESETS.minimalSelection(REV_MIN_OPTS), REV_MIN_OPTS, { mode: 'default-off' })
+ok(v.hardBlocks.every((i) => i.flag !== 'modules_enabled_by_default'),
+   '反向模式但保留的模块被点名了(webp)→ 不是零模块产物 → 不硬拦(删掉"有没有点名"这半边判据这条就红)', JSON.stringify(v.hardBlocks))
+v = T.validateSelection(T.initialSelection(CORE_ONLY), CORE_ONLY, { mode: 'default-off' })
+ok(!v.hardBlocks.some((i) => i.flag === 'modules_enabled_by_default'),
+   '这份源码根本没声明 modules_enabled_by_default → 发出去也是静默忽略 → 不拦(未声明的键不存在,拿"我记得有"当依据就是猜)', JSON.stringify(v.hardBlocks))
+
+section('反向白名单下「面板保留但源码没探到」的模块 → 软问题(不硬拦)')
+// 真实形态:fmtCompressed 一项映射 7 个模块开关(dds/ktx/tinyexr/astcenc/bcdec/etcpak/cvtt),
+// 源码里少一个目录就是"整项勾着、产物里缺一块"。这里造出那个形态(cvtt 探不到)。
+const REV_FULL = Object.assign({ modules_enabled_by_default: { exists: true, default: true } }, ALL_ON_OPTS)
+delete REV_FULL.module_cvtt_enabled
+const revKept = Object.assign(T.initialSelection(REV_FULL), { fmtCompressed: true })
+ok(revKept.fmtCompressed === true && !('module_cvtt_enabled' in REV_FULL),
+   '夹具:该项是勾着的而它的一个模块 flag 没探到(不勾就不该报,探得到也不该报)', JSON.stringify([revKept.fmtCompressed, 'module_cvtt_enabled' in REV_FULL]))
+v = vk('反向+cvtt 未探到', T.validateSelection(revKept, REV_FULL, { mode: 'default-off', untestedSource: true, d3d12SdkInstalled: false }))
+ok(v.issues.some((i) => i.skippable === true && /反向白名单/.test(i.why) && /整体关/.test(i.why) && /1 项/.test(i.why)),
+   '保留的模块没探到 → 出一条「它会被整体关掉」的软问题,条数如实是 1', JSON.stringify(v.issues))
+ok(v.issues.length >= 3, '这一份场景同时出 3 条软问题(未实测 + 缺依赖 + 反向白名单)——下面的 (itemId,flag) 去重检查因此不是空转', JSON.stringify(v.issues.map((i) => [i.itemId, i.flag])))
+ok(v.hardBlocks.every((i) => i.flag !== 'modules_enabled_by_default'),
+   '其余模块都点名的到 → 不是零模块产物 → 不硬拦(§5.5:能越过就让他越过)', JSON.stringify(v.hardBlocks))
+// 反面对照:同一份选项表但**没有**勾着探不到的项 → 一条都不报(把 some 判据写死成"总报"这条就红)
+v = T.validateSelection(T.initialSelection(REV_FULL), REV_FULL, { mode: 'default-off' })
+ok(!v.issues.some((i) => /反向白名单/.test(i.why)),
+   '探不到的那一项没被勾着 → 不报(未识别项按源码默认处理,不是用户保留了什么)', JSON.stringify(v.issues))
+
+section('校验必须查两通道并集(#38 后四个渲染驱动只出现在命令行)')
+const noDrvSel = sel({ vulkan: false, opengl3: false, angle: false, d3d12: false })
+const noDrvBuilt = T.buildProfile(noDrvSel, OPTS2)
+ok(!['vulkan', 'opengl3', 'angle', 'd3d12'].some((k) => k in dboOf(noDrvBuilt)),
+   '四个驱动的「关」一个都不在 profile 里(只查 profile 的校验在这里永远查不到它们)', JSON.stringify(Object.keys(dboOf(noDrvBuilt))))
+ok(['vulkan=no', 'opengl3=no', 'angle=no'].every((t) => noDrvBuilt.commandExtras.includes(t)) && !inCommand(noDrvBuilt, 'd3d12'),
+   '它们全在命令行 token 里;d3d12 默认已 False → 不发(§5.3 差值)', JSON.stringify(noDrvBuilt.commandExtras))
+ok(vk('驱动全关', T.validateSelection(noDrvSel, OPTS2, {})).hardBlocks.some((i) => i.itemId === 'vulkan'),
+   '而硬拦照样触发 —— 这条是"只读 disabled_build_options 的实现"的照妖镜')
+// 反面对照:只剩 d3d12 一个驱动(它源码默认 False,勾上才是"有画面")。把 d3d12 从名单里漏掉
+// 就会把这份**能跑**的组合误拦成"没有任何画面" —— 这条给名单本身当牙。
+const onlyD3d12 = T.validateSelection(Object.assign(T.initialSelection(OPTS2), { vulkan: false, opengl3: false, angle: false, d3d12: true }), OPTS2, {})
+ok(onlyD3d12.hardBlocks.length === 0,
+   '三个默认为真的驱动全关、只留 d3d12 → 不硬拦(它也是渲染驱动;名单里漏掉它就误拦)', JSON.stringify(onlyD3d12.hardBlocks))
+ok(inCommand(T.buildProfile(Object.assign(T.initialSelection(OPTS2), { d3d12: true }), OPTS2), 'd3d12'),
+   '夹具:勾上 d3d12 确实会发出 d3d12=yes(否则上一条不拦是假绿)', '')
+
+section('物理软问题:2D 与 3D 两条轴都没有后端才报,未知不报')
+const PHYS_OPTS = {
+  module_godot_physics_2d_enabled: { exists: true, default: true }, module_godot_physics_3d_enabled: { exists: true, default: true },
+  module_jolt_physics_enabled: { exists: true, default: true },
+  disable_physics_2d: { exists: true, default: false }, disable_physics_3d: { exists: true, default: false },
+  vulkan: { exists: true, default: true }
+}
+const physBase = T.initialSelection(PHYS_OPTS)
+ok(physBase.a3GodotPhys === true && physBase.a3Jolt === true && physBase.phys2d === true && physBase.phys3d === true,
+   '夹具:物理相关四项初始都勾着(下面才看得出"取消"是用户的选择而不是我们的假设)', JSON.stringify([physBase.a3GodotPhys, physBase.a3Jolt, physBase.phys2d, physBase.phys3d]))
+v = vk('自带后端+Jolt 全取消', T.validateSelection(Object.assign({}, physBase, { a3GodotPhys: false, a3Jolt: false }), PHYS_OPTS, {}))
+ok(v.issues.some((i) => i.itemId === 'a3GodotPhys' && i.skippable === true),
+   '两套自带后端 + Jolt 全取消 → 没有物理的软问题', JSON.stringify(v.issues))
+v = T.validateSelection(Object.assign({}, physBase, { a3GodotPhys: false }), PHYS_OPTS, {})
+ok(!v.issues.some((i) => /物理后端都被关掉/.test(i.why)),
+   'Jolt 还留着 → 3D 有后端 → 不该报(把 Jolt 那半边判据删掉这条就红)', JSON.stringify(T.validateSelection(Object.assign({}, physBase, { a3GodotPhys: false }), PHYS_OPTS, {}).issues))
+v = T.validateSelection(Object.assign({}, physBase, { phys3d: false }), PHYS_OPTS, {})
+ok(!v.issues.some((i) => /物理后端都被关掉/.test(i.why)), '只关 3D 物理伞 → 2D 还在 → 不报(两条轴是 && 不是 ||)')
+v = vk('两套 disable_* 伞全取消', T.validateSelection(Object.assign({}, physBase, { phys2d: false, phys3d: false }), PHYS_OPTS, {}))
+ok(v.issues.some((i) => i.itemId === 'a3GodotPhys' && i.skippable === true),
+   'module_* 都勾着但 disable_physics_2d/3d 双双关掉 → 同样是没有物理(简报原式只看 module_*,这里会漏报)', JSON.stringify(v.issues))
+v = T.validateSelection(Object.assign({}, physBase, { a3GodotPhys: false, a3Jolt: false }), {}, {})
+ok(!v.issues.some((i) => /物理后端都被关掉/.test(i.why)), '什么都没探到时不报物理(未探到 ≠ 已关闭)')
+
+section('依赖类软问题只在"这个驱动真会被编进产物"时报')
+v = vk('accesskit 缺依赖', T.validateSelection(sel({ accesskit: true }), OPTS2, { accesskitSdkInstalled: false }))
+ok(v.issues.some((i) => i.itemId === 'accesskit' && i.skippable === true), '保留 accesskit 但缺依赖 → 软问题', JSON.stringify(v.issues))
+v = T.validateSelection(sel({ accesskit: false }), OPTS2, { accesskitSdkInstalled: false })
+ok(!v.issues.some((i) => i.itemId === 'accesskit'), '已经取消 accesskit → 依赖装不上也无所谓,不该报', JSON.stringify(v.issues))
+v = T.validateSelection(sel({ d3d12: true }), {}, { d3d12SdkInstalled: false })
+ok(!v.issues.some((i) => i.itemId === 'd3d12'),
+   '保留了 d3d12 但这份源码里没探到它 → 命令行根本不会发它 → 不报(报了就是把我们的无知说成用户的选择)')
+
+section('关 mbedTLS 是软问题,但只在"真的关掉了"时报')
+const MB_OPTS = { module_mbedtls_enabled: { exists: true, default: true }, module_webp_enabled: { exists: true, default: true }, vulkan: { exists: true, default: true } }
+const mbBase = T.initialSelection(MB_OPTS)
+v = vk('关 mbedTLS', T.validateSelection(Object.assign({}, mbBase, { netMbedtls: false }), MB_OPTS, {}))
+ok(v.issues.some((i) => i.itemId === 'netMbedtls' && i.flag === 'module_mbedtls_enabled' && i.skippable === true),
+   '取消 mbedTLS → 软问题(#38:它是 module_*,产物在 profile 通道里)', JSON.stringify(v.issues))
+v = T.validateSelection(Object.assign({}, mbBase, { netMbedtls: false }), {}, {})
+ok(!v.issues.some((i) => i.itemId === 'netMbedtls'), '这份源码没探到 module_mbedtls_enabled → 什么都没被关掉 → 不报')
+
+section('入参整体缺失:不抛,按「什么都没探到」处理(与 buildProfile 同一条兜底)')
+v = vk('全 undefined 入参', T.validateSelection(undefined, undefined, undefined))
+ok(Array.isArray(v.issues) && Array.isArray(v.hardBlocks) && v.hardBlocks.length === 1 && v.hardBlocks[0].itemId === 'source',
+   'undefined 入参 → 不抛,只出「一项都没保留」这一条硬拦(把 selection||{} 删掉这里直接 TypeError)', JSON.stringify(v))
+
+section('Issue 形状契约(T9 按 itemId 找面板行,T10 按 skippable 分流)')
+ok(VCOL.length >= 8, `收集了 ${VCOL.length} 个校验结果供遍历断言(空了下面三条就是空转)`, VCOL.map((x) => x[0]).join(' / '))
+const allIss = VCOL.flatMap((pair) => pair[1].issues.concat(pair[1].hardBlocks).map((i) => [pair[0], i]))
+ok(allIss.length >= 8, `收集到的 issue 共 ${allIss.length} 条(为 0 时下面几条全体空转)`, VCOL.map((p) => `${p[0]}:${p[1].issues.length}+${p[1].hardBlocks.length}`).join(' / '))
+ok(allIss.every((p) => {
+  const i = p[1]
+  return typeof i.itemId === 'string' && i.itemId.length > 0 && typeof i.flag === 'string' &&
+    typeof i.why === 'string' && i.why.length >= 10 && typeof i.action === 'string' && i.action.length > 0 &&
+    typeof i.skippable === 'boolean'
+}), '每条 issue 五字段齐全:itemId/flag/why/action/skippable,why 与 action 非空', JSON.stringify(allIss.filter((p) => !p[1].why || !p[1].action)))
+ok(allIss.every((p) => p[1].itemId === 'source' || !!F.featureById(p[1].itemId)),
+   'itemId 必须是功能表里的面板项 id(全局项只允许 source)——拼错的 id 让 T9 找不到行', JSON.stringify(allIss.filter((p) => p[1].itemId !== 'source' && !F.featureById(p[1].itemId)).map((p) => p[1].itemId)))
+ok(allIss.every((p) => p[1].flag === '' || p[1].flag === 'modules_enabled_by_default' || TABLE_FLAGS.includes(p[1].flag)),
+   'flag(非空时)必须是功能表里的真实 flag 名,或模式级那一条 —— 与实现真正会写出的键名对不上就红', JSON.stringify(allIss.filter((p) => p[1].flag !== '' && p[1].flag !== 'modules_enabled_by_default' && !TABLE_FLAGS.includes(p[1].flag)).map((p) => p[1].flag)))
+ok(VCOL.every((pair) => pair[1].issues.every((i) => i.skippable === true) && pair[1].hardBlocks.every((i) => i.skippable === false)),
+   '软问题一律 skippable:true、硬拦一律 false(T10 就靠这个字段决定给不给「仍然继续」)')
+const allHard = VCOL.flatMap((pair) => pair[1].hardBlocks)
+const hardRoster = [...new Set(allHard.map((i) => i.itemId + '|' + i.flag))].sort()
+ok(eqJson(hardRoster, ['source|', 'source|modules_enabled_by_default', 'vulkan|vulkan']),
+   '硬拦名单**封闭为三条**(策划书 §5.5:除硬拦外一律可越过,多一条都是拿我们的无知换他的选择权)', JSON.stringify(hardRoster))
+ok(['source|', 'source|modules_enabled_by_default', 'vulkan|vulkan'].every((k) => hardRoster.includes(k)),
+   '三条硬拦各被至少一个场景真的触发过(名单封闭但不空转:某条永不触发就该删掉它)', JSON.stringify(hardRoster))
+for (const pair of VCOL) {
+  const softKeys = pair[1].issues.map((i) => i.itemId + ' ' + i.flag)
+  const hardKeys = pair[1].hardBlocks.map((i) => i.itemId + ' ' + i.flag)
+  ok(new Set(softKeys).size === softKeys.length && new Set(hardKeys).size === hardKeys.length,
+     `「${pair[0]}」同一列表内 (itemId,flag) 不重复(T9 的 v-for key 用它)`, JSON.stringify([softKeys, hardKeys]))
+}
+
+// ---- 真树上的静态校验:临时树在才跑 ----
+if (fs.existsSync(path.join(REAL_SRC, 'SConstruct'))) {
+  section('真实 4.7.2 源码上的静态校验(树在才跑)')
+  const vRealOpts = P.parseSconsOptions(fs.readFileSync(path.join(REAL_SRC, 'SConstruct'), 'utf8'))
+  const vRealFull = vk('真树:全默认勾选', T.validateSelection(T.initialSelection(vRealOpts), vRealOpts, {}))
+  ok(vRealFull.hardBlocks.length === 0 && vRealFull.issues.length === 0,
+     '真实源码上「全默认勾选」既不硬拦也不报软问题(与 T5 那条空 profile 同一条立身之本)', JSON.stringify(vRealFull))
+  const vRealMin = vk('真树:minimal+反向', T.validateSelection(T.PRESETS.minimalSelection(vRealOpts), vRealOpts, { mode: 'default-off' }))
+  ok(vRealMin.hardBlocks.some((i) => i.flag === 'modules_enabled_by_default' && i.skippable === false),
+     '真树实样:本机这棵 modules/ 只剩 config.py 的树探到 0 个模块 → 反向模式必须硬拦(裁定①在真实源码上成立)', JSON.stringify(vRealMin.hardBlocks))
+  const vRealDrv = T.validateSelection(Object.assign({}, T.initialSelection(vRealOpts), { vulkan: false, opengl3: false, angle: false, d3d12: false }), vRealOpts, {})
+  ok(vRealDrv.hardBlocks.some((i) => i.itemId === 'vulkan'), '真树:四个驱动全关 → 硬拦', JSON.stringify(vRealDrv.hardBlocks))
+  ok(!['vulkan', 'opengl3', 'angle', 'd3d12'].some((k) => k in dboOf(T.buildProfile(Object.assign({}, T.initialSelection(vRealOpts), { vulkan: false, opengl3: false, angle: false, d3d12: false }), vRealOpts))),
+     '真树上这四个键的「关」也一个都不在 profile 里(#38 在真实源码上的形态)')
+}
+
 console.log(`\n${'='.repeat(56)}`)
 console.log(`PASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) { for (const f of failures) console.log('  - ' + f); process.exit(1) }
