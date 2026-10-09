@@ -228,8 +228,12 @@ function probeSourceSync(srcDir) {
 
 /**
  * 包一层异步探测:probeSource 的任何异常都转成 ok:false。
- * 作业跑在**串行队列**里(pump 里 `await job()`),从那儿 throw 出去就是未捕获拒绝 ——
- * 一个任务的探测炸了会把整条任务队列连带后面的 emit 一起打断。
+ * 作业跑在**串行队列**里,但队列不会因此塌 —— `taskqueue.js:188-199` 的 `pump` 是
+ * `try { await job() } finally { running = false; pump() }`,**没有 catch**,所以下一个任务照跑。
+ * 真实后果是另外两条:① 一个**未捕获的 Promise 拒绝**(宿主里只是一条没人看的日志,
+ * 渲染层与向导都拿不到任何说法);② **这个任务永远停在 `building`**,已经落盘的临时文件也等不到
+ * 清理(转 error、写错误文案、删临时文件都排在 throw 之后,轮不到它们跑)。
+ * 这里包一层,把那两条换成「任务转 error + 带上探测层给的原因」。
  * @param {(srcDir: string) => any} fn
  * @param {string} srcDir
  * @returns {Promise<ProbeOutcome>}
@@ -328,6 +332,13 @@ function buildTemplatePackWith(params, deps) {
     let batPath = ''
     let profilePath = ''
     let stageDir = ''
+    // 两份临时文件同进同退:只删 bat 会把每次构建的裁剪配置留在临时目录里积灰。
+    // 三个清理常量定义在 try **之前**、Promise 执行器之外 —— 因为「写盘失败」的 catch 与
+    // 「子进程起不来」的 'error' 这两条终态也都在两份文件已落盘之后,必须够得着它们;
+    // existsSync 守卫让重复调用安全,所以每条终态分支都只管调,不必判断走到过哪一步。
+    const cleanupBat = () => { try { fs.existsSync(batPath) && fs.unlinkSync(batPath) } catch (e) { /* ignore */ } }
+    const cleanupProfile = () => { try { fs.existsSync(profilePath) && fs.unlinkSync(profilePath) } catch (e) { /* ignore */ } }
+    const cleanupTmp = () => { cleanupBat(); cleanupProfile() }
     try {
       batPath = path.join(os.tmpdir(), `ztools-godot-build-${id}.bat`)
       profilePath = path.join(os.tmpdir(), `ztools-godot-profile-${id}.json`)
@@ -355,6 +366,8 @@ function buildTemplatePackWith(params, deps) {
       // "当时编了什么"回查用:两个通道写出去的键都记在任务上(profile 里也留着整份 JSON)
       setTask(id, { writtenFlags: prof.written, profilePath })
     } catch (e) {
+      // profile 先写、bat 后写:这一步失败时已落盘的那份(通常是 .json)不能留成孤儿。
+      cleanupTmp()
       setTask(id, { status: 'error', error: '写构建脚本失败: ' + ((e && e.message) || e) })
       return
     }
@@ -362,10 +375,6 @@ function buildTemplatePackWith(params, deps) {
     const tail = []
     let canceled = false
     await /** @type {Promise<void>} */ (new Promise((resolve) => {
-      const cleanupBat = () => { try { fs.existsSync(batPath) && fs.unlinkSync(batPath) } catch (e) { /* ignore */ } }
-      const cleanupProfile = () => { try { fs.existsSync(profilePath) && fs.unlinkSync(profilePath) } catch (e) { /* ignore */ } }
-      // 两份临时文件同进同退:只删 bat 会把每次构建的裁剪配置留在临时目录里积灰
-      const cleanupTmp = () => { cleanupBat(); cleanupProfile() }
       const child = deps.spawn('cmd.exe', ['/d', '/s', '/c', batPath], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
       tasks.setToken(id, {
         cancel: () => {
@@ -385,6 +394,9 @@ function buildTemplatePackWith(params, deps) {
       if (child.stdout) child.stdout.on('data', onChunk)
       if (child.stderr) child.stderr.on('data', onChunk)
       child.on('error', (e) => {
+        // cmd.exe 起不来(ENOENT / EPERM / 企业机 AV 拦截 / env 被清理)走的是这条,而此刻两份
+        // 临时文件**都已经写盘** —— 真实宿主里这是主要形态('close' 根本不会来),不清就是每失败一次留一对残骸。
+        cleanupTmp()
         if (!canceled) setTask(id, { status: 'error', error: '启动编译失败: ' + e.message })
         resolve()
       })

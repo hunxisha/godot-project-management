@@ -4,7 +4,8 @@
 // fallback)、产物改名映射(scons 的 godot.windows.template_release.* → 官方 tpz 的
 // windows_release_*)、检测流程(非 Windows 直接说明;Windows 下缺什么给什么下一步)、
 // 构建主流程(bat + profile 两份临时文件的生成、两条裁剪通道的划分、尾行收集、取消、
-// 失败诊断、产物 stage)、入队前的源码版本闸 —— 全部经 _with 注入接缝,
+// 失败诊断、产物 stage)、入队前的源码版本闸、两份临时文件在每条终态分支都同进同退
+// (取消 / 非 0 退出 / 写盘失败 / 子进程起不来)—— 全部经 _with 注入接缝,
 // 不真跑 scons(闸门②的真实编译已于 2026-10-06 在本机完成,见 docs/template-build-wizard-plan.md)。
 //
 // 用法:
@@ -48,7 +49,9 @@ async function waitTask(id, timeout = 3000) {
   throw new Error('任务超时未完成')
 }
 
-/** spawn 桩:记录调用,按脚本吐输出再 close;支持延迟 close(取消用例)与 kill 观察 */
+/** spawn 桩:记录调用,按脚本吐输出再 close;支持延迟 close(取消用例)与 kill 观察。
+ * script.spawnError 走另一条形态:子进程根本起不来 → 只有 'error' 事件、没有 'close'
+ * (真实宿主里 cmd.exe 被 AV 拦 / PATH 被清就是这样,是这条路的主要失效形态)。 */
 function fakeSpawn(script) {
   const calls = []
   let killed = false
@@ -60,6 +63,10 @@ function fakeSpawn(script) {
     child.kill = () => {
       killed = true
       setTimeout(() => child.emit('close', null, 'SIGTERM'), 10)
+    }
+    if (script.spawnError) {
+      setTimeout(() => child.emit('error', script.spawnError), script.delay ?? 10)
+      return child
     }
     setTimeout(() => {
       if (script.out) child.stdout.emit('data', Buffer.from(script.out))
@@ -107,14 +114,21 @@ function makeTree(name, opts) {
  * 这两份文件都在 `child.on('close')` 里被删,构建结束后根本读不到,只能在写入那一刻拦。
  * buildtools.js 与本文件 require('node:fs') 拿到的是同一个模块对象,所以打补丁生效 ——
  * 不为此新开一条注入通道(通道越多,执行层与测试各说各话的机会越多)。
+ * @param {'bat'|'json'} [failOn] 让写这一类文件时**抛错**(模拟磁盘满 / 目录被锁 / AV 拦第二次写),
+ *   另一类照常落盘 —— 用来钉「写盘失败这条终态也要把已经落盘的那份删掉」。
+ *   抛在记录之前,所以 captured 里只有真落盘的那几份(不给"没写成却记了一条"留空转)。
  */
-function startTmpCapture() {
+function startTmpCapture(failOn) {
   /** @type {{file: string, text: string}[]} */
   const captured = []
   const orig = fs.writeFileSync
   fs.writeFileSync = (fp, data, ...rest) => {
     const name = String(fp)
-    if (/^ztools-godot-(build|profile)-/.test(path.basename(name))) captured.push({ file: name, text: String(data) })
+    const base = path.basename(name)
+    if (/^ztools-godot-(build|profile)-/.test(base)) {
+      if (failOn && base.endsWith('.' + failOn)) throw new Error(`模拟写盘失败: ${base}`)
+      captured.push({ file: name, text: String(data) })
+    }
     return orig.apply(fs, [fp, data, ...rest])
   }
   return {
@@ -131,21 +145,30 @@ function startTmpCapture() {
  * 注入给 buildtools 的探测桩:一份「探到了两个核心 flag 与两个模块开关」的源码。
  * options 形态与 tplprobe 的 OptionMap 逐字同形(`{ exists: true, default: … }`),
  * 默认值取真实 4.7.2 的形态(disable_3d 默认 False、vulkan 与各模块默认 True)。
+ * 桩**照实记下每次收到的 srcDir**(挂在 `fn.received`):Ruling #45 的护栏要证明的是
+ * 「buildtools 真调到了探测接缝、且 srcDir 传的就是入队时那个目录」——
+ * 只有间接证据(传错目录 → 真探测 ok:false → 别的断言变红)不算直接证明。
  * @param {Record<string, {exists: true, default: boolean|string}>} [overrides]
- * @returns {(srcDir: string) => Promise<any>}
+ * @returns {((srcDir: string) => Promise<any>) & { received: string[] }}
  */
 function probeStub(overrides) {
-  return async () => ({
-    ok: true, error: '', sourceVersion: '4.7.2-stable', tested: true, tagMatched: true,
-    cascades: {}, testedVersions: [],
-    options: {
-      disable_3d: { exists: true, default: false },
-      vulkan: { exists: true, default: true },
-      module_regex_enabled: { exists: true, default: true },
-      module_zip_enabled: { exists: true, default: true },
-      ...(overrides || {})
+  /** @type {string[]} */
+  const received = []
+  const fn = async (srcDir) => {
+    received.push(srcDir)
+    return {
+      ok: true, error: '', sourceVersion: '4.7.2-stable', tested: true, tagMatched: true,
+      cascades: {}, testedVersions: [],
+      options: {
+        disable_3d: { exists: true, default: false },
+        vulkan: { exists: true, default: true },
+        module_regex_enabled: { exists: true, default: true },
+        module_zip_enabled: { exists: true, default: true },
+        ...(overrides || {})
+      }
     }
-  })
+  }
+  return Object.assign(fn, { received })
 }
 
 /**
@@ -387,6 +410,10 @@ async function main() {
       '反向白名单下保留的模块显式点名 true(不点名的会被整体关掉)', JSON.stringify(d.dbo))
     ok(!/module_/.test(d.sconsLine) && nonModuleKeys(d.dbo || {}).length === 0,
       '反向白名单同样守住两条通道的划分')
+    // Ruling #45 的直接证据:探测接缝被真调用过 4 次(本节 4 次 runBuild,一次构建一次探测),
+    // 且每次收到的都是入队时那个 srcDir —— 传错目录(比如临时目录或 stage 目录)这里就红。
+    ok(stub.received.length === 4 && stub.received.every((d2) => d2 === src),
+      '★每次构建真调到了探测接缝,且收到的 srcDir 就是入队传进去的那个目录', JSON.stringify(stub.received))
   }
 
   // ---------- 5. 探测失败 ----------
@@ -405,7 +432,7 @@ async function main() {
 
     const b = await runBuild(src, { sys3d: false }, () => Promise.reject(new Error('探测炸了')))
     ok(b.t && b.t.status === 'error' && /探测构建选项失败/.test(b.t.error || '') && /探测炸了/.test(b.t.error || ''),
-      '★probeSource 抛/reject 也转 error 并带原因(作业在串行队列里 throw = 未捕获拒绝,整条队列塌)', b.t && b.t.error)
+      '★probeSource 抛/reject 也转 error 并带原因(作业里 throw 出去 = 未捕获拒绝 + 这个任务永远停在 building;队列本身不塌)', b.t && b.t.error)
     ok(b.calls.length === 0, 'reject 分支同样不起 scons')
   }
 
@@ -415,17 +442,25 @@ async function main() {
     const src = makeTree('src-ver')
     const no = path.join(WORK, 'not-godot-ver')
     fs.mkdirSync(no, { recursive: true })
-    const r1 = B.buildTemplatePack({ srcDir: src, tag: '4.6-stable', features: {} })
+    // 四条拒绝用例全部走 buildTemplatePackWith + 「一被调用就抛」的 spawn 桩(Ruling #48):
+    // 用未注入的 buildTemplatePack 时,一旦 stable 闸或版本闸回归,这几条会真的 enqueue、
+    // 用真 fs.statfsSync 并 spawn 真 cmd.exe 去跑一份假源码目录 —— 测试套件不该能在人不知情时起真进程。
+    // 同文件 :260 / :345 就是这个写法。放行用例仍另配 fakeSpawn(见下面 f5/f47)。
+    const gateDeps = () => ({
+      spawn: () => { throw new Error('不应 spawn:闸门失守才会走到这里') },
+      statfsSync: () => ({ bsize: 4096, bavail: 1e7 })
+    })
+    const r1 = B.buildTemplatePackWith({ srcDir: src, tag: '4.6-stable', features: {} }, gateDeps())
     ok(r1.ok === false && /源码版本不符/.test(r1.error || '') && /4\.6-stable/.test(r1.error || '') && /4\.7\.2-stable/.test(r1.error || ''),
       '★版本不符 → 同步拒绝且串里带两个版本', r1.error)
-    const r2 = B.buildTemplatePack({ srcDir: no, tag: '4.7.2-stable', features: {} })
+    const r2 = B.buildTemplatePackWith({ srcDir: no, tag: '4.7.2-stable', features: {} }, gateDeps())
     ok(r2.ok === false && /SConstruct/.test(r2.error || ''), '缺 SConstruct → 同步拒绝', r2.error)
     // Ruling #44:versionStringFromTag 不规范化,预发布 tag 与带 v 前缀的 tag 都会被上面那句
     // 判成"源码版本不符" —— 那是给错方向的建议(用户的源码是对的,错的是 tag 形态)。
-    const r3 = B.buildTemplatePack({ srcDir: src, tag: '4.4-beta1', features: {} })
+    const r3 = B.buildTemplatePackWith({ srcDir: src, tag: '4.4-beta1', features: {} }, gateDeps())
     ok(r3.ok === false && /stable/.test(r3.error || '') && !/源码版本不符/.test(r3.error || ''),
       '★预发布 tag(4.4-beta1)→ 走「只支持 stable」的专门文案,不是「源码版本不符」', r3.error)
-    const r4 = B.buildTemplatePack({ srcDir: src, tag: 'v4.7.2-stable', features: {} })
+    const r4 = B.buildTemplatePackWith({ srcDir: src, tag: 'v4.7.2-stable', features: {} }, gateDeps())
     ok(r4.ok === false && /stable/.test(r4.error || '') && !/源码版本不符/.test(r4.error || ''),
       '★带 v 前缀的 tag 同走专门文案(不做规范化、不猜用户想要哪个 stable)', r4.error)
     const f5 = fakeSpawn({ out: 'x', code: 1 })
@@ -440,6 +475,43 @@ async function main() {
     if (r6.taskId) await waitTask(r6.taskId, 5000)
   }
 
+  // ---------- 7. 异常终态的清理 ----------
+  section('7. 异常终态也不留残骸:子进程起不来 / 写盘失败都两份一起清')
+  {
+    // 真实宿主里 cmd.exe 起不来(ENOENT / EPERM / 企业机 AV 拦截 / env 被清理)走的是 'error' 事件,
+    // 而这条路发生在两份临时文件**都已写盘之后**('close' 根本不会来)。
+    const src = makeTree('src-spawnerr', { artifacts: true })
+    const f = fakeSpawn({ spawnError: Object.assign(new Error('spawn cmd.exe ENOENT'), { code: 'ENOENT' }) })
+    const cap = startTmpCapture()
+    try {
+      const r = B.buildTemplatePackWith({ srcDir: src, tag: '4.7.2-stable', features: {} }, { spawn: f.spawn, statfsSync: () => ({ bsize: 4096, bavail: 1e7 }) })
+      const t = await waitTask(r.taskId, 5000)
+      ok(t.status === 'error' && /启动编译失败/.test(t.error || '') && /ENOENT/.test(t.error || ''),
+        '★子进程起不来 → 任务转 error 并带上 spawn 的原因(不是悄悄停在 building)', `${t.status}/${t.error}`)
+      ok(cap.captured.length === 2 && cap.captured.every((c) => c.text !== ''),
+        '前提:两份临时文件都真写了盘(否则下面的"无残骸"是恒真)', JSON.stringify(cap.captured.map((c) => c.file)))
+      ok(cap.captured.every((c) => !fs.existsSync(c.file)),
+        '★spawn 失败同样两份同进同退(临时目录不留 .bat/.json 残骸)',
+        JSON.stringify(cap.captured.filter((c) => fs.existsSync(c.file)).map((c) => c.file)))
+    } finally { cap.restore() }
+  }
+  {
+    // 写盘失败:profile 先写、bat 后写 → bat 写不动时留下的那个 .json 是本轮新引入的孤儿。
+    // 清理常量原先定义在 Promise 执行器内部,catch 结构上够不着它(想清也清不了),现在必须能清。
+    const src = makeTree('src-writefail', { artifacts: true })
+    const f = fakeSpawn({ out: 'x', code: 0 })
+    const cap = startTmpCapture('bat')
+    try {
+      const r = B.buildTemplatePackWith({ srcDir: src, tag: '4.7.2-stable', features: {} }, { spawn: f.spawn, statfsSync: () => ({ bsize: 4096, bavail: 1e7 }) })
+      const t = await waitTask(r.taskId, 5000)
+      ok(t.status === 'error' && /写构建脚本失败/.test(t.error || '') && /模拟写盘失败/.test(t.error || ''),
+        '★写 bat 失败 → 任务转 error 并带上原因', `${t.status}/${t.error}`)
+      ok(cap.captured.length === 1 && cap.captured[0].file.endsWith('.json') && cap.captured[0].text !== '',
+        '前提:.json 已落盘、.bat 没写成(否则下面的"无孤儿"是恒真)', JSON.stringify(cap.captured.map((c) => c.file)))
+      ok(!fs.existsSync(cap.file('json')), '★写盘失败也删掉已经落盘的那份 .json(不留孤儿配置)', cap.file('json'))
+      ok(f.calls.length === 0, '★写盘失败后一次 scons 都不起', String(f.calls.length))
+    } finally { cap.restore() }
+  }
 
   console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
   if (failures.length) {
