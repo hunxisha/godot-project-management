@@ -1,10 +1,12 @@
 // 导出模板自编译(Godot 工坊裁剪向导的后半):工具链检测 → 跑 scons → 产物 stage。
 //
 // 形态与依据(docs/template-build-wizard-plan.md,闸门②已于 2026-10-06 本机实测):
-//   · 命令:`vcvars64.bat && scons platform=windows target=template_release disable_3d=yes
-//     accesskit=no d3d12=no -j<核数>` —— 选项组是实测验证过的固定值:2D-only 模板不需要
-//     D3D12 依赖与 AccessKit 依赖,缺它们正是实测里最先撞上的两个失败;disable_3d 连带
-//     裁掉 physics_3d/navigation_3d/xr。命令经**临时 .bat 文件**执行(与手动实测同款),
+//   · 命令:`vcvars64.bat` 里跑 `scons platform=windows target=template_release
+//     build_profile="<临时 profile>" <核心 flag 的 flag=value token…> -j<核数>` —— 裁剪集不再是
+//     写死的固定值,由**用户勾选 + 这份源码的探测结果**查表生成:两条通道按 Ruling #38 划分,
+//     `module_*` 全进 profile 文件,其余一切(核心 flag 与模式键)发命令行 token,顺序由输出层排好。
+//     实测验证过的那组(disable_3d / accesskit)仍是勾掉 2D-only 时的产物,只是不再写死。
+//     命令经**临时 .bat 文件**执行(与手动实测同款),
 //     绕开 spawn 数组参数里带引号路径被 cmd 二次解释的问题。
 //   · 产物:`bin/godot.windows.template_release.<arch>.*` 改名拷贝到
 //     `stage/templates/windows_release_<arch>.*`(官方 tpz 的文件名形态),由第 5 项的
@@ -16,13 +18,16 @@
 // 检测的三个探头:python(直接调)、SCons(`python -m SCons --version`,不依赖 PATH 里的
 // scons.exe)、vcvars64.bat(vswhere 找 VC 工具链,fallback 扫常见安装位)。
 // 红线:这里 spawn/exec 的对象全部来自**本机探测与用户选择的路径**,不接受渲染层传命令串 ——
-// 渲染层只给 srcDir/tag/jobs 三个值,命令的其余部分在本文件里拼死,不给注入留门。
+// 渲染层只给 srcDir / tag / jobs / features / mode 五个值(两个通道的参数都由本文件查表生成,
+// 命令的其余部分在本文件里拼死),不给注入留门。
 const { spawn, execSync } = require('node:child_process')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const { createTaskQueue } = require('./taskqueue')
 const { versionDirFromTag } = require('./templates')
+const { probeSource, parseVersionPy, versionStringFromTag } = require('./tplprobe')
+const { buildProfile, profileText } = require('./tplprofile')
 
 const tasks = createTaskQueue({
   serial: true,
@@ -34,6 +39,24 @@ const LOG_TAIL = 40
 
 /** 编译前要求源码所在盘的剩余空间(源码树 ~2GB + 编译中间物 ~10GB 的经验值,拍定的保守闸) */
 const MIN_FREE_BYTES = 20 * 1024 * 1024 * 1024
+
+/**
+ * 版本闸只认 stable 形态的引擎版本(Ruling #44)。
+ * `tplprobe.versionStringFromTag` 刻意只做 trim、不做规范化(两侧同形态才对得上),所以
+ * `4.4-beta1`(真实 version.py 解析出来是 `4.4-beta`)与 `v4.7.2-stable` 都会撞在
+ * "源码版本不符"上 —— 那是给错方向的建议:用户的源码是对的,错的是 tag 形态。
+ * 这一道先把它拦下来给专门文案,**不猜用户想要哪个 stable**。
+ */
+const STABLE_TAG_RE = /^\d+\.\d+(\.\d+)?-stable$/
+
+/**
+ * 探测结果的执行层视图:本文件只用这三项,其余(sourceVersion / tested / cascades …)
+ * 由上游与后续任务消费,这里不复制一份。
+ * @typedef {Object} ProbeOutcome
+ * @property {boolean} ok
+ * @property {string} error
+ * @property {Record<string, {exists: true, default: boolean|string}>} options
+ */
 
 /** 检测/构建只在 Windows 有意义(非 Windows 检测直接给说明) */
 function isWin() {
@@ -188,9 +211,43 @@ function stageBin(binDir, stageDir) {
 }
 
 /**
+ * 同步探测(只读 version.py)。**定义在本文件,不从 ./tplprobe 取** —— tplprobe 只有异步的
+ * probeSource,而入队路径必须同步返回 ok:false(与 toggleFavorite 那条既有约定同形)。
+ * 异步版 probeSource 在任务里跑,拿完整选项表生成两条通道。
+ * @param {string} srcDir
+ * @returns {{ok: boolean, error: string, sourceVersion: string}}
+ */
+function probeSourceSync(srcDir) {
+  const sc = path.join(srcDir, 'SConstruct')
+  if (!srcDir || !fs.existsSync(sc)) return { ok: false, error: '所选目录不是 Godot 源码根(缺 SConstruct)', sourceVersion: '' }
+  let vpy = ''
+  try { vpy = String(fs.readFileSync(path.join(srcDir, 'version.py'), 'utf8')) } catch (e) { /* 下面按读不出处理 */ }
+  // parseVersionPy 读不出给空串:空串对不上任何 stable tag,闸门自然拒绝,不猜一个"看起来对"的串。
+  return { ok: true, error: '', sourceVersion: parseVersionPy(vpy) }
+}
+
+/**
+ * 包一层异步探测:probeSource 的任何异常都转成 ok:false。
+ * 作业跑在**串行队列**里(pump 里 `await job()`),从那儿 throw 出去就是未捕获拒绝 ——
+ * 一个任务的探测炸了会把整条任务队列连带后面的 emit 一起打断。
+ * @param {(srcDir: string) => any} fn
+ * @param {string} srcDir
+ * @returns {Promise<ProbeOutcome>}
+ */
+async function runProbe(fn, srcDir) {
+  try {
+    return await fn(srcDir)
+  } catch (e) {
+    return { ok: false, error: '探测构建选项失败: ' + ((e && e.message) || e), options: {} }
+  }
+}
+
+/**
  * 发起自编译(入队,立即返回)。完成后任务上带 stageDir(含 templates/ 顶层)与
  * versionDir(tag 派生),渲染层直接 installExportTemplates(versionId, { srcPath: stageDir })。
- * @param {{srcDir: string, tag: string, jobs?: number}} params
+ * @param {{srcDir: string, tag: string, jobs?: number, features?: Record<string, boolean>, mode?: 'default-on' | 'default-off'}} params
+ *   `features` 在**运行时是必填的**(见下面那道闸),类型侧标可选只因为既有的 services.js / services.ts
+ *   契约还没带上它 —— 那是 T8 的改动面(不在此文件里放宽成长期契约)。
  * @returns {{ok: boolean, error?: string, taskId?: string}}
  */
 function buildTemplatePack(params) {
@@ -198,23 +255,46 @@ function buildTemplatePack(params) {
 }
 
 /**
- * `buildTemplatePack` 的实现体。spawn 与 statfs 注入是测试接缝:构建流程(bat 生成、
- * 尾行收集、取消、产物 stage)在 Node 里就能钉住,不必真跑 40 分钟的 scons。
- * @param {{srcDir: string, tag: string, jobs?: number}} params
- * @param {{spawn: typeof spawn, statfsSync: (p: string) => {bsize: number, bavail: number}}} deps
+ * `buildTemplatePack` 的实现体。spawn / statfs / probeSource 注入是测试接缝:构建流程
+ * (profile 与 bat 的生成、两条裁剪通道的划分、尾行收集、取消、产物 stage)在 Node 里就能钉住,
+ * 不必真跑 40 分钟的 scons;而 probeSource 这一格是为了让"两条通道"的用例不必在夹具里
+ * 重造一棵探得出选项的源码树(逐字 SConstruct + modules 三件套的形态由 tplprobe.test.js 守着)。
+ * @param {{srcDir: string, tag: string, jobs?: number, features?: Record<string, boolean>, mode?: 'default-on' | 'default-off'}} params
+ * @param {{spawn: typeof spawn, statfsSync: (p: string) => {bsize: number, bavail: number}, probeSource?: (srcDir: string) => any}} deps
  */
 function buildTemplatePackWith(params, deps) {
   const { srcDir, tag } = params || {}
+  const features = (params || {}).features
+  const mode = (params || {}).mode
   if (!srcDir || typeof srcDir !== 'string') return { ok: false, error: '请先选择 Godot 源码目录' }
   if (!tag || typeof tag !== 'string') return { ok: false, error: '缺少引擎版本信息' }
+  // 勾选结果是裁剪的唯一来源:没有它就等于让执行层替面板猜一套默认值(猜多猜少都是替用户做主)。
+  if (!features || typeof features !== 'object') return { ok: false, error: '缺少功能勾选结果' }
   // vcvars 路径来自检测步的缓存:构建必须在检测之后(向导的第一步就是它),这道闸放最前 ——
   // 没检测过时,源码目录对不对都无从谈起。不在这里重新探测:检测的三个子进程是秒级动作,
   // 重复探测只会拖慢入队。
   if (!checkCache.vcvarsPath) {
     return { ok: false, error: '请先完成工具链检测(向导第一步)' }
   }
-  if (!fs.existsSync(path.join(srcDir, 'SConstruct'))) {
-    return { ok: false, error: '所选目录不是 Godot 源码根(缺 SConstruct)' }
+  // 版本闸(取代原先那句 SConstruct 存在性检查,位置不变 —— 不前移到检测闸之前,那条
+  // "检测先于一切"的既有约定由 buildtools.test.js 钉着)。拿 4.6 源码给 4.7.2 编模板,
+  // 产物会被塞进 4.7.2.stable 目录,导出时的行为异常极难查 —— 这一道在建任务之前、同步拒绝。
+  // 先判 tag 形态再读源码:预发布/带 v 前缀的 tag 与 versionStringFromTag 的"不规范化"撞出来的是
+  // 一句指错方向的"源码版本不符"(源码没错,错的是 tag),所以它专属下面这条文案。
+  const target = versionStringFromTag(tag)
+  if (!STABLE_TAG_RE.test(target)) {
+    return {
+      ok: false,
+      error: `自编译模板只支持 stable 形态的引擎版本(如 4.7.2-stable / 4.7-stable),目标引擎 = ${target || '读不出'}。预发布版(beta / rc)与带 v 前缀的 tag 不走这条路 —— 请改用对应的正式版引擎与同版本源码。`
+    }
+  }
+  const probeSync = probeSourceSync(srcDir)
+  if (!probeSync.ok) return { ok: false, error: probeSync.error }
+  if (probeSync.sourceVersion !== target) {
+    return {
+      ok: false,
+      error: `源码版本不符：version.py = ${probeSync.sourceVersion || '读不出'}，目标引擎 = ${target}。请先切到该版本的源码，或改用与源码同版本的引擎。`
+    }
   }
   const binDir = path.join(srcDir, 'bin')
   if (!fs.existsSync(binDir)) fs.mkdirSync(binDir, { recursive: true })
@@ -234,80 +314,105 @@ function buildTemplatePackWith(params, deps) {
     srcDir,
     jobs,
     status: 'queued',
-    log: ''
+    log: '',
+    writtenFlags: []
   })
   const id = task.id
   tasks.emit()
 
-  const job = /** @returns {Promise<void>} */ () => new Promise((resolve) => {
+  const job = async () => {
     const cur = tasks.get(id)
-    if (!cur || cur.status === 'canceled') return resolve()
+    if (!cur || cur.status === 'canceled') return
     setTask(id, { status: 'building' })
-    // 临时 bat:路径写死在文件里逐行执行,引号/空格路径与手动实测完全同形态
+    // 临时 bat 与临时 profile:路径写死在文件里逐行执行,引号/空格路径与手动实测完全同形态
     let batPath = ''
+    let profilePath = ''
     let stageDir = ''
     try {
       batPath = path.join(os.tmpdir(), `ztools-godot-build-${id}.bat`)
+      profilePath = path.join(os.tmpdir(), `ztools-godot-profile-${id}.json`)
+      // 探测这份源码:选项的存在性与默认值决定两条通道各写什么。探不到就停 ——
+      // 未声明的 scons 变量是静默失效的,拿一份"以为裁了其实没裁"的产物比失败更糟。
+      const probe = await runProbe(deps.probeSource || probeSource, srcDir)
+      if (!probe.ok) {
+        setTask(id, { status: 'error', error: probe.error })
+        return
+      }
+      // mode 原样透传:T7 不校验它(归契约层 T8),buildProfile 自己把缺省与认不出的值
+      // 都归到保守那一侧(关得少的 default-on)。
+      const prof = buildProfile(features, probe.options, { mode })
+      // 一条都没写也照样落盘:命令行上的 build_profile= 指向它,scons 读不到这个文件会直接失败。
+      fs.writeFileSync(profilePath, profileText(prof.json), 'utf8')
+      // scons 行的前缀恒定;前缀之后只出现 commandExtras 的 token(核心 flag 与模式键,
+      // module_* 一律不在行上 —— 它们只在 profile 文件里),最后是 -j。
       fs.writeFileSync(batPath, [
         '@echo off',
         `call "${checkCache.vcvarsPath}"`,
         `cd /d "${srcDir}"`,
-        `scons platform=windows target=template_release disable_3d=yes accesskit=no d3d12=no -j${jobs}`
+        ['scons', 'platform=windows', 'target=template_release', `build_profile="${profilePath}"`,
+          ...prof.commandExtras, `-j${jobs}`].join(' ')
       ].join('\r\n'), 'utf8')
+      // "当时编了什么"回查用:两个通道写出去的键都记在任务上(profile 里也留着整份 JSON)
+      setTask(id, { writtenFlags: prof.written, profilePath })
     } catch (e) {
       setTask(id, { status: 'error', error: '写构建脚本失败: ' + ((e && e.message) || e) })
-      return resolve()
+      return
     }
     /** @type {string[]} 构建输出尾部环形缓冲(exporter 同款) */
     const tail = []
     let canceled = false
-    const child = deps.spawn('cmd.exe', ['/d', '/s', '/c', batPath], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
-    tasks.setToken(id, {
-      cancel: () => {
-        canceled = true
-        try { child.kill() } catch (e) { /* ignore */ }
-      }
-    })
-    /** @param {any} buf */
-    const onChunk = (buf) => {
-      for (const line of String(buf).split(/\r?\n/)) {
-        if (!line.trim()) continue
-        tail.push(line)
-        if (tail.length > LOG_TAIL) tail.shift()
-      }
-      setTask(id, { log: tail.join('\n') })
-    }
-    if (child.stdout) child.stdout.on('data', onChunk)
-    if (child.stderr) child.stderr.on('data', onChunk)
-    child.on('error', (e) => {
-      if (!canceled) setTask(id, { status: 'error', error: '启动编译失败: ' + e.message })
-      resolve()
-    })
-    child.on('close', (code) => {
+    await /** @type {Promise<void>} */ (new Promise((resolve) => {
       const cleanupBat = () => { try { fs.existsSync(batPath) && fs.unlinkSync(batPath) } catch (e) { /* ignore */ } }
-      if (canceled) {
-        cleanupBat()
-        setTask(id, { status: 'canceled' })
-        return resolve()
+      const cleanupProfile = () => { try { fs.existsSync(profilePath) && fs.unlinkSync(profilePath) } catch (e) { /* ignore */ } }
+      // 两份临时文件同进同退:只删 bat 会把每次构建的裁剪配置留在临时目录里积灰
+      const cleanupTmp = () => { cleanupBat(); cleanupProfile() }
+      const child = deps.spawn('cmd.exe', ['/d', '/s', '/c', batPath], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      tasks.setToken(id, {
+        cancel: () => {
+          canceled = true
+          try { child.kill() } catch (e) { /* ignore */ }
+        }
+      })
+      /** @param {any} buf */
+      const onChunk = (buf) => {
+        for (const line of String(buf).split(/\r?\n/)) {
+          if (!line.trim()) continue
+          tail.push(line)
+          if (tail.length > LOG_TAIL) tail.shift()
+        }
+        setTask(id, { log: tail.join('\n') })
       }
-      if (code !== 0) {
-        cleanupBat()
-        setTask(id, { status: 'error', error: `编译失败(退出码 ${code})—— 常见原因与下一步见向导的失败说明`, errorDetail: tail.join('\n') })
-        return resolve()
-      }
-      // 编译成功:bin 产物改名拷贝进 stage(templates/ 顶层),交给目录形态导入
-      try {
-        stageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ztools-godot-stage-'))
-        const n = stageBin(binDir, stageDir)
-        if (!n) throw new Error('bin/ 里没有模板产物(编译配置可能不对,应含 godot.windows.template_release.*)')
-        setTask(id, { status: 'done', stageDir, versionDir: versionDirFromTag(tag), files: n })
-      } catch (e) {
-        setTask(id, { status: 'error', error: (e && e.message) || '整理产物失败' })
-      }
-      cleanupBat()
-      resolve()
-    })
-  })
+      if (child.stdout) child.stdout.on('data', onChunk)
+      if (child.stderr) child.stderr.on('data', onChunk)
+      child.on('error', (e) => {
+        if (!canceled) setTask(id, { status: 'error', error: '启动编译失败: ' + e.message })
+        resolve()
+      })
+      child.on('close', (code) => {
+        if (canceled) {
+          cleanupTmp()
+          setTask(id, { status: 'canceled' })
+          return resolve()
+        }
+        if (code !== 0) {
+          cleanupTmp()
+          setTask(id, { status: 'error', error: `编译失败(退出码 ${code})—— 常见原因与下一步见向导的失败说明`, errorDetail: tail.join('\n') })
+          return resolve()
+        }
+        // 编译成功:bin 产物改名拷贝进 stage(templates/ 顶层),交给目录形态导入
+        try {
+          stageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ztools-godot-stage-'))
+          const n = stageBin(binDir, stageDir)
+          if (!n) throw new Error('bin/ 里没有模板产物(编译配置可能不对,应含 godot.windows.template_release.*)')
+          setTask(id, { status: 'done', stageDir, versionDir: versionDirFromTag(tag), files: n })
+        } catch (e) {
+          setTask(id, { status: 'error', error: (e && e.message) || '整理产物失败' })
+        }
+        cleanupTmp()
+        resolve()
+      })
+    }))
+  }
 
   tasks.enqueue(job)
   return { ok: true, taskId: id }
