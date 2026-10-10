@@ -103,7 +103,20 @@ const servicesImpl = {
       accesskitSdkInstalled: params.accesskitSdkInstalled,
       untestedSource
     })
-    return { ok: r.hardBlocks.length === 0, issues: r.issues, hardBlocks: r.hardBlocks }
+    // `suppressed`(Ruling #62):当前这份勾选下**被连带关闭**的面板项 id。面板要显示"这一行现在点不动是因为
+    // 上面的总开关把它带走了",而 `items[].cascadedBy` 只是这份源码的**静态连带结构**,给不出"当前"。
+    // 两个约束决定了它只能长在这里:
+    //   · **不新增一次探测** —— `cascades` 就是上面那次 probe 已经拿到的东西(台账 T8 deferred ⑤:
+    //     每次勾选变化都会触发本方法,而每次已经是 ~60 次同步读);
+    //   · **不从渲染层收 `cascades`** —— Ruling #53 已经把 ctx 通道整个删掉了(宿主逐字段组装),
+    //     连带图从渲染层传进来就等于让用户能伪造"哪些行点不动"。
+    // 面板因此只当名单的接收端,不在 .vue 里算连带(T9 的护栏测试第 7 条钉着这条)。
+    return {
+      ok: r.hardBlocks.length === 0,
+      issues: r.issues,
+      hardBlocks: r.hardBlocks,
+      suppressed: tplprofile.selectionSuppressed(params.features, probe.cascades || {})
+    }
   },
   /** 工具链检测(python/SCons/vcvars) */
   checkTemplateBuildTools: () => buildtools.checkTemplateBuildTools(),

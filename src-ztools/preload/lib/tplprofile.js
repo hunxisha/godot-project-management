@@ -577,6 +577,54 @@ function validateSelection(selection, options, ctx) {
 }
 
 /**
+ * 当前勾选下**被连带关闭**的面板项 id(Ruling #62)—— 策划书 §5.4 那条连带关系的**动态态**。
+ *
+ * 为什么必须在宿主算而不是在面板算:`FeatureWithProbe.cascadedBy`(`services.js:80` 直接取
+ * `probe.cascades` 的键)是**这份源码的静态连带结构**,不是"当前已被连带关闭"。默认组合(3D 开着)下
+ * 3D 导航 / 3D 物理 / XR 三行并没有被关、产物里它们都在;用户真把 3D 取消时它们才没了。
+ * 面板手里只有 modelValue,要它独自把这个动态态判对就是**把判据塞进 .vue**(违反全局约束第一条),
+ * 所以这一层由宿主算完再交出去,面板只当名单的接收端。
+ *
+ * 语义:对 `cascades` 的每个 `源 flag → [目标 flag...]`,若**拥有那个源 flag 的面板项**在 `selection`
+ * 里是 `false`(用户取消了伞项 → 这个 `disable_*` 会被真发出去),则**拥有任一目标 flag 的面板项**全部进表。
+ * 只有严格 `false` 才算:缺键(整份 selection 没给 / 该项没进勾选表)按"用户没取消它"处理,
+ * 与 `validateSelection` 的「面板没给勾选态 → 什么都不写」同一条口径。
+ *
+ * **表外源 flag**(这份源码的连带源在我们功能表里没有对应面板项)不退化成跳过:那一支 SCons 照样连带,
+ * 面板只是给不出伞项名字(文案走不带名字那一态)。认不出伞项时取**保守态**把它报进表:
+ * 这里不替用户改勾选(modelValue 原样不动,伞项关回去目标就回来),只是不再假装用户能单独改一个
+ * 由我们看不见的总开关决定的行 —— 把这种行显示成"可点"就是 Ruling #62 要修掉的那类谎。
+ *
+ * flag → 面板项 的反查只用本文件已 import 的 `TPL_FEATURES`,不为此新增入参(调用方手头没有能力表,
+ * 让它传就等于把表的第二份拷贝推到契约上)。
+ *
+ * @param {Record<string, boolean>} selection 面板勾选(整个对象缺失按"没取消任何伞项"处理,不抛)
+ * @param {Record<string, string[]>} cascades 探测层给的静态连带图(tplprobe.probeSource().cascades;整个缺失按"没有连带关系")
+ * @returns {string[]} 被抑制的面板项 id:**只含面板项 id**(表里没有对应项的目标 flag 不进表)、去重、按 TPL_FEATURES 表序
+ */
+function selectionSuppressed(selection, cascades) {
+  const sel = selection || {}
+  const graph = cascades || {}
+  /** @type {Set<string>} */
+  const hit = new Set()
+  for (const srcFlag of Object.keys(graph)) {
+    // 拥有源 flag 的面板项(功能表已钉死"同一 flag 不被两个面板项共用",这里仍写成 some 以免表长歪)
+    const owners = TPL_FEATURES.filter((f) => flagsOf(f).includes(srcFlag))
+    // owners 为空 = 表外源,按上面那条保守态处理;非空 = 只有真被取消才算连带。
+    const umbrellaOff = owners.length === 0 || owners.some((f) => sel[f.id] === false)
+    if (!umbrellaOff) continue
+    for (const target of graph[srcFlag] || []) {
+      // 一项多 flag 时**任一** flag 是连带目标就算这项没了(与 itemOffInProduct 同一条"任一"口径)
+      for (const f of TPL_FEATURES) {
+        if (flagsOf(f).includes(target)) hit.add(f.id)
+      }
+    }
+  }
+  // 按表序输出而不是 Set 的插入序:两个调用方拿到的数组能逐字节比,断言也钉得住形状
+  return TPL_FEATURES.filter((f) => hit.has(f.id)).map((f) => f.id)
+}
+
+/**
  * 三个预设(策划书 §5.4b)。
  * full = 全部回到源码默认;lite2d = 附录实测那组(只动 LITE2D_OFF_IDS 那两项);
  * minimal = 官方 CI Minimal template 的 9 条 scons-flags 逐条对齐(见 MINIMAL_OFF 与文件头第 (1)(2) 条):
@@ -595,4 +643,4 @@ const PRESETS = {
   minimalSelection(options) { return selectionTurningOff(options, MINIMAL_OFF.map((x) => x.id)) }
 }
 
-module.exports = { initialSelection, buildProfile, profileText, PRESETS, ENUM_VALUES, validateSelection }
+module.exports = { initialSelection, buildProfile, profileText, PRESETS, ENUM_VALUES, validateSelection, selectionSuppressed }

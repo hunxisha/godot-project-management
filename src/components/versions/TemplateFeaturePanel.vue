@@ -4,6 +4,8 @@
 // 这里**没有任何判据**:哪些开关存在、默认值是什么、关掉 3D 会连带什么、哪些组合会编出废模板,
 // 全部由宿主侧的 tplfeatures(能力表)/ tplprobe(源码探测)/ tplprofile(勾选→产物)算完,
 // 再经契约 listTemplateFeatures 交出来(策划书 §5.1 三层模型)。
+// "这一行**眼下**是不是被上面的总开关带走了"也是判据,同样归宿主(tplprofile.selectionSuppressed →
+// validateTemplateConfig 的 suppressed → T10 并进 :suppressed,Ruling #62),组件只当名单的接收端。
 // 本组件只做三件事:按 group 分区渲染、把勾选变化报上去、把宿主给的禁用/连带/风险态显示出来。
 // 与 TemplateBuildWizard.vue 同一先例:判据不进 .vue(跑不进 Node harness),这里只是展示与调度。
 //
@@ -17,6 +19,8 @@ const props = defineProps<{
   modelValue: Record<string, boolean>
   sourceVersion: string
   tested: boolean
+  /** 当前被连带关闭的面板项 id:宿主的 validateTemplateConfig 算好交出来(Ruling #62),不是本地判断 */
+  suppressed?: string[]
 }>()
 const emit = defineEmits<{ (e: 'update:modelValue', v: Record<string, boolean>): void; (e: 'preset', name: string): void }>()
 
@@ -35,32 +39,40 @@ const grouped = computed(() => {
   return order.map((g) => ({ group: g, items: map.get(g)! }))
 })
 
-// 探不到的项(这份源码没这个开关)与被伞项连带的项都点不动:前者由宿主的 present 判,
-// 后者由宿主的 cascadedBy 判 —— 组件不自己算连带,只是不让用户改一个改不动的值。
-const isDisabled = (it: FeatureWithProbe) => !it.present || !!it.cascadedBy
+// 点不动只有两支,两支都是宿主给的事实:
+//   · present  —— 这份源码里没有这个开关;
+//   · suppressed —— **当前这份勾选下**它被上面的总开关带走了(Ruling #62)。
+// 为什么不用 cascadedBy 决定禁用:它是这份源码的**静态连带结构**(契约那个键直接取了探测层 cascades 的键),
+// 拿它当"现在已被连带关闭"会让 3D 开着时的 3D 导航/3D 物理/XR 三行长期显示未勾选、长期点不动,
+// 而产物里那三项都在 —— 想表达的结果根本没被表达。动态态归宿主算(tplprofile.selectionSuppressed),
+// 组件只当名单的接收端。cascadedBy 在这里只剩一件事:把伞项的中文名说给用户(见 cascadeNote)。
+const isSuppressed = (it: FeatureWithProbe) => (props.suppressed || []).includes(it.id)
+const isDisabled = (it: FeatureWithProbe) => !it.present || isSuppressed(it)
 function toggle(it: FeatureWithProbe, on: boolean) {
+  // 被抑制的项在这一行就被拦住:不替用户改勾选、也不发那个键,所以总开关勾回来时它自己就回来了
   if (isDisabled(it)) return
-  emit('update:modelValue', { ...props.modelValue, [it.id]: on })
+  emit('update:modelValue', { ...(props.modelValue || {}), [it.id]: on })
 }
-// 勾选框显示的是**结果**,不是要发出去的那个 flag:连带项的 modelValue 里可能仍是 true
-// (我们不替用户改勾选态,也不发那个键),但它编出来就是没有 —— 所以界面必须显示没有。
-const checked = (it: FeatureWithProbe) => (isDisabled(it) ? false : !!props.modelValue[it.id])
+// 勾选框显示的是**结果**,不是要发出去的那个 flag:被连带关闭的项在 modelValue 里可能仍是 true,
+// 但它编出来就是没有 —— 所以界面必须显示没有。
+const checked = (it: FeatureWithProbe) => (isDisabled(it) ? false : !!(props.modelValue || {})[it.id])
 
 // 宿主交出来的 cascadedBy 是构建选项的**变量名**(契约里那个键直接取了 cascades 的键),不是面板项 id。
 // 这里做展示层的一次反查:拿它去 items 里找哪个伞项声明了这个变量,把伞项的中文 label 说给用户;
-// 反查不到(伞项不在面板上)就退化成不带名字的文案。绝不把变量名端给用户。
+// 反查不到(连带源在功能表外)就退化成不带名字的文案。绝不把变量名端给用户。
 // 这是查表不是判据:它不决定任何行为,只决定这一行的小字写什么。
 // 已知限制(台账 T8 deferred ④):一项被两个伞项同时连带时,宿主只报第一个,这里就照那一个说。
+// 连带文案两态(Ruling #62):现在真被带走了 / 结构上会被带走但眼下没有。后者这一行**可以点**。
 function cascadeNote(it: FeatureWithProbe): string {
-  const by = it.cascadedBy
-  if (!by) return ''
-  const label = (props.items || []).find((u) => u.flags.includes(by))?.label
-  return label ? `（随「${label}」关闭）` : '（随上级选项关闭）'
+  const label = (props.items || []).find((u) => it.cascadedBy !== undefined && u.flags.includes(it.cascadedBy))?.label || ''
+  if (isSuppressed(it)) return label ? `（随「${label}」关闭）` : '（随上级选项关闭）'
+  if (!it.cascadedBy) return ''
+  return label ? `（取消「${label}」时这项会一起关闭）` : '（取消上级选项时这项会一起关闭）'
 }
 // 点不动的时候说清为什么点不动(同样是宿主给的事实,不是本地判断)
 function disabledHint(it: FeatureWithProbe): string {
   if (!it.present) return '这份源码里没有这个开关'
-  if (it.cascadedBy) return '它由总开关决定,单独点不动'
+  if (isSuppressed(it)) return '这一项现在被上面的总开关带走了,单独改它没有效果;把那个总开关勾回来就能改'
   return ''
 }
 
@@ -88,7 +100,7 @@ const hasDanger = computed(() => (props.items || []).some((it) => it.risk === 'd
       带「高风险」标记的项:取消后那一项对应的功能在产物里整块不可用。第二行小字写的就是会失去什么。
     </p>
 
-    <p v-if="!grouped.length" class="hint">没有可显示的开关(宿主这次没交出面板项)。</p>
+    <p v-if="!grouped.length" class="hint">这一版没有可勾选的开关,请回到上一步确认源码目录。</p>
 
     <section v-for="g in grouped" :key="g.group" class="grp">
       <h4>{{ g.group }}</h4>

@@ -22,6 +22,8 @@
 //   · `buildTemplatePack` 的 `features` 是否整份转交给执行层;
 //   · 第 9 节是两条**源码扫描**:Ruling #60(整份转发这个形状)与 Ruling #58(契约层不重算
 //     `tested`)。它们在行为上观察不到,不扫形状就等于没测。
+//   · 第 10 节是 Ruling #62 的 `suppressed` 通道:名单算得对(行为)、不重复探测也不从渲染层收连带图
+//     (形状),并跨文件对账契约声明与桌面垫片的占位是否同形。
 // 这些调用是 async,因此全文改成 `async function main()` + `main().catch(() => process.exit(1))`
 // —— 本仓库主流形状(backup/templates/taskqueue/docs/exporter/http 六个 harness 同形)。
 // 形状规则的意义:断言若写在 await 节内而汇总三行在文件末尾同步执行,那些断言既不计 PASS、
@@ -36,6 +38,7 @@ const path = require('node:path')
 const ROOT = path.resolve(__dirname, '../../../..')
 const SERVICES = path.resolve(ROOT, 'src-ztools/preload/services.js')
 const DTS = path.resolve(ROOT, 'src/types/services.ts')
+const SHIM = path.resolve(ROOT, 'src/public/tauri-shim.js')
 
 const tplprobe = require('../tplprobe.js')
 const tplprofile = require('../tplprofile.js')
@@ -315,6 +318,38 @@ async function main() {
     const rAkQuiet = await implemented.validateTemplateConfig({ srcDir: T472, features: { vulkan: true, accesskit: true } })
     ok(!rAkQuiet.issues.some((x) => x.itemId === 'accesskit'),
       '同一份勾选不传该键 → 不报', JSON.stringify(rAkQuiet.issues.map((x) => x.itemId)))
+
+    // ---------- Ruling #62:被连带关闭的名单(suppressed)随校验结果一起交出去 ----------
+    // 这棵树带真实 4.7.2 的那张连带图(SC_CASCADE 逐字摘自 SConstruct:1076-1080),所以这两条互钉对
+    // 验的是**宿主算得对不对**:3D 开着时空表、真取消 3D 才带出那三项("恒空"与"恒非空"两种退化都只能过一支)。
+    // 如实登记一句:这棵最小摘录**没有** Add disable_navigation_3d / disable_physics_3d / disable_xr
+    // 三个变量(tplfeatures.js:40/42/44 标注它们在真实 SConstruct:267-270),所以那三行在本夹具上是
+    // present=false,显示层"旧判据长期说谎 vs 新判据"的对照要看真实源码树(见 task-9-report.md 修复轮 1 §6)。
+    const sel472 = tplprofile.initialSelection((await tplprobe.probeSource(T472)).options)
+    const rSupOn = await implemented.validateTemplateConfig({ srcDir: T472, features: sel472 })
+    ok(['ok', 'issues', 'hardBlocks', 'suppressed'].every((k) => k in rSupOn) && Array.isArray(rSupOn.suppressed),
+      '★Ruling #62:返回形状补上 suppressed(数组),面板项 id 而不是 flag 名',
+      JSON.stringify(Object.keys(rSupOn)))
+    ok(Array.isArray(rSupOn.suppressed) && rSupOn.suppressed.length === 0,
+      '★Ruling #62 互钉①:默认勾选(3D 开着)→ suppressed 为空(3D 导航/物理/XR 三行不再长期显示未勾选)',
+      JSON.stringify(rSupOn.suppressed))
+    const rSupOff = await implemented.validateTemplateConfig({ srcDir: T472, features: Object.assign({}, sel472, { sys3d: false }) })
+    ok(JSON.stringify(rSupOff.suppressed) === JSON.stringify(['phys3d', 'nav3d', 'xr']),
+      '★Ruling #62 互钉②:取消 3D 伞项 → 那三项进表(按表序),面板据此把它们显示成"随总开关关闭"且点不动',
+      JSON.stringify(rSupOff.suppressed))
+    // 名单里的每一项必须能在**面板数据**里找到对应的行:两条通道分别由 listTemplateFeatures 与
+    // validateTemplateConfig 交出,对不上号(比如返回了 flag 名)面板就永远比不中 it.id。
+    const listForSup = await implemented.listTemplateFeatures(T472)
+    const idSet = new Set((listForSup.items || []).map((x) => x.id))
+    const supOff = rSupOff.suppressed || []
+    ok(supOff.length > 0 && supOff.every((id) => idSet.has(id)),
+      '★Ruling #62 对账:名单里每一项都是 listTemplateFeatures 交出的面板项 id(两项通道接得上)',
+      JSON.stringify(supOff.filter((id) => !idSet.has(id))))
+    // Ruling #62 的分工用一句话钉住:静态结构不随勾选变,动态名单随勾选变。
+    ok((rSupOn.suppressed || []).length === 0 && supOff.length === 3 &&
+      (listForSup.items.find((x) => x.id === 'nav3d') || {}).cascadedBy === 'disable_3d',
+      '★Ruling #62 的分工:items[].cascadedBy(静态结构)不随勾选变,suppressed(动态名单)才随勾选变',
+      JSON.stringify([rSupOn.suppressed, supOff, (listForSup.items.find((x) => x.id === 'nav3d') || {}).cascadedBy]))
   }
 
   section('8. buildTemplatePack:features 是契约的必填项,必须整份转交执行层')
@@ -353,6 +388,43 @@ async function main() {
     ok(!/testedVersions\s*\.\s*includes/.test(srcJs),
       '★Ruling #58 反向:契约层代码里不再出现 `testedVersions.includes(...)` 这种第二处推导(把旧表达式改回去就红)',
       JSON.stringify((srcJs.match(/.*testedVersions\s*\.\s*includes.*/) || ['<无>'])[0]))
+  }
+
+  section('10. suppressed 通道:算得起、不重复探测、不从渲染层收连带图(Ruling #62 的三条形状)')
+  {
+    // 三件事都在行为上观察不到或容易被"顺手改坏",所以按第 9 节的办法扫形状:
+    //   · **不新增一次探测** —— 台账 T8 deferred ⑤ 说过每次调用已是 ~60 次同步读,而每次勾选变化都会触发;
+    //     多加一次 probeSource 在返回值上完全看不出来,只能数调用次数。
+    //   · **连带图只能来自宿主自己那次探测** —— Ruling #53 已经把 ctx 通道整个删掉(宿主逐字段组装);
+    //     若从 params 收 cascades,渲染层塞一张空图就能让面板把所有行都显示成可点。
+    //   · **契约与三宿主同形** —— 桌面垫片的占位缺这个键,渲染层取属性就是 undefined。
+    const raw = fs.readFileSync(SERVICES, 'utf8')
+    const code = raw.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l)).join('\n')
+    const vtc = /validateTemplateConfig: async \(params\) => \{([\s\S]*?)\n {2}\},/.exec(code)
+    ok(!!vtc, '取得出 validateTemplateConfig 的函数体(切不开说明写法变了,本节不能静默通过)',
+      vtc ? 'ok' : '没匹配到方法体')
+    ok(vtc ? (vtc[1].match(/probeSource\s*\(/g) || []).length === 1 : false,
+      '★Ruling #62:validateTemplateConfig 里 probeSource 只调一次(suppressed 复用同一次探测的 cascades)',
+      vtc ? String((vtc[1].match(/probeSource\s*\(/g) || []).length) + ' 次' : '没切出方法体')
+    ok(/tplprofile\.selectionSuppressed\(\s*params\.features\s*,\s*probe\.cascades\b/.test(code),
+      '★Ruling #62:名单由宿主用**自己探测到的** probe.cascades 算(把 probe.options 或写死的图换进来就红)',
+      JSON.stringify((code.match(/.*selectionSuppressed\(.*/) || ['<没找到>'])[0]))
+    ok(!/params\.cascades/.test(code),
+      '★Ruling #53 同口径:连带图不从渲染层收(入参里出现 params.cascades 就是让用户能伪造"哪些行点不动")')
+
+    // 契约声明里有这个键,类型是 string[]。
+    const vtcDecl = dts.slice(dts.indexOf('validateTemplateConfig'))
+    ok(/suppressed:\s*string\[\]/.test(vtcDecl.slice(0, 500)),
+      '★Ruling #62:src/types/services.ts 的 validateTemplateConfig 返回类型含 suppressed: string[]',
+      JSON.stringify(vtcDecl.split(/\r?\n/).slice(0, 4)))
+
+    // 桌面垫片(Tauri)的占位与契约同形:缺这个键时渲染层拿到的就是 undefined。
+    // (为什么在本 harness 扫而不是在 src/__tests__/tauriShimHonesty.test.mjs 加一条:那个 harness 不在
+    //  本轮授权改动的文件清单里,而"三宿主与契约逐项同形"本来就是这份契约测试的职责段。)
+    const shim = fs.readFileSync(SHIM, 'utf8')
+    ok(/validateTemplateConfig:[\s\S]{0,160}?suppressed:\s*\[\s*\]/.test(shim),
+      '★Ruling #62:桌面垫片 validateTemplateConfig 的占位也带 suppressed:[](如实空名单,不是漏字段)',
+      JSON.stringify((shim.match(/validateTemplateConfig:[^\n]*/) || ['<没找到>'])[0].slice(0, 120)))
   }
 
   // ---------- 结果 ----------

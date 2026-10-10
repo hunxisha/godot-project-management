@@ -829,6 +829,95 @@ if (fs.existsSync(path.join(REAL_SRC, 'SConstruct'))) {
      '真树上这四个键的「关」也一个都不在 profile 里(#38 在真实源码上的形态)')
 }
 
+// ==================== Ruling #62:连带抑制的**动态态** ====================
+// 为什么要有这一节:`items[].cascadedBy`(契约里那个键直接取了探测层 cascades 的键)是这份源码的
+// **静态连带结构**,而面板要显示的是"**眼下**这份勾选下它是不是被上面的总开关带走了"。默认组合(3D 开着)
+// 下 3D 导航 / 3D 物理 / XR 三行并没有被关、产物里三项都在 —— 拿静态字段当动态态,那三行就长期说谎。
+// 面板手里只有 modelValue,要它自己判对就是把判据塞进 .vue,所以这一层归宿主算。
+section('selectionSuppressed(Ruling #62):当前勾选下被连带关闭的面板项')
+{
+  // 夹具来源(承重部分逐字有出处,形态部分是合成):
+  //  · `disable_3d → [disable_navigation_3d, disable_physics_3d, disable_xr]` 逐字取自真实 4.7.2 的
+  //    SConstruct:1076-1080(本仓库的摘录在 tplprobe.test.js:195,那条也说明"4.3 与 4.7.2 形态不同");
+  //  · 对象形态就是探测层返回值的形状:tplprobe.js:232 的 @typedef `cascades: Record<string, string[]>`,
+  //    parseCascades 只收录目标非空的源(tplprobe.js:144),所以这里不写空数组的源。
+  //  · 表外源/表外目标那几个 flag 名是**合成的**(不声称任何真实版本有它们),它们只为"功能表里找不到对应
+  //    面板项"这一支存在 —— 那正是 Ruling #62 边界条款点名的形态。
+  const CAS_472 = { disable_3d: ['disable_navigation_3d', 'disable_physics_3d', 'disable_xr'] }
+  const FULL = T.PRESETS.full(OPTS)
+  const OFF_SYS3D = Object.assign({}, FULL, { sys3d: false })
+
+  ok(eqJson(T.selectionSuppressed(OFF_SYS3D, CAS_472), ['phys3d', 'nav3d', 'xr']),
+     '★伞项取消 → 它的三个连带目标所属面板项全部进表(按 TPL_FEATURES 表序,不是 Set 的插入序)',
+     JSON.stringify(T.selectionSuppressed(OFF_SYS3D, CAS_472)))
+  ok(eqJson(T.selectionSuppressed(FULL, CAS_472), []),
+     '★同一张图、伞项没取消 → 空表(这条就是"三行长期显示未勾选"的反面:默认组合下那三项没被带走)',
+     JSON.stringify(T.selectionSuppressed(FULL, CAS_472)))
+  ok(eqJson(T.selectionSuppressed({}, CAS_472), []),
+     '缺键不算"用户取消"(与 validateSelection 的「面板没给勾选态 → 什么都不写」同一条口径)',
+     JSON.stringify(T.selectionSuppressed({}, CAS_472)))
+  ok(eqJson(T.selectionSuppressed(FULL, { disable_future_umbrella: ['disable_physics_3d'] }), ['phys3d']),
+     '★边界:连带源在功能表里没有对应面板项 → 目标仍进表(SCons 那侧照样连带,不能因为面板给不出伞项名字就漏掉)',
+     JSON.stringify(T.selectionSuppressed(FULL, { disable_future_umbrella: ['disable_physics_3d'] })))
+  ok(eqJson(T.selectionSuppressed(OFF_SYS3D, { disable_3d: ['module_mobile_vr_enabled'] }), ['uiXrExtra']),
+     '一个面板项映射多个 flag 时,**任一** flag 是连带目标就算这项被带走(uiXrExtra 的第二个 flag)',
+     JSON.stringify(T.selectionSuppressed(OFF_SYS3D, { disable_3d: ['module_mobile_vr_enabled'] })))
+  ok(eqJson(T.selectionSuppressed(OFF_SYS3D, { disable_3d: ['disable_no_such_option'] }), []),
+     '连带目标在功能表里没有对应面板项 → 不回那个 flag(返回值只含面板项 id,面板拿它 compare 的是 it.id)',
+     JSON.stringify(T.selectionSuppressed(OFF_SYS3D, { disable_3d: ['disable_no_such_option'] })))
+  ok(eqJson(T.selectionSuppressed(Object.assign({}, FULL, { sys3d: false, advGui: false }),
+     { disable_3d: ['disable_physics_3d'], disable_advanced_gui: ['disable_physics_3d'] }), ['phys3d']),
+     '两个伞项同时连带同一项 → 去重后只出现一次(面板按 includes 用,重复不致错,但形状要干净)',
+     JSON.stringify(T.selectionSuppressed(Object.assign({}, FULL, { sys3d: false, advGui: false }),
+       { disable_3d: ['disable_physics_3d'], disable_advanced_gui: ['disable_physics_3d'] })))
+  // 缺失入参要连**连带图在场**那一支一起试:只测 (undefined, undefined) 的话,循环体压根不进去,
+  // `selection || {}` 这层兜底被删掉也照样绿(本轮变异 A10 实测就是这么漏的,已补)。
+  const tryCall = (fn) => { try { return fn() } catch (e) { return 'THREW: ' + e.message } }
+  ok([undefined, null].every((a) => [CAS_472, {}, undefined, null].every((b) => eqJson(tryCall(() => T.selectionSuppressed(a, b)), []))) &&
+     [undefined, null].every((b) => eqJson(tryCall(() => T.selectionSuppressed(FULL, b)), [])),
+     '两个入参整体缺失都不抛:selection 缺失按"没取消任何伞项"(带着真实连带图也不抑制),cascades 缺失按"没有连带关系"',
+     String(tryCall(() => T.selectionSuppressed(undefined, CAS_472))))
+  // 遍历性:任意连带图下,返回的每一项都必须是功能表里真实存在的面板项 id,且按表序递增。
+  // (只测上面几个点名的形态会漏"把 flag 名当 id 返回"这种退化 —— 面板拿它比 it.id 就永远比不中。)
+  const GRAPHS = [
+    CAS_472,
+    { disable_3d: ['disable_physics_3d'], disable_advanced_gui: ['disable_navigation_3d', 'module_vorbis_enabled'] },
+    { module_mono_enabled: ['disable_xr', 'disable_no_such_option'], accesskit: ['module_ogg_enabled'] },
+    {}
+  ]
+  const ORDER = F.TPL_FEATURES.map((f) => f.id)
+  const flat = GRAPHS.flatMap((g) => [OFF_SYS3D, FULL, T.PRESETS.minimalSelection(OPTS)].flatMap((s) => T.selectionSuppressed(s, g)))
+  ok(flat.length > 0 && flat.every((id) => !!F.featureById(id)) &&
+     GRAPHS.every((g) => [OFF_SYS3D, FULL].every((s) => {
+       const r = T.selectionSuppressed(s, g)
+       return eqJson(r, [...r].sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b)))
+     })),
+     '遍历性:返回值只含面板项 id(不含 flag),且任何图下都按表序稳定输出',
+     JSON.stringify(GRAPHS.map((g) => [OFF_SYS3D, FULL].map((s) => T.selectionSuppressed(s, g)))))
+  // 与预设对接地:minimal / lite2d 都取消 3D 伞项(策划书 §5.4b),所以这两档下面板必然带出那三项。
+  ok(eqJson(T.selectionSuppressed(T.PRESETS.lite2d(OPTS), CAS_472), ['phys3d', 'nav3d', 'xr']) &&
+     eqJson(T.selectionSuppressed(T.PRESETS.minimalSelection(OPTS), CAS_472), ['phys3d', 'nav3d', 'xr']),
+     'lite2d / minimal 两档都取消 3D 伞项 → 这三项在两档下都被抑制(T10 换预设时面板显示跟着变,不需要重探)',
+     JSON.stringify([T.selectionSuppressed(T.PRESETS.lite2d(OPTS), CAS_472), T.selectionSuppressed(T.PRESETS.minimalSelection(OPTS), CAS_472)]))
+}
+
+// ---- 真树上的连带抑制:临时树在才跑(这条最接近"用户真会看到的图") ----
+if (fs.existsSync(path.join(REAL_SRC, 'SConstruct'))) {
+  section('selectionSuppressed 在真实 4.7.2 源码上(树在才跑)')
+  const realSc = fs.readFileSync(path.join(REAL_SRC, 'SConstruct'), 'utf8')
+  const realOpts = P.parseSconsOptions(realSc)
+  const realCasc = P.parseCascades(realSc)
+  ok(Object.keys(realCasc).length === 1 && Array.isArray(realCasc.disable_3d) && realCasc.disable_3d.length === 3,
+     '夹具守卫:这棵树的连带图就是 disable_3d → 三个目标(与 tplprobe.test.js:195 那条摘录同一张图)',
+     JSON.stringify(realCasc))
+  ok(eqJson(T.selectionSuppressed(T.initialSelection(realOpts), realCasc), []),
+     '★真数据:全默认勾选(3D 开着)→ 空表,那三行不再长期显示未勾选(#62 要修的就是这个)',
+     JSON.stringify(T.selectionSuppressed(T.initialSelection(realOpts), realCasc)))
+  ok(eqJson(T.selectionSuppressed(T.PRESETS.minimalSelection(realOpts), realCasc), ['phys3d', 'nav3d', 'xr']),
+     '★真数据:minimal 档(取消了 3D)→ 这三项确实被带走,面板这时才把它们标成随总开关关闭',
+     JSON.stringify(T.selectionSuppressed(T.PRESETS.minimalSelection(realOpts), realCasc)))
+}
+
 console.log(`\n${'='.repeat(56)}`)
 console.log(`PASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) { for (const f of failures) console.log('  - ' + f); process.exit(1) }

@@ -113,9 +113,13 @@ export interface Services {
   /** 编译前静态校验。hardBlocks 非空时不允许发起编译。
    *  `mode` 是**顶层具名入参**而不是埋在 `ctx: Record<string, any>` 里(Ruling #53):三条硬拦的第 3 条
    *  (反向白名单 + 一个模块都没点名保留)只在 `default-off` 下才可能触发,埋在松散对象里漏传编译器抓不到,
-   *  表现是那条硬拦永不响。宿主负责组装 ctx,其中 `untestedSource` 由宿主按 version.py 算,不接受外部同名键。 */
+   *  表现是那条硬拦永不响。宿主负责组装 ctx,其中 `untestedSource` 由宿主按 version.py 算,不接受外部同名键。
+   *  `suppressed`(Ruling #62):**当前这份勾选下被连带关闭**的面板项 id(伞项被取消 → 它的连带目标所属项进表),
+   *  由宿主自己那次探测的连带图算,不从入参收 `cascades`。面板项 id 而非 flag 名;`items[].cascadedBy`
+   *  给的是这份源码的静态连带结构,回答不了"现在是否已被带走",所以 T10 要把这一份并进
+   *  `<TemplateFeaturePanel :suppressed="..." />`。 */
   validateTemplateConfig(params: { srcDir: string, features: Record<string, boolean>, mode?: TplProfileMode, d3d12SdkInstalled?: boolean, accesskitSdkInstalled?: boolean }):
-    Promise<{ ok: boolean, issues: TplIssue[], hardBlocks: TplIssue[] }>
+    Promise<{ ok: boolean, issues: TplIssue[], hardBlocks: TplIssue[], suppressed: string[] }>
   /** 工具链检测(python / SCons / MSVC vcvars64)。缺什么把「下一步动作」放进 problems */
   checkTemplateBuildTools(): Promise<{
     ok: boolean
