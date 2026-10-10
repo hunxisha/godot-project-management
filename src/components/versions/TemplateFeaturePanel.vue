@@ -27,7 +27,8 @@ const emit = defineEmits<{ (e: 'update:modelValue', v: Record<string, boolean>):
 
 // 量级只给相对档位,不给 MB/GB(策划书 §1 第 9 条:绝对数字因版本与平台而变,给了就是假的)
 const SIZE_LABEL = { large: '大', medium: '中', small: '小', tiny: '微', none: '—' } as const
-const RISK_CLASS = { safe: 'risk-safe', notice: 'risk-notice', danger: 'risk-danger' } as const
+// safe 档没有样式(正常观感就是默认态):留空串而不是挂一个没有任何 CSS 对应的死类名(终审 M6)
+const RISK_CLASS = { safe: '', notice: 'risk-notice', danger: 'risk-danger' } as const
 
 // 分组顺序与组名都来自宿主的表(能力层 TPL_GROUPS),组件不认识任何具体组名 —— 与工具页 registry 同一套做法
 const grouped = computed(() => {
@@ -124,7 +125,7 @@ const hasDanger = computed(() => (props.items || []).some((it) => it.risk === 'd
         </span>
         <span class="size">体积影响：{{ SIZE_LABEL[it.sizeImpact] }}</span>
         <span class="desc">
-          {{ it.present ? it.desc : '此版本源码无对应开关' }}<em v-if="cascadeNote(it)" class="cascade">{{ cascadeNote(it) }}</em>
+          {{ it.present ? it.desc : '此版本源码无对应开关' }}<span v-if="cascadeNote(it)" class="cascade">{{ cascadeNote(it) }}</span>
         </span>
       </label>
     </section>
@@ -163,7 +164,7 @@ const hasDanger = computed(() => (props.items || []).some((it) => it.risk === 'd
 .feat .lab { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; color: var(--text); }
 .feat .size { color: var(--text-2); font-size: 11.5px; white-space: nowrap; }
 .feat .desc { grid-column: 2 / span 2; color: var(--text-2); font-size: 11.5px; line-height: 1.5; }
-.feat .cascade { color: var(--warn); font-style: normal; }
+.feat .cascade { color: var(--warn); }
 /* 风险态:danger 是「取消就没有画面」那一类,提醒必须看得见 ——
    整行底色 + 左侧实心条 + 徽标三重,行高与密度不变(本仓库取向是信息密度优先) */
 .feat.risk-danger { background: var(--danger-weak); box-shadow: inset 3px 0 0 var(--danger); }

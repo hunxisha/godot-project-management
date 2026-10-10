@@ -36,6 +36,10 @@
 //    完整输出与逐条归属见 task-9-report.md 修复轮 2 §3;轮 1 那 49 次见同文件修复轮 1 §6)。
 //    T10 收口(2026-10-10):#72 的假绿已修(默认值改验 withDefaults **第二个实参**、要求工厂形状),
 //    新增 ★New-7(.off 淡化与禁用态同源);两处的变异证据见 task-10-report.md §变异表。
+//    终审修复波(2026-10-10):I1 —— v- 指令进 #67 禁令扫描面(v-if 谎刀:旧面 PASS 19/0 看不见 →
+//    新面 FAIL 1 抓住;合法 v-if / v-show、改名、注释全绿);I2 —— :145 与「原始变量名」里两半改扫整文件
+//    剥注释面 CODE(含 disable_3d / ${it.cascadedBy} 的自然注释由红转绿,真写回代码仍红)。
+//    逐条输出与前后对照见 final-fix-report.md。
 //    口径 = 把对应那段功能**真的拿掉/改反**(不是改注释、不是改名)→ 这条必须红:
 //      1 ← 把一个开关的变量名字面量真写进组件                  → 红(轮 1)
 //      2 ← 把编译命令行真拼进组件                              → 红(轮 1)
@@ -88,6 +92,17 @@ const TPL = SRC.slice(SRC.indexOf('<template>', SRC.indexOf('</script>')), SRC.l
 // 单独造一份 TPL_CODE、不改上面那行 TPL:存量断言(第 4/7/9/11/12/13 条)的输入一字不动,
 // 只让本轮新买的守卫用它 —— 不顺手改动没被点名的存量判据。
 const TPL_CODE = TPL.replace(/<!--[\s\S]*?-->/g, '')
+// 终审 I2 收口:整文件剥注释扫描面(与向导 .vue 的 sfcCode 同形)—— :145 的 scons flag 禁令与
+// 「原始变量名不进模板」那条里原先扫 SRC 原文的两半,与头部自述"注释不进扫描面"矛盾:
+// 终审实测加一句自然注释(含 disable_3d 字样 / 含 ${it.cascadedBy})→ FAIL 1,与 Ruling #79 在向导侧
+// 修掉的是同一形态。这两条红线挪到这份 CODE 上 —— 注释里提这些字样不再假红,代码里真写回去照样红。
+const sfcCode = (raw) => {
+  const scriptRaw = raw.slice(raw.indexOf('<script'), raw.indexOf('</script>'))
+  const script = scriptRaw.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l)).map(stripTailComments).join('\n')
+  const tpl = raw.slice(raw.indexOf('<template>', raw.indexOf('</script>')), raw.lastIndexOf('</template>'))
+  return script + '\n' + tpl.replace(/<!--[\s\S]*?-->/g, '')
+}
+const CODE = sfcCode(SRC)
 
 /** 一行里的括号是否配平(配平 = 这是条自足的单行定义) */
 const balanced = (l) => { let d = 0; for (const c of l) { if (c === '(' || c === '{' || c === '[') d++; else if (c === ')' || c === '}' || c === ']') d-- } return d === 0 }
@@ -142,7 +157,9 @@ const mustaches = [...TPL.matchAll(/\{\{([^{}]*)\}\}/g)].map((m) => m[1])
 const interpolations = [...SCRIPT.matchAll(/\$\{([^{}]*)\}/g)].map((m) => m[1])
 
 // ---------- 红线:判据不进 .vue ----------
-ok(!/disable_3d|module_[a-z0-9_]+_enabled|accesskit\s*=/.test(SRC), '组件里不出现任何 scons flag 名(判据不进 .vue)')
+// scons flag 禁令扫整文件剥注释面 CODE(I2 收口;注释里提这些字样不假红,代码里真写回去照样红)。
+// 同段的「不拼编译命令」「面板项来自宿主」两条未在本轮点名清单里,仍按原文扫描,勿顺手改动。
+ok(!/disable_3d|module_[a-z0-9_]+_enabled|accesskit\s*=/.test(CODE), '组件里不出现任何 scons flag 名(判据不进 .vue;扫剥注释后的代码面)')
 ok(!/scons\s+platform=/.test(SRC), '组件里不拼编译命令')
 ok(/services\.listTemplateFeatures|props\.items/.test(SRC), '面板项来自宿主,不是本地常量')
 
@@ -164,8 +181,12 @@ ok(/cascadedBy/.test(SCRIPT) && cbDefs.length > 0 && cbDefs.every((x) => /\.labe
 // 复审员实测 M-TPLCASC:`:disabled="isDisabled(it) || !!it.cascadedBy"`(就是 #62 修掉的那个谎原样回归)
 // → PASS 15/FAIL 0,没人喊。根因是轮 1 为 #64 做"名字无关化"时,把再上一轮那条精确属性正则
 // `/:disabled="isDisabled\(it\)"/` 的牙一起丢了。收法(复审员给的)是把禁令落在**绑定**上而不是函数名上:
-// 零成本、不牺牲改名自由,而且对任何属性绑定(:disabled / :checked / :title / @click / :class)一律生效。
-const bindWithCb = (TPL_CODE.match(/[:@][\w-]+\s*=\s*(?:"[^"]*"|'[^']*')/g) || []).filter((s) => /\bcascadedBy\b/.test(s))
+// 零成本、不牺牲改名自由。
+// 终审 I1 收口:原正则只认 `:` / `@` 前缀,`v-` 指令(v-if / v-show / v-for / v-bind…)整类漏在扫描面外 ——
+// 实测把 `:disabled="isDisabled(it)"` 换成等价的 `v-if="isDisabled(it) || !!it.cascadedBy"` 全绿
+// (PASS 19/FAIL 0,对照刀 `:disabled` 版本红 1):#62 那类谎可经 v- 原样回归。扫描面现在 = 任何
+// `:` / `@` 绑定**与** `v-` 指令,与本注释逐字对齐(别留"比实现宽的声称"这种自我背书)。
+const bindWithCb = (TPL_CODE.match(/(?:[:@]|v-)[\w-]+\s*=\s*(?:"[^"]*"|'[^']*')/g) || []).filter((s) => /\bcascadedBy\b/.test(s))
 ok(bindWithCb.length === 0,
   '★Ruling #67:模板的属性绑定里不出现 cascadedBy(静态连带结构不当作"现在点不动"的判据,绑定层也不许)',
   JSON.stringify(bindWithCb))
@@ -205,7 +226,7 @@ const leakedInterp = interpolations.filter((e) => !labelish(e))
 // 代码里提到 cascadedBy 的行只许是「带 .label 的反查行」「存在性检查(回空串)」两类。
 const leakedLines = SCRIPT.split(/\r?\n/).filter((l) => /cascadedBy/.test(l) && !/\.label|return\s*''/.test(l))
 ok(interpolations.length > 0 && leakedInterp.length === 0 && leakedLines.length === 0 &&
-  !/\$\{[^{}]*cascadedBy/.test(SRC) && !/\{\{[^{}]*(cascadedBy|\.flags)/.test(SRC) && /flags\.includes\(/.test(SCRIPT),
+  !/\$\{[^{}]*cascadedBy/.test(CODE) && !/\{\{[^{}]*(cascadedBy|\.flags)/.test(CODE) && /flags\.includes\(/.test(SCRIPT),
   '伞项名字来自 items 表的 label 反查;原始变量名不进插值、不进拼接、不进 mustache',
   JSON.stringify({ leakedInterp, leakedLines }))
 

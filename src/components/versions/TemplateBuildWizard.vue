@@ -146,6 +146,12 @@ async function tryStartBuild() {
 watch(features, scheduleValidate)
 watch(srcDir, (dir) => {
   skippedOk.value = false
+  // C1(整分支终审,必修):mode 随目录一起复位 —— 预设(「最小可跑」= default-off)是**上一份源码**的勾选状态,
+  // 换目录后 features 被重建为全默认,它却还挂着:panel 显示一切正常、validateSelection 也不喊(硬拦 3 要求
+  // 点名数 > 0,全默认恰好绕过),而 buildProfile 会带 modules_enabled_by_default=no 把表外模块
+  // (gdscript/freetype/text_server_adv/glslang 等)整体关掉 —— 拿到一份没有 GDScript 的模板。重置回默认态,
+  // 要 default-off 请在新目录上重新点一次预设。
+  mode.value = 'default-on'
   buildErr.value = '' // 上一轮的同步拒绝原因属于旧目录:换目录即清,不挂在按钮上方(Ruling #83)
   if (!dir) {
     if (loadTimer) { clearTimeout(loadTimer); loadTimer = null }

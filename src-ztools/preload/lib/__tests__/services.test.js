@@ -384,14 +384,17 @@ async function main() {
     //   · Ruling #60 —— `mode` 进 buildTemplatePack 零断言:`buildtools.js` 的入队闸先拦 `features`,
     //     再拦工具链,mode 的差异在这一层根本不外漏;只能把「整份 params 转发」这个形状钉住。
     //     它防的是「有人把转发改成显式字段列表而漏掉 mode」→ 变成**校验用 default-off、编译用 default-on**,
-    //     正是 services.ts:130 注释自己警告的那一形态。先例:T9 简报 :28 与垫片诚实性扫描都用源码正则。
+    //     正是 services.ts:142 注释自己警告的那一形态(M5 改正:此前写 :130,是行号漂移)。先例:T9 简报 :28
+    //     与垫片诚实性扫描都用源码正则。
     //   · Ruling #58 —— `untestedSource` 不许在契约层重算 `testedVersions.includes(sourceVersion)`
     //     (`tplprobe.js:270` 是同一个表达式的第二处推导;`tested` 的语义一改就静默用旧口径)。
     //     这条同样是等价重构,行为断言抓不到,所以钉形状。
-    const forward = /buildTemplatePack:\s*\(params\)\s*=>\s*buildtools\.buildTemplatePack\(\s*params\s*\)/.exec(code)
+    // M5(终审修复波):形参名不写死 —— 两侧必须是**同一个标识符**(反向引用):改名继续绿,
+    // 而「两侧不是同一个名字」= 转发链真的换了一端 → 照样红。
+    const forward = /buildTemplatePack:\s*\(([A-Za-z_$][\w$]*)\)\s*=>\s*buildtools\.buildTemplatePack\(\s*\1\s*\)/.exec(code)
     ok(!!forward,
       '★Ruling #60:buildTemplatePack 是「整份 params 转发」的形状(改成显式字段列表就红,而漏掉 mode 在行为层看不见)',
-      '没匹配到 `buildTemplatePack: (params) => buildtools.buildTemplatePack(params)`')
+      '没匹配到「buildTemplatePack: (x) => buildtools.buildTemplatePack(同一个 x)」这种整份转发形状(形参名不固定)')
     // Ruling #58 的钉子:写成"直接读探测层算好的 probe.tested"。局部变量名从方法体**反查**得到
     // (上面的 probeVar)—— T9 轮 2 复审实测:把它写死成 `probe`,仅把该变量改名 `probe` → `p` 就假红 1 条。
     ok(!!probeVar && new RegExp('const\\s+untestedSource\\s*=\\s*!' + probeVar + '\\.tested\\b').test(code),

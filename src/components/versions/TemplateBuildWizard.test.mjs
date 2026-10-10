@@ -8,7 +8,10 @@
 //   2. 面板接线:items / 勾选态 / 探测版本 / 被连带名单,四个锚点全部来自宿主的活数据;
 //   3. 校验分流:发起前走宿主 validateTemplateConfig,硬拦不给编、软问题带「仍然继续」(简报 Step 3);
 //   4. Ruling #74/#75/#77:mode 由宿主给且两个调用点同值、勾选变化去抖重算、列表 key 用复合键;
-//   5. 修复轮 1(Ruling #80–#83):发起编译的重入闸、三处过时恢复闸、预设错误位与面板错误位分离、buildErr 随目录清空。
+//   5. 修复轮 1(Ruling #80–#83):发起编译的重入闸、三处过时恢复闸、预设错误位与面板错误位分离、buildErr 随目录清空;
+//   6. 终审修复波:C1(换目录即把 mode 复位 default-on —— 该状态迁移扫描结构上看不见,由真机条目 T21 兜底)、
+//      T10-①(srcDirVar 反查改走 pickDirectory → @click → v-model 链,不再锚「源码根」文案)、
+//      T10-②(watch 形态认 ref 直传与 `() => srcDir.value` 两种等价写法)。
 //
 // 写法纪律(沿用 TemplateFeaturePanel.test.mjs 的轮 2 口径):
 //   · 断言只钉**方向与形状**,函数名/变量名一律从模板绑定或赋值处**反查**,改名与等价写法都该继续绿;
@@ -249,9 +252,16 @@ console.log('\n=== 8. 修复轮 1:Ruling #80–#83 的四道闸(每条都有一�
 // 四道闸都在 Ruling #80–#83 里点名:重入闸(双击起两条编译)、三处过时恢复闸(旧结果盖新状态)、
 // 预设错误位单独渲染、buildErr 随目录清空。判定一律形状级(名字反查),别钉具体拼写。
 
-/** 反查源码输入框双向绑定的那个状态量(凡说"当前目录"的闸都拿它比对;改名不假红) */
+/** 反查源码输入框双向绑定的那个状态量(凡说"当前目录"的闸都拿它比对;改名不假红)。
+ *  T10-① 收口:原先锚在用户可见标签文案「源码根」上 —— 改文案会假红 4 条(终审实测)。
+ *  现在从**绑定**反查:先找调 pickDirectory 的那个处理函数,再找它的 @click 按钮,
+ *  同一条 label 里按钮之前最近的那个 v-model 就是源码输入框(与文案无关)。 */
 const srcDirVar = (() => {
-  const m = /源码根[\s\S]{0,200}?v-model="([A-Za-z_$][\w$]*)"/.exec(TPL_CODE)
+  const pickFn = declOf(/pickDirectory\s*\(/)
+  if (!pickFn) return ''
+  const at = TPL_CODE.search(new RegExp('@click="\\s*' + pickFn + '\\b'))
+  if (at < 0) return ''
+  const m = [...TPL_CODE.slice(0, at).matchAll(/v-model="([A-Za-z_$][\w$]*)"/g)].pop()
   return m ? m[1] : ''
 })()
 
@@ -307,13 +317,28 @@ ok(!!presetErrVar && presetErrVar !== listErrVar &&
   JSON.stringify({ presetErrVar, panelErrVar: listErrVar }))
 
 // #83:上一轮的同步拒绝原因(buildErr)不许跨目录挂着 —— watch(srcDir) 或 loadPanel 里清一行。
-const srcWatchIdx = srcDirVar ? SCRIPT.search(new RegExp('watch\\(\\s*' + srcDirVar + '\\s*,')) : -1
+// T10-② 收口:原先钉成 `watch(<srcDirVar>,` 字面,等价的 getter 写法 `watch(() => srcDir.value, cb)`
+// 假红 1 条(终审实测)。两种都是 Vue 的合法写法,形状判定都认;名字仍从绑定反查,不写死。
+const srcWatchIdx = srcDirVar
+  ? SCRIPT.search(new RegExp('watch\\(\\s*(?:\\[?\\s*' + srcDirVar + '\\b|\\(\\s*\\)\\s*=>\\s*' + srcDirVar + '\\.value\\b)'))
+  : -1
 const srcWatchEnd = srcWatchIdx >= 0 ? (() => { const n = SCRIPT.indexOf('watch(', srcWatchIdx + 6); return n > srcWatchIdx ? n : SCRIPT.length })() : -1
 const srcWatchSeg = srcWatchIdx >= 0 ? SCRIPT.slice(srcWatchIdx, srcWatchEnd) : ''
 const clearRe = buildErrVar ? new RegExp('\\b' + buildErrVar + "\\.value\\s*=\\s*['\"]['\"]") : null
 ok(srcWatchIdx >= 0 && !!clearRe && (clearRe.test(srcWatchSeg) || clearRe.test(listBody)),
   '★Ruling #83:换源码目录即清上一轮的同步拒绝原因(watch(srcDir) 的开头或 loadPanel 里清一行;删掉 → 红)',
   JSON.stringify({ srcDirVar, buildErrVar, watchSeg: srcWatchSeg.slice(0, 60).replace(/\n/g, ' ') }))
+
+// C1(整分支终审,必修):mode 必须随换目录复位 —— "选目录 A → 点最小可跑(mode=default-off)→ 换目录 B"
+// 这条**状态迁移**扫描型 harness 结构上看不见;能钉的是"复位这一行真的在 watch(srcDir) 段里"。
+// 缺了它的后果:features 回到全默认而 mode 还是 default-off → validateSelection 一条都不报
+// (硬拦 3 要求点名数 > 0,全默认恰好绕过),buildProfile 却带 modules_enabled_by_default=no
+// 把表外模块(GDScript / freetype / text_server_adv / glslang 等)整体关掉。
+// 名字不写死:modeVar 从 applyPreset 的赋值处反查(改名不假红);真机兜底条目 = manual-verification.md T21。
+const modeResetRe = modeVar ? new RegExp('\\b' + modeVar + "\\.value\\s*=\\s*['\"]default-on['\"]") : null
+ok(!!modeVar && !!modeResetRe && modeResetRe.test(srcWatchSeg),
+  '★C1:watch(srcDir) 里把编译模式复位回 default-on(预设的 default-off 不跟着新目录跑;把这行删掉 → 红)',
+  JSON.stringify({ srcDirVar, modeVar, watchSeg: srcWatchSeg.slice(0, 200).replace(/\n/g, ' ') }))
 
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) { for (const f of failures) console.log('  - ' + f); process.exit(1) }

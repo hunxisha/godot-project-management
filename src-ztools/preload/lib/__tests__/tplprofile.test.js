@@ -843,8 +843,12 @@ ok(allIss.every((p) => {
   const f = F.featureById(i.itemId)
   return !!f && F.flagsOf(f).includes(i.flag)
 }), 'itemId 与 flag 必须同属一个面板项(只核"flag 是真名"抓不到"flag 张冠李戴")',
-   JSON.stringify(allIss.filter((p) => p[1].itemId !== 'source' && p[1].flag !== '' &&
-     !(F.featureById(p[1].itemId) && F.flagsOf(p[1].itemId).includes(p[1].flag))).map((p) => [p[1].itemId, p[1].flag])))
+   JSON.stringify(allIss.filter((p) => {
+     // M3(终审修复波):原先这里把 **id 字符串**直接喂给 F.flagsOf(它要 feature 对象)→ 恒 [] →
+     // 红的时候诊断列会淹掉真凶;照上一条的写法先 featureById 取对象。
+     const f = F.featureById(p[1].itemId)
+     return p[1].itemId !== 'source' && p[1].flag !== '' && !(f && F.flagsOf(f).includes(p[1].flag))
+   }).map((p) => [p[1].itemId, p[1].flag])))
 ok(VCOL.every((pair) => pair[1].issues.every((i) => i.skippable === true) && pair[1].hardBlocks.every((i) => i.skippable === false)),
    '软问题一律 skippable:true、硬拦一律 false(T10 就靠这个字段决定给不给「仍然继续」)')
 const allHard = VCOL.flatMap((pair) => pair[1].hardBlocks)

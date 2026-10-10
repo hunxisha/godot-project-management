@@ -324,14 +324,21 @@ async function main() {
     } finally { cap.restore() }
   }
   {
-    // 编译失败:退出码 + 尾行进 errorDetail
+    // 编译失败:退出码 + 尾行进 errorDetail。非 0 退出也在头部"同进同退"清单里,所以这里补一条
+    // 残骸断言(M2,终审修复波:此前这节对清单里的"非 0 退出"没有对应断言,只是一句声称)
     const src = makeTree('src-fail')
     fs.writeFileSync(path.join(src, 'bin', 'godot.windows.template_release.x86_64.exe'), 'x')
     const f = fakeSpawn({ err: 'ERROR: The Direct3D 12 rendering driver requires dependencies', code: 2 })
-    const r = B.buildTemplatePackWith({ srcDir: src, tag: '4.7.2-stable', features: {} }, { spawn: f.spawn, statfsSync: () => ({ bsize: 4096, bavail: 1e7 }) })
-    const t = await waitTask(r.taskId, 5000)
-    ok(t.status === 'error' && /退出码 2/.test(t.error || '') && /Direct3D 12/.test(t.errorDetail || ''),
-      '★失败带退出码,原话尾部进 errorDetail(闸门③:诊断信息不丢)', `${t.error} / ${t.errorDetail}`)
+    const cap = startTmpCapture()
+    try {
+      const r = B.buildTemplatePackWith({ srcDir: src, tag: '4.7.2-stable', features: {} }, { spawn: f.spawn, statfsSync: () => ({ bsize: 4096, bavail: 1e7 }) })
+      const t = await waitTask(r.taskId, 5000)
+      ok(t.status === 'error' && /退出码 2/.test(t.error || '') && /Direct3D 12/.test(t.errorDetail || ''),
+        '★失败带退出码,原话尾部进 errorDetail(闸门③:诊断信息不丢)', `${t.error} / ${t.errorDetail}`)
+      ok(cap.captured.length === 2 && cap.captured.every((c) => !fs.existsSync(c.file)),
+        '★非 0 退出同样两份同进同退(残骸断言;captured 为 2 也挡住"什么都没写还恒真"的空转)',
+        JSON.stringify(cap.captured.map((c) => c.file)))
+    } finally { cap.restore() }
   }
   {
     // 取消:kill 子进程,状态 canceled;两份临时文件都要清掉
@@ -511,6 +518,13 @@ async function main() {
       ok(!fs.existsSync(cap.file('json')), '★写盘失败也删掉已经落盘的那份 .json(不留孤儿配置)', cap.file('json'))
       ok(f.calls.length === 0, '★写盘失败后一次 scons 都不起', String(f.calls.length))
     } finally { cap.restore() }
+  }
+
+  // ★M1(终审修复波):stage 目录收尾 —— 构建完成即 mkdtempSync,真实链路由导入(move)consume,
+  // 测试里没人消费:单次运行会在 %TEMP% 留 5 个 ztools-godot-stage-*(终审实测)。遍历 seen 收干净
+  // (放在汇总前,失败路径也照收)。
+  for (const t of seen.values()) {
+    if (t.stageDir) fs.rmSync(t.stageDir, { recursive: true, force: true })
   }
 
   console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)

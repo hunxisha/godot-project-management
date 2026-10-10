@@ -218,8 +218,11 @@ function stageBin(binDir, stageDir) {
  * @returns {{ok: boolean, error: string, sourceVersion: string}}
  */
 function probeSourceSync(srcDir) {
-  const sc = path.join(srcDir, 'SConstruct')
-  if (!srcDir || !fs.existsSync(sc)) return { ok: false, error: '所选目录不是 Godot 源码根(缺 SConstruct)', sourceVersion: '' }
+  // M7(终审修复波):判空/判串提到 path.join 之前 —— 传 undefined 时 join 先炸 TypeError
+  // (入队路径有上面的同步闸挡着,这一格目前不可达;换一次序就没有死角了)。join 只在两个前置判过时才求值。
+  if (!srcDir || typeof srcDir !== 'string' || !fs.existsSync(path.join(srcDir, 'SConstruct'))) {
+    return { ok: false, error: '所选目录不是 Godot 源码根(缺 SConstruct)', sourceVersion: '' }
+  }
   let vpy = ''
   try { vpy = String(fs.readFileSync(path.join(srcDir, 'version.py'), 'utf8')) } catch (e) { /* 下面按读不出处理 */ }
   // parseVersionPy 读不出给空串:空串对不上任何 stable tag,闸门自然拒绝,不猜一个"看起来对"的串。
