@@ -136,8 +136,8 @@ declare module 'node:path' {
   export function basename(p: string, ext?: string): string
   export function extname(p: string): string
   export const sep: string
-  /** win32 语义的 join:拼 Windows 特定路径(vswhere/vcvars 落点)时使用,与运行平台无关 */
-  export const win32: { join(...parts: string[]): string }
+  /** win32 语义的 join / dirname:拼与拆 Windows 特定路径(vswhere/vcvars/python 落点)时使用,与运行平台无关 */
+  export const win32: { join(...parts: string[]): string, dirname(p: string): string }
 }
 
 declare module 'node:os' {

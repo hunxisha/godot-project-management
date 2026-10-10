@@ -18,55 +18,95 @@ const fsutil = require('./fsutil')
 
 const PACK_PREFIX = 'godot/tplpack/'
 
+/** @typedef {import('../../../src/types/services').TemplatePack} TemplatePack */
+
+/**
+ * 存档记录(db `godot/tplpack/<packId>` 的文档体)。`dir=''` = 这套正在生效位(收编登记、没搬过文件);
+ * `dir=<packId>` = 独立副本躺在存档槽。除 packId 外的目录位置运行时由根解析,换根零迁移。
+ * @typedef {object} PackDoc
+ * @property {string} packId
+ * @property {string} versionId
+ * @property {string} tag
+ * @property {string} versionDir
+ * @property {string} dir
+ * @property {'selfbuild'|'adopted'} [source]
+ * @property {number} [bytes]
+ * @property {number} [createdAt]
+ * @property {string[]} [writtenFlags]
+ * @property {string} [mode]
+ */
+
+/**
+ * 注入缝:fs 与 db 全走这里(文件头那条红线),测试整份换掉即可造 EXDEV / 缺目录 / 回收站炸。
+ * `renameSync` 只有桩会传 —— 真宿主走 `fs.renameSync`。
+ * @typedef {object} TplLibDeps
+ * @property {(p: string) => boolean} existsSync
+ * @property {(p: string) => string[]} readdirSync
+ * @property {(s: string, d: string) => void} cpSync
+ * @property {(p: string) => void} rmSync
+ * @property {(p: string) => void} trashPath
+ * @property {(p: string) => number} dirSize
+ * @property {(exePath: string) => string} resolveBase
+ * @property {(versionId: string) => { versionDir?: string, installed?: boolean }} status
+ * @property {(id: string) => any} getDoc
+ * @property {(id: string, doc: any) => any} putDoc
+ * @property {(id: string) => any} removeDoc
+ * @property {(prefix: string) => PackDoc[]} listDocs
+ * @property {() => number} now
+ * @property {(oldPath: string, newPath: string) => void} [renameSync]
+ */
+
+/** @returns {TplLibDeps} */
 function realDeps() {
   // templates 懒 require:templates.js 顶部 require 本文件(自动存档钩子),顶层互 require 会拿到半空 exports
   const T = require('./templates')
   const { dirSize } = require('./extract')
   return {
     existsSync: fs.existsSync,
-    readdirSync: (p) => fs.readdirSync(p),
-    cpSync: (s, d) => fs.cpSync(s, d, { recursive: true }),
-    rmSync: (p) => fs.rmSync(p, { recursive: true, force: true }),
-    trashPath: (p) => fsutil.trashPath(p, true),
+    readdirSync: (/** @type {string} */ p) => fs.readdirSync(p),
+    cpSync: (/** @type {string} */ s, /** @type {string} */ d) => fs.cpSync(s, d, { recursive: true }),
+    rmSync: (/** @type {string} */ p) => fs.rmSync(p, { recursive: true, force: true }),
+    trashPath: (/** @type {string} */ p) => fsutil.trashPath(p, true),
     dirSize,
-    resolveBase: (exePath) => T.resolveTemplatesBase(exePath).base,
-    status: (versionId) => T.exportTemplateStatus({ versionId }),
+    resolveBase: (/** @type {string} */ exePath) => T.resolveTemplatesBase(exePath).base,
+    status: (/** @type {string} */ versionId) => T.exportTemplateStatus({ versionId }),
     getDoc, putDoc, removeDoc, listDocs,
     now: () => Date.now()
   }
 }
 
 /** 同盘 rename、跨盘 EXDEV/EPERM 回退复制(与 templates.js:120 同形态);rename 走注入缝,桩可造 EXDEV */
-function moveSync(src, dest, deps) {
+function moveSync(/** @type {string} */ src, /** @type {string} */ dest, /** @type {TplLibDeps} */ deps) {
   const rename = deps.renameSync || fs.renameSync
   try {
     rename(src, dest)
   } catch (e) {
-    if (e.code !== 'EXDEV' && e.code !== 'EPERM') throw e
+    if (/** @type {{code?: string}} */ (e).code !== 'EXDEV' && /** @type {{code?: string}} */ (e).code !== 'EPERM') throw e
     deps.cpSync(src, dest)
     deps.rmSync(src)
   }
 }
 
-function newPackId(deps) {
+function newPackId(/** @type {TplLibDeps} */ deps) {
   return `tpl-${deps.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 }
 
 /** 存档根:生效基目录的同级 tplpack/(同盘前提,任务书 §0 第 1 拍) */
-function packRoot(base) {
+function packRoot(/** @type {string} */ base) {
   return path.join(path.dirname(base), 'tplpack')
 }
 
-function readPack(packId, deps) {
+/** @returns {PackDoc|null} */
+function readPack(/** @type {string} */ packId, /** @type {TplLibDeps} */ deps) {
   const d = deps.getDoc(PACK_PREFIX + packId)
   return d && d.packId ? d : null
 }
 
 /**
- * 某版本串下的存档列表(同 tag 多台引擎共享,任务书 §5)。
+ * 某版本串下的存档列表(同 tag 多台引擎共享,任务书 §5)。列不出即空表,本函数没有失败分支。
  * @param {{base: string, versionDir: string}} params
- * @param {any} [deps]
- * @returns {{ok: true, packs: any[]} | {ok: false, error: string}}
+ * @param {TplLibDeps} [deps]
+ * @returns {{ok: true, packs: TemplatePack[]}}
  */
 function listTemplatePacks(params, deps) {
   const d = deps || realDeps()
@@ -79,7 +119,7 @@ function listTemplatePacks(params, deps) {
       versionId: x.versionId,
       tag: x.tag,
       versionDir: x.versionDir,
-      source: x.source || 'adopted',
+      source: /** @type {'selfbuild'|'adopted'} */ (x.source || 'adopted'),
       dir: x.dir || '',
       active: (x.dir || '') === '',
       bytes: x.bytes || 0,
@@ -96,7 +136,7 @@ function listTemplatePacks(params, deps) {
  * 自编译导入后的自动存档:生效位 cpSync 一份独立副本进槽 + 写记录(dir=槽名,非 active)。
  * 失败由调用方(templates.js 的安装任务)收成 archiveError,不影响安装 ok。
  * @param {{base: string, dest: string, versionId: string, tag: string, versionDir: string, archive: {source?: string, writtenFlags?: string[], mode?: string}}} params
- * @param {any} [deps]
+ * @param {TplLibDeps} [deps]
  * @returns {{packId: string}}
  */
 function archiveFromInstall(params, deps) {
@@ -123,7 +163,8 @@ function archiveFromInstall(params, deps) {
 /**
  * 收编:把当前生效目录登记为 dir='' 的存档(**不搬文件**);首次被换出时才 move 进槽。
  * @param {{base: string, versionId: string, tag: string, versionDir: string}} params
- * @param {any} [deps]
+ * @param {TplLibDeps} [deps]
+ * @returns {{ok: true, packId: string} | {ok: false, error: string}}
  */
 function adoptTemplatePack(params, deps) {
   const d = deps || realDeps()
@@ -148,9 +189,10 @@ function adoptTemplatePack(params, deps) {
 }
 
 /**
- * 切换生效:两次 move + 回滚(任务书 §5)。跨 versionDir 拒、已 active 早退、同 versionId 在途锁。
+ * 切换生效:两次 move + 回滚(任务书 §5)。跨 versionDir 拒、已 active 早退;不设在途锁 —— 理由见下面那条注释。
  * @param {{base: string, versionId: string, versionDir: string, packId: string}} params
- * @param {any} [deps]
+ * @param {TplLibDeps} [deps]
+ * @returns {{ok: true, moved?: boolean} | {ok: false, error: string}}
  */
 function activateTemplatePack(params, deps) {
   const d = deps || realDeps()
@@ -215,7 +257,8 @@ function activateTemplatePack(params, deps) {
 /**
  * 删除存档:有槽目录的进回收站 + 除名;dir='' 的只除名(不动生效位,任务书 §6 末条)。
  * @param {{base: string, packId: string}} params
- * @param {any} [deps]
+ * @param {TplLibDeps} [deps]
+ * @returns {{ok: true} | {ok: false, error: string}}
  */
 function deleteTemplatePack(params, deps) {
   const d = deps || realDeps()
@@ -253,7 +296,8 @@ module.exports = {
 /**
  * versionId → 模板库操作上下文(base / versionDir / installed / tag);引擎记录或版本串读不出就 ok:false。
  * @param {string} versionId
- * @param {any} [deps]
+ * @param {TplLibDeps} [deps]
+ * @returns {{ok: false, error: string} | {ok: true, base: string, versionDir: string, installed: boolean, tag: string, versionId: string}}
  */
 function forVersion(versionId, deps) {
   const d = deps || realDeps()
@@ -261,9 +305,10 @@ function forVersion(versionId, deps) {
   if (!v || !v.tag) return { ok: false, error: '引擎记录不存在' }
   const st = d.status(versionId)
   if (!st.versionDir) return { ok: false, error: '读不到该引擎的模板版本串' }
-  return { ok: true, base: d.resolveBase(v.exePath), versionDir: st.versionDir, installed: st.installed, tag: v.tag, versionId }
+  return { ok: true, base: d.resolveBase(v.exePath), versionDir: st.versionDir, installed: !!st.installed, tag: v.tag, versionId }
 }
 
+/** @param {string} versionId @param {TplLibDeps} [deps] */
 function listForVersion(versionId, deps) {
   const d = deps || realDeps()
   const c = forVersion(versionId, d)
@@ -271,6 +316,7 @@ function listForVersion(versionId, deps) {
   return listTemplatePacks({ base: c.base, versionDir: c.versionDir }, d)
 }
 
+/** @param {string} versionId @param {string} packId @param {TplLibDeps} [deps] */
 function activateForVersion(versionId, packId, deps) {
   const d = deps || realDeps()
   const c = forVersion(versionId, d)
@@ -278,6 +324,7 @@ function activateForVersion(versionId, packId, deps) {
   return activateTemplatePack({ base: c.base, versionId, versionDir: c.versionDir, packId }, d)
 }
 
+/** @param {string} versionId @param {string} packId @param {TplLibDeps} [deps] */
 function deleteForVersion(versionId, packId, deps) {
   const d = deps || realDeps()
   const c = forVersion(versionId, d)
@@ -285,6 +332,7 @@ function deleteForVersion(versionId, packId, deps) {
   return deleteTemplatePack({ base: c.base, packId }, d)
 }
 
+/** @param {string} versionId @param {TplLibDeps} [deps] @returns {{ok: true, packId: string} | {ok: false, error: string}} */
 function adoptForVersion(versionId, deps) {
   const d = deps || realDeps()
   const c = forVersion(versionId, d)

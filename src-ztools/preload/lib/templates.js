@@ -165,7 +165,9 @@ function exportTemplateStatus(opts) {
  * 「手动导入过自定义目录名的引擎」再走一次下载安装就会装到另一个目录,而状态卡读的
  * 还是记录里的旧值 —— 实际装的目录与 db 记录不一致(计划书第 5 项点名的分叉)。
  *
- * @param {{versionId: string, srcPath?: string, versionDir?: string}} params
+ * @param {{versionId: string, srcPath?: string, versionDir?: string,
+ *            archive?: {source?: string, writtenFlags?: string[], mode?: string}}} params
+ *   archive 由自编译导入链路带进来:安装成功后按它把生效位存档进模板库(tpllib.archiveFromInstall)
  * @param {{versionsRoot?: string, templatesBase?: string, platform?: string}} [opts]
  *   templatesBase 仅供测试覆盖安装根;缺省按 Godot 规则解析(._sc_ → exe 旁,否则用户数据目录)
  *   platform 仅供测试注入目标平台(测试模板包内是固定平台的文件);缺省用真实平台

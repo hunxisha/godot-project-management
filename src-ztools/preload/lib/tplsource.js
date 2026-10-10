@@ -19,6 +19,15 @@ const RELEASE_BASE = 'https://github.com/godotengine/godot/releases/download'
 const MIN_FREE_BYTES = 4 * 1024 * 1024 * 1024
 
 /** 在途锁:全局至多一条代下载(同目录重入是它的子集);结束与取消都清 */
+/**
+ * 一条代下载作业的四格状态(取消按 phase 分流,故 phase 与两个可空把手都要显式定型)。
+ * @typedef {object} SourceJob
+ * @property {'downloading'|'hashing'|'extracting'} phase
+ * @property {{promise: Promise<any>, cancel: () => void} | null} dl
+ * @property {GpmChildProcess | null} child
+ * @property {boolean} canceled
+ */
+/** @type {SourceJob | null} */
 let active = null
 
 /**
@@ -30,17 +39,32 @@ function sourceUrls(tag) {
   return { asset: `${RELEASE_BASE}/${tag}/${asset}`, sidecar: `${RELEASE_BASE}/${tag}/${asset}.sha256` }
 }
 
-/** 流式 sha256(分块读、不整文件进内存;写法同 inspectfs.js:389) */
+/**
+ * 分块 sha256(1 MiB 一块、不整文件进内存)。**与 inspectfs.js:389-397 同一套已声明 API**
+ * (openSync / readSync / closeSync),不走 createReadStream —— 沙箱声明面里没有读流,
+ * 用了就是给真宿主埋一个只有类型检查能发现的洞。
+ * @param {string} file
+ * @returns {string} 小写十六进制摘要
+ */
 function hashFile(file) {
-  return new Promise((resolve, reject) => {
-    const h = crypto.createHash('sha256')
-    const s = fs.createReadStream(file)
-    s.on('data', (d) => h.update(d))
-    s.on('end', () => resolve(h.digest('hex')))
-    s.on('error', reject)
-  })
+  const h = crypto.createHash('sha256')
+  const buf = Buffer.alloc(1024 * 1024)
+  const fd = fs.openSync(file, 'r')
+  try {
+    let pos = 0
+    for (;;) {
+      const n = fs.readSync(fd, buf, 0, buf.length, pos)
+      if (n <= 0) break
+      h.update(buf.subarray(0, n))
+      pos += n
+    }
+  } finally {
+    fs.closeSync(fd)
+  }
+  return h.digest('hex')
 }
 
+/** @param {string} p */
 function rmTree(p) {
   try { fs.rmSync(p, { recursive: true, force: true }) } catch (e) { /* 清不掉留给错误文案点名 */ }
 }
@@ -64,8 +88,9 @@ function downloadTemplateSource(params, onProgress) {
 /**
  * 实现体。下载/旁证/探头/盘闸/tar 全注入,桩测不碰网络与真盘(哈希与 rename/unlink 走真 fs,落在临时目录)。
  * @param {{tag: string, destDir: string}} params
- * @param {(p: any) => void} [onProgress]
+ * @param {((p: any) => void) | null | undefined} onProgress 可传 null / 省略(测试与「不要进度」的调用方),但**位置必传**
  * @param {{downloadResumable: typeof downloadResumable, getText: typeof getText, existsSync: (p: string) => boolean, statfsSync: (p: string) => {bsize: number, bavail: number}, spawn: typeof spawn}} deps
+ * @returns {Promise<{ok: true, srcDir: string} | {ok: false, error: string}>}
  */
 async function downloadTemplateSourceWith(params, onProgress, deps) {
   const tag = String((params && params.tag) || '').trim()
@@ -88,8 +113,10 @@ async function downloadTemplateSourceWith(params, onProgress, deps) {
     return { ok: false, error: `目标目录已存在:${top}。请先移除它或换一个父目录(不覆盖既有目录)。` }
   }
   const urls = sourceUrls(tag)
+  /** @type {SourceJob} */
   const state = { phase: 'downloading', dl: null, child: null, canceled: false }
   active = state
+  /** @param {{stage: string, received?: number, total?: number}} p */
   const progress = (p) => {
     if (!onProgress) return
     try { onProgress(p) } catch (e) { /* 渲染层回调异常不许打死主流程 */ }
@@ -124,7 +151,7 @@ async function downloadTemplateSourceWith(params, onProgress, deps) {
     if (!/^[0-9a-f]{64}$/.test(expect)) {
       return { ok: false, error: '官方 sha256 旁证形态不认(不是 64 位十六进制),拒绝盲解。' }
     }
-    const actual = await hashFile(xz)
+    const actual = hashFile(xz)
     if (actual !== expect) {
       // 坏包不配续传:整包删掉,重试从零下
       try { fs.unlinkSync(xz) } catch (e) { /* ignore */ }

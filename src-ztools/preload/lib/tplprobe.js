@@ -265,7 +265,7 @@ async function probeSource(srcDir, deps) {
   // testedVersions 交出去的是**副本**:按引用交模块级常量,下游一次 .push() 就永久污染已实测表,
   // 而下面 `tested` 的判定用的正是同一个数组(计划书里 T8 只 `.includes` 读,不是活 bug,但不留给下游)。
   // STATIC_CHECKED_VERSIONS 不进返回值,所以不用同样处理。
-  const out = { ok: false, error: '', sourceVersion: '', tested: false, tagMatched: false, options: {}, cascades: {}, testedVersions: TESTED_VERSIONS.slice() }
+  const out = { ok: false, error: '', sourceVersion: '', tested: false, tagMatched: false, options: /** @type {OptionMap} */ ({}), cascades: {}, testedVersions: TESTED_VERSIONS.slice() }
   // SConstruct 是"这是不是 Godot 源码根"的唯一判据(与 buildtools.js 现有那道同步校验同一条)。
   if (!srcDir || !safeExists(existsSync, p('SConstruct'))) {
     out.error = '所选目录不是 Godot 源码根(缺 SConstruct),无法探测构建选项'

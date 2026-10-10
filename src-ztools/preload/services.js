@@ -153,11 +153,14 @@ const servicesImpl = {
   }),
   /** 卸载导出模板(删除模板目录与记录) */
   uninstallExportTemplates: (versionId) => templates.uninstallExportTemplates({ versionId }),
-  /** 模板库:列表 / 切换 / 删除 / 收编(存档根与两次 move 全在 tpllib.js) */
-  listTemplatePacks: (versionId) => tpllib.listForVersion(versionId),
-  activateTemplatePack: (versionId, packId) => tpllib.activateForVersion(versionId, packId),
-  deleteTemplatePack: (versionId, packId) => tpllib.deleteForVersion(versionId, packId),
-  adoptTemplatePack: (versionId) => tpllib.adoptForVersion(versionId),
+  /** 模板库:列表 / 切换 / 删除 / 收编(存档根与两次 move 全在 tpllib.js)。
+   *  async 只加在**注册边界**(契约 services.ts:130-136 声明的是 Promise,视图四处都已 await);
+   *  tpllib 内部仍全程同步 —— 两次 move 之间没有 await,所以不需要在途锁。别把 async 挪进 lib 里,
+   *  那会在两步之间开出让步点,把「第二步失败回滚第一步」的原子性拆掉。 */
+  listTemplatePacks: async (versionId) => tpllib.listForVersion(versionId),
+  activateTemplatePack: async (versionId, packId) => tpllib.activateForVersion(versionId, packId),
+  deleteTemplatePack: async (versionId, packId) => tpllib.deleteForVersion(versionId, packId),
+  adoptTemplatePack: async (versionId) => tpllib.adoptForVersion(versionId),
   /** 添加项目(目录或 project.godot 文件) */
   addProject: (inputPath) => projects.addProject(inputPath),
   /** 新建项目(生成 project.godot 与默认图标并加入列表) */
