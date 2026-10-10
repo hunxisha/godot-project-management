@@ -8,9 +8,6 @@ ZTools 插件。渲染层为 **Vue 3 + Vite + TypeScript**，Node 能力由 **pr
 
 支持平台：Windows / macOS / Linux。
 
-> **另提供桌面版（Tauri 2）**：同一套渲染层换宿主（Rust 核心 + 系统 WebView），无需安装 ZTools
-> 即可独立运行。构建与开发命令见下方「[桌面版](#桌面版tauri-2)」。
-
 ## 功能
 
 界面分 9 个页面（7 个顶栏标签 + 齿轮按钮进入的设置页 + 主题切换按钮）：
@@ -105,15 +102,7 @@ dev 版本走「tag → 小版本分支 → master」回退链，全部失败则
 │   │                             godotExe/projects/launcher/assets/backup/datatransfer/
 │   │                             diagnostics/docs + 基础设施 http/store/fsutil/taskqueue
 │   └── dist/                     构建产物(git 忽略)
-├── src-tauri/                    桌面版(Tauri 2 宿主:Rust 核心 + 系统 WebView)
-│   ├── src/main.rs               命令面(#[tauri::command] 全量注册)与 AppState
-│   ├── src/*.rs                  领域模块:store/projects/versions/releases/templates/
-│   │                             assets/backup/docs/launcher/extract + 基础设施
-│   │                             http/fsutil/taskqueue(与 preload/lib 同名域一一对应)
-│   ├── tests/parity.rs           与 ZTools 能力层的行为对齐断言
-│   ├── tauri.conf.json           bundler 配置(frontendDist = ../src-ztools/dist)
-│   └── RELEASE_NOTES.md          桌面版发布说明(CI 建草稿 Release 时取用)
-├── docs/                         设计文档(备份/主题/优化计划/GodotHub 集成策划/引擎文档浏览策划/Tauri 迁移策划/术语表)
+├── docs/                         设计文档(备份/主题/优化计划/GodotHub 集成策划/引擎文档浏览策划/术语表)
 └── */__tests__/                  回归测试(preload 与渲染层)
 ```
 
@@ -130,26 +119,6 @@ npm run build      # vue-tsc 类型检查 + 构建到 src-ztools/dist/
 
 术语（分片让出、原子落盘、来源过户、保留策略…）见 [`docs/glossary.md`](docs/glossary.md)。
 
-### 桌面版（Tauri 2）
-
-桌面版是**同一套渲染层的第二个宿主**：Rust 核心 + 系统 WebView。`src-tauri/src/` 的领域模块与
-`src-ztools/preload/lib/` 同名域一一对应，行为差异由 `src-tauri/tests/parity.rs` 钉住；渲染层靠
-`window.ztools.isDesktop` 分流少数位置（如项目页内嵌搜索框，替代 ZTools 的子输入栏），
-垫片在 `src/public/tauri-shim.js`。
-
-```bash
-npm run dev:tauri     # 开发:Vite + Tauri 窗口(渲染层热更新)
-npm run build:tauri   # 打包当前平台安装包到 src-tauri/target/release/bundle/
-npm run cargo:check   # 只编译 Rust 核心,不出包
-```
-
-桌面版数据存在应用数据目录的 `godot-workshop/db.json`，文档结构与 ZTools 宿主一致，
-因此「设置 → 数据导出/导入」可跨两端迁移；1.x 桌面版（已退役的 Electron 宿主）用户
-直接拷 `db.json` 过来即可，文件格式未变。版本号在 `src-tauri/Cargo.toml` 独立走线
-（`desktop-v*` tag 触发 `.github/workflows/desktop-release.yml` 三平台打包并建草稿 Release，
-发布说明取 `src-tauri/RELEASE_NOTES.md`），与插件 zpx 的发版节奏互不影响。
-迁移设计与实测记录见 `docs/tauri-migration-plan.md`。
-
 ## 测试
 
 ```bash
@@ -164,7 +133,7 @@ npm test           # 全部断言（数量随版本增长,各套件实况见下�
 | `npm run test:preload` / `:sandbox` | 备份领域层全套（后者先删掉 `setImmediate` 模拟宿主沙箱） |
 | `npm run test:preload:unit` | 版本解析、任务队列、文件工具、HTTP 下载与**断点续传**、引擎安装、**导出模板**、**一键导出**、启动参数拆分、**数据迁移/网络诊断**、**引擎文档库**、services 契约一致性、**文档存储 `_rev` 语义** |
 | `npm run test:addons` | 插件/素材来源、安装分流、清单卸载、复制过户（默认 + 沙箱各一遍） |
-| `npm run test:renderer` | 渲染层:市场搜索(分页/竞态守卫)/浏览/安装确认层、项目列表、已装操作、备份、文档数据层与 **BBCode 解析**、纯工具,**工具页十八项体检 + 修复管线 + 聚合判据**(引用索引、`project.godot`/`.import`/GDScript 解析、GDScript 顶层声明与场景 `[node]` 段解析、翻译 csv 首列、结论判定、按条勾选门;工具页目录内共 28 个 harness(27 个挂链),性能基准 `perf.test.mjs` 刻意不挂链;另有跨项目巡检 `useUpdateScan` 与桌面版垫片诚实性静态扫描 `tauriShimHonesty`) |
+| `npm run test:renderer` | 渲染层:市场搜索(分页/竞态守卫)/浏览/安装确认层、项目列表、已装操作、备份、文档数据层与 **BBCode 解析**、纯工具,**工具页十八项体检 + 修复管线 + 聚合判据**(引用索引、`project.godot`/`.import`/GDScript 解析、GDScript 顶层声明与场景 `[node]` 段解析、翻译 csv 首列、结论判定、按条勾选门;工具页目录内共 28 个 harness(27 个挂链),性能基准 `perf.test.mjs` 刻意不挂链;另有跨项目巡检 `useUpdateScan`) |
 
 提交与 PR 由 GitHub Actions 跑同一条命令（见 `.github/workflows/ci.yml`）。
 
@@ -185,11 +154,6 @@ npm test           # 全部断言（数量随版本增长,各套件实况见下�
 - ZTools 宿主（运行插件）
 - 网络：引擎与模板走 GitHub/官方 CDN，市场走 store.godotengine.org，均可通过设置中的 HTTP 代理转发
   （设置 → 网络诊断可一键探测三条链路）
-
-桌面版无需 ZTools 宿主，用系统 WebView 渲染（Windows 10+ 依赖 WebView2，Win11 自带；
-macOS 11+ 用系统 WKWebView；Linux 需 WebKitGTK）；
-当前为**免签名构建**：Windows 首次运行会有 SmartScreen「未知发布者」提示（选「更多信息 → 仍要运行」），
-macOS 需右键打开或到「隐私与安全性」放行。
 
 ## 许可
 

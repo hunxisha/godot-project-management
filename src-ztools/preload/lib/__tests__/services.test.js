@@ -40,8 +40,6 @@ const path = require('node:path')
 const ROOT = path.resolve(__dirname, '../../../..')
 const SERVICES = path.resolve(ROOT, 'src-ztools/preload/services.js')
 const DTS = path.resolve(ROOT, 'src/types/services.ts')
-const SHIM = path.resolve(ROOT, 'src/public/tauri-shim.js')
-const MAIN_RS = path.resolve(ROOT, 'src-tauri/src/main.rs')
 
 const tplprobe = require('../tplprobe.js')
 const tplprofile = require('../tplprofile.js')
@@ -438,23 +436,9 @@ async function main() {
       '★Ruling #62:src/types/services.ts 的 validateTemplateConfig 返回类型含 suppressed: string[]',
       JSON.stringify(vtcDecl.split(/\r?\n/).slice(0, 4)))
 
-    // 桌面垫片:这一条从「占位必须带 suppressed:[]」改成「必须接真命令」—— P0e-1 把
-    // validate_template_config 注册进了 Rust(src-tauri/src/main.rs),占位已摘。
-    // 意图不变:**渲染层不能拿到 undefined**。今天多钉一层「垫片引的命令真有人注册」,
-    // 否则 invoke 会在运行时裸拒绝,而扫描层什么都看不出来。
-    const shim = fs.readFileSync(SHIM, 'utf8')
-    ok(/validateTemplateConfig:\s*\(params\)\s*=>\s*invoke\(\s*'validate_template_config',\s*\{\s*params\s*\}\s*\)/.test(shim),
-      '★P0e-1:桌面垫片 validateTemplateConfig 已接 validate_template_config(退回占位或参数名漂移即红)',
-      JSON.stringify((shim.match(/validateTemplateConfig:[^\n]*/) || ['<没找到>'])[0].slice(0, 120)))
-    const mainRs = fs.readFileSync(MAIN_RS, 'utf8')
-    const handler = (mainRs.match(/generate_handler!\[([\s\S]*?)\]\)/) || [, ''])[1]
-    const eight = ['probe_template_source', 'list_template_features', 'validate_template_config', 'apply_template_preset',
-      'check_template_build_tools', 'build_template_pack', 'cancel_template_build_task', 'dismiss_template_build_task',
-      'download_template_source', 'cancel_template_source_download',
-      'list_template_packs', 'activate_template_pack', 'delete_template_pack', 'adopt_template_pack']
-    ok(eight.every((c) => handler.includes(c)) && eight.every((c) => new RegExp(`fn ${c}\\(`).test(mainRs)),
-      'P0e-1..4 十四条命令在 Rust 侧既有定义也在注册表(缺一半就是 invoke 裸拒绝)',
-      eight.filter((c) => !handler.includes(c) || !new RegExp(`fn ${c}\\(`).test(mainRs)).join(','))
+    // 桌面版（Tauri）已于 2026-10-11 整体拆除，原先钉「垫片已接真命令 + Rust 注册表齐补」的
+    // 两条源码扫描随之删除：被扫的 src/public/tauri-shim.js 与 src-tauri/src/main.rs 都不存在了。
+    // 本节剩下的是插件线自己的判据。
   }
 
   section('11. applyTemplatePreset:预设与 mode 都出自输出层(Ruling #74;契约+注册+垫片三处齐补)')
@@ -486,11 +470,7 @@ async function main() {
     const directNoRoot = await tplprobe.probeSource(TNOROOT)
     ok(rNoRoot.ok === false && rNoRoot.error === directNoRoot.error,
       '不是源码根 → 把探测层原句带回,不假成功', `${rNoRoot.ok}/${rNoRoot.error}`)
-    // 桌面垫片:P0e-1 起接真命令(同第 10 节那条,意图都是「渲染层不能拿到 undefined」)。
-    const shimPreset = fs.readFileSync(SHIM, 'utf8')
-    ok(/applyTemplatePreset:\s*\(name,\s*srcDir\)\s*=>\s*invoke\(\s*'apply_template_preset',\s*\{\s*name,\s*srcDir\s*\}\s*\)/.test(shimPreset),
-      'P0e-1:桌面垫片 applyTemplatePreset 已接 apply_template_preset(两个入参都得传,漏 srcDir 就等于拿不到探测结果)',
-      JSON.stringify((shimPreset.match(/applyTemplatePreset:[^\n]*/) || ['<没找到>'])[0].slice(0, 140)))
+    // 桌面垫片那条已随桌面版拆除(见第 10 节末的说明),本节只剩契约层与输出层的对账。
   }
 
   // ---------- 结果 ----------

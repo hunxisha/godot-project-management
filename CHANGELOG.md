@@ -2,8 +2,9 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-> **两条版本线**：ZTools 插件（`vX.Y.Z`）与桌面版（`desktop-vX.Y.Z`）各自独立排序，
-> 互不影响。桌面版的完整发布说明见对应 GitHub Release。
+> **桌面版（Tauri）版本线已于 2026-10-11 整体下线**：`src-tauri/`、垫片、三平台打包流水线与
+> `desktop-v*` 的 GitHub Release/tag 全部拆除，准备重做。历史代码可从 git 历史取回
+> （`f7700d1` 及其之前的提交）。本文件此后只记 ZTools 插件线（`vX.Y.Z`）。
 
 ## 2.1.0
 
@@ -43,74 +44,6 @@
 - 桌面版(Tauri)对自编译链路按「缺能力是状态不是假成功」如实占位
   —— 该占位已在同日发布的桌面版 2.1.0 重制版里接成真 Rust,见下方「桌面版 2.1.0」
 
-## 桌面版 2.1.0（2026-10-11 重新发布）
-
-与插件版 2.1.0 同一套渲染层与能力语义,但这一轮把**自编译模板整条链路接成了真 Rust** ——
-上一条插件发布段里写的「如实占位」到此作废。
-
-### 新增
-
-- **自编译导出模板 14 条命令接真 Rust**:`src-tauri/src/tpl/{features,probe,profile,api,build,exec,source,pack}.rs`
-  语义镜像插件版 JS 真源(判据不在 Rust 另立一套),探测 / 功能表 / 校验 / 预设 / 环境检测 / 编译 /
-  取消 / 销单 / 代下载 / 取消下载 / 模板库四操作全部注册;垫片对应 14 条占位摘掉,诚实性测试改为
-  反向钉「占位复辟或参数名漂移即红」
-- **真串行编译**:scons 子进程 + 实时日志尾 + 取消走 `taskkill /T /F` 杀进程树;任务快照经
-  `tasks://snapshot` 推送,垫片 `dispatch()` 补上 `tplbuild` 分流(此前收了回调却不分流 = 断链)
-- **自编译导入的自动存档**在桌面版同样生效:`install_export_templates` 补 `archive` / `versionId`,
-  存档失败不碰已成功的安装,原因挂 `archiveError`
-
-### 修复
-
-- **桌面版开屏「未检测到 ZTools 环境」的成因**:垫片放在 `src/public/`,而 `vite.config.js` 从未配
-  `publicDir`,Vite 按默认 `<root>/public` 找(该目录不存在)→ `/tauri-shim.js` 落到 SPA 回落返回
-  index.html,浏览器把 HTML 当 JS 解析报错。dev 模式已截图取证;打包路径同源,上一版包未做开屏验证
-- **`tauri dev` 编译期连带退出**:cargo 写 `src-tauri/target` 里 exe 的那一瞬间是独占锁定,chokidar
-  撞上抛未捕获 EBUSY → vite 崩 → dev 退。`server.watch.ignored` 忽略该目录(Vite 把这条**追加**在默认
-  忽略表之后,`node_modules` 那几条不受影响)
-- **模板库切换失败回滚留幽灵槽**:`activateTemplatePack` 换入失败时把「换出后写的那笔记账」又写一遍
-  —— 文件已搬回生效位、记录却写着「在槽里」,下次切换报「存档目录已不在(记录陈旧)」。Rust 侧不
-  bug 兼容(还原换出前的记录;换出时新建的那条直接撤掉),`tpllib.js` 同改并补两条断言
-- **typecheck 红闸门 55 条**:`npm test` 不含 typecheck,于是连着三批提交与一次发布没人看见;
-  本仓库从此「报绿」一律指 `npm run verify`(typecheck + test)
-
-### 工程
-
-- 双端逐字节 parity 六轮(14 条命令、约 50 例两边都跑真代码对照,profile 按字符串比而不是 JSON 深比较);
-  对照夹具 `src-tauri/tests/fixtures/tplsrc/` 逐字摘自真实编译过的 4.7.2-stable 源码树,并在
-  `.gitattributes` 里标 `-text` 禁换行转换
-- `cargo test` 97 单测(2 项 `#[ignore]` 为真机项)、`npm run verify` 71 套件全绿
-- 三平台产物经 `desktop-release.yml` 矩阵构建;数据格式与 2.0 完全一致,无需迁移
-- 仍未接(如实登记):桌面版 `export_template_status` 只按 tag 派模板目录、未走「统一取法」;
-  导出 / 文档两域的运行态发 `running` 而契约要 `exporting` / `dumping`;磁盘余量门槛(20 GB / 4 GB)
-  在桌面版不触发。其余 12 处方法(收藏、导出历史、`.godot` 缓存统计与清理、账号校验、安装预览与暂存、
-  插件更新检查、单类差异对比、文档库缓存统计与清理等)继续如实提示「暂不支持」
-
-## 桌面版 1.0.1
-
-修掉两个一上手就会撞到的问题,并给启动链路补上失败兜底。
-
-### 修复
-
-- **启动项目后软件自己关闭**(功能性缺陷):ZTools 宿主里 `hideMainWindow` 是「让插件窗口让位给
-  刚打开的编辑器」(宿主常驻托盘),桌面版照 Electron 字面语义实现成了关窗 —— 唯一窗口一关就触发
-  `window-all-closed → app.quit()`,于是点启动项目就变成「软件自己关了」;v1.0 又没有托盘,关掉
-  就再也找不回来。现改为**最小化**,策略抽到 `desktop/main/window-policy.js`,并由断言钉住
-  「隐藏 ≠ 关闭」
-- **下载引擎报「下载失败 HTTP 404」**:官方归档页会先把版本列出来,而官方 CDN 的版本映射(或上游
-  产物本身)可能还没跟上 —— 实测 `4.8-dev7` 归档页有条目、构建仓库里却一个桌面版包都没有。现在主
-  地址 404/403 时**自动回落官方构建仓库的同名直链**;两个地址都没有时给出「该版本暂无当前平台的
-  构建产物」而不是 HTTP 404,原始原因留在任务的 `errorDetail` 里备查
-- **引擎缺执行位不再掀掉宿主**:Linux 上解压出来的引擎若丢了执行位,`spawn` 的 `error` 是**异步**
-  事件,没人接收就是未捕获异常、主进程直接退出。现启动前补执行位并前置校验,真失败时经宿主通知
-  浮出,而不是静默或陪葬
-
-### 工程
-
-- 新增 `desktop/main/window-policy.js`(窗口策略纯函数)与 10 项断言;`launcher` 由 9 项扩到
-  **25** 项(启动失败各分支 + 异步 `error` 不再掀掉宿主);`install` 由 34 项扩到 **51** 项
-  (404 回落 / 双地址皆失 / 非 404 不换地址)
-- 断言总数 2,019 → **2,062** 项
-
 ## 2.0.1
 
 下载引擎 404 的兼容修复。同一处能力层改动,插件版与桌面版一并生效。
@@ -129,59 +62,6 @@
 - 回落做在 `src-ztools/preload/lib/releases.js`(构造备用直链)与 `install.js`(404 才换、换地址
   清 `.part`),属两宿主共用的能力层,故插件版与桌面版行为一致
 - 断言总数 2,019 → **2,062** 项
-
-## 桌面版 2.0.0
-
-**宿主换新：Electron → Tauri 2**。同一套渲染层与能力语义换到系统 WebView + Rust 核心，
-闲置内存占用从 ~200MB（私有）/~350MB（任务管理器）量级显著下降；安装体积同步缩小。
-
-### 架构
-
-- 能力层 30 个 Node 模块（7,596 行）以 Rust 重写：JSON 文档库（与 1.x 同格式，迁移=拷 db.json）、
-  断点续传下载（SHA-256 全文件校验）、安全解压（zip-slip 防护）、备份（zip/快照/恢复/保留策略）、
-  引擎下载与安装、导出模板、headless 导出、市场嗅探安装、文档库（po 翻译查表/索引打分/全文检索/跨版本 diff）
-- **双端逐字节 diff 验收**：同一 extension_api.json 跑 Electron 与 Rust 两条管线，五个产物文件字节级一致
-- **真实下载验收**：GitHub 归档 → 中途截断 → 续传 → 完成后解压出引擎可执行
-- 渲染层 Vue 零改动换宿主（阶段 A 数据层 async 化为前提）；Tauri 垫片按 34+ 命令映射，
-  未移植能力如实报错而非假成功
-
-### 工程
-
-- Rust 侧 46 组测试（含双端 diff 与真网下载验收）随 CI 的 cargo test 强制执行；渲染层 2,062 项断言保持全绿
-- `npm run dev:tauri / build:tauri` 本地开发与打包；三平台产物经 `desktop-release.yml` 的
-  cargo tauri build matrix 产出（免签名延续）
-
-## 桌面版 1.0.0
-
-首次发布：把「Godot 工坊」从 ZTools 插件发育为独立桌面应用，Windows / macOS / Linux 三平台可装即用，
-**无需安装 ZTools**，七页功能与插件版 2.0.0 对齐。
-
-### 架构
-
-- **同一套渲染层与能力层的第二个宿主，不是 fork**：两端共用 `src/`（Vue 3 渲染层）与
-  `src-ztools/preload/lib/`（30 个 Node 能力模块），差异全部收在新增的 `desktop/` 目录
-  与被 `window.ztools.isDesktop` 分流的位置内
-- 新增 `desktop/`：主进程（窗口 / 原生对话框与通知 / 单实例）、`window.ztools` 垫片
-  （db 四方法与 14 个宿主方法映射到 Electron）、JSON 文档存储
-  （CouchDB 风格 `_rev` 冲突语义、写穿落盘、`.bak` 上一代回滚与损坏留档）
-- 能力层对宿主的依赖实测只有 `window.ztools` 一个对象，磁盘路径全走
-  `os.tmpdir()/homedir()/APPDATA` 与设置项 —— 因此能力层**一行未改**即可复用
-
-### 桌面版差异
-
-- 项目页新增**页内搜索框**，替代 ZTools 的子输入栏（渲染层唯一改动，按开关分流）
-- 深浅色可**实时跟随系统**切换（插件版受限于宿主无切换回调）
-- 数据落在 Electron `userData/godot-workshop/db.json`，文档结构与宿主一致，
-  故插件版「设置 → 数据导出/导入」可直接双向迁移
-
-### 工程
-
-- 新增文档存储断言 47 项（`_rev` 冲突语义 / `allDocs` 前缀排序 / 持久化与损坏回滚 /
-  `store.js` 直连集成），断言总数 2,019 项
-- `npm run smoke:desktop` 无头自检：垫片挂载、能力层 91 个方法在位、db 往返、
-  Vue 挂载、控制台零报错，退出码即结果
-- 三平台打包（NSIS / dmg / AppImage + deb）走 `.github/workflows/desktop-release.yml`，
-  推送 `desktop-v*` tag 触发并建草稿 Release；免签名起步（见 Release 说明的首次运行指引）
 
 ## 2.0.0
 
