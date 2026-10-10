@@ -21,6 +21,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SHIM = path.resolve(__dirname, '../public/tauri-shim.js')
 const SRC = readFileSync(SHIM, 'utf8')
 const ROOT = path.resolve(__dirname, '../..')
+/** vite.config.js 的**生效**配置(直接 import,不正则读文本 —— 改写法不该把断言带红) */
+const VCFG = (await import(pathToFileURL(path.join(ROOT, 'vite.config.js')).href)).default
 
 let pass = 0
 const failures = []
@@ -204,7 +206,6 @@ section('6. 垫片必须真的被宿主取到(index.html 的 URL ↔ Vite public
   // publicDir,Vite 于是按默认的 <root>/public 找(该目录根本不存在),/tauri-shim.js 落到 SPA 回落
   // 返回 index.html(text/html),浏览器把 HTML 当 JS 解析报语法错,main.ts 的守卫弹「未检测到 ZTools 环境」。
   // 两端表现还不一样:ZTools 宿主自己注入 window.ztools,这个 404 完全看不出来 —— 只有桌面版会红。
-  const cfg = (await import(pathToFileURL(path.join(ROOT, 'vite.config.js')).href)).default
   const src = shimTagSrc(readFileSync(path.join(ROOT, 'index.html'), 'utf8'))
 
   // 自检(同第 0 节的道理):判定式必须分得开「当年那条红路」和「修好」,否则这一节会静默通过。
@@ -216,14 +217,32 @@ section('6. 垫片必须真的被宿主取到(index.html 的 URL ↔ Vite public
     '自检:type="module" 的垫片标签算红(异步执行会晚于主包)')
 
   ok(!!src, 'index.html 里有一条非 module 的脚本标签指向 tauri-shim.js', '找不到标签')
-  const served = servedShim(cfg, src)
+  const served = servedShim(VCFG, src)
   ok(!!src && existsSync(served), `请求 ${src} 取到的是垫片本体,而不是 SPA 回落的 index.html`,
-    `publicDir=${publicDirOf(cfg)}`)
+    `publicDir=${publicDirOf(VCFG)}`)
   // 反向核账:publicDir 里那份必须就是上面第 1~5 节扫描的那一份。复制一份到 public/ 也能让桌面版跑起来,
   // 但那些断言扫的就是假身了 —— 改垫片改到没人运行的那份,比不修更糟。
   ok(!!src && existsSync(served) && realpathSync(served) === realpathSync(SHIM),
     'publicDir 里那份与本文件扫描的那份是同一个文件(realpath 相同,否则第 1~5 节是自证)')
-  console.log(`  注:publicDir = ${publicDirOf(cfg)}`)
+  console.log(`  注:publicDir = ${publicDirOf(VCFG)}`)
+}
+
+section('7. tauri dev 不能被 cargo 写盘撞死(vite 得忽略 src-tauri/target)')
+{
+  // 2026-10-11 实测:cargo 重编到 414/418 时,vite 的 chokidar 撞上 target 下正被独占锁定的
+  // build_script_build.exe,抛未捕获的 EBUSY → vite 进程死 → tauri 报 beforeDevCommand 非零退出,
+  // 桌面版连窗口都没有。Vite 默认只忽略 node_modules/.git/test-results/cacheDir/outDir,
+  // 而 target/ 既在 root 之内又是每次编译都在写的目录,必须自己列进 ignored。
+  // 只认函数式判定:Vite 的 glob 要经 escapePath,Windows 反斜杠形态正是这次事故的一部分。
+  const ign = [].concat(VCFG.server?.watch?.ignored ?? []).filter((f) => typeof f === 'function')
+  ok(ign.length > 0, 'server.watch.ignored 给了函数式判定(Vite 会把函数追加进默认忽略表后面)',
+    JSON.stringify(VCFG.server?.watch?.ignored))
+  const ignoredByUs = (p) => ign.some((f) => f(p) === true)
+  ok(ignoredByUs(path.join(ROOT, 'src-tauri', 'target', 'debug', 'build', 'godot-workshop-3cc26e8d',
+    'build_script_build-3cc26e8d.exe')), '崩溃现场那条(cargo 正写的 target 下 exe)被忽略')
+  // 反向:误伤源码 = 热更新静默失效,那比崩更难查。
+  ok(!ignoredByUs(path.join(ROOT, 'src', 'App.vue')) && !ignoredByUs(path.join(ROOT, 'src-tauri', 'src', 'main.rs')),
+    '不误伤 src 与 src-tauri/src(否则改代码不再热更新)', path.join(ROOT, 'src', 'App.vue'))
 }
 
 console.log(`\n${'='.repeat(56)}`)

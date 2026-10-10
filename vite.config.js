@@ -14,7 +14,14 @@ export default defineConfig({
     strictPort: true,
     // Windows 上 localhost 可能解析为 IPv6(::1),而 ZTools webview 用 IPv4 访问会连接被拒导致白屏。
     // 明确绑定 127.0.0.1,与 plugin.json 的 development.main 保持一致
-    host: '127.0.0.1'
+    host: '127.0.0.1',
+    watch: {
+      // cargo 往 src-tauri/target 写 exe 的那一瞬间文件是独占锁定的,chokidar 撞上就抛未捕获的 EBUSY,
+      // vite 崩 → tauri dev 连带退出(Vite 默认只忽略 node_modules/.git/test-results/cacheDir/outDir,
+      // 而 target/ 在 root 之内)。写成函数是为了同时吃 Windows 的反斜杠形态;Vite 会把这条**追加**到
+      // 默认忽略表后面,不会把 node_modules 那几条顶掉。
+      ignored: [(p) => typeof p === 'string' && /[\\/]src-tauri[\\/]target([\\/]|$)/.test(p)]
+    }
   },
   build: {
     outDir: fileURLToPath(new URL('./src-ztools/dist', import.meta.url)),
