@@ -9,6 +9,7 @@
 //   tplsource.js   (220 行,代下载)   →  tpl/source.rs   (P0e-3)
 //   tpllib.js      (342 行,模板库)   →  tpl/pack.rs     (P0e-4)
 pub mod api;
+pub mod build;
 pub mod features;
 pub mod probe;
 pub mod profile;
