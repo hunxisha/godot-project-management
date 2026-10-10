@@ -44,11 +44,25 @@ const suppressed = ref<string[]>([])
 const skippedOk = ref(false)                    // 用户点过「仍然继续」后为真
 const mode = ref<TplProfileMode>('default-on')  // 未选预设时的编译模式;选了预设由宿主重给(Ruling #74)
 const enqueuing = ref(false)                    // 「开始编译」在途(校验 + 入队):双击重入闸 + 按钮禁用态(Ruling #80)
+const srcDl = ref<{ stage: string; received: number; total: number } | null>(null)  // 代下载进度(_null = 不在途)
+const srcDlBusy = ref(false)                    // 代下载在途:入口按钮重入闸
+const srcDlErr = ref('')                        // 代下载失败原因:单独一位,不藏面板(Ruling #82 同口径)
 
 /** 编译命令预览:只是示意形状 —— 真实命令行上还挂着按勾选下发的编译选项(下方提示已明说),不在这里拼 */
 const commandPreview = computed(() =>
   `scons platform=windows target=template_release build_profile="<本次生成的 profile 文件>" -j${checkResult.value?.cpuCount || '?'}`
 )
+/** 代下载进度行文案:三阶段各说各的,下载期带 MB 数 */
+const srcDlText = computed(() => {
+  const p = srcDl.value
+  if (!p) return ''
+  const mb = (n: number) => (n / 1048576).toFixed(1)
+  if (p.stage === 'downloading') {
+    return p.total > 0 ? `正在下载源码包… ${mb(p.received)} / ${mb(p.total)} MB` : `正在下载源码包… ${mb(p.received)} MB`
+  }
+  if (p.stage === 'hashing') return '正在与官方 sha256 旁证比对…'
+  return '正在用 tar.exe 解包…'
+})
 /** 目录名默认值:tag 派生(模板给官方同 tag 引擎用正好;自编译引擎要按它的 --version 改) */
 const defaultVersionDir = computed(() => String(props.tag || '').replace(/-/g, '.'))
 const importDirName = ref('')
@@ -187,6 +201,9 @@ watch(
     skippedOk.value = false
     enqueuing.value = false
     mode.value = 'default-on'
+    srcDl.value = null
+    srcDlBusy.value = false
+    srcDlErr.value = ''
     if (validateTimer) { clearTimeout(validateTimer); validateTimer = null }
     if (loadTimer) { clearTimeout(loadTimer); loadTimer = null }
     runCheck()
@@ -203,6 +220,34 @@ function pickSrc() {
   void pickDirectory('选择 Godot 源码根(含 SConstruct)').then((d) => {
     if (d) srcDir.value = d
   })
+}
+
+/** 代下载源码:父目录每次选(不静默写用户盘),成功才把解包根回填 srcDir(既有 watch 自动拉面板) */
+async function startSrcDownload() {
+  if (srcDlBusy.value) return
+  const parent = await pickDirectory('选择源码下载与解包的父目录(将在其中创建 godot-<tag>/)')
+  if (!parent) return
+  srcDlBusy.value = true
+  srcDlErr.value = ''
+  srcDl.value = { stage: 'downloading', received: 0, total: 0 }
+  try {
+    const r = await window.services.downloadTemplateSource(
+      { tag: props.tag, destDir: parent },
+      (p) => { srcDl.value = { stage: p.stage, received: p.received || 0, total: p.total || 0 } }
+    )
+    if (!r.ok) {
+      srcDlErr.value = r.error || '代下载源码失败'
+      return
+    }
+    srcDir.value = r.srcDir
+  } finally {
+    srcDlBusy.value = false
+    srcDl.value = null
+  }
+}
+
+function cancelSrcDownload() {
+  window.services.cancelTemplateSourceDownload()
 }
 
 async function startBuild() {
@@ -298,7 +343,12 @@ function close() {
           <span>Godot 源码根</span>
           <input v-model="srcDir" class="select grow" placeholder="含 SConstruct 的目录(如 E:\godot-4.7.2-stable)">
           <button class="btn small" @click="pickSrc">选择目录</button>
+          <button class="btn small" :disabled="srcDlBusy || !checkResult?.tarPath" @click="startSrcDownload">下载该版本源码</button>
+          <button v-if="srcDlBusy" class="btn small ghost" @click="cancelSrcDownload">取消下载</button>
         </label>
+        <p v-if="checkResult && !checkResult.tarPath" class="hint">未找到 System32\tar.exe,无法代下载源码;请手动准备源码目录后由「选择目录」指入。</p>
+        <p v-if="srcDl" class="hint"><span class="spin"></span> {{ srcDlText }}</p>
+        <p v-if="srcDlErr" class="hint bad-line">{{ srcDlErr }}</p>
         <p v-if="panelErr" class="hint bad-line">{{ panelErr }}</p>
         <template v-else>
           <!-- 预设失败只藏这一行:面板与「开始编译」照常可点(重试预设不用先去动输入框;Ruling #82) -->

@@ -123,6 +123,9 @@ function mapTemplateFileName(name) {
 /** vswhere 的固定位置(Windows SDK/VS Installer 的官方落点,本机实测存在) */
 const VSWHERE = 'C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe'
 
+/** Windows 自带 tar(bsdtar,Win10 1803+;吃得动 .tar.xz)的固定落点;代下载解包与第四探头共用 */
+const TAR_EXE = 'C:\\Windows\\System32\\tar.exe'
+
 /** vswhere 找不到时的候选安装根(常见盘符 × 常见 SKU) */
 function vcvarsFallbackDirs() {
   const roots = ['C:', 'D:', 'E:', 'D:\\apps', 'E:\\apps']
@@ -136,7 +139,7 @@ function vcvarsFallbackDirs() {
 /**
  * 工具链检测(只读;跑三个子进程,总量毫秒到秒级)。
  * 缺什么就把「下一步动作」放进 problems —— 闸门③的要求:不许只说缺,不说怎么补。
- * @returns {Promise<{ok: boolean, pythonVersion: string, pythonPath: string, sconsVersion: string, sconsPath: string, vcvarsPath: string, cpuCount: number, problems: string[]}>}
+ * @returns {Promise<{ok: boolean, pythonVersion: string, pythonPath: string, sconsVersion: string, sconsPath: string, vcvarsPath: string, tarPath: string, cpuCount: number, problems: string[]}>}
  */
 function checkTemplateBuildTools() {
   return checkTemplateBuildToolsWith(
@@ -153,8 +156,8 @@ function checkTemplateBuildTools() {
  */
 async function checkTemplateBuildToolsWith(env, deps) {
   const cpuCount = deps.cpuCount
-  /** @type {{ok: boolean, pythonVersion: string, pythonPath: string, sconsVersion: string, sconsPath: string, vcvarsPath: string, cpuCount: number, problems: string[]}} */
-  const out = { ok: false, pythonVersion: '', pythonPath: '', sconsVersion: '', sconsPath: '', vcvarsPath: '', cpuCount, problems: [] }
+  /** @type {{ok: boolean, pythonVersion: string, pythonPath: string, sconsVersion: string, sconsPath: string, vcvarsPath: string, tarPath: string, cpuCount: number, problems: string[]}} */
+  const out = { ok: false, pythonVersion: '', pythonPath: '', sconsVersion: '', sconsPath: '', vcvarsPath: '', tarPath: '', cpuCount, problems: [] }
   if (env.platform !== 'win32') {
     out.problems.push('自编译模板构建目前只在 Windows 宿主提供(需要 MSVC 与 vcvars 环境)。')
     return out
@@ -216,6 +219,9 @@ async function checkTemplateBuildToolsWith(env, deps) {
   } catch (e) { /* 没有 Installer 就直接走 fallback */ }
   out.vcvarsPath = pickVcvars(vsOut, vcvarsFallbackDirs(), (p) => deps.existsSync(p))
   if (!out.vcvarsPath) out.problems.push('没有找到 MSVC 工具链。请安装 Visual Studio(Community 即可)并在 Installer 里勾选「使用 C++ 的桌面开发」。')
+  // 第四探头:tar.exe 只服务代下载的解包步(手动备源码 + 编译都不吃 tar)—— 缺只回空串,
+  // 不进 problems、不拖 ok:向导的「下载该版本源码」按钮按这个字段禁用并给如实文案
+  out.tarPath = deps.existsSync(TAR_EXE) ? TAR_EXE : ''
   out.ok = out.problems.length === 0
   // 检测到的 vcvars / python / scons 通道缓存给构建步;重跑检测会覆盖 —— 换了安装位后重检即可生效
   checkCache.vcvarsPath = out.vcvarsPath
@@ -521,6 +527,7 @@ module.exports = {
   pickVcvars,
   mapTemplateFileName,
   vcvarsFallbackDirs,
+  TAR_EXE,
   checkCache,
   checkTemplateBuildTools,
   checkTemplateBuildToolsWith,

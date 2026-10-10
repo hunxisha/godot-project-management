@@ -181,10 +181,12 @@
     validateTemplateConfig: () => Promise.resolve({ ok: false, issues: [], suppressed: [], hardBlocks: [{ itemId: 'source', flag: '', why: '桌面版暂不支持自编译模板', action: '请使用 ZTools 插件版', skippable: false }] }),
     applyTemplatePreset: () => Promise.resolve({ ok: false, error: '桌面版暂不支持自编译模板,请使用 ZTools 插件版。' }),
     checkTemplateBuildTools: () => Promise.resolve({
-      ok: false, pythonVersion: '', pythonPath: '', sconsVersion: '', sconsPath: '', vcvarsPath: '',
+      ok: false, pythonVersion: '', pythonPath: '', sconsVersion: '', sconsPath: '', vcvarsPath: '', tarPath: '',
       cpuCount: navigator.hardwareConcurrency || 0,
       problems: ['桌面版暂不支持自编译模板构建,请使用 ZTools 插件版。']
     }),
+    downloadTemplateSource: () => Promise.resolve({ ok: false, error: '桌面版暂不支持代下载源码,请使用 ZTools 插件版。' }),
+    cancelTemplateSourceDownload: () => { /* 桌面版没有在途任务,取消是空操作 */ },
     buildTemplatePack: () => Promise.resolve({ ok: false, error: '桌面版暂不支持自编译模板构建,请使用 ZTools 插件版。' }),
     watchTemplateBuildTasks: (fn) => { listeners.tplbuild.push(fn); return () => { listeners.tplbuild = listeners.tplbuild.filter((f) => f !== fn) } },
     cancelTemplateBuildTask: (id) => { void id },

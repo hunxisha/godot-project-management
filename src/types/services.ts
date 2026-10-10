@@ -137,9 +137,19 @@ export interface Services {
     /** PATH 通道命中时 where scons 的落点(模块通道为空串);给用户看「编译实际跑哪支 scons.exe」 */
     sconsPath: string
     vcvarsPath: string
+    /** System32\tar.exe 落点(空串 = 缺);只决定代下载按钮可用与否,不进 problems、不影响 ok */
+    tarPath: string
     cpuCount: number
     problems: string[]
   }>
+  /** 代下载源码:官方 godot-<tag>.tar.xz + .sha256 旁证逐字节比对 + tar.exe 解包到 <destDir>/godot-<tag>/。
+   *  sha 不匹配或旁证缺失一律拒解;成功回解包根。仅 ZTools 宿主真实现 */
+  downloadTemplateSource(
+    params: { tag: string, destDir: string },
+    onProgress?: (p: { stage: 'downloading' | 'hashing' | 'extracting', received?: number, total?: number }) => void
+  ): Promise<{ ok: true, srcDir: string } | { ok: false, error: string }>
+  /** 取消在途代下载:下载期留 .part 供续传;解包期 kill tar 并删本次自创的 godot-<tag>/ */
+  cancelTemplateSourceDownload(): void
   /** 发起自编译(入队;srcDir 必须是 Godot 源码根)。完成后任务带 stageDir(templates/ 顶层)
    *  与 versionDir,渲染层凭 stageDir 走 installExportTemplates 的目录形态导入。
    *  `features` 是**必填**(执行层没有它就等于替面板猜一套默认值,同步拒绝 `缺少功能勾选结果`);

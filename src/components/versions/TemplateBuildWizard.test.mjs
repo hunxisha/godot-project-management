@@ -13,7 +13,8 @@
 //      T10-①(srcDirVar 反查改走 pickDirectory → @click → v-model 链,不再锚「源码根」文案)、
 //      T10-②(watch 形态认 ref 直传与 `() => srcDir.value` 两种等价写法);
 //   7. 第一步检测的 Python 行渲染宿主回的 pythonPath(是哪支解释器由它自报 sys.executable,
-//      宿主侧对应断言在 buildtools.test.js §2)。
+//      宿主侧对应断言在 buildtools.test.js §2);
+//   8. 代下载入口(P0d):按钮接线(宿主方法 → 解包根回填 srcDir)、tar 缺禁用 + 如实文案、取消转发。
 //
 // 写法纪律(沿用 TemplateFeaturePanel.test.mjs 的轮 2 口径):
 //   · 断言只钉**方向与形状**,函数名/变量名一律从模板绑定或赋值处**反查**,改名与等价写法都该继续绿;
@@ -350,6 +351,23 @@ ok(!!checkVar && new RegExp('v-if="' + checkVar + '\\.pythonPath"').test(TPL_COD
 ok(!!checkVar && new RegExp('v-if="' + checkVar + '\\.sconsPath"').test(TPL_CODE) && new RegExp('\\{\\{\\s*' + checkVar + '\\.sconsPath\\s*\\}\\}').test(TPL_CODE),
   '★SCons 行同样渲染宿主从 PATH 解析的 sconsPath(编译实际跑哪支 scons.exe 不再靠猜;删掉路径行 → 红)',
   JSON.stringify({ checkVar }))
+
+console.log('\n=== 10. 代下载入口:接线 + tar 缺的如实态 ===')
+const dlBtn = buttonAt('下载该版本源码')
+const dlClick = clickNameOf(dlBtn)
+const dlBody = defOf(dlClick) || ''
+ok(!!dlClick && /downloadTemplateSource\(/.test(dlBody) &&
+  new RegExp('\\b' + srcDirVar + '\\.value\\s*=[^\\n]*\\.srcDir\\b').test(dlBody) &&
+  /:disabled="[^"]*tarPath/.test(dlBtn),
+  '★代下载按钮接线齐:点击 → 宿主方法 → 解包根回填 srcDir;tar 缺按 tarPath 禁用(删任一处 → 红:按钮成死的或回填断链)',
+  JSON.stringify({ dlClick }))
+const cancelBtn = buttonAt('取消下载')
+const cancelClick = clickNameOf(cancelBtn)
+const cancelBody = defOf(cancelClick) || ''
+ok(!!cancelClick && /cancelTemplateSourceDownload\(/.test(cancelBody) &&
+  new RegExp('v-if="' + checkVar + '[^"]*tarPath').test(TPL_CODE),
+  '★取消按钮真转宿主取消;tar 缺的如实文案按检测位渲染(删任一处 → 红:取消是死的 / 缺 tar 却不说为什么)',
+  JSON.stringify({ cancelClick }))
 
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) { for (const f of failures) console.log('  - ' + f); process.exit(1) }

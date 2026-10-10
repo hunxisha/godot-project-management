@@ -19,6 +19,7 @@ const diagnostics = require('./lib/diagnostics')
 const docs = require('./lib/docs')
 const inspectfs = require('./lib/inspectfs')
 const buildtools = require('./lib/buildtools')
+const tplsource = require('./lib/tplsource')
 const tplfeatures = require('./lib/tplfeatures')
 const tplprobe = require('./lib/tplprobe')
 const tplprofile = require('./lib/tplprofile')
@@ -129,6 +130,10 @@ const servicesImpl = {
   },
   /** 工具链检测(python/SCons/vcvars) */
   checkTemplateBuildTools: () => buildtools.checkTemplateBuildTools(),
+  /** 代下载源码:官方 tar.xz + sha256 旁证比对 + tar.exe 解包(各闸在 tplsource.js) */
+  downloadTemplateSource: (params, onProgress) => tplsource.downloadTemplateSource(params, onProgress),
+  /** 取消在途代下载 */
+  cancelTemplateSourceDownload: () => tplsource.cancelTemplateSourceDownload(),
   /** 发起自编译(入队;完成后任务带 stageDir,渲染层走目录形态导入) */
   buildTemplatePack: (params) => buildtools.buildTemplatePack(params),
   /** 订阅自编译任务快照 */

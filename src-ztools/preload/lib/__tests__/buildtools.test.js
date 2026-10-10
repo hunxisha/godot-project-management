@@ -257,7 +257,7 @@ async function main() {
     // existsSync 桩:检测的 vcvars 落点是 Windows 路径,Linux CI 上真 existsSync 必然 false ——
     // 注入桩让「三件套齐」的流程跨平台确定(真实存在性由真宿主的人工验收 T8 管)
     const r = await B.checkTemplateBuildToolsWith({ platform: 'win32' },
-      { execSync: execStub, cpuCount: 16, existsSync: (p) => p.includes('D:') })
+      { execSync: execStub, cpuCount: 16, existsSync: (p) => p.includes('D:') || /tar\.exe/.test(p) })
     ok(r.ok === true && r.pythonVersion === '3.12.13' && r.sconsVersion === '4.10.1' &&
       r.vcvarsPath.includes('D:\\apps\\Microsoft Visual Studio\\Community') && r.cpuCount === 16 && r.problems.length === 0,
       '★三件套齐:ok、版本、vcvars(经 vswhere 找到非默认盘安装位)、核数都对', JSON.stringify(r))
@@ -269,6 +269,8 @@ async function main() {
       '★路径问命中的解释器自己拿 sys.executable(删掉那次 execSync → 空串 → 红:弹窗只剩版本号,用户不知道装 SCons 该用哪支 python.exe)',
       r.pythonPath)
     ok(B.checkCache.vcvarsPath === r.vcvarsPath, '检测结果缓存给构建步(向导第一步本来就是它)')
+    ok(r.tarPath === 'C:\\Windows\\System32\\tar.exe',
+      '★第四探头 tar.exe:在 → tarPath 回固定落点(代下载按钮靠它启用)', r.tarPath)
   }
   {
     // scons 不在 PATH、模块在命中解释器里:检测回落模块通道,bat 随之改由该解释器起
@@ -317,6 +319,8 @@ async function main() {
       '★全缺:problems 各带下一步动作(python 缺时 SCons 没有运行入口,装好 python 重检才会轮到它)',
       JSON.stringify(r.problems))
     ok(B.checkCache.vcvarsPath === '', '缺工具链时不给构建步留路径')
+    ok(r.tarPath === '',
+      '★tar 探头缺 → 空串且不进 problems(手动备源码与编译都不吃 tar,不许拖 ok 下水)')
   }
 
   // ---------- 3. 构建主流程 ----------
