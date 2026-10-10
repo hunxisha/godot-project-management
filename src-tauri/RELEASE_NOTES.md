@@ -7,16 +7,26 @@
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| Windows | `Godot.Workshop_2.0.0_x64-setup.exe` | 64 位 NSIS 安装包 |
-| macOS (Apple 芯片) | `Godot.Workshop_2.0.0_aarch64.dmg` | M 系列芯片 |
-| Linux | `Godot.Workshop_2.0.0_amd64.AppImage` | 免安装，`chmod +x` 后直接运行 |
-| Linux | `Godot.Workshop_2.0.0_amd64.deb` | Debian/Ubuntu 系 |
+| Windows | `Godot.Workshop_2.1.0_x64-setup.exe` | 64 位 NSIS 安装包 |
+| macOS (Apple 芯片) | `Godot.Workshop_2.1.0_aarch64.dmg` | M 系列芯片 |
+| Linux | `Godot.Workshop_2.1.0_amd64.AppImage` | 免安装，`chmod +x` 后直接运行 |
+| Linux | `Godot.Workshop_2.1.0_amd64.deb` | Debian/Ubuntu 系 |
 
 ### 当前是免签名构建
 
 - **Windows**：首次运行会出现 SmartScreen「未知发布者」提示 → 点「更多信息」→「仍要运行」。
 - **macOS**：首次打开需**右键 → 打开**，或在「系统设置 → 隐私与安全性」中放行。
 - **Linux**：无额外提示。
+
+## 2.1.0（本版）
+
+与插件版 2.1.0 同一套渲染层与能力语义：
+
+- **工具页**：18 项体检（扫描 / 报告 / 一键修复）上线，界面改版为摘要带 + 双栏 + 类别聚合流
+- **版本页**：模板状态悬停显示真实安装路径，新增「模板目录」直开落点
+- **如实性**：「自编译模板」向导与「模板库」在桌面版给出「请使用 ZTools 插件版」的明确说明
+  （不假成功、不静默消失）；收藏星标禁用并说明原因；一批原本会静默吞错的入口改为如实报错
+- 数据格式与 2.0 完全一致，直接覆盖安装即可，无需迁移
 
 ## 2.0.0：宿主换新（Electron → Tauri 2）
 

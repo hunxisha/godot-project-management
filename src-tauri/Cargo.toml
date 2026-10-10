@@ -1,6 +1,6 @@
 [package]
 name = "godot-workshop"
-version = "2.0.0"
+version = "2.1.0"
 description = "Godot 工坊桌面版(Tauri 宿主)"
 authors = ["hunxisha"]
 edition = "2021"
