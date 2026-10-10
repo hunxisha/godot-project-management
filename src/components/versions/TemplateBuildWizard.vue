@@ -34,7 +34,8 @@ let unwatch: (() => void) | null = null
 // ---------- 第二步:功能勾选与静态校验(数据与判定全部来自宿主) ----------
 const panelItems = ref<FeatureWithProbe[]>([])
 const features = ref<Record<string, boolean>>({})
-const panelErr = ref('')
+const panelErr = ref('')                        // 拉面板失败的原因(这一位同时决定"面板与开始编译按钮都不出")
+const presetErr = ref('')                       // 预设失败的原因:单独一位,只藏自己那行字,不藏面板(Ruling #82)
 const sourceVersion = ref('')
 const tested = ref(true)
 const issues = ref<TplIssue[]>([])
@@ -42,6 +43,7 @@ const hardBlocks = ref<TplIssue[]>([])
 const suppressed = ref<string[]>([])
 const skippedOk = ref(false)                    // 用户点过「仍然继续」后为真
 const mode = ref<TplProfileMode>('default-on')  // 未选预设时的编译模式;选了预设由宿主重给(Ruling #74)
+const enqueuing = ref(false)                    // 「开始编译」在途(校验 + 入队):双击重入闸 + 按钮禁用态(Ruling #80)
 
 /** 编译命令预览:只是示意形状 —— 真实命令行上还挂着按勾选下发的编译选项(下方提示已明说),不在这里拼 */
 const commandPreview = computed(() =>
@@ -53,6 +55,7 @@ const importDirName = ref('')
 
 let validateTimer: ReturnType<typeof setTimeout> | null = null
 let loadTimer: ReturnType<typeof setTimeout> | null = null
+let presetSeq = 0 // 预设连点的请求序号:结果回来时只让最后一次的响应落地(Ruling #81)
 
 /** 勾选变化 → 去抖跑一次校验(Ruling #75):连带变灰、软问题、按钮禁用态都跟着勾选即时更新 */
 function scheduleValidate() {
@@ -69,6 +72,7 @@ function scheduleLoadPanel(dir: string) {
 /** 面板数据 = 宿主的能力表 + 这份源码的探测结果。探测失败(不是源码根 / 整表空)就拒绝进面板 */
 async function loadPanel(dir: string) {
   skippedOk.value = false
+  presetErr.value = '' // 换目录即清上一轮的预设失败(Ruling #82/#83 同口径:错误不跨目录挂着)
   const r = await window.services.listTemplateFeatures(dir)
   if (dir !== srcDir.value) return // 输入已经改到别的目录了:这份响应作废,过时数据不落到面板上
   if (!r.ok) {
@@ -83,6 +87,7 @@ async function loadPanel(dir: string) {
   for (const it of panelItems.value) init[it.id] = it.present ? it.defaultOn : false
   features.value = init
   const probe = await window.services.probeTemplateSource(dir)
+  if (dir !== srcDir.value) return // 探测期间输入又改了:这份版本备注属于旧目录,不盖到新面板上(Ruling #81)
   sourceVersion.value = probe.sourceVersion || ''
   tested.value = !!probe.tested
 }
@@ -95,11 +100,14 @@ async function runValidate() {
     suppressed.value = []
     return
   }
+  const dir = srcDir.value
+  const sel = features.value
   const v = await window.services.validateTemplateConfig({
     srcDir: srcDir.value,
     features: features.value,
     mode: mode.value
   })
+  if (dir !== srcDir.value || sel !== features.value) return // 结果回来时输入已经变了:这份校验过时,不覆盖后来者(Ruling #81)
   issues.value = v.issues || []
   hardBlocks.value = v.hardBlocks || []
   suppressed.value = v.suppressed || []
@@ -107,32 +115,44 @@ async function runValidate() {
 
 /** 预设:三档各关哪些项、编译模式是什么都由宿主给(Ruling #74:判定不进 .vue,向导只透传) */
 async function applyPreset(name: string) {
+  const dir = srcDir.value
+  const seq = ++presetSeq
   const r = await window.services.applyTemplatePreset(name, srcDir.value)
+  if (seq !== presetSeq || dir !== srcDir.value) return // 连点或中途换了目录:这份预设结果过时,不覆盖后来者(Ruling #81)
   if (!r.ok) {
-    panelErr.value = r.error || '预设应用失败'
+    presetErr.value = r.error || '预设应用失败'
     return
   }
+  presetErr.value = ''
   skippedOk.value = false
   features.value = r.features
   mode.value = r.mode
 }
 
-/** 点「开始编译」:先让宿主再校一次 —— 硬拦不给编,软问题要用户先看过 */
+/** 点「开始编译」:先让宿主再校一次 —— 硬拦不给编,软问题要用户先看过。在途时再点直接早退(Ruling #80 重入闸) */
 async function tryStartBuild() {
-  await runValidate()
-  if (hardBlocks.value.length) return
-  if (issues.value.length && !skippedOk.value) return
-  await startBuild()
+  if (enqueuing.value) return // await 期间第二次点击:上一次还没走完,别起第二条编译
+  enqueuing.value = true
+  try {
+    await runValidate()
+    if (hardBlocks.value.length) return
+    if (issues.value.length && !skippedOk.value) return
+    await startBuild()
+  } finally {
+    enqueuing.value = false // 无论编到哪一步(硬拦早退 / 同步拒绝 / 成功入队)都放下闸
+  }
 }
 
 watch(features, scheduleValidate)
 watch(srcDir, (dir) => {
   skippedOk.value = false
+  buildErr.value = '' // 上一轮的同步拒绝原因属于旧目录:换目录即清,不挂在按钮上方(Ruling #83)
   if (!dir) {
     if (loadTimer) { clearTimeout(loadTimer); loadTimer = null }
     panelItems.value = []
     features.value = {}
     panelErr.value = ''
+    presetErr.value = ''
     return
   }
   scheduleLoadPanel(dir)
@@ -154,10 +174,12 @@ watch(
     panelItems.value = []
     features.value = {}
     panelErr.value = ''
+    presetErr.value = ''
     issues.value = []
     hardBlocks.value = []
     suppressed.value = []
     skippedOk.value = false
+    enqueuing.value = false
     mode.value = 'default-on'
     if (validateTimer) { clearTimeout(validateTimer); validateTimer = null }
     if (loadTimer) { clearTimeout(loadTimer); loadTimer = null }
@@ -265,6 +287,8 @@ function close() {
         </label>
         <p v-if="panelErr" class="hint bad-line">{{ panelErr }}</p>
         <template v-else>
+          <!-- 预设失败只藏这一行:面板与「开始编译」照常可点(重试预设不用先去动输入框;Ruling #82) -->
+          <p v-if="presetErr" class="hint bad-line">{{ presetErr }}</p>
           <TemplateFeaturePanel
             v-model="features"
             :items="panelItems"
@@ -289,7 +313,7 @@ function close() {
           </ul>
           <p v-if="buildErr" class="hint bad-line">{{ buildErr }}</p>
           <div class="acts-row">
-            <button class="btn primary" :disabled="!srcDir || !panelItems.length || hardBlocks.length > 0 || (issues.length > 0 && !skippedOk)" @click="tryStartBuild">开始编译</button>
+            <button class="btn primary" :disabled="enqueuing || !srcDir || !panelItems.length || hardBlocks.length > 0 || (issues.length > 0 && !skippedOk)" @click="tryStartBuild">开始编译</button>
           </div>
         </template>
       </template>

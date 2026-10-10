@@ -3,16 +3,19 @@
 // 为什么只能扫源码:.vue 要 vite + @vitejs/plugin-vue + DOM 才载得进来,本仓库的 Node harness 没有这套
 // (先例:同目录 TemplateFeaturePanel.test.mjs 头部;台账 deferred ⑥ 已判不为两条断言引新依赖)。
 //
-// 这份闸门守四件事(每条断言都做过「拿掉对应实现就要红」的变异自检,逐条见 task-10-report.md §变异表):
+// 这份闸门守五件事(每条断言都做过「拿掉对应实现就要红」的变异自检,逐条见 task-10-report.md §变异表):
 //   1. 两处入口与标题去「2D」、命令预览配新口径(简报 Step 1/4 + Ruling #76);
 //   2. 面板接线:items / 勾选态 / 探测版本 / 被连带名单,四个锚点全部来自宿主的活数据;
 //   3. 校验分流:发起前走宿主 validateTemplateConfig,硬拦不给编、软问题带「仍然继续」(简报 Step 3);
-//   4. Ruling #74/#75/#77:mode 由宿主给且两个调用点同值、勾选变化去抖重算、列表 key 用复合键。
+//   4. Ruling #74/#75/#77:mode 由宿主给且两个调用点同值、勾选变化去抖重算、列表 key 用复合键;
+//   5. 修复轮 1(Ruling #80–#83):发起编译的重入闸、三处过时恢复闸、预设错误位与面板错误位分离、buildErr 随目录清空。
 //
 // 写法纪律(沿用 TemplateFeaturePanel.test.mjs 的轮 2 口径):
 //   · 断言只钉**方向与形状**,函数名/变量名一律从模板绑定或赋值处**反查**,改名与等价写法都该继续绿;
-//   · 注释不进扫描面(整行 / 行尾 `//` / HTML 注释)—— 唯一例外是 Ruling #76 的反向禁令:
-//     它扫的是**原文**,因为那句作废承诺恰恰以"假背书注释"的形态祸害过一轮(注释与文案都不许再说)。
+//   · 注释不进扫描面(整行 / 行尾 `//` / HTML 注释)—— **含"不许出现"的禁令一律扫剥过的 W_CODE/V_CODE**
+//     (Ruling #79 收口;此前 :124/:130 扫原文,向导里加一句解释注释就假红,与这句声称不符)。
+//     **唯二继续扫原文**的是 build_profile= 的计数(:132,台账点名保留)与 #76 的反向禁令(:135)——
+//     那句作废承诺恰恰以"假背书注释"的形态祸害过一轮,所以连注释一起禁(注释与文案都不许再说)。
 // 用法: node src/components/versions/TemplateBuildWizard.test.mjs
 import fs from 'node:fs'
 
@@ -29,6 +32,20 @@ const SCRIPT_RAW = W_RAW.slice(W_RAW.indexOf('<script'), W_RAW.indexOf('</script
 const SCRIPT = SCRIPT_RAW.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l)).map(stripTailComments).join('\n')
 const TPL = W_RAW.slice(W_RAW.indexOf('<template>', W_RAW.indexOf('</script>')), W_RAW.lastIndexOf('</template>'))
 const TPL_CODE = TPL.replace(/<!--[\s\S]*?-->/g, '')
+
+// ---------- Ruling #79:剥注释后的整文件扫描面(第 1/2 节的禁令用它,别再退回原文扫描) ----------
+// 评审员实测:向导里加一句**纯解释注释**(`// 注意:disable_3d 这类核心开关由宿主以 token 追加在命令行上`)
+// → :130 扫原文 W_RAW 时红,失败文案还说"向导里不再有写死的裁剪参数" —— 把注释当代码,不属实。
+// 剥法与上面的 SCRIPT/TPL_CODE 同源(整行 / 行尾 `//` / 同行 `/* */` / HTML 注释),只是把一份 .vue 的
+// 脚本段与模板段合成一个扫描面;VersionsView.vue 的对应断言(V_CODE)同口径。
+const sfcCode = (raw) => {
+  const scriptRaw = raw.slice(raw.indexOf('<script'), raw.indexOf('</script>'))
+  const script = scriptRaw.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l)).map(stripTailComments).join('\n')
+  const tpl = raw.slice(raw.indexOf('<template>', raw.indexOf('</script>')), raw.lastIndexOf('</template>'))
+  return script + '\n' + tpl.replace(/<!--[\s\S]*?-->/g, '')
+}
+const W_CODE = sfcCode(W_RAW)
+const V_CODE = sfcCode(V)
 
 // ---------- 名字反查工具(与 TemplateFeaturePanel.test.mjs 同一套,decl 正则多认 async/export) ----------
 const balanced = (l) => { let d = 0; for (const c of l) { if (c === '(' || c === '{' || c === '[') d++; else if (c === ')' || c === '}' || c === ']') d-- } return d === 0 }
@@ -121,14 +138,17 @@ const hardUl = ulBlock(hardVar)
 const softUl = ulBlock(softVar)
 
 console.log('\n=== 1. 两处入口与标题去「2D」(简报 Step 1/4) ===')
-ok(!/2D\s*模板|自编译\s*2D/.test(W_RAW) && !/2D\s*模板|自编译\s*2D/.test(V),
-  '两处入口与标题都不再出现「2D 模板」(把标题或按钮文字改回去 → 红)')
+ok(!/2D\s*模板|自编译\s*2D/.test(W_CODE) && !/2D\s*模板|自编译\s*2D/.test(V_CODE),
+  '两处入口与标题都不再出现「2D 模板」—— 扫剥注释后的代码面(Ruling #79;把标题或按钮文字改回去 → 红,写解释注释不红)')
 ok(/自编译模板\s*·\s*\{\{\s*tag\s*\}\}/.test(TPL) && /自编译模板\s*<\/button>/.test(V),
   '新标题是「自编译模板 · {{ tag }}」、入口按钮是「自编译模板」(正例;删掉/改回 → 红)')
 
 console.log('\n=== 2. 命令预览的新口径(Ruling #76) ===')
-ok(!/disable_3d|module_[a-z0-9_]+_enabled|accesskit\s*=|d3d12\s*=/.test(W_RAW),
-  '向导里不再有写死的裁剪参数(把旧的 disable_3d=yes 那份复制品写回来 → 红)')
+ok(!/disable_3d|module_[a-z0-9_]+_enabled|accesskit\s*=|d3d12\s*=/.test(W_CODE),
+  '向导里不再有写死的裁剪参数 —— 扫剥注释后的代码面(Ruling #79;把旧的 disable_3d=yes 那份复制品写回代码 → 红,写解释注释不红)')
+// 下面两条继续扫原文(W_RAW),是"注释不进扫描面"的例外清单(台账/裁定点名保留,勿动):
+//   :132 是 build_profile= 的**计数** —— 注释里出现第二次也算第二处,计数面就必须是原文;
+//   :135 是 #76 的反向禁令 —— 那句作废承诺恰恰以假背书注释的形态祸害过,注释里出现也要红。
 ok((W_RAW.match(/build_profile=/g) || []).length === 1 &&
   /scons platform=windows target=template_release build_profile=/.test(W_RAW),
   '预览仍是一行 scons 示意形状,且 build_profile= 只出现一次(删掉预览/复制到第二处 → 红)')
@@ -224,6 +244,76 @@ const compositeKey = (expr) => {
 ok(compositeKey(keyOf(hardUl)) && compositeKey(keyOf(softUl)),
   '★Ruling #77:两条列表的 :key 都是复合键(含 itemId+flag)或 index(把 :key 改回 b.itemId → 红)',
   JSON.stringify({ hard: keyOf(hardUl), soft: keyOf(softUl) }))
+
+console.log('\n=== 8. 修复轮 1:Ruling #80–#83 的四道闸(每条都有一刀"拿掉什么会红"的故事) ===')
+// 四道闸都在 Ruling #80–#83 里点名:重入闸(双击起两条编译)、三处过时恢复闸(旧结果盖新状态)、
+// 预设错误位单独渲染、buildErr 随目录清空。判定一律形状级(名字反查),别钉具体拼写。
+
+/** 反查源码输入框双向绑定的那个状态量(凡说"当前目录"的闸都拿它比对;改名不假红) */
+const srcDirVar = (() => {
+  const m = /源码根[\s\S]{0,200}?v-model="([A-Za-z_$][\w$]*)"/.exec(TPL_CODE)
+  return m ? m[1] : ''
+})()
+
+/** 取某方法调用点之后的文本(括号配平找调用的收尾)—— 用来钉"闸在 await 之后" */
+const afterCall = (body, method) => {
+  const i = body.indexOf(method + '(')
+  if (i < 0) return ''
+  let d = 0
+  for (let j = body.indexOf('(', i); j < body.length; j++) {
+    const c = body[j]
+    if (c === '(') d++
+    else if (c === ')') { d--; if (d === 0) return body.slice(j + 1) }
+  }
+  return ''
+}
+/** 「请求时的值 vs 当前状态」的比对闸:同一段文本里既有比较运算符、又提到当前状态量(dir 或勾选) */
+const staleGate = (tail) => !!tail && /!==?|===?/.test(tail) && !!srcDirVar &&
+  new RegExp('\\b(?:' + srcDirVar + '|' + featuresVar + ')\\.value\\b').test(tail)
+
+// #80:「开始编译」的重入闸 —— 处理函数先看到一个「在途」标志就早退,该标志在第一个 await 前置位、
+// finally 复位;三处引用同一个名字(早退检查 / 置 true / finally 置 false),名字不写死。
+const gateName = (() => {
+  const m = new RegExp('if\\s*\\(\\s*([A-Za-z_$][\\w$]*)(?:\\.value)?\\s*\\)\\s*(?:\\{[\\s\\S]{0,80}?\\breturn\\b|return\\b)').exec(buildBody)
+  return m ? m[1] : ''
+})()
+const gateSetIdx = gateName ? buildBody.search(new RegExp('\\b' + gateName + '(?:\\.value)?\\s*=\\s*true')) : -1
+const gateReset = gateName ? new RegExp('finally[\\s\\S]{0,60}?\\b' + gateName + '(?:\\.value)?\\s*=\\s*false').test(buildBody) : false
+ok(!!gateName && gateSetIdx >= 0 && gateSetIdx < buildBody.indexOf('await') && gateReset,
+  '★Ruling #80:「开始编译」重入闸:先判在途早退、await 前置位、finally 复位三处同名(删掉任一处 → 红;双击不再起两条编译)',
+  JSON.stringify({ gateName, gateSetIdx, firstAwait: buildBody.indexOf('await'), gateReset }))
+
+// #81 三处过时恢复闸:请求时快照的值,响应回来时与当前状态比对,不一致就丢弃这条响应。
+const valTail = afterCall(valBody, 'validateTemplateConfig')
+ok(staleGate(valTail),
+  '★Ruling #81:两次在途校验只让"与当前 dir/勾选 一致"的那份落地(把闸删掉 → 红;谁后返回谁赢 = 旧结果盖新状态)',
+  JSON.stringify({ valTail: (valTail || '').slice(0, 120).replace(/\n/g, ' ') }))
+const applyTail = afterCall(applyBody, 'applyTemplatePreset')
+ok(staleGate(applyTail),
+  '★Ruling #81:预设连点只让最后一次的响应落地(把闸删掉 → 红;旧预设结果不许盖新勾选)',
+  JSON.stringify({ applyTail: (applyTail || '').slice(0, 120).replace(/\n/g, ' ') }))
+const probeTail = afterCall(listBody, 'probeTemplateSource')
+ok(staleGate(probeTail),
+  '★Ruling #81:拉面板的第二段 await(探测)回来后还要再过一次「dir 仍是当前值」的闸(删掉 → 红;与第一段同口径,两段都设防)',
+  JSON.stringify({ probeTail: (probeTail || '').slice(0, 120).replace(/\n/g, ' ') }))
+
+// #82:预设失败写的是**单独**的错误位,且真的渲染 —— 与决定面板可见性的那个错误位共用的那天,
+// 一次预设失败会把整块面板与「开始编译」一起藏掉(用户想重试得先去动输入框)。
+const applyRes = (/([A-Za-z_$][\w$]*)\s*=\s*await[\s\S]{0,120}?applyTemplatePreset\s*\(/.exec(applyBody) || [])[1] || ''
+const presetErrVar = applyRes ? ((new RegExp('([A-Za-z_$][\\w$]*)\\.value\\s*=\\s*' + applyRes + '\\.error').exec(applyBody) || [])[1] || '') : ''
+ok(!!presetErrVar && presetErrVar !== listErrVar &&
+  new RegExp('v-if="' + presetErrVar + '"').test(TPL_CODE) && new RegExp('\\{\\{\\s*' + presetErrVar + '\\s*\\}\\}').test(TPL_CODE),
+  '★Ruling #82:预设失败写单独的错误位并渲染那行字(与决定面板可见性的 error 位共用 → 面板与「开始编译」一起消失;合并回去/删渲染 → 红)',
+  JSON.stringify({ presetErrVar, panelErrVar: listErrVar }))
+
+// #83:上一轮的同步拒绝原因(buildErr)不许跨目录挂着 —— watch(srcDir) 或 loadPanel 里清一行。
+const srcWatchIdx = srcDirVar ? SCRIPT.search(new RegExp('watch\\(\\s*' + srcDirVar + '\\s*,')) : -1
+const srcWatchEnd = srcWatchIdx >= 0 ? (() => { const n = SCRIPT.indexOf('watch(', srcWatchIdx + 6); return n > srcWatchIdx ? n : SCRIPT.length })() : -1
+const srcWatchSeg = srcWatchIdx >= 0 ? SCRIPT.slice(srcWatchIdx, srcWatchEnd) : ''
+const clearRe = buildErrVar ? new RegExp('\\b' + buildErrVar + "\\.value\\s*=\\s*['\"]['\"]") : null
+ok(srcWatchIdx >= 0 && !!clearRe && (clearRe.test(srcWatchSeg) || clearRe.test(listBody)),
+  '★Ruling #83:换源码目录即清上一轮的同步拒绝原因(watch(srcDir) 的开头或 loadPanel 里清一行;删掉 → 红)',
+  JSON.stringify({ srcDirVar, buildErrVar, watchSeg: srcWatchSeg.slice(0, 60).replace(/\n/g, ' ') }))
 
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) { for (const f of failures) console.log('  - ' + f); process.exit(1) }
