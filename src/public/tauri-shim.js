@@ -182,6 +182,7 @@
     applyTemplatePreset: () => Promise.resolve({ ok: false, error: '桌面版暂不支持自编译模板,请使用 ZTools 插件版。' }),
     checkTemplateBuildTools: () => Promise.resolve({
       ok: false, pythonVersion: '', pythonPath: '', sconsVersion: '', sconsPath: '', vcvarsPath: '', tarPath: '',
+      d3d12SdkInstalled: false, accesskitSdkInstalled: false,
       cpuCount: navigator.hardwareConcurrency || 0,
       problems: ['桌面版暂不支持自编译模板构建,请使用 ZTools 插件版。']
     }),

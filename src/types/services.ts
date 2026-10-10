@@ -139,6 +139,9 @@ export interface Services {
     vcvarsPath: string
     /** System32\tar.exe 落点(空串 = 缺);只决定代下载按钮可用与否,不进 problems、不影响 ok */
     tarPath: string
+    /** %LOCALAPPDATA%\Godot\build_deps 下 mesa / accesskit 依赖目录在不在(校验软拦的料) */
+    d3d12SdkInstalled: boolean
+    accesskitSdkInstalled: boolean
     cpuCount: number
     problems: string[]
   }>

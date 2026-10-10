@@ -32,7 +32,7 @@ const TPL_FEATURES = [
   { id: 'vulkan', label: 'Vulkan 渲染驱动', group: '渲染与显示', desc: '取消后 Forward Plus / Mobile 渲染法不可用', sizeImpact: 'large', risk: 'danger', flags: ['vulkan'] },          // SConstruct:197 默认 True
   { id: 'opengl3', label: 'OpenGL / GLES3 驱动', group: '渲染与显示', desc: '取消后 Compatibility 渲染法不可用', sizeImpact: 'medium', risk: 'notice', flags: ['opengl3'] },            // SConstruct:198
   { id: 'angle', label: 'ANGLE（GLES3 over D3D11）', group: '渲染与显示', desc: '取消后 opengl3 少一条后端路径', sizeImpact: 'medium', risk: 'notice', flags: ['angle'] },              // SConstruct:203
-  { id: 'd3d12', label: 'Direct3D 12 驱动', group: '渲染与显示', desc: '需要额外 SDK 依赖;源码默认就是关的', sizeImpact: 'medium', risk: 'safe', flags: ['d3d12'] },                    // SConstruct:199 默认 False
+  { id: 'd3d12', label: 'Direct3D 12 驱动', group: '渲染与显示', desc: 'Windows 平台默认开(detect.py get_flags 覆盖 SConstruct:199 的 False);保留需本机装 D3D12 SDK,取消则发 d3d12=no', sizeImpact: 'medium', risk: 'notice', flags: ['d3d12'] },                    // SConstruct:199 声明 False,平台覆盖 True
   { id: 'accesskit', label: 'AccessKit 无障碍驱动', group: '渲染与显示', desc: '取消后屏幕阅读器读不到界面', sizeImpact: 'small', risk: 'safe', flags: ['accesskit'] },                  // SConstruct:202
   { id: 'sdl', label: 'SDL3 输入驱动', group: '渲染与显示', desc: '取消后手柄输入回落系统栈', sizeImpact: 'small', risk: 'safe', flags: ['sdl'] },                                        // SConstruct:204
   // ---- 引擎子系统 ----

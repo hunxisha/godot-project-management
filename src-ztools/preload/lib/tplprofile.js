@@ -312,7 +312,7 @@ function selectionTurningOff(options, ids) {
  * 不含 d3d12:源码默认就是 False,关它是空操作(策划书 §5.3 反面教材)。
  * @type {string[]}
  */
-const LITE2D_OFF_IDS = ['sys3d', 'accesskit']
+const LITE2D_OFF_IDS = ['sys3d', 'accesskit', 'd3d12']
 
 /**
  * minimal(官方 CI 的 Minimal template)真正取消的面板项,逐条对齐 `linux_builds.yml:110-116`
@@ -334,12 +334,16 @@ const MINIMAL_OFF = [
   { id: 'optDeprecated', flag: 'deprecated', ciLine: 'linux_builds.yml:114' },
   { id: 'optMinizip', flag: 'minizip', ciLine: 'linux_builds.yml:115' },
   { id: 'optBrotli', flag: 'brotli', ciLine: 'linux_builds.yml:116' }
+  // d3d12 **刻意不进**这份名单:它与官方 CI 九条逐字对齐的口径不能破;windows 上它被平台 get_flags
+  // 强制默认开(detect.py:294)而保留又必撞 SDK 墙这件事,由 validateSelection 的 d3d12SdkInstalled
+  // 软拦在编译前喊出来(带「仍然继续」),不在预设里替用户做决定。lite2d 例外地关它(2D 模板不需要 D3D12)。
 ]
 
 /**
  * 至少要有其一、否则产物没有任何画面的四个渲染驱动(策划书 §5.5 的第一条硬拦)。
- * `d3d12` 必须在名单里但**不能反过来算**:它源码默认 False(SConstruct:199),
- * "用户没动它"不等于"有它" —— 所以判定看的是产物里的生效值而不是"勾没勾"。
+ * `d3d12` 必须在名单里但**不能反过来算**:它的生效默认由探测给(windows 上被平台 get_flags
+ * 覆盖成 True,detect.py:294;其它平台才是 SConstruct 的声明值),"用户没动它"不等于"有它" ——
+ * 所以判定看的是产物里的生效值而不是"勾没勾"。
  * @type {string[]}
  */
 const RENDER_DRIVERS = ['vulkan', 'opengl3', 'angle', 'd3d12']

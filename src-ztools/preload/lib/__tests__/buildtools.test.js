@@ -271,6 +271,24 @@ async function main() {
     ok(B.checkCache.vcvarsPath === r.vcvarsPath, '检测结果缓存给构建步(向导第一步本来就是它)')
     ok(r.tarPath === 'C:\\Windows\\System32\\tar.exe',
       '★第四探头 tar.exe:在 → tarPath 回固定落点(代下载按钮靠它启用)', r.tarPath)
+    ok(r.d3d12SdkInstalled === false && r.accesskitSdkInstalled === false,
+      '★SDK 位按注入的 existsSync 判(桩不放行 build_deps → 两位都 false;软拦的料不靠自己猜)',
+      JSON.stringify({ d3d12: r.d3d12SdkInstalled, accesskit: r.accesskitSdkInstalled }))
+  }
+  {
+    // SDK 位独立判:mesa 目录在 → d3d12 已装;accesskit 目录不在 → 仍 false(两位不串联)
+    const savedLA = process.env.LOCALAPPDATA
+    process.env.LOCALAPPDATA = 'C:\\fakeLA'
+    try {
+      const r = await B.checkTemplateBuildToolsWith({ platform: 'win32' },
+        { execSync: () => { throw new Error('x') }, cpuCount: 4, existsSync: (p) => /build_deps[\\/]mesa/.test(p) })
+      ok(r.d3d12SdkInstalled === true && r.accesskitSdkInstalled === false,
+        '★mesa 目录在 → d3d12SdkInstalled 真;accesskit 独立判假(删任一 existsSync 判据 → 红:软拦永远不喊)',
+        JSON.stringify({ d3d12: r.d3d12SdkInstalled, accesskit: r.accesskitSdkInstalled }))
+    } finally {
+      if (savedLA === undefined) delete process.env.LOCALAPPDATA
+      else process.env.LOCALAPPDATA = savedLA
+    }
   }
   {
     // scons 不在 PATH、模块在命中解释器里:检测回落模块通道,bat 随之改由该解释器起
@@ -413,6 +431,9 @@ async function main() {
       await sleep(60)
       ok(cap.captured.length > 0 && cap.captured.every((c) => !fs.existsSync(c.file)),
         '★取消路径同样不留 .bat/.json 残骸', JSON.stringify(cap.captured.map((c) => c.file)))
+      ok(f.calls.some((c) => c.cmd === 'taskkill' && c.args.includes('/T') && c.args.includes('/F')),
+        '★取消补一刀 taskkill /T /F 杀进程树(只 kill cmd → 红:scons 子进程后台继续烧 CPU,真机「取消无反应」体感来源)',
+        JSON.stringify(f.calls.map((c) => c.cmd)))
     } finally { cap.restore() }
     B.dismissTemplateBuildTask(taskId)
     ok(!seen.get(taskId) || seen.get(taskId).status === 'canceled', 'dismiss 不抛错(列表快照按宿主实现为准)')

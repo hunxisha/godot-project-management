@@ -460,10 +460,12 @@ ok(eqJson(F.TPL_FEATURES.filter((f) => touchedMin.includes(f.id)).flatMap((f) =>
    JSON.stringify(F.TPL_FEATURES.filter((f) => touchedMin.includes(f.id)).flatMap((f) => F.flagsOf(f))))
 ok(touchedMin.every((id) => !['vulkan', 'opengl3', 'angle', 'sdl', 'd3d12'].includes(id)),
    'minimal 不取消渲染/输入驱动那几项(上一轮的凑法把它们一起关了)', touchedMin.join(','))
-// 全开夹具下的 lite2d:两项都发命令行,profile 空 —— 与 MINIMAL 那节同一条通道口径。
+// 全开夹具下的 lite2d:三条都发命令行,profile 空 —— 与 MINIMAL 那节同一条通道口径。
+// d3d12 进 off 名单的原因:windows 平台 get_flags 把它强制默认开(detect.py:294),保留必撞 SDK 墙;
+// 2D 模板不需要 D3D12,预设替用户关掉,想保留回面板勾回来(缺 SDK 时校验软拦会喊)。
 const liteAllOn = reg('lite2d(全开夹具)', T.buildProfile(T.PRESETS.lite2d(ALL_ON_OPTS), ALL_ON_OPTS))
-ok(eqJson(liteAllOn.commandExtras, ['accesskit=no', 'disable_3d=yes']),
-   '全开夹具下的 lite2d 也只发这两条命令行 token', JSON.stringify(liteAllOn.commandExtras))
+ok(eqJson(liteAllOn.commandExtras, ['accesskit=no', 'd3d12=no', 'disable_3d=yes']),
+   '全开夹具下的 lite2d 发这三条命令行 token', JSON.stringify(liteAllOn.commandExtras))
 ok(Object.keys(dboOf(liteAllOn)).length === 0, '全开夹具下 lite2d 不写任何 profile 键(它不动模块)', JSON.stringify(dboOf(liteAllOn)))
 // 真实默认:minizip True(SConstruct:194)、brotli True(:195)、deprecated True(:190)。
 // 必须用探到=True 的夹具,否则"预设把它们强制取消"这条断言毫无牙(OPTS 里没探到,

@@ -151,7 +151,7 @@ function vcvarsFallbackDirs() {
 /**
  * 工具链检测(只读;跑三个子进程,总量毫秒到秒级)。
  * 缺什么就把「下一步动作」放进 problems —— 闸门③的要求:不许只说缺,不说怎么补。
- * @returns {Promise<{ok: boolean, pythonVersion: string, pythonPath: string, sconsVersion: string, sconsPath: string, vcvarsPath: string, tarPath: string, cpuCount: number, problems: string[]}>}
+ * @returns {Promise<{ok: boolean, pythonVersion: string, pythonPath: string, sconsVersion: string, sconsPath: string, vcvarsPath: string, tarPath: string, d3d12SdkInstalled: boolean, accesskitSdkInstalled: boolean, cpuCount: number, problems: string[]}>}
  */
 function checkTemplateBuildTools() {
   return checkTemplateBuildToolsWith(
@@ -168,8 +168,8 @@ function checkTemplateBuildTools() {
  */
 async function checkTemplateBuildToolsWith(env, deps) {
   const cpuCount = deps.cpuCount
-  /** @type {{ok: boolean, pythonVersion: string, pythonPath: string, sconsVersion: string, sconsPath: string, vcvarsPath: string, tarPath: string, cpuCount: number, problems: string[]}} */
-  const out = { ok: false, pythonVersion: '', pythonPath: '', sconsVersion: '', sconsPath: '', vcvarsPath: '', tarPath: '', cpuCount, problems: [] }
+  /** @type {{ok: boolean, pythonVersion: string, pythonPath: string, sconsVersion: string, sconsPath: string, vcvarsPath: string, tarPath: string, d3d12SdkInstalled: boolean, accesskitSdkInstalled: boolean, cpuCount: number, problems: string[]}} */
+  const out = { ok: false, pythonVersion: '', pythonPath: '', sconsVersion: '', sconsPath: '', vcvarsPath: '', tarPath: '', d3d12SdkInstalled: false, accesskitSdkInstalled: false, cpuCount, problems: [] }
   if (env.platform !== 'win32') {
     out.problems.push('自编译模板构建目前只在 Windows 宿主提供(需要 MSVC 与 vcvars 环境)。')
     return out
@@ -234,6 +234,14 @@ async function checkTemplateBuildToolsWith(env, deps) {
   // 第四探头:tar.exe 只服务代下载的解包步(手动备源码 + 编译都不吃 tar)—— 缺只回空串,
   // 不进 problems、不拖 ok:向导的「下载该版本源码」按钮按这个字段禁用并给如实文案
   out.tarPath = deps.existsSync(TAR_EXE) ? TAR_EXE : ''
+  // SDK 在不在本机(校验软拦的料,契约的 d3d12SdkInstalled / accesskitSdkInstalled):落点固定
+  // %LOCALAPPDATA%\Godot\build_deps(detect.py:207-209),d3d12 认 mesa 目录(含 -x86_64-msvc 后缀变体)、
+  // accesskit 认 accesskit 目录(detect.py:474 / :1049)。探不到按未装 —— 宁可软拦多喊一次,
+  // 不让 scons 跑几分钟配置阶段才停(真机:保留 d3d12 却缺 SDK,报错文案对用户像天书)
+  const depsBase = process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Godot', 'build_deps') : ''
+  out.d3d12SdkInstalled = depsBase !== '' &&
+    (deps.existsSync(path.join(depsBase, 'mesa')) || deps.existsSync(path.join(depsBase, 'mesa-x86_64-msvc')))
+  out.accesskitSdkInstalled = depsBase !== '' && deps.existsSync(path.join(depsBase, 'accesskit'))
   out.ok = out.problems.length === 0
   // 检测到的 vcvars / python / scons 通道缓存给构建步;重跑检测会覆盖 —— 换了安装位后重检即可生效
   checkCache.vcvarsPath = out.vcvarsPath
@@ -454,6 +462,11 @@ function buildTemplatePackWith(params, deps) {
         cancel: () => {
           canceled = true
           try { child.kill() } catch (e) { /* ignore */ }
+          // cmd.exe 被 kill 不会带走它起的 scons 子进程:补一刀 taskkill /T 杀整棵进程树,
+          // 否则「取消」只停了日志刷新,编译还在后台烧几十分钟 CPU(真机:取消编译无反应的体感来源之一)
+          try {
+            deps.spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+          } catch (e) { /* 杀树失败不掩盖取消本身 */ }
         }
       })
       /** @param {any} buf */

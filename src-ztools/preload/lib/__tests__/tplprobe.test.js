@@ -280,6 +280,23 @@ mk('modules/mono/register_types.h', ''); mk('modules/mono/SCsub', ''); mk('modul
   ok(r.ok === true, '探测成功', r.error)
   ok(r.sourceVersion === '4.7.2-stable', '读出源码版本', r.sourceVersion)
   ok(r.tagMatched === false, '没带 targetTag 时不谎报匹配', String(r.tagMatched))
+
+  // 平台 get_flags 覆盖层:d3d12 声明 False(SConstruct:199)被 windows get_flags 盖成 True(detect.py:294)——
+  // 不盖的话「取消 = 与默认相同不发 token」,scons 却按平台默认开着编,配置阶段停 D3D12 SDK 墙(真机踩过)
+  const pfRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gpm-tplprobe-pf-'))
+  const mkPf = mkAt(pfRoot)
+  const PF_SCONSTRUCT = 'opts.Add(BoolVariable("d3d12", "Enable the Direct3D 12 rendering driver on supported platforms", False))\n'
+  mkPf('SConstruct', PF_SCONSTRUCT)
+  mkPf('platform/windows/detect.py', 'def get_flags():\n    return {\n        "arch": "x86_64",\n        "d3d12": True,\n    }\n\n\ndef configure():\n    pass\n')
+  const rPf = await P.probeSource(pfRoot)
+  ok(rPf.ok === true && rPf.options.d3d12 && rPf.options.d3d12.default === true,
+    '★平台覆盖层:d3d12 声明 False 被 get_flags 盖成 True(删覆盖层 → 红:取消不发 token,scons 按平台默认撞 SDK 墙)',
+    JSON.stringify(rPf.options.d3d12))
+  const pfRoot2 = fs.mkdtempSync(path.join(os.tmpdir(), 'gpm-tplprobe-pf2-'))
+  mkAt(pfRoot2)('SConstruct', PF_SCONSTRUCT)
+  const rPf2 = await P.probeSource(pfRoot2)
+  ok(rPf2.options.d3d12 && rPf2.options.d3d12.default === false,
+    '★没有 detect.py 时回落声明默认(不凭空造覆盖表)', JSON.stringify(rPf2.options.d3d12))
   ok(r.tested === true, '4.7.2-stable 在已实测表内(附录 B)')
   const rTag = await P.probeSource(root, { targetTag: '4.6-stable' })
   ok(rTag.tagMatched === false, '带一个不符的 targetTag → tagMatched false')

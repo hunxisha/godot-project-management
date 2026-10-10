@@ -219,6 +219,27 @@ function mergeOptionsFirstWins(target, extra) {
 }
 
 /**
+ * 平台 get_flags 覆盖表(SConstruct:434-437 的消费点):这些键除非命令行点名,env 直接取平台值 ——
+ * SConstruct 里 BoolVariable 的声明默认**不是生效默认**。真机踩过的坑:d3d12 在 SConstruct:199
+ * 声明 False,而 windows 的 get_flags 给 True(detect.py:294),面板按声明默认算「取消 = 与默认相同
+ * 不发 token」,scons 却按平台默认开着编,配置阶段停在 D3D12 SDK 检查上。
+ * 只认 get_flags 函数体里的布尔键,其余(arch / supported 等非布尔或非标键)不猜。
+ * @param {string} detectText platform/windows/detect.py 的原文(读不到给空串)
+ * @returns {Record<string, boolean>}
+ */
+function parsePlatformFlags(detectText) {
+  const text = String(detectText || '')
+  const at = text.indexOf('def get_flags():')
+  if (at < 0) return {}
+  const next = text.indexOf('\ndef ', at + 1)
+  const body = text.slice(at, next < 0 ? text.length : next)
+  /** @type {Record<string, boolean>} */
+  const out = {}
+  for (const m of body.matchAll(/"([a-z0-9_]+)":\s*(True|False)/g)) out[m[1]] = m[2] === 'True'
+  return out
+}
+
+/**
  * 探测一份源码树 —— 本层**唯一**做 IO 的函数,且 IO 全部走可注入的 deps
  * (readFileSync / existsSync / readdirSync),只有不传 deps 时才回落到真 node:fs。
  * 返回值喂给输出层:`options` 是「这个开关在这份源码里存不存在 + 源码默认值」的唯一真源,
@@ -262,6 +283,11 @@ async function probeSource(srcDir, deps) {
     (rel) => safeExists(existsSync, p(rel)),
     (rel) => readOpt(rel)
   ))
+  // 平台覆盖层最后盖:生效默认 = 平台 get_flags 覆盖后的值(只盖两边都声明了的键,未声明的不凭空造)
+  const platformFlags = parsePlatformFlags(readOpt(require('node:path').join('platform', 'windows', 'detect.py')))
+  for (const k of Object.keys(platformFlags)) {
+    if (out.options[k] && out.options[k].exists) out.options[k] = { exists: true, default: platformFlags[k] }
+  }
   // 连带块都在 SConstruct 顶层(parseCascades 认顶格 `if env["x"]:),平台脚本里那些是缩进的,
   // 喂进去恒为空 —— 只从 SConstruct 解析一次。
   out.cascades = parseCascades(sc)
@@ -279,5 +305,5 @@ async function probeSource(srcDir, deps) {
 
 module.exports = {
   parseSconsOptions, parseIsEnabled, detectBuiltinModules, parseCascades, MODULE_MARKERS,
-  parseVersionPy, versionStringFromTag, probeSource, TESTED_VERSIONS, STATIC_CHECKED_VERSIONS
+  parseVersionPy, versionStringFromTag, probeSource, parsePlatformFlags, TESTED_VERSIONS, STATIC_CHECKED_VERSIONS
 }

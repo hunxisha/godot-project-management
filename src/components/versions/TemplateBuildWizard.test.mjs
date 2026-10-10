@@ -369,6 +369,24 @@ ok(!!cancelClick && /cancelTemplateSourceDownload\(/.test(cancelBody) &&
   '★取消按钮真转宿主取消;tar 缺的如实文案按检测位渲染(删任一处 → 红:取消是死的 / 缺 tar 却不说为什么)',
   JSON.stringify({ cancelClick }))
 
+console.log('\n=== 11. 终态:失败/取消离开「编译中」并摆原因 ===')
+const stepVar = (/([A-Za-z_$][\w$]*)\.value\s*=\s*'check'/.exec(SCRIPT) || [])[1] || ''
+ok(!!stepVar && new RegExp(stepVar + "\\.value\\s*=\\s*'failed'").test(SCRIPT) &&
+  /status === 'error'/.test(SCRIPT) && /status === 'canceled'/.test(SCRIPT),
+  '★任务终态(error/canceled)把 step 转到 failed(删掉迁移 → 红:取消与报错永远停在「编译中」,真机「取消编译无反应」即此)',
+  JSON.stringify({ stepVar }))
+const backBtn = buttonAt('回到配置')
+const backClick = clickNameOf(backBtn)
+const backBody = defOf(backClick) || ''
+ok(!!backClick && /\.value\s*=\s*'build'/.test(backBody) &&
+  /编译失败/.test(TPL_CODE) && /编译已取消/.test(TPL_CODE) && /buildTask\.error/.test(TPL_CODE),
+  '★终态分支摆失败/取消两种原因与 buildTask.error,「回到配置」真把 step 送回去(删任一处 → 红)')
+
+console.log('\n=== 12. SDK 软拦的料:检测位透传进 validate ===')
+ok(/d3d12SdkInstalled/.test(vtcArgs) && /accesskitSdkInstalled/.test(vtcArgs),
+  '★validateTemplateConfig 调用点透传两个 SDK 位(不传 → 红:宿主软拦永远不喊,保留 d3d12/accesskit 缺 SDK 要等 scons 配置阶段才停)',
+  JSON.stringify({ vtcArgs: vtcArgs.slice(0, 120) }))
+
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) { for (const f of failures) console.log('  - ' + f); process.exit(1) }
 console.log('全部通过')

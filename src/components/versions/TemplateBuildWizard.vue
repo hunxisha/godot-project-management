@@ -21,9 +21,9 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'imported', msg: string): void }>()
 
-type Step = 'checking' | 'check' | 'build' | 'building' | 'done'
+type Step = 'checking' | 'check' | 'build' | 'building' | 'done' | 'failed'
 const step = ref<Step>('checking')
-const checkResult = ref<{ ok: boolean; pythonVersion: string; pythonPath: string; sconsVersion: string; sconsPath: string; vcvarsPath: string; cpuCount: number; problems: string[] } | null>(null)
+const checkResult = ref<{ ok: boolean; pythonVersion: string; pythonPath: string; sconsVersion: string; sconsPath: string; vcvarsPath: string; tarPath: string; d3d12SdkInstalled: boolean; accesskitSdkInstalled: boolean; cpuCount: number; problems: string[] } | null>(null)
 const srcDir = ref('')
 const buildTask = ref<TemplateBuildTask | null>(null)
 const importMsg = ref('')
@@ -119,7 +119,11 @@ async function runValidate() {
   const v = await window.services.validateTemplateConfig({
     srcDir: srcDir.value,
     features: features.value,
-    mode: mode.value
+    mode: mode.value,
+    // SDK 在不在本机由检测步探好(宿主 fs),渲染层只透传 —— 保留 d3d12/accesskit 却缺 SDK 时
+    // 宿主的软拦才喊得出来(契约的可选参数,不传等于永远不拦)
+    d3d12SdkInstalled: checkResult.value?.d3d12SdkInstalled,
+    accesskitSdkInstalled: checkResult.value?.accesskitSdkInstalled
   })
   if (dir !== srcDir.value || sel !== features.value) return // 结果回来时输入已经变了:这份校验过时,不覆盖后来者(Ruling #81)
   issues.value = v.issues || []
@@ -250,6 +254,10 @@ function cancelSrcDownload() {
   window.services.cancelTemplateSourceDownload()
 }
 
+function backToConfig() {
+  step.value = 'build'
+}
+
 async function startBuild() {
   // 先订阅再入队:入队到首帧快照之间没有空窗,任务不会闪没
   unwatch = window.services.watchTemplateBuildTasks((list) => {
@@ -259,6 +267,10 @@ async function startBuild() {
     if (t.status === 'done') {
       importDirName.value = t.versionDir || defaultVersionDir.value
       step.value = 'done'
+    } else if (t.status === 'error' || t.status === 'canceled') {
+      // 终态必须离开「编译中」分支:旧界面在 error/canceled 时仍停在编译中(取消按钮点了像没反应,
+      // scons 报错也永远显示「编译中」),真机两条反馈同源于此
+      step.value = 'failed'
     }
   })
   // features 是必填(漏传被宿主同步拒);mode 与校验那次用的是同一个状态量(Ruling #74)
@@ -388,6 +400,15 @@ function close() {
         <pre class="log mono">{{ buildTask?.log || '启动编译…' }}</pre>
         <div class="acts-row">
           <button class="btn danger-text" @click="cancelBuild">取消编译</button>
+        </div>
+      </template>
+
+      <!-- 终态:失败 / 取消 —— 摆原因与日志尾,给回配置的路 -->
+      <template v-else-if="step === 'failed' && buildTask">
+        <p class="hint bad-line">{{ buildTask.status === 'canceled' ? '编译已取消。' : `编译失败:${buildTask.error || '宿主未给原因,见下方日志尾'}` }}</p>
+        <pre class="log mono">{{ buildTask.log || '(无日志)' }}</pre>
+        <div class="acts-row">
+          <button class="btn small" @click="backToConfig">回到配置</button>
         </div>
       </template>
 
