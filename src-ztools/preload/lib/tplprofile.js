@@ -598,6 +598,15 @@ function validateSelection(selection, options, ctx) {
  * flag → 面板项 的反查只用本文件已 import 的 `TPL_FEATURES`,不为此新增入参(调用方手头没有能力表,
  * 让它传就等于把表的第二份拷贝推到契约上)。
  *
+ * **只走一层,不做传递闭包(Ruling #73 —— 这条边界就写在这里,别只写在报告里)**:
+ * 对 `A → B`、`B → C` 这样的两级链,取消 A 只把 **B** 报进表;`C` 不会因为"B 也被连带"而进表,
+ * 只有当用户**自己把 B 取消**(selection 里 `B === false`)时 C 才进表。链式连带的判定不在本函数职责内。
+ * 这么切的依据是已核实的三份真实 SConstruct 的连带图:4.3 的连带源数 0,4.5 与 4.7.2 都只有 `disable_3d`
+ * 一个源、且它的目标自身都不是别的源的源 —— **全是单层图**,所以现在做 fixpoint 就是给假想需求设计。
+ * 但"没做传递闭包"与"静默漏抑制"只差一处登记:已用一条**合成两级链**的断言钉住这个意图
+ * (`__tests__/tplprofile.test.js` 的「★Ruling #73」两条)。将来真出现两级链的版本、或决定改做传递闭包时,
+ * 该由那条断言**变红**逼出一次显式改动(改成 fixpoint 或在这里补一层),而不是让 C 少抑制而没人喊。
+ *
  * @param {Record<string, boolean>} selection 面板勾选(整个对象缺失按"没取消任何伞项"处理,不抛)
  * @param {Record<string, string[]>} cascades 探测层给的静态连带图(tplprobe.probeSource().cascades;整个缺失按"没有连带关系")
  * @returns {string[]} 被抑制的面板项 id:**只含面板项 id**(表里没有对应项的目标 flag 不进表)、去重、按 TPL_FEATURES 表序

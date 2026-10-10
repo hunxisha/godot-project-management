@@ -519,7 +519,25 @@ for (const k of ['module_webp_enabled', 'module_tga_enabled', 'module_gltf_enabl
 // ---- 真树核对:SConstruct 在就把 ENUM_VALUES 与方向判断钉到真实源码上 ----
 const REAL_SRC = 'C:/Users/Administrator/AppData/Local/Temp/godot-tpl-verify/godot-4.7.2-stable'
 const realSC = path.join(REAL_SRC, 'SConstruct')
-if (fs.existsSync(realSC)) {
+// Ruling #69:真树那几节是**条件跑**的(REAL_SRC 是 %TEMP% 下的一次性目录,别的机器与 CI 上本来就没有)。
+// 轮 1 的形状把它跳成了「静默少跑」:复审员把 REAL_SRC 指到不存在的路径 → PASS 330 / FAIL 0 / exit 0,
+// 汇总照样打印「全部通过」,一次少跑 22 条而没人喊 —— 那比没有测试更坏(不跑的断言被报成绿)。
+// 收法按裁定的最低要求:**跳过就打一行 SKIPPED,汇总带跳过计数**;
+// 不改成硬失败、不改 exit 1 —— 那样会把整套弄成在没这棵树的机器上不可跑。
+// 未跑条数从**本节源码**里数 `ok(` 的静态出现次数(不手写数字,免得加一条断言就漂移;
+// 也不做词法分析:块里没有 for 包 ok 的形态,数出来的就是条数)。
+const SELF_LINES = fs.readFileSync(__filename, 'utf8').split(/\r?\n/)
+const SKIPPED = []
+const treeGate = (label) => {
+  if (fs.existsSync(realSC)) return true
+  const i = SELF_LINES.findIndex((l) => l.includes(`treeGate('${label}')`))
+  let n = 0
+  for (let j = i + 1; i >= 0 && j < SELF_LINES.length && SELF_LINES[j] !== '}'; j++) n += (SELF_LINES[j].match(/\bok\(/g) || []).length
+  SKIPPED.push({ label, n })
+  console.log(`\nSKIPPED ${label}：未找到 ${realSC} —— 本节 ${n} 条断言这次没跑`)
+  return false
+}
+if (treeGate('真实 4.7.2 SConstruct 核对')) {
   section('真实 4.7.2 SConstruct 核对(临时树在才跑)')
   const realOpts = P.parseSconsOptions(fs.readFileSync(realSC, 'utf8'))
   ok(realOpts.precision && realOpts.precision.default === 'single' && realOpts.lto.default === 'none' && realOpts.optimize.default === 'auto',
@@ -565,8 +583,6 @@ if (fs.existsSync(realSC)) {
      '真实树上渲染与输入驱动一条都不发(真树默认全 True,勾着 → 与默认相同 → 不输出)', JSON.stringify([Object.keys(dboOf(realMin)), realMin.commandExtras]))
   ok(Object.keys(dboOf(realMin)).every((k) => isModulePrefix(k)),
      '真实树 minimal 的 profile 键要么带 module_ 前缀要么一个都没有(#38 在真树上成立)', JSON.stringify(Object.keys(dboOf(realMin))))
-} else {
-  console.log(`\n(跳过真实源码核对:未找到 ${realSC})`)
 }
 
 // ==================== Task 6 · 静态校验 validateSelection ====================
@@ -814,7 +830,7 @@ for (const pair of VCOL) {
 }
 
 // ---- 真树上的静态校验:临时树在才跑 ----
-if (fs.existsSync(path.join(REAL_SRC, 'SConstruct'))) {
+if (treeGate('真实 4.7.2 源码上的静态校验')) {
   section('真实 4.7.2 源码上的静态校验(树在才跑)')
   const vRealOpts = P.parseSconsOptions(fs.readFileSync(path.join(REAL_SRC, 'SConstruct'), 'utf8'))
   const vRealFull = vk('真树:全默认勾选', T.validateSelection(T.initialSelection(vRealOpts), vRealOpts, {}))
@@ -899,10 +915,26 @@ section('selectionSuppressed(Ruling #62):当前勾选下被连带关闭的面板
      eqJson(T.selectionSuppressed(T.PRESETS.minimalSelection(OPTS), CAS_472), ['phys3d', 'nav3d', 'xr']),
      'lite2d / minimal 两档都取消 3D 伞项 → 这三项在两档下都被抑制(T10 换预设时面板显示跟着变,不需要重探)',
      JSON.stringify([T.selectionSuppressed(T.PRESETS.lite2d(OPTS), CAS_472), T.selectionSuppressed(T.PRESETS.minimalSelection(OPTS), CAS_472)]))
+  // Ruling #73:本函数**只走一层,不做传递闭包**(A→B、B→C 时取消 A 只带走 B,不会因为"B 也被连带"再带走 C)。
+  // 这条边界此前在代码与测试里**零登记**(意图只活在报告 §11.4,而报告不进仓库),复审员用合成两级链实测
+  // 出「xr 静默漏抑制」—— 正是 Ruling #62 要修的那类谎。裁定是**保持单层**(已核实的三份真实源码都是单层图:
+  // 4.3 连带源数 0;4.5 与 4.7.2 都只有 disable_3d 一个源,且它的三个目标自身都不是别的源的源),
+  // 但必须把这件事钉成断言:真出现两级链的版本、或有人决定改做 fixpoint 时,是**这条红**并逼出一次显式决定,
+  // 而不是让 C 静默漏抑制。
+  // ⚠ 下面这张 CAS_CHAIN_SYNTH 是**合成夹具**(`disable_xr` 挂在 `disable_physics_3d` 下面这个形态
+  //    在 4.3 / 4.5 / 4.7.2 里都不存在),它只为"两级链"这一支存在,不声称任何真实版本有它。
+  //    真实出处只有内层那一条边:`disable_3d → disable_physics_3d`(SConstruct:1076-1080 的摘录,见本节开头)。
+  const CAS_CHAIN_SYNTH = { disable_3d: ['disable_physics_3d'], disable_physics_3d: ['disable_xr'] }
+  ok(eqJson(T.selectionSuppressed(OFF_SYS3D, CAS_CHAIN_SYNTH), ['phys3d']),
+     '★Ruling #73(合成两级链,不声称真实版本有此形态):只走一层 —— 取消 A 只把 B 报进表,C 不进表',
+     JSON.stringify(T.selectionSuppressed(OFF_SYS3D, CAS_CHAIN_SYNTH)))
+  ok(eqJson(T.selectionSuppressed(Object.assign({}, FULL, { sys3d: false, phys3d: false }), CAS_CHAIN_SYNTH), ['phys3d', 'xr']),
+     '★Ruling #73 的另一半(同一张合成链):C 只认**它自己的源被用户显式取消**这一跳 —— 少掉的只是"由上游连带而来"那一跳,不是判据写反',
+     JSON.stringify(T.selectionSuppressed(Object.assign({}, FULL, { sys3d: false, phys3d: false }), CAS_CHAIN_SYNTH)))
 }
 
 // ---- 真树上的连带抑制:临时树在才跑(这条最接近"用户真会看到的图") ----
-if (fs.existsSync(path.join(REAL_SRC, 'SConstruct'))) {
+if (treeGate('selectionSuppressed 在真实 4.7.2 源码上')) {
   section('selectionSuppressed 在真实 4.7.2 源码上(树在才跑)')
   const realSc = fs.readFileSync(path.join(REAL_SRC, 'SConstruct'), 'utf8')
   const realOpts = P.parseSconsOptions(realSc)
@@ -919,6 +951,14 @@ if (fs.existsSync(path.join(REAL_SRC, 'SConstruct'))) {
 }
 
 console.log(`\n${'='.repeat(56)}`)
-console.log(`PASS ${pass}  FAIL ${failures.length}`)
+// Ruling #69:汇总必须把"这次没跑的节"报出来 —— 只打 PASS 数会把少跑的 22 条混在"全部通过"里骗人。
+console.log(`PASS ${pass}  FAIL ${failures.length}${SKIPPED.length ? `  SKIPPED ${SKIPPED.length}` : ''}`)
 if (failures.length) { for (const f of failures) console.log('  - ' + f); process.exit(1) }
-console.log('全部通过')
+if (SKIPPED.length) {
+  const n = SKIPPED.reduce((a, s) => a + s.n, 0)
+  console.log(`跑到的全通过,**但不是"全部通过"**:本次跳过 ${SKIPPED.length} 节 / 共 ${n} 条断言未跑`)
+  for (const s of SKIPPED) console.log(`  - SKIPPED ${s.label}（${s.n} 条）`)
+  console.log(`  原因:未找到真树 ${REAL_SRC}(一次性临时目录,别的机器与 CI 上本来就没有)`)
+} else {
+  console.log('全部通过')
+}

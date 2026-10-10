@@ -400,17 +400,27 @@ async function main() {
     //   · **契约与三宿主同形** —— 桌面垫片的占位缺这个键,渲染层取属性就是 undefined。
     const raw = fs.readFileSync(SERVICES, 'utf8')
     const code = raw.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l)).join('\n')
-    const vtc = /validateTemplateConfig: async \(params\) => \{([\s\S]*?)\n {2}\},/.exec(code)
-    ok(!!vtc, '取得出 validateTemplateConfig 的函数体(切不开说明写法变了,本节不能静默通过)',
+    // Ruling #71(与 #64/#60 同一条口径):轮 1 在这里把**形参名 `params` 与局部变量名 `probe` 写死**进
+    // 三处正则,复审员实测 S5 —— 仅把该方法内 `params` 整体改名 `input`(语义完全不变)就假红 3 条。
+    // 收紧办法同 T8 那条给过的零成本形状:第一次出现时**捕获**标识符,后面的判据反向引用同一个名字。
+    // 于是「改名」绿(等价改写不该红),而「两侧不是同一个标识符」= 数据来源真的换了 → 照样红。
+    const vtc = /validateTemplateConfig:\s*async\s*\(([A-Za-z_$][\w$]*)\)\s*=>\s*\{([\s\S]*?)\n {2}\},/.exec(code)
+    const vtcParam = vtc ? vtc[1] : ''
+    const vtcBody = vtc ? vtc[2] : ''
+    // 探测结果落在哪个局部变量上也是**反查**出来的(轮 1 同样把它钉死成了 `probe`)。
+    const probeVar = vtcBody ? (/const\s+([A-Za-z_$][\w$]*)\s*=\s*await\s+tplprobe\.probeSource\s*\(/.exec(vtcBody) || [])[1] : ''
+    ok(!!vtc && !!vtcParam, '取得出 validateTemplateConfig 的函数体与它的入参名(切不开说明写法变了,本节不能静默通过)',
       vtc ? 'ok' : '没匹配到方法体')
-    ok(vtc ? (vtc[1].match(/probeSource\s*\(/g) || []).length === 1 : false,
+    ok(vtc ? (vtcBody.match(/probeSource\s*\(/g) || []).length === 1 : false,
       '★Ruling #62:validateTemplateConfig 里 probeSource 只调一次(suppressed 复用同一次探测的 cascades)',
-      vtc ? String((vtc[1].match(/probeSource\s*\(/g) || []).length) + ' 次' : '没切出方法体')
-    ok(/tplprofile\.selectionSuppressed\(\s*params\.features\s*,\s*probe\.cascades\b/.test(code),
-      '★Ruling #62:名单由宿主用**自己探测到的** probe.cascades 算(把 probe.options 或写死的图换进来就红)',
-      JSON.stringify((code.match(/.*selectionSuppressed\(.*/) || ['<没找到>'])[0]))
-    ok(!/params\.cascades/.test(code),
-      '★Ruling #53 同口径:连带图不从渲染层收(入参里出现 params.cascades 就是让用户能伪造"哪些行点不动")')
+      vtc ? String((vtcBody.match(/probeSource\s*\(/g) || []).length) + ' 次' : '没切出方法体')
+    ok(!!vtcParam && !!probeVar &&
+      new RegExp('tplprofile\\.selectionSuppressed\\(\\s*' + vtcParam + '\\.features\\s*,\\s*' + probeVar + '\\.cascades\\b').test(code),
+      '★Ruling #62:名单由宿主用**自己探测到的**那份 cascades 算(把 options 或写死的图换进来就红;标识符名反查,改名不红)',
+      JSON.stringify({ vtcParam, probeVar, found: (code.match(/.*selectionSuppressed\(.*/) || ['<没找到>'])[0] }))
+    ok(!!vtcParam && !new RegExp(vtcParam + '\\.cascades\\b').test(code),
+      '★Ruling #53 同口径:连带图不从渲染层收(入参里出现「<该方法入参>.cascades」就是让用户能伪造"哪些行点不动")',
+      JSON.stringify({ vtcParam, hit: (code.match(new RegExp(vtcParam + '\\.cascades', 'g')) || ['<无>'])[0] }))
 
     // 契约声明里有这个键,类型是 string[]。
     const vtcDecl = dts.slice(dts.indexOf('validateTemplateConfig'))

@@ -5,41 +5,60 @@
 //  tauriShimHonesty.test.mjs 的静态扫描、buildtools.test.js 第 8 节那套「未移植方法不得假成功」)。
 // 台账 deferred ⑥ 已判:不为两条断言引 vitest/jsdom(违反"不引入新依赖")。
 //
-// 写法纪律(本轮按 Ruling #63/#64 重写过,别再退回旧形态):
-//   · 断言只钉**方向与形状**,不钉三元 / `&&` / `if-return` 的拼写,也不钉局部变量名 ——
-//     函数名一律从模板绑定(`:checked` / `:disabled` / `@change`)或从文案里的承重短语**反查**得到,
-//     纯改名与等价改写都该继续绿(评审员实测 M-D/M-E/F/G 四条假红就是上一轮在这里欠的)。
+// 写法纪律(轮 1 按 Ruling #63/#64 重写过,轮 2 按 #67/#68/#70/#72 补洞,别再退回旧形态):
+//   · 断言只钉**方向与形状**,不钉三元 / `&&` / `if-return` 的拼写,也不钉函数名 / 形参名 ——
+//     名字一律从模板绑定(`:checked` / `:disabled` / `:title` / `@change`)或从文案里的承重短语**反查**得到,
+//     纯改名与等价改写都该继续绿(评审员实测 M-D/M-E/F/G 四条假红就是轮 1 之前欠的)。
 //   · "字样存在"不是断言:每条都配一刀**反向禁令**(错误方向不出现)+ 一刀**渲染点被钉**
-//     (函数留着但那一处不渲染 = 红)。上一轮的 5/7 两条只查字样,评审员实跑 M-H/M-C/M-I 全绿,
+//     (函数留着但那一处不渲染 = 红)。轮 1 的 5/7 两条只查字样,评审员实跑 M-H/M-C/M-I 全绿,
 //     所以这三条现在是:插值只许出 label、cascadedBy 不进判定、文案两态的分支来自 suppressed 名单。
+//   · **反向禁令的扫描面必须跟着靶子走**(Ruling #67)。#62 把"当前是否被连带关闭"搬去宿主之后,
+//     轮 1 把靶子从"某几个函数不许读 cascadedBy"换成了"定义体里不许出现 cascadedBy",
+//     却把**模板的属性绑定**整个漏在扫描面外 —— 于是 `:disabled="isDisabled(it) || !!it.cascadedBy"`
+//     (正是 #62 修掉的那个谎原样回归)全绿。轮 1 做"名字无关化"时把再上一轮那条精确属性正则
+//     `/:disabled="isDisabled\(it\)"/` 的牙一起丢了,现在用"任何属性绑定里不许出现 cascadedBy"补回来,
+//     零成本且不牺牲改名自由。
+//   · **实现的另一半语义也要有护栏**(Ruling #68):#62 还说了"被抑制项的用户选择原样保留",
+//     轮 1 一条护栏都没给。复审员实测 M-POLLUTE(把名单内项统一写成 false 再整份 emit,**显示仍正确**)
+//     全绿。这条语义正是要交给 T10 去接的位置,所以轮 2 钉两条:名单谓词只出现在四个展示位、
+//     上报的 payload 只写被点的那一行且不写 false 字面量。
 //   · 扫描型断言最怕的失效模式是"删掉代码 + 在注释里补一句同样的字样"把它喂绿。这里按
-//     services.test.js:352 / tauriShimHonesty.test.mjs:37 的先导**先把注释行剥掉再扫**,那条假绿就不成立了
+//     services.test.js:352 / tauriShimHonesty.test.mjs:37 的先导**先把注释剥掉再扫**,那条假绿就不成立了
 //     (注释不进扫描面);代价是同一文件里"注释替代码作保证"也不作数 —— 代码不在就是不在。
+//     Ruling #70:轮 1 只剥**整行**注释,结果"解释这条裁定的行尾注释"把这条裁定的守卫打红
+//     (复审员实测 M-尾部注释 红 3 条),与目标正好相反 —— 现在整行 / 行尾 `//` / 同行 `/* */` /
+//     模板的 HTML 注释都不进扫描面(新守卫用剥过的 TPL_CODE,存量断言的输入一字未动)。
 //     剩下的天花板如实登记:字符串拼接类泄漏只认带 `cascadedBy` 标识符的那一种写法,
 //     真要把原始变量名换个中间量绕过去仍然可能;要堵死它得引真正的数据流分析(= 引新工具,台账 deferred ⑥ 已判不做)。
 //
-// ⚠ 逐条变异自检(2026-10-10,修复轮 1;全部在仓库外的临时副本里跑,工作树未动。
-//    本轮共 49 次实验:41 刀功能变异全杀红 + 8 组合法改写全绿,完整输出与逐条归属见 task-9-report.md 修复轮 1 §5)。
+// ⚠ 逐条变异自检(2026-10-10,修复轮 2 口径;全部在仓库外的临时副本里跑,工作树未动。
+//    轮 2 共 14 次面板实验(8 刀功能变异全杀红 + 6 组合法改写/注释全绿),
+//    完整输出与逐条归属见 task-9-report.md 修复轮 2 §3;轮 1 那 49 次见同文件修复轮 1 §6)。
 //    口径 = 把对应那段功能**真的拿掉/改反**(不是改注释、不是改名)→ 这条必须红:
-//      1 ← 把一个开关的变量名字面量真写进组件                  → 红
-//      2 ← 把编译命令行真拼进组件                              → 红
-//      3 ← 面板项换成组件内的常量表(三处读法一起换)          → 红
-//      4 ← 删掉 :disabled 绑定 / 删掉探不到的文案 / 判据不再读 present → 各红
-//      5 ← 不读 props.suppressed(禁用名单本地硬编)            → 红
-//      6 ← isDisabled 改回 `!present || !!it.cascadedBy`        → 红(#62 的回归刀)
-//      7 ← checked 丢掉禁用支 / 把冻结简报 :86 那行照抄回来    → 各红
-//      8 ← 删掉两态其中一支 / 当前态改由 cascadedBy 决定        → 各红
-//      9 ← 函数留着、模板里那个 <em> 删掉(M-I)                → 红
-//     10 ← 命中支直出原始变量名(M-H)/ 退化支带上别名(M-C)/
-//          退化支改用字符串拼接                                → 各红
-//     11 ← 量级换成具体 MB 数字 / 删掉查表直接输出枚举          → 各红
-//     12 ← 分区拉平(内层直接吃 props.items)                  → 红
-//     13 ← 上报丢掉 spread / 干脆就地改 props                  → 各红
-//     14 ← 三档名字被改('minimal' → 'min')                    → 红
-//     15 ← 去掉任一 `|| []` / `|| {}` 的 null 兜底              → 红
-//    对照组(合法改写**不该**红,Ruling #64 要收掉的就是这些假红):checked 改 if-return、checked 改
-//    `&&` 写法、grouped 纯改名、SIZE_LABEL 纯改名、isDisabled 纯改名、cascadeNote 纯改名、
-//    isSuppressed 纯改名 —— 七条实测全绿。
+//      1 ← 把一个开关的变量名字面量真写进组件                  → 红(轮 1)
+//      2 ← 把编译命令行真拼进组件                              → 红(轮 1)
+//      3 ← 面板项换成组件内的常量表(三处读法一起换)          → 红(轮 1)
+//      4 ← 删掉 :disabled 绑定 / 删掉探不到的文案 / 判据不再读 present → 各红(轮 1)
+//      5 ← 不读 props.suppressed(禁用名单本地硬编)/ 代码不读、只在注释里声称读(M-注释喂绿)→ 各红
+//      6 ← isDisabled 改回 `!present || !!it.cascadedBy`        → 红(#62 的回归刀,轮 1)
+//      7 ← 模板属性绑定拿 cascadedBy 判禁用(M-TPLCASC)/ 写文案(M-TPLCASC-title)→ 各红(轮 2 #67)
+//      8 ← checked 丢掉禁用支 / 把冻结简报 :86 那行照抄回来    → 各红(轮 1)
+//      9 ← 删掉两态其中一支 / 当前态改由 cascadedBy 决定        → 各红(轮 1)
+//     10 ← 函数留着、模板里那个 <em> 删掉(M-I)                → 红(轮 1)
+//     11 ← 命中支直出原始变量名(M-H)/ 退化支带上别名(M-C)/ 退化支改用字符串拼接 → 各红(轮 1)
+//     12 ← 量级换成具体 MB 数字 / 删掉查表直接输出枚举          → 各红(轮 1)
+//     13 ← 分区拉平(内层直接吃 props.items)                  → 红(轮 1)
+//     14 ← 上报丢掉 spread / 干脆就地改 props / 整份按名单重建(M-POLLUTE3)→ 各红
+//     15 ← 名单谓词出现在上报函数里(M-POLLUTE)/ :title 不再绑那个文案函数(M-TPLCASC-title)→ 各红(轮 2 #68①)
+//     16 ← 把名单内项统一写成 false 再整份 emit(M-POLLUTE / M-POLLUTE2,**显示仍正确**)→ 各红(轮 2 #68②)
+//     17 ← 三档名字被改('minimal' → 'min')                    → 红(轮 1)
+//     18 ← 去掉任一 `|| []` / `|| {}` 且没有 withDefaults(M-66回归)/ withDefaults 少盖一个键(M-72混用缺口)→ 各红
+//    对照组(合法改写**不该**红,Ruling #64/#72/#70 要收掉的就是这些假红):
+//    轮 1 七条(checked 改 if-return、checked 改 `&&`、grouped 纯改名、SIZE_LABEL 纯改名、isDisabled 纯改名、
+//    cascadeNote 纯改名、isSuppressed 纯改名)实测全绿;轮 2 新增六条:
+//      G-toggle-先建后发(先 const next 再发)、G-改名inSuppressList(名单谓词改名 → 15/16 仍绿)、
+//      M-尾部注释 / M-尾部注释块 / M-模板注释(写注释解释裁定 → 不再打红守卫)、
+//      G-withDefaults(改成声明默认值那种同样合法的写法 → 18 不再假红)—— 六条实测全绿。
 //
 // 用法: node src/components/versions/TemplateFeaturePanel.test.mjs
 import fs from 'node:fs'
@@ -52,9 +71,21 @@ const ok = (c, l, e) => { if (c) { pass++; console.log(`  PASS  ${l}`) } else { 
 // 注释一律剥掉再扫(切法与 services.test.js:352、tauriShimHonesty.test.mjs:37 同一条):
 // 这一层的目的是"删掉代码 + 在注释里补一句同样的字样"不能把它喂绿 —— 注释不进扫描面,
 // 那条假绿就不成立了;同时合法改写也不会因为注释里提到某个标识符而假红。
+// Ruling #70:轮 1 只剥**整行**注释,行尾注释仍进扫描面 —— 复审员实测 M-尾部注释 给 :50 加一句
+// `// 这里不看 cascadedBy（Ruling #62）` 反而红 3 条:解释这条裁定的注释把这条裁定的守卫打红了,
+// 与"注释不进扫描面"的目标正好相反(T10 迟早要写这种注释)。现在整行与行尾都剥:
+//   · 同行的 `/* … */` 一并剥;
+//   · `//` 只认「行首或前面是空白」那一种,免得把 'https://…' 这类字符串里的斜杠当注释;
+//   · 完整词法分析**不做**(过度设计,台账 deferred ⑥ 同口径:要堵死字符串绕过得引真数据流分析)。
+const stripTailComments = (l) => l.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/.*$/g, '$1')
 const SCRIPT_RAW = SRC.slice(SRC.indexOf('<script'), SRC.indexOf('</script>'))
-const SCRIPT = SCRIPT_RAW.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l)).join('\n')
+const SCRIPT = SCRIPT_RAW.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l)).map(stripTailComments).join('\n')
 const TPL = SRC.slice(SRC.indexOf('<template>', SRC.indexOf('</script>')), SRC.lastIndexOf('</template>'))
+// 本轮新增的两条守卫(#67/#68)扫的是**模板**,所以模板侧的注释(HTML 注释 `<!-- … -->`)也不许进扫描面,
+// 否则同一类"写注释解释裁定 → 把裁定守卫打红"的问题会在模板里重演一遍。
+// 单独造一份 TPL_CODE、不改上面那行 TPL:存量断言(第 4/7/9/11/12/13 条)的输入一字不动,
+// 只让本轮新买的守卫用它 —— 不顺手改动没被点名的存量判据。
+const TPL_CODE = TPL.replace(/<!--[\s\S]*?-->/g, '')
 
 /** 一行里的括号是否配平(配平 = 这是条自足的单行定义) */
 const balanced = (l) => { let d = 0; for (const c of l) { if (c === '(' || c === '{' || c === '[') d++; else if (c === ')' || c === '}' || c === ']') d-- } return d === 0 }
@@ -127,6 +158,15 @@ const cbDefs = DECL_NAMES.map((n) => [n, defOf(n)]).filter((x) => x[1] && /casca
 ok(/cascadedBy/.test(SCRIPT) && cbDefs.length > 0 && cbDefs.every((x) => /\.label|上级选项/.test(x[1])),
   '★Ruling #62:cascadedBy 不参与任何判定,只用来把伞项的中文名说给用户',
   JSON.stringify(cbDefs.filter((x) => !/\.label|上级选项/.test(x[1])).map((x) => x[0])))
+// Ruling #67:上面那条只扫**脚本**里的定义体,模板里的属性绑定一直在扫描面外。
+// 复审员实测 M-TPLCASC:`:disabled="isDisabled(it) || !!it.cascadedBy"`(就是 #62 修掉的那个谎原样回归)
+// → PASS 15/FAIL 0,没人喊。根因是轮 1 为 #64 做"名字无关化"时,把再上一轮那条精确属性正则
+// `/:disabled="isDisabled\(it\)"/` 的牙一起丢了。收法(复审员给的)是把禁令落在**绑定**上而不是函数名上:
+// 零成本、不牺牲改名自由,而且对任何属性绑定(:disabled / :checked / :title / @click / :class)一律生效。
+const bindWithCb = (TPL_CODE.match(/[:@][\w-]+\s*=\s*(?:"[^"]*"|'[^']*')/g) || []).filter((s) => /\bcascadedBy\b/.test(s))
+ok(bindWithCb.length === 0,
+  '★Ruling #67:模板的属性绑定里不出现 cascadedBy(静态连带结构不当作"现在点不动"的判据,绑定层也不许)',
+  JSON.stringify(bindWithCb))
 
 // ---------- 勾选框显示的是结果,不是要发出去的 flag ----------
 const checkedName = bindingName('checked')
@@ -184,14 +224,52 @@ ok(/emit\(\s*'update:modelValue'/.test(changeBody) && /\.\.\.\s*\(?\s*props\.mod
   /\[[A-Za-z_$][\w$]*\.id\]/.test(changeBody) && !/props\.modelValue\[[^\]]*\]\s*=[^=]/.test(SCRIPT),
   '勾选变化以整份映射上报(v-model 锚点,T10 直接接),且不就地改 props',
   JSON.stringify([changeName, changeBody]))
+
+// ---------- Ruling #68:「不替用户改勾选」这半句也要有护栏 ----------
+// 轮 1 把判定搬到宿主之后,#62 还剩另一半语义没被钉:**被抑制项在 modelValue 里的用户选择原样保留**。
+// 复审员实测 M-POLLUTE —— 在 toggle 的抑制分支里 `for (const x of (props.items||[])) if (isSuppressed(x))
+// next[x.id] = false` 再整份 emit,**显示仍然正确**(checked() 对被抑制项本来就给 false),
+// 上面三条正向形状全满足,反向禁令只拦"就地改 props"那种写法 → PASS 15/0。
+// 这条语义正是**要交给 T10 去接的位置**,而"顺手把状态统一一下"是那里最自然的动作,所以现在就钉。
+// 两条互补的钉法(名字全部反查,不写死):
+//   ① 名单的直接读者只许出现在**四个展示位**::disabled 绑的判定 / :checked 绑的显示 /
+//      :title 绑的悬停文案 / 连带文案函数。出现在 @change 绑的那个函数里 = 上报时拿名单改勾选。
+//      (T10 若要新增第五个合法用途,例如让 .off 也跟着名单,就该**显式**把它加进这一处白名单 ——
+//       红了会逼着写理由,而不是静默放行。)
+//   ② 上报的 payload 里计算键**恰好一个**(被点的那一行),且它的值不许是 false 字面量。
+//      这一条管的是①绕过去的形态(例如改用 `isDisabled(x)` 或就地判断 present 去批量写 false)。
+const titleName = bindingName('title')
+const suppressReaders = DECL_NAMES.filter((n) => /\bprops\.suppressed\b/.test(defOf(n) || ''))
+const displayDefLines = new Set([disabledName, checkedName, titleName, noteName, ...suppressReaders]
+  .filter(Boolean).flatMap((n) => (defOf(n) || '').split(/\r?\n/)))
+const strayReaderLines = SCRIPT.split(/\r?\n/).filter((l) =>
+  (/\bprops\.suppressed\b/.test(l) || suppressReaders.some((r) => new RegExp('\\b' + r + '\\b\\s*\\(').test(l))) &&
+  !displayDefLines.has(l))
+ok(suppressReaders.length > 0 && !!titleName && strayReaderLines.length === 0,
+  '★Ruling #68①:名单谓词只出现在「禁用判定 / 勾选显示 / 悬停文案 / 连带文案」四处,上报函数里一次都不出现',
+  JSON.stringify({ suppressReaders, titleName, strayReaderLines }))
+const keyWrites = (changeBody.match(/\[[^\]\n]*\.id\]\s*[:=]/g) || []).length
+const falseWrites = changeBody.match(/\[[^\]\n]*\.id\]\s*[:=][^,}\n]*\bfalse\b/g) || []
+ok(keyWrites === 1 && falseWrites.length === 0,
+  '★Ruling #68②:上报只写被点的那一行(计算键恰好一个)且不把任何项写成 false 字面量(不替用户改勾选)',
+  JSON.stringify({ changeName, keyWrites, falseWrites }))
+
 ok(/emit\(\s*'preset',\s*'full'\s*\)/.test(SRC) && /'lite2d'/.test(SRC) && /'minimal'/.test(SRC) && !/PRESETS/.test(SRC),
   '预设只 emit 三个名字(full/lite2d/minimal),不在本地算预设结果')
-// #66:同一文件不许两种口径 —— items/suppressed 防了、modelValue 没防,首帧 modelValue 就可能是 undefined。
-ok(!/props\.items(?!\s*\|\|\s*\[\])/.test(SCRIPT) && !/props\.modelValue(?!\s*\|\|\s*\{\})/.test(SCRIPT) &&
+// #66 的口径 + Ruling #72 的收法:null 安全有**两种合法写法** —— 读法带兜底(`props.items || []`),
+// 或在 props 声明处给默认值(`withDefaults(defineProps<…>(), { items: () => [], … })`)。
+// 轮 1 要求前者逐字存在,结果复审员实测 G-withDefaults(改成默认值写法并删掉三处 `||`)反而红 1 条 ——
+// 那是同一意图下更安全的一种写法,不该被红线打死。判据因此改成:
+// **要么**三个读法都带兜底(现状,逐字校验不变),**要么** withDefaults 把这三个键都给了默认值;
+// 混着来(有一个键两样都没覆盖)就是原来的"两种口径",照样红。
+const defaultKeysCovered = ['items', 'modelValue', 'suppressed'].every(
+  (k) => new RegExp('withDefaults\\s*\\([\\s\\S]{0,600}[,{]\\s*[\'"]?' + k + '[\'"]?\\s*:').test(SCRIPT))
+ok(defaultKeysCovered ||
+  (!/props\.items(?!\s*\|\|\s*\[\])/.test(SCRIPT) && !/props\.modelValue(?!\s*\|\|\s*\{\})/.test(SCRIPT) &&
   !/props\.suppressed(?!\s*\|\|\s*\[\])/.test(SCRIPT) && /props\.items \|\| \[\]/.test(SCRIPT) &&
-  /props\.modelValue \|\| \{\}/.test(SCRIPT) && /props\.suppressed \|\| \[\]/.test(SCRIPT),
-  '★Ruling #66:props 的数组/映射读法一律 null 安全,同文件不留两种口径',
-  JSON.stringify((SCRIPT.match(/props\.(items|modelValue|suppressed)\b[^\n]*/g) || []).slice(0, 8)))
+  /props\.modelValue \|\| \{\}/.test(SCRIPT) && /props\.suppressed \|\| \[\]/.test(SCRIPT)),
+  '★Ruling #66/#72:props 的 items/modelValue/suppressed 三个读法要么带 null 兜底、要么在声明处给默认值,不留缺口',
+  JSON.stringify({ defaultKeysCovered, reads: (SCRIPT.match(/props\.(items|modelValue|suppressed)\b[^\n]*/g) || []).slice(0, 8) }))
 
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) { for (const f of failures) console.log('  - ' + f); process.exit(1) }
