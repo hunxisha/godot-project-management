@@ -22,6 +22,9 @@ sha2 = "0.10"
 md5 = "0.7"
 walkdir = "2"
 trash = "5"
+# tpl 探测层照搬 tplprobe.js 的正则(见 src/tpl/probe.rs 顶部注释)。
+# 该 crate 已在依赖树里(1.13.1),加直接依赖不增编译成本。
+regex = "1"
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"

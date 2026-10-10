@@ -12,6 +12,7 @@
 //!      静默跳过就是本项目最恨的那种假绿。
 
 use godot_workshop::tpl::features;
+use godot_workshop::tpl::probe as tp;
 use godot_workshop::tpl::profile as rp;
 use serde_json::{json, Map, Value};
 use std::fs;
@@ -361,5 +362,125 @@ fn tpl_profile_text_is_byte_identical_between_js_and_rust() {
     assert!(compared >= CASES.len(), "实际比对 {compared} 例,少于 {}", CASES.len());
     println!("  parity OK:{compared} 例逐字节相同,面板项 {ids_len} 个两端一致");
 
+    let _ = fs::remove_dir_all(&base);
+}
+
+/// 探测层 + 链式（真探测 → 真 profile）的第二轮对照。
+/// 为什么单开一轮：第一轮比的是「给定一张选项表，两端算出的 profile 一样」，
+/// 那还没证明**选项表本身**两端读得一样 —— 这一轮从真源码树开始，把探测也纳入逐字节对照，
+/// 最后一格 `chain-profile` 才是「两端拿同一份源码会编出同一个产物」的正证。
+const JS_PROBE_HARNESS: &str = r###"
+const fs = require('node:fs')
+const path = require('node:path')
+const cfg = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))
+const B = require(path.join(cfg.repo, 'src-ztools/preload/lib/tplprobe.js'))
+const P = require(path.join(cfg.repo, 'src-ztools/preload/lib/tplprofile.js'))
+const tree = cfg.tree
+
+;(async () => {
+  const cases = {}
+  const a = await B.probeSource(tree)
+  cases['probe'] = JSON.stringify(a)
+  cases['probe-tag-same'] = JSON.stringify(await B.probeSource(tree, { targetTag: '4.7.2-stable' }))
+  cases['probe-tag-other'] = JSON.stringify(await B.probeSource(tree, { targetTag: '4.3-stable' }))
+  cases['probe-not-root'] = JSON.stringify(await B.probeSource(path.join(tree, 'platform')))
+  cases['probe-missing'] = JSON.stringify(await B.probeSource(path.join(tree, 'no-such-dir')))
+  const sel = P.initialSelection(a.options)
+  const r = P.buildProfile(sel, a.options, { mode: 'default-on' })
+  cases['chain-profile'] = P.profileText(r.json) + '\n' + JSON.stringify(r.commandExtras)
+  process.stdout.write(JSON.stringify({ cases }))
+})()
+"###;
+
+fn rust_probe_side(tree: &Path) -> Map<String, Value> {
+    let s = |v: Value| Value::String(serde_json::to_string(&v).unwrap());
+    let a = tp::probe_source(tree, None);
+    let mut cases = Map::new();
+    cases.insert("probe".into(), s(a.clone()));
+    cases.insert("probe-tag-same".into(), s(tp::probe_source(tree, Some("4.7.2-stable"))));
+    cases.insert("probe-tag-other".into(), s(tp::probe_source(tree, Some("4.3-stable"))));
+    cases.insert("probe-not-root".into(), s(tp::probe_source(&tree.join("platform"), None)));
+    cases.insert("probe-missing".into(), s(tp::probe_source(&tree.join("no-such-dir"), None)));
+    let options = a.get("options").cloned().unwrap_or(json!({}));
+    let sel = rp::initial_selection(&options);
+    let r = rp::build_profile(&sel, &options, "default-on");
+    cases.insert(
+        "chain-profile".into(),
+        Value::String(format!("{}\n{}", rp::profile_text(&r.json), serde_json::to_string(&r.command_extras).unwrap())),
+    );
+    cases
+}
+
+/// 递归按键排序后再紧凑序列化。
+/// 为什么探测结果要这么做而 profile 不用：`options` 里模块键的**插入顺序**由 `readdir` 决定，
+/// 那是操作系统的行为不是语义（node 与 Rust 的 read_dir 不保证同一序）；把它算成两端不一致
+/// 就是拿环境问题冒充判据漂移。profile 那一侧顺序由构造保证（sortKeys + token 字典序），
+/// 所以 `chain-profile` 这一例仍按原样逐字节比（本函数对非 JSON 串直接原样返回）。
+fn canon(s: &str) -> String {
+    let Ok(v) = serde_json::from_str::<Value>(s) else {
+        return s.to_string();
+    };
+    fn sort_deep(v: Value) -> Value {
+        match v {
+            Value::Object(m) => {
+                let mut keys: Vec<String> = m.keys().cloned().collect();
+                keys.sort();
+                let mut out = Map::new();
+                for k in keys {
+                    out.insert(k.clone(), sort_deep(m[&k].clone()));
+                }
+                Value::Object(out)
+            }
+            Value::Array(a) => Value::Array(a.into_iter().map(sort_deep).collect()),
+            other => other,
+        }
+    }
+    serde_json::to_string(&sort_deep(v)).unwrap()
+}
+
+#[test]
+fn tpl_probe_and_profile_chain_are_byte_identical() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
+    let tree = repo.join("src-tauri/tests/fixtures/tplsrc");
+    assert!(tree.join("SConstruct").exists(), "夹具树没了：重造方法见 tplsrc/MANIFEST.md");
+
+    let base = std::env::temp_dir().join(format!("gpm-tpl-probe-parity-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    fs::create_dir_all(&base).unwrap();
+    let script = base.join("js-probe.js");
+    fs::write(&script, JS_PROBE_HARNESS).unwrap();
+    let cfg_file = base.join("js-cfg.json");
+    fs::write(&cfg_file, json!({ "repo": repo, "tree": tree }).to_string()).unwrap();
+
+    let js: Value = match Command::new("node").arg(&script).arg(&cfg_file).output() {
+        Err(e) => panic!("环境里找不到 node({e})—— 按失败处理,不静默跳过"),
+        Ok(out) => {
+            if !out.status.success() {
+                panic!("JS probe harness 退出非零:{}", String::from_utf8_lossy(&out.stderr));
+            }
+            serde_json::from_slice(&out.stdout).expect("JS 侧输出的是 JSON")
+        }
+    };
+
+    let jc = js["cases"].as_object().unwrap().clone();
+    let rc = rust_probe_side(&tree);
+    let mut keys: Vec<&String> = jc.keys().collect();
+    keys.sort();
+    let mut rkeys: Vec<&String> = rc.keys().collect();
+    rkeys.sort();
+    assert_eq!(keys, rkeys, "探测对照用例集合两端不一致");
+    assert!(jc.len() >= 6, "只有 {} 例,少于 6 说明取数方式错了", jc.len());
+
+    // 自检:这几例本就两两不同,若 harness 忘了传 targetTag 就会全等 → 下面的比对成了自证
+    assert_ne!(jc["probe"], jc["probe-tag-same"], "probe 与 probe-tag-same 相同 = targetTag 没生效");
+    assert_ne!(jc["probe-tag-same"], jc["probe-tag-other"], "两个 targetTag 结果相同 = tagMatched 没参与判定");
+
+    let n = keys.len();
+    for k in keys {
+        let j = canon(jc[k].as_str().unwrap());
+        let r = canon(rc[k].as_str().unwrap());
+        assert_eq!(j, r, "探测对照用例 {k} 不是逐字节相同 → {}", first_diff(&j, &r));
+    }
+    println!("  探测 parity OK:{n} 例逐字节相同(含 chain-profile)");
     let _ = fs::remove_dir_all(&base);
 }
