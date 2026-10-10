@@ -41,26 +41,49 @@
 - 断言总数 2,062 → **4,877** 项(71 套件;新增 tplprobe / tplprofile / tplfeatures / tplsource /
   tpllib / buildtools 与面板、向导两份源码扫描闸门)
 - 桌面版(Tauri)对自编译链路按「缺能力是状态不是假成功」如实占位
+  —— 该占位已在同日发布的桌面版 2.1.0 重制版里接成真 Rust,见下方「桌面版 2.1.0」
 
-## 桌面版 2.1.0
+## 桌面版 2.1.0（2026-10-11 重新发布）
 
-与插件版 2.1.0 同一套渲染层与能力语义,桌面用户同步拿到工具页与版本页的这一轮;自编译链路在桌面版**如实不可用**。
+与插件版 2.1.0 同一套渲染层与能力语义,但这一轮把**自编译模板整条链路接成了真 Rust** ——
+上一条插件发布段里写的「如实占位」到此作废。
 
 ### 新增
 
-- **工具页**:18 项体检(扫描 / 报告 / 一键修复)与摘要带 + 双栏 + 类别聚合流改版
-- **版本页**:模板状态悬停显示真实路径、「模板目录」直开落点;「模板库」下拉与「自编译模板」向导
-  在桌面版给出「请使用 ZTools 插件版」的如实说明(不假成功、不静默消失)
+- **自编译导出模板 14 条命令接真 Rust**:`src-tauri/src/tpl/{features,probe,profile,api,build,exec,source,pack}.rs`
+  语义镜像插件版 JS 真源(判据不在 Rust 另立一套),探测 / 功能表 / 校验 / 预设 / 环境检测 / 编译 /
+  取消 / 销单 / 代下载 / 取消下载 / 模板库四操作全部注册;垫片对应 14 条占位摘掉,诚实性测试改为
+  反向钉「占位复辟或参数名漂移即红」
+- **真串行编译**:scons 子进程 + 实时日志尾 + 取消走 `taskkill /T /F` 杀进程树;任务快照经
+  `tasks://snapshot` 推送,垫片 `dispatch()` 补上 `tplbuild` 分流(此前收了回调却不分流 = 断链)
+- **自编译导入的自动存档**在桌面版同样生效:`install_export_templates` 补 `archive` / `versionId`,
+  存档失败不碰已成功的安装,原因挂 `archiveError`
 
 ### 修复
 
-- 桌面版收藏如实化:星标禁用 + 悬停说明 + 收藏浏览模式空态指引(收藏竞态修复本身是插件版链路)
-- 垫片审计三批收口:一批原本会假成功/静默吞掉的入口改为如实报错或正确接线;仍缺 Rust 命令的
-  6 项(详情抓取、导出记录、release 列表等)保持如实占位
+- **桌面版开屏「未检测到 ZTools 环境」的成因**:垫片放在 `src/public/`,而 `vite.config.js` 从未配
+  `publicDir`,Vite 按默认 `<root>/public` 找(该目录不存在)→ `/tauri-shim.js` 落到 SPA 回落返回
+  index.html,浏览器把 HTML 当 JS 解析报错。dev 模式已截图取证;打包路径同源,上一版包未做开屏验证
+- **`tauri dev` 编译期连带退出**:cargo 写 `src-tauri/target` 里 exe 的那一瞬间是独占锁定,chokidar
+  撞上抛未捕获 EBUSY → vite 崩 → dev 退。`server.watch.ignored` 忽略该目录(Vite 把这条**追加**在默认
+  忽略表之后,`node_modules` 那几条不受影响)
+- **模板库切换失败回滚留幽灵槽**:`activateTemplatePack` 换入失败时把「换出后写的那笔记账」又写一遍
+  —— 文件已搬回生效位、记录却写着「在槽里」,下次切换报「存档目录已不在(记录陈旧)」。Rust 侧不
+  bug 兼容(还原换出前的记录;换出时新建的那条直接撤掉),`tpllib.js` 同改并补两条断言
+- **typecheck 红闸门 55 条**:`npm test` 不含 typecheck,于是连着三批提交与一次发布没人看见;
+  本仓库从此「报绿」一律指 `npm run verify`(typecheck + test)
 
 ### 工程
 
+- 双端逐字节 parity 六轮(14 条命令、约 50 例两边都跑真代码对照,profile 按字符串比而不是 JSON 深比较);
+  对照夹具 `src-tauri/tests/fixtures/tplsrc/` 逐字摘自真实编译过的 4.7.2-stable 源码树,并在
+  `.gitattributes` 里标 `-text` 禁换行转换
+- `cargo test` 97 单测(2 项 `#[ignore]` 为真机项)、`npm run verify` 71 套件全绿
 - 三平台产物经 `desktop-release.yml` 矩阵构建;数据格式与 2.0 完全一致,无需迁移
+- 仍未接(如实登记):桌面版 `export_template_status` 只按 tag 派模板目录、未走「统一取法」;
+  导出 / 文档两域的运行态发 `running` 而契约要 `exporting` / `dumping`;磁盘余量门槛(20 GB / 4 GB)
+  在桌面版不触发。其余 12 处方法(收藏、导出历史、`.godot` 缓存统计与清理、账号校验、安装预览与暂存、
+  插件更新检查、单类差异对比、文档库缓存统计与清理等)继续如实提示「暂不支持」
 
 ## 桌面版 1.0.1
 
