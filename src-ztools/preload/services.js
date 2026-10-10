@@ -63,8 +63,8 @@ const servicesImpl = {
     // 两支闸的成因不同,建议也就不同,不合并成一支:
     //   ① 不是源码根 → 把探测层原句带回(缺 SConstruct / 读不到);
     //   ② 是源码根却一个构建选项都没解析出来 → 策划书 §5.2 那道「拒绝进面板」的闸(Ruling #26)。
-    //      这一支不返回 items:给一张 69 项全灰的面板,等于让用户以为「这版什么都不支持」,
-    //      比拒绝更坏。判据用 options 的键数而不是「69 个 flag 全 absent」—— 后者会把能力表
+    //      这一支不返回 items:给一张 55 项全灰的面板,等于让用户以为「这版什么都不支持」,
+    //      比拒绝更坏。判据用 options 的键数,而不是「所有 flag 全 absent 才拒绝」—— 后者会把能力表
     //      拖进契约层,破掉「两层接缝只有 flag 名」那条约定。
     if (!probe.ok) return { ok: false, error: probe.error }
     if (Object.keys(probe.options).length === 0) {
@@ -117,6 +117,15 @@ const servicesImpl = {
       hardBlocks: r.hardBlocks,
       suppressed: tplprofile.selectionSuppressed(params.features, probe.cascades || {})
     }
+  },
+  /** 应用预设(面板三档名字):取消哪些项、以及编译模式都由输出层给 —— 渲染层只报名字(Ruling #74) */
+  applyTemplatePreset: async (name, srcDir) => {
+    const probe = await tplprobe.probeSource(srcDir)
+    if (!probe.ok) return { ok: false, error: probe.error || '无法探测这份源码' }
+    // 预设的差集规则依赖探测结果,所以先探再算;mode 随 features 一起交出去,渲染层两个调用点透传同一份。
+    const r = tplprofile.PRESETS.apply(name, probe.options)
+    if (!r.ok) return { ok: false, error: r.error }
+    return { ok: true, features: r.features, mode: r.mode }
   },
   /** 工具链检测(python/SCons/vcvars) */
   checkTemplateBuildTools: () => buildtools.checkTemplateBuildTools(),

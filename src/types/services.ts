@@ -120,6 +120,13 @@ export interface Services {
    *  `<TemplateFeaturePanel :suppressed="..." />`。 */
   validateTemplateConfig(params: { srcDir: string, features: Record<string, boolean>, mode?: TplProfileMode, d3d12SdkInstalled?: boolean, accesskitSdkInstalled?: boolean }):
     Promise<{ ok: boolean, issues: TplIssue[], hardBlocks: TplIssue[], suppressed: string[] }>
+  /** 应用预设(面板三档名字:full / lite2d / minimal):取消哪些项、以及编译模式都由宿主算(Ruling #74)。
+   *  `mode` 是预设的一部分("最小可跑" = 反向白名单 default-off)——
+   *  渲染层把它**原样**喂给 validateTemplateConfig 与 buildTemplatePack 两个调用点;
+   *  `name === 'minimal' ? 'default-off' : 'default-on'` 这种写法就是把 §5.4b 的判定搬进视图,禁止。
+   *  未知预设名不猜:ok:false(拼错名字在渲染层当场可见,而不是静默拿到 full)。 */
+  applyTemplatePreset(name: string, srcDir: string):
+    Promise<{ ok: true, features: Record<string, boolean>, mode: TplProfileMode } | { ok: false, error: string }>
   /** 工具链检测(python / SCons / MSVC vcvars64)。缺什么把「下一步动作」放进 problems */
   checkTemplateBuildTools(): Promise<{
     ok: boolean

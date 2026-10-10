@@ -10,6 +10,7 @@
 // 与 TemplateBuildWizard.vue 同一先例:判据不进 .vue(跑不进 Node harness),这里只是展示与调度。
 //
 // 护栏测试:TemplateFeaturePanel.test.mjs(源码扫描,逐条做过「拿掉实现就要红」的变异自检)。
+// T10 收口:.off 淡化与禁用态同源(被抑制行也淡化),未实测提示改人话;两处都有对应断言(★New-7)。
 import { computed } from 'vue'
 import Icon from '../Icon.vue'
 import type { FeatureWithProbe } from '../../types/godot'
@@ -91,8 +92,8 @@ const hasDanger = computed(() => (props.items || []).some((it) => it.risk === 'd
     </div>
 
     <p v-if="!tested" class="hint warn-line">
-      这份源码（{{ sourceVersion || '版本读不出' }}）不在已实测表内。面板按探测结果工作，
-      未识别的项已置灰并保持源码默认 —— 不猜参数，也不拒绝编译。
+      这份源码（{{ sourceVersion || '版本读不出' }}）我们还没有实测过。下面按它自己声明的默认值显示，
+      认不出的项保持灰色 —— 不猜参数，也不拒绝编译。
     </p>
 
     <p v-if="hasDanger" class="hint danger-legend">
@@ -108,7 +109,7 @@ const hasDanger = computed(() => (props.items || []).some((it) => it.risk === 'd
         v-for="it in g.items"
         :key="it.id"
         class="feat"
-        :class="[RISK_CLASS[it.risk], { off: !it.present }]"
+        :class="[RISK_CLASS[it.risk], { off: isDisabled(it) }]"
         :title="disabledHint(it) || undefined"
       >
         <input

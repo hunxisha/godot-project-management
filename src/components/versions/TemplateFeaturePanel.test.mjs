@@ -34,6 +34,8 @@
 // ⚠ 逐条变异自检(2026-10-10,修复轮 2 口径;全部在仓库外的临时副本里跑,工作树未动。
 //    轮 2 共 14 次面板实验(8 刀功能变异全杀红 + 6 组合法改写/注释全绿),
 //    完整输出与逐条归属见 task-9-report.md 修复轮 2 §3;轮 1 那 49 次见同文件修复轮 1 §6)。
+//    T10 收口(2026-10-10):#72 的假绿已修(默认值改验 withDefaults **第二个实参**、要求工厂形状),
+//    新增 ★New-7(.off 淡化与禁用态同源);两处的变异证据见 task-10-report.md §变异表。
 //    口径 = 把对应那段功能**真的拿掉/改反**(不是改注释、不是改名)→ 这条必须红:
 //      1 ← 把一个开关的变量名字面量真写进组件                  → 红(轮 1)
 //      2 ← 把编译命令行真拼进组件                              → 红(轮 1)
@@ -248,6 +250,17 @@ const strayReaderLines = SCRIPT.split(/\r?\n/).filter((l) =>
 ok(suppressReaders.length > 0 && !!titleName && strayReaderLines.length === 0,
   '★Ruling #68①:名单谓词只出现在「禁用判定 / 勾选显示 / 悬停文案 / 连带文案」四处,上报函数里一次都不出现',
   JSON.stringify({ suppressReaders, titleName, strayReaderLines }))
+// ★New-7(T10 收):被抑制行的 `.off` 淡化与禁用态**同源**(Ruling #62 的观感统一)——
+// 只按 `!it.present` 判 off 时,被连带关闭的行是"灰着又亮着"的,与"点不动"的禁用态不一致。
+// 名字不写死:从 :class 的绑定**表达式**里反查被调用的函数名,要求它落在
+// {禁用判定} ∪ {名单读者}(等价写法 `!it.present || isSuppressed(it)` 里出现名单谓词,同样放行)。
+// 把表达式改回 `off: !it.present` → 一个白名单函数都不出现 → 红。
+const classExpr = (TPL_CODE.match(/:class="([^"]*)"/) || [])[1] || ''
+const classCallNames = [...classExpr.matchAll(/([A-Za-z_$][\w$]*)\s*\(/g)].map((m) => m[1])
+const disableLikeNames = new Set([disabledName, ...suppressReaders].filter(Boolean))
+ok(!!disabledName && classCallNames.some((n) => disableLikeNames.has(n)),
+  '★New-7:被抑制行也带 .off 淡化 —— :class 绑定里调用了禁用判定或名单谓词(改回只按 present 判 off → 红)',
+  JSON.stringify({ classExpr, classCallNames, disableLikeNames: [...disableLikeNames] }))
 const keyWrites = (changeBody.match(/\[[^\]\n]*\.id\]\s*[:=]/g) || []).length
 const falseWrites = changeBody.match(/\[[^\]\n]*\.id\]\s*[:=][^,}\n]*\bfalse\b/g) || []
 ok(keyWrites === 1 && falseWrites.length === 0,
@@ -260,16 +273,45 @@ ok(/emit\(\s*'preset',\s*'full'\s*\)/.test(SRC) && /'lite2d'/.test(SRC) && /'min
 // 或在 props 声明处给默认值(`withDefaults(defineProps<…>(), { items: () => [], … })`)。
 // 轮 1 要求前者逐字存在,结果复审员实测 G-withDefaults(改成默认值写法并删掉三处 `||`)反而红 1 条 ——
 // 那是同一意图下更安全的一种写法,不该被红线打死。判据因此改成:
-// **要么**三个读法都带兜底(现状,逐字校验不变),**要么** withDefaults 把这三个键都给了默认值;
-// 混着来(有一个键两样都没覆盖)就是原来的"两种口径",照样红。
+// **要么**三个读法都带兜底(现状,逐字校验不变),**要么** withDefaults 的**第二个实参**(默认值对象)
+// 把这三个键都给了默认值;混着来(有一个键两样都没覆盖)就是原来的"两种口径",照样红。
+// Ruling #72 的收口(T10 从轮 2 手里接下):旧判据从 `withDefaults(` 之后随手抓 600 字符,于是
+// **props 的类型字面量**(`defineProps<{ … suppressed: string[] }>`)里的 `suppressed:` 就把这一格喂绿了 ——
+// 实参一个默认值都不给(第二个实参是 `{}`)也照样 PASS,而 `props.suppressed.includes(...)` 会首帧 TypeError。
+// 现在先把**第二个实参文本**切出来再验键,并要求工厂形状 `k: () =>`(类型字面量在切面之外,喂不进来)。
+function withDefaultsSecondArg() {
+  const i = SCRIPT.indexOf('withDefaults')
+  if (i < 0) return ''
+  const open = SCRIPT.indexOf('(', i)
+  if (open < 0) return ''
+  let depth = 0
+  let end = -1
+  for (let j = open; j < SCRIPT.length; j++) {
+    const c = SCRIPT[j]
+    if (c === '(') depth++
+    else if (c === ')') { depth--; if (depth === 0) { end = j; break } }
+  }
+  if (end < 0) return ''
+  // 第一个实参是 defineProps<…>():类型字面量里的 `{}` 也在括号配平里,顶层逗号切出来的就是第二个实参
+  const inner = SCRIPT.slice(open + 1, end)
+  let d = 0
+  for (let j = 0; j < inner.length; j++) {
+    const c = inner[j]
+    if (c === '(' || c === '{' || c === '[') d++
+    else if (c === ')' || c === '}' || c === ']') d--
+    else if (c === ',' && d === 0) return inner.slice(j + 1)
+  }
+  return ''
+}
+const defaultsArg = withDefaultsSecondArg()
 const defaultKeysCovered = ['items', 'modelValue', 'suppressed'].every(
-  (k) => new RegExp('withDefaults\\s*\\([\\s\\S]{0,600}[,{]\\s*[\'"]?' + k + '[\'"]?\\s*:').test(SCRIPT))
+  (k) => new RegExp('[\\s{,]\\s*[\'"]?' + k + '[\'"]?\\s*:\\s*\\(\\s*\\)\\s*=>').test(defaultsArg))
 ok(defaultKeysCovered ||
   (!/props\.items(?!\s*\|\|\s*\[\])/.test(SCRIPT) && !/props\.modelValue(?!\s*\|\|\s*\{\})/.test(SCRIPT) &&
   !/props\.suppressed(?!\s*\|\|\s*\[\])/.test(SCRIPT) && /props\.items \|\| \[\]/.test(SCRIPT) &&
   /props\.modelValue \|\| \{\}/.test(SCRIPT) && /props\.suppressed \|\| \[\]/.test(SCRIPT)),
-  '★Ruling #66/#72:props 的 items/modelValue/suppressed 三个读法要么带 null 兜底、要么在声明处给默认值,不留缺口',
-  JSON.stringify({ defaultKeysCovered, reads: (SCRIPT.match(/props\.(items|modelValue|suppressed)\b[^\n]*/g) || []).slice(0, 8) }))
+  '★Ruling #66/#72:props 的 items/modelValue/suppressed 三个读法要么带 null 兜底、要么在**withDefaults 第二个实参**里给工厂默认值,不留缺口',
+  JSON.stringify({ defaultKeysCovered, defaultsArg: defaultsArg.slice(0, 120), reads: (SCRIPT.match(/props\.(items|modelValue|suppressed)\b[^\n]*/g) || []).slice(0, 8) }))
 
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) { for (const f of failures) console.log('  - ' + f); process.exit(1) }

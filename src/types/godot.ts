@@ -705,7 +705,8 @@ export interface FeatureWithProbe {
   present: boolean
   /** 由源码默认值推出的初始勾选态 */
   defaultOn: boolean
-  /** 被哪个伞项连带(仅当探测到该连带关系) */
+  /** 被哪个伞项连带(**结构上**可被带走:这份源码的静态连带关系,仅当探到);
+   *  当前是否已被带走看 validateTemplateConfig 的 suppressed(Ruling #62 之后两者分工不同) */
   cascadedBy?: string
 }
 

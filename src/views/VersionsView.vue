@@ -358,9 +358,9 @@ function progressOf(t: DownloadTask): number {
             v-if="isWindows()"
             class="btn small ghost"
             :disabled="!!tplTaskFor(v._id)"
-            title="在本机编译一份 2D-only 的导出模板(约 5 分钟,产物 ~56 MB);需要 Python/SCons/MSVC"
+            title="挑选要保留的功能后自行编译导出模板（需要本机 MSVC 工具链与 Godot 源码）"
             @click="tplWizardFor = v._id"
-          >自编译 2D 模板</button>
+          >自编译模板</button>
           <button
             v-if="tplStatuses[v._id]?.installed"
             class="btn small ghost"

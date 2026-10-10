@@ -488,6 +488,37 @@ ok(eqJson(Object.keys(dboOf(minReal)), ['module_gltf_enabled', 'module_webp_enab
    'minimal 对保留的模块(gltf/webp)在 profile 里显式点名 true,其余一个键都不写', JSON.stringify(Object.keys(dboOf(minReal))))
 ok(!hasIn(minReal, 'vulkan'), '对渲染驱动(vulkan)两个通道一个字都不写 —— 面板上看不见的东西不由预设代关', JSON.stringify([dboOf(minReal), minReal.commandExtras]))
 
+section('PRESETS.apply:预设名 → 勾选 + mode(Ruling #74;契约层 applyTemplatePreset 走这一张表)')
+// 三档的映射与 mode 都在这一层定死,渲染层只报名字(.vue 里不许出现「name === 'minimal' ? …」这类判定)。
+// mode 是预设的一部分:"最小可跑" = 反向白名单 default-off,宿主拿到的必须是这里交出的那一份,
+// 且同一份喂给校验与编译两个调用点 —— 两处不同的话,校验的就不是将要发出去的那份产物。
+// 夹具一律带实参(OPTS / ALL_ON_OPTS),与本节其它 PRESETS 断言同源。
+const apFull = T.PRESETS.apply('full', OPTS)
+const apLite = T.PRESETS.apply('lite2d', OPTS)
+const apMin = T.PRESETS.apply('minimal', OPTS)
+ok(apFull.ok === true && apFull.mode === 'default-on' && eqJson(apFull.features, T.PRESETS.full(OPTS)),
+   '「full」→ full() 的勾选 + default-on(把这一支映射到别的档或把 mode 写反 → 红)', JSON.stringify([apFull.ok, apFull.mode]))
+ok(apLite.ok === true && apLite.mode === 'default-on' && eqJson(apLite.features, T.PRESETS.lite2d(OPTS)),
+   '「lite2d」→ lite2d() 的勾选 + default-on(名字与面板按钮一一对应;换成别的档 → 红)',
+   JSON.stringify([apLite.ok, apLite.mode]))
+ok(apMin.ok === true && apMin.mode === 'default-off' && eqJson(apMin.features, T.PRESETS.minimalSelection(OPTS)),
+   '★Ruling #74:「minimal」→ minimalSelection() 的勾选 + **default-off**(这一格丢了,§5.4b 的反向白名单整个不可达)',
+   JSON.stringify([apMin.ok, apMin.mode]))
+// mode 真流进产物:apply('minimal') 交出的 (features, mode) 直接喂 buildProfile,反向白名单 token 必须在。
+const apMinBuilt = reg('apply(minimal) 的 (features, mode) 直接喂 buildProfile', T.buildProfile(apMin.features || {}, OPTS, { mode: apMin.mode }))
+ok(eqJson(apMinBuilt.commandExtras, T.buildProfile(T.PRESETS.minimalSelection(OPTS), OPTS, { mode: 'default-off' }).commandExtras) &&
+   apMinBuilt.commandExtras.includes('modules_enabled_by_default=no'),
+   'apply 交出的 mode 是真会生效的那个:反向白名单 token 在产物里(把 mode 改成 default-on,这条就没了)',
+   JSON.stringify(apMinBuilt.commandExtras))
+const apUnknown = T.PRESETS.apply('__未知预设__', OPTS)
+ok(apUnknown.ok === false && !('features' in apUnknown) && /__未知预设__/.test(apUnknown.error),
+   '未知预设名不猜:ok:false 且**不带 features**(拼错名字静默回退成 full → 红;渲染层只报名字,拼错必须当场可见)',
+   JSON.stringify(apUnknown))
+const apMinEmpty = T.PRESETS.apply('minimal', undefined)
+ok(apMinEmpty.ok === true && Object.values(apMinEmpty.features || {}).every((v) => v === false),
+   'options 整份缺失与"什么都没探到"同形:minimal 全不打勾、不抛(与 initialSelection 同一条兜底)',
+   JSON.stringify(Object.values((apMinEmpty && apMinEmpty.features) || {}).filter(Boolean)))
+
 section('Ruling #38 通道守卫:遍历本节造出的每一份产物')
 // 这两条是规则本身的牙:
 //   · profile(disabled_build_options)里**不得出现任何非 module_* 前缀的键**;

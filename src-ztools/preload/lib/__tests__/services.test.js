@@ -24,6 +24,8 @@
 //     `tested`)。它们在行为上观察不到,不扫形状就等于没测。
 //   · 第 10 节是 Ruling #62 的 `suppressed` 通道:名单算得对(行为)、不重复探测也不从渲染层收连带图
 //     (形状),并跨文件对账契约声明与桌面垫片的占位是否同形。
+//   · 第 11 节是 T10 补的 `applyTemplatePreset`:预设与 mode 都出自输出层(Ruling #74),
+//     契约层只合成不重算;mode 漏交 = §5.4b 反向白名单在真实流程里永不可达。
 // 这些调用是 async,因此全文改成 `async function main()` + `main().catch(() => process.exit(1))`
 // —— 本仓库主流形状(backup/templates/taskqueue/docs/exporter/http 六个 harness 同形)。
 // 形状规则的意义:断言若写在 await 节内而汇总三行在文件末尾同步执行,那些断言既不计 PASS、
@@ -264,7 +266,7 @@ async function main() {
     // Ruling #26:策划书 §5.2「解析不出任何声明 → 拒绝进面板」这道闸落在契约层。
     const rEmpty = await implemented.listTemplateFeatures(TEMPTY)
     ok(rEmpty.ok === false && rEmpty.error === '无法解析此版本源码的构建选项（源码结构可能已变）' && !rEmpty.items,
-      '★Ruling #26:源码根成立但一个选项都没解析出来 → ok:false + 逐字文案,且**不给 items**(不给一张 69 项全灰的面板)',
+      '★Ruling #26:源码根成立但一个选项都没解析出来 → ok:false + 逐字文案,且**不给 items**(不给一张 55 项全灰的面板)',
       `${rEmpty.ok}/${rEmpty.error}`)
     const rNoRoot = await implemented.listTemplateFeatures(TNOROOT)
     ok(rNoRoot.ok === false && rNoRoot.error !== '无法解析此版本源码的构建选项（源码结构可能已变）' && !!rNoRoot.error,
@@ -363,6 +365,19 @@ async function main() {
       JSON.stringify(withFeatures))
   }
 
+  // 第 9 / 10 两节共用的切面:剥注释后的 services.js 代码文本 + validateTemplateConfig 的入参名与
+  // 探测结果落在哪个局部变量上(两个标识符都**反查**、不写死 —— Ruling #71/#58 两次假红的教训)。
+  // 轮 1 曾在两节里各写一份提取、各钉死一个名字;现在只留这一处,两节引用同一批反转引用。
+  // 剥法说明:这两节防的是"第二处推导",而解释为什么不再有它的那段注释里必然提到那个写法 ——
+  // 不剥注释的话第一条反向扫描会被自己的注释命中(假阳性),剥掉后代码里真把旧表达式改回去照样红。
+  // 切法与 tauriShimHonesty.test.mjs:37 同一条。只扫**代码行**。
+  const srcJsRaw = fs.readFileSync(SERVICES, 'utf8')
+  const code = srcJsRaw.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l)).join('\n')
+  const vtc = /validateTemplateConfig:\s*async\s*\(([A-Za-z_$][\w$]*)\)\s*=>\s*\{([\s\S]*?)\n {2}\},/.exec(code)
+  const vtcParam = vtc ? vtc[1] : ''
+  const vtcBody = vtc ? vtc[2] : ''
+  const probeVar = vtcBody ? (/const\s+([A-Za-z_$][\w$]*)\s*=\s*await\s+tplprobe\.probeSource\s*\(/.exec(vtcBody) || [])[1] : ''
+
   section('9. 契约层不养第二个真源:两条源码扫描(行为断言看不见的那半边)')
   {
     // 这一节是**静态扫描**,因为这两件事在行为上观察不到:
@@ -373,21 +388,18 @@ async function main() {
     //   · Ruling #58 —— `untestedSource` 不许在契约层重算 `testedVersions.includes(sourceVersion)`
     //     (`tplprobe.js:270` 是同一个表达式的第二处推导;`tested` 的语义一改就静默用旧口径)。
     //     这条同样是等价重构,行为断言抓不到,所以钉形状。
-    const srcJsRaw = fs.readFileSync(SERVICES, 'utf8')
-    // 只扫**代码行**:这一节防的是"第二处推导",而解释为什么不再有它的那段注释里必然提到那个写法
-    // (本仓的注释规矩如此)。不剥注释的话第一条反向扫描会被自己的注释命中 —— 那是假阳性,
-    // 剥掉后代码里真把旧表达式改回去照样红。切法与 tauriShimHonesty.test.mjs:37 同一条。
-    const srcJs = srcJsRaw.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l)).join('\n')
-    const forward = /buildTemplatePack:\s*\(params\)\s*=>\s*buildtools\.buildTemplatePack\(\s*params\s*\)/.exec(srcJs)
+    const forward = /buildTemplatePack:\s*\(params\)\s*=>\s*buildtools\.buildTemplatePack\(\s*params\s*\)/.exec(code)
     ok(!!forward,
       '★Ruling #60:buildTemplatePack 是「整份 params 转发」的形状(改成显式字段列表就红,而漏掉 mode 在行为层看不见)',
       '没匹配到 `buildTemplatePack: (params) => buildtools.buildTemplatePack(params)`')
-    ok(/const untestedSource = !probe\.tested\b/.test(srcJs),
-      '★Ruling #58:untestedSource 直接读探测层算好的 `probe.tested`(判定只留 tplprobe.js 那一处)',
-      JSON.stringify((srcJs.match(/const untestedSource = .*/) || ['<没找到>'])[0]))
-    ok(!/testedVersions\s*\.\s*includes/.test(srcJs),
+    // Ruling #58 的钉子:写成"直接读探测层算好的 probe.tested"。局部变量名从方法体**反查**得到
+    // (上面的 probeVar)—— T9 轮 2 复审实测:把它写死成 `probe`,仅把该变量改名 `probe` → `p` 就假红 1 条。
+    ok(!!probeVar && new RegExp('const\\s+untestedSource\\s*=\\s*!' + probeVar + '\\.tested\\b').test(code),
+      '★Ruling #58:untestedSource 直接读探测层算好的 `probe.tested`(判定只留 tplprobe.js 那一处;标识符名反查,改名不红)',
+      JSON.stringify({ probeVar, found: (code.match(/const\s+untestedSource[^\n]*/) || ['<没找到>'])[0] }))
+    ok(!/testedVersions\s*\.\s*includes/.test(code),
       '★Ruling #58 反向:契约层代码里不再出现 `testedVersions.includes(...)` 这种第二处推导(把旧表达式改回去就红)',
-      JSON.stringify((srcJs.match(/.*testedVersions\s*\.\s*includes.*/) || ['<无>'])[0]))
+      JSON.stringify((code.match(/.*testedVersions\s*\.\s*includes.*/) || ['<无>'])[0]))
   }
 
   section('10. suppressed 通道:算得起、不重复探测、不从渲染层收连带图(Ruling #62 的三条形状)')
@@ -398,17 +410,11 @@ async function main() {
     //   · **连带图只能来自宿主自己那次探测** —— Ruling #53 已经把 ctx 通道整个删掉(宿主逐字段组装);
     //     若从 params 收 cascades,渲染层塞一张空图就能让面板把所有行都显示成可点。
     //   · **契约与三宿主同形** —— 桌面垫片的占位缺这个键,渲染层取属性就是 undefined。
-    const raw = fs.readFileSync(SERVICES, 'utf8')
-    const code = raw.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l)).join('\n')
     // Ruling #71(与 #64/#60 同一条口径):轮 1 在这里把**形参名 `params` 与局部变量名 `probe` 写死**进
     // 三处正则,复审员实测 S5 —— 仅把该方法内 `params` 整体改名 `input`(语义完全不变)就假红 3 条。
     // 收紧办法同 T8 那条给过的零成本形状:第一次出现时**捕获**标识符,后面的判据反向引用同一个名字。
     // 于是「改名」绿(等价改写不该红),而「两侧不是同一个标识符」= 数据来源真的换了 → 照样红。
-    const vtc = /validateTemplateConfig:\s*async\s*\(([A-Za-z_$][\w$]*)\)\s*=>\s*\{([\s\S]*?)\n {2}\},/.exec(code)
-    const vtcParam = vtc ? vtc[1] : ''
-    const vtcBody = vtc ? vtc[2] : ''
-    // 探测结果落在哪个局部变量上也是**反查**出来的(轮 1 同样把它钉死成了 `probe`)。
-    const probeVar = vtcBody ? (/const\s+([A-Za-z_$][\w$]*)\s*=\s*await\s+tplprobe\.probeSource\s*\(/.exec(vtcBody) || [])[1] : ''
+    // 提取(去掉注释的 code 文本、vtc 方法体、vtcParam / probeVar)提在**两节之外**共用,见第 9 节顶上。
     ok(!!vtc && !!vtcParam, '取得出 validateTemplateConfig 的函数体与它的入参名(切不开说明写法变了,本节不能静默通过)',
       vtc ? 'ok' : '没匹配到方法体')
     ok(vtc ? (vtcBody.match(/probeSource\s*\(/g) || []).length === 1 : false,
@@ -435,6 +441,42 @@ async function main() {
     ok(/validateTemplateConfig:[\s\S]{0,160}?suppressed:\s*\[\s*\]/.test(shim),
       '★Ruling #62:桌面垫片 validateTemplateConfig 的占位也带 suppressed:[](如实空名单,不是漏字段)',
       JSON.stringify((shim.match(/validateTemplateConfig:[^\n]*/) || ['<没找到>'])[0].slice(0, 120)))
+  }
+
+  section('11. applyTemplatePreset:预设与 mode 都出自输出层(Ruling #74;契约+注册+垫片三处齐补)')
+  {
+    // 两件事在这一层才观察得到:
+    //   · **mode 随 features 一起交出去** —— 渲染层两个调用点(校验/编译)靠它透传同一份;契约层漏交
+    //     `mode` 时渲染层只会退回自己的默认值(default-on),minimal 的反向白名单模式整个不可达
+    //     (Ruling #74 的全部风险所在),而契约层不测就没有人看得见;
+    //   · **拿不到源码 / 拼错预设名时不猜** —— 静默回退成 full 会让渲染层替用户做一套他没选过的勾选。
+    // 与第 5 节同一条口径:契约层的合成结果直接与输出层的纯函数逐字对账,不在契约层复算。
+    const probe472 = await tplprobe.probeSource(T472)
+    const rFull = await implemented.applyTemplatePreset('full', T472)
+    ok(rFull.ok === true && rFull.mode === 'default-on' &&
+      JSON.stringify(rFull.features) === JSON.stringify(tplprofile.PRESETS.full(probe472.options)),
+      'full → 输出层 full() 的勾选 + default-on(契约层不放第二套预设规则)',
+      JSON.stringify([rFull.ok, rFull.mode, rFull.features && rFull.features.sys3d]))
+    const rMin = await implemented.applyTemplatePreset('minimal', T472)
+    ok(rMin.ok === true && rMin.mode === 'default-off' &&
+      JSON.stringify(rMin.features) === JSON.stringify(tplprofile.PRESETS.minimalSelection(probe472.options)),
+      '★Ruling #74:minimal → minimalSelection() 的勾选 + **default-off**(这一格丢了,§5.4b 的反向白名单在真实流程里永不可达)',
+      JSON.stringify([rMin.ok, rMin.mode, rMin.features && rMin.features.sys3d]))
+    ok(rFull.features && rFull.features.sys3d === true && rMin.features && rMin.features.sys3d === false,
+      '两档的勾选真的不同(恒返回同一份、或把 full 与 minimal 映射接反的退化解只能过一支)',
+      JSON.stringify([rFull.features && rFull.features.sys3d, rMin.features && rMin.features.sys3d]))
+    const rUnknown = await implemented.applyTemplatePreset('__未知预设__', T472)
+    ok(rUnknown.ok === false && !('features' in rUnknown) && !!rUnknown.error,
+      '未知预设名不猜:ok:false + error,且**不带 features**(静默回退成 full → 红)', JSON.stringify(rUnknown))
+    const rNoRoot = await implemented.applyTemplatePreset('full', TNOROOT)
+    const directNoRoot = await tplprobe.probeSource(TNOROOT)
+    ok(rNoRoot.ok === false && rNoRoot.error === directNoRoot.error,
+      '不是源码根 → 把探测层原句带回,不假成功', `${rNoRoot.ok}/${rNoRoot.error}`)
+    // 桌面垫片同形补位:漏一个方法,渲染层调用就是 undefined(与第 10 节最后一条同一条规矩)。
+    const shimPreset = fs.readFileSync(SHIM, 'utf8')
+    ok(/applyTemplatePreset:[\s\S]{0,140}?ok:\s*false[\s\S]{0,80}?error:/.test(shimPreset),
+      '桌面垫片也补了 applyTemplatePreset 占位(ok:false + error;漏了就是给渲染层一个 undefined)',
+      JSON.stringify((shimPreset.match(/applyTemplatePreset:[^\n]*/) || ['<没找到>'])[0].slice(0, 140)))
   }
 
   // ---------- 结果 ----------

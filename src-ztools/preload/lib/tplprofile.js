@@ -649,7 +649,23 @@ const PRESETS = {
   /** minimal 取消的面板项 id(由 MINIMAL_OFF 派生,与 minimalSelection() 同一份真源) */
   minimalIds: MINIMAL_OFF.map((x) => x.id),
   /** @param {OptionMap} options @returns {Record<string, boolean>} */
-  minimalSelection(options) { return selectionTurningOff(options, MINIMAL_OFF.map((x) => x.id)) }
+  minimalSelection(options) { return selectionTurningOff(options, MINIMAL_OFF.map((x) => x.id)) },
+  /**
+   * 预设名 → 勾选 + 编译模式(Ruling #74;T10 的 applyTemplatePreset 走这里)。
+   * 名字由渲染层报、判据都在本层;`mode` 是预设的一部分("最小可跑" = 反向白名单 default-off),
+   * 宿主把它**同一份**喂给 validateTemplateConfig 与 buildTemplatePack 两个调用点 ——
+   * 两处不同的话,校验的就不是将要发出去的那份产物(services.ts:130 注释警告的形态)。
+   * **未知名不猜**:返回 ok:false(名字拼错/按旧名调用时立刻可见,而不是静默拿到 full)。
+   * @param {string} name
+   * @param {OptionMap} options
+   * @returns {{ok: true, features: Record<string, boolean>, mode: ProfileMode} | {ok: false, error: string}}
+   */
+  apply(name, options) {
+    if (name === 'full') return { ok: true, features: PRESETS.full(options), mode: 'default-on' }
+    if (name === 'lite2d') return { ok: true, features: PRESETS.lite2d(options), mode: 'default-on' }
+    if (name === 'minimal') return { ok: true, features: PRESETS.minimalSelection(options), mode: 'default-off' }
+    return { ok: false, error: `未知预设:${name}` }
+  }
 }
 
 module.exports = { initialSelection, buildProfile, profileText, PRESETS, ENUM_VALUES, validateSelection, selectionSuppressed }
