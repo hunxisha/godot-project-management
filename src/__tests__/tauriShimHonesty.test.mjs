@@ -69,6 +69,8 @@ const NAMED = {
   // BARE 那条句法代理只认这两个键名,于是把「原因写在 TplIssue.why 里」读成了「不给原因」。
   // 不放宽 BARE(它抓的是真债),也不往契约里塞一个渲染层不读的 error 字段;记名等 Rust 侧命令,
   // 命令一注册,这个占位连同本条一起删(stale 反向检查会盯着)。
+  // 记名的代价是「同一入口以后任何真债也会被放过」—— 那半边由第 5 节那条逐形状断言兜住(Ruling #61),
+  // 所以这里挂名不等于免检。
   validateTemplateConfig: 'ok:false 的原因走契约自己的 hardBlocks[].why(BARE 只认 error/problems 两个键名);Rust 侧注册 validate_template_config 后连占位带这条一起删'
 }
 
@@ -169,6 +171,14 @@ section('5. 返回形状要对得上契约(不是「像就行」)')
   const detail = methods.find((m) => m.name === 'getAssetDetail')
   ok(!!detail && /Promise\.resolve\(\s*null\s*\)/.test(detail.body) && !/ok:\s*false/.test(detail.body),
     'getAssetDetail 取不到回 null,不回带 ok 的假对象', detail ? detail.body.split('\n')[0].trim() : '没找到该方法')
+  // Ruling #61:validateTemplateConfig 挂在 NAMED 名单上(名单记名的代价是**同一入口以后任何真债
+  // 也会被这条记名放过**,而 BARE 本来就看不见写在 hardBlocks[].why 里的那个原因),所以这里按本节
+  // 的办法逐形状钉住:占位必须给出**非空的 hardBlocks**,且那一条自带 why 与 skippable:false。
+  // 占位退化成 `hardBlocks: []` 就是「ok:false 却一句为什么都不给」,名单救不了它。
+  const vtc = methods.find((m) => m.name === 'validateTemplateConfig')
+  ok(!!vtc && /hardBlocks:\s*\[\s*\{/.test(vtc.body) && /why:\s*'[^']+'/.test(vtc.body) && /skippable:\s*false/.test(vtc.body),
+    'validateTemplateConfig 占位的 hardBlocks 非空且那条带 why/skippable(记名不等于免检)',
+    vtc ? vtc.body.split('\n')[0].trim() : '没找到该方法')
 }
 
 console.log(`\n${'='.repeat(56)}`)

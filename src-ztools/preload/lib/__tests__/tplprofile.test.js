@@ -84,14 +84,22 @@ const rasterR = reg('关 TGA/BMP/HDR 三个模块', T.buildProfile(sel({ fmtRast
 })))
 ok(['module_tga_enabled', 'module_bmp_enabled', 'module_hdr_enabled'].every((k) => dboOf(rasterR)[k] === false), '三项一起关(模块开关正是留在 profile 的那一类)', JSON.stringify(dboOf(rasterR)))
 ok(eqJson(rasterR.commandExtras, []), '这三项一个都不发到命令行(#38 的反向半边)', JSON.stringify(rasterR.commandExtras))
-// 反向的一半:一项多 flag 时,**默认值不一致**就不能打勾(打勾等于替用户猜另外那个 flag 也开着)。
-// 夹具:vorbis 探到且默认 True、ogg 未探到(真实 4.7.2 里 ogg 模块确实存在,这条只钉"every 不是 some")。
+// 反向的一半:一项多 flag 时**已探到的默认值不一致**就不能打勾(打勾等于替用户猜另外那个 flag 也开着)。
+// Ruling #57 改的是另一半:未探到的 flag **不进 every 的求值集合**。旧写法把"未探到"当 false 塞进 every,
+// 于是 7-flag 项缺 1 个就整项判"默认未开",而 services.js 的 present 按 some 判 → 面板上这项不灰 →
+// 用户一个勾都没动也被关掉探到的那 6 个兄弟格式。夹具:vorbis 探到且默认 True、ogg 未探到
+// (真实 4.7.2 里 ogg 模块确实存在,这一格只钉"部分探到 → 勾着"这个新语义)。
 const mixed = Object.assign({}, OPTS, { module_vorbis_enabled: { exists: true, default: true } })
-ok(T.initialSelection(mixed).audOgg === false, '一项多 flag 且默认混合(True + 未探到)→ 不打勾(every 写成 some 就红)',
+ok(T.initialSelection(mixed).audOgg === true, '一项多 flag 且部分探到(探到的那个默认为开)→ 打勾(Ruling #57:未探到的不进 every)',
    JSON.stringify(T.initialSelection(mixed).audOgg))
-// 与"面板没给勾选态"不同:这里选择是**明确给了** false 的,所以按"用户取消了这项"处理 ——
-// 探到的那个 flag 写 false,没探到的那个只进 skipped。
-const mixedR = reg('明确未勾选的混合项', T.buildProfile(T.initialSelection(mixed), mixed))
+// 「every 不是 some」那半边不许被这条一起松掉:两个 flag **都探到**而默认一开一关 → 仍不打勾。
+const knownMixed = Object.assign({}, mixed, { module_ogg_enabled: { exists: true, default: false } })
+ok(T.initialSelection(knownMixed).audOgg === false, '两项都探到而默认一开一关 → 不打勾(every 写成 some 就红,Ruling #57 没把它松掉)',
+   JSON.stringify(T.initialSelection(knownMixed).audOgg))
+// 与"面板没给勾选态"不同:这里选择是**明确给了** false 的(勾着是初始态,取消才是用户的动作),
+// 所以按"用户取消了这项"处理 —— 探到的那个 flag 写 false,没探到的那个只进 skipped。
+// Ruling #57 之后初始态就是 true,所以"明确 false"必须写出来,不能靠初始态恰好为 false 来表达。
+const mixedR = reg('明确未勾选的混合项', T.buildProfile(Object.assign(T.initialSelection(mixed), { audOgg: false }), mixed))
 ok(dboOf(mixedR).module_vorbis_enabled === false, '明确未勾选项里"探到的"flag 照选择写 false(把明确 false 当"不处理"就红)', JSON.stringify(dboOf(mixedR)))
 ok(!hasIn(mixedR, 'module_ogg_enabled') && mixedR.skipped.some((s) => s.flag === 'module_ogg_enabled'),
    '同一项里"没探到"的那个仍只报 skipped,不写(与上条分得开)', JSON.stringify(mixedR.skipped.filter((s) => /ogg/.test(s.flag))))
@@ -407,6 +415,38 @@ for (const f of F.TPL_FEATURES) {
 const allOn = T.initialSelection(ALL_ON_OPTS)
 ok(Object.values(allOn).every((v) => v === true), '全开夹具:55 项初始全是勾着的(下面两条差集的前提)',
    JSON.stringify(Object.keys(allOn).filter((id) => !allOn[id])))
+// —— Ruling #57 的语义验证点(派发词点名的三条)。**形态是真实的,不是假设**:
+// tplfeatures.js:51 fmtCompressed 映射 7 个模块开关(dds/ktx/tinyexr/astcenc/bcdec/etcpak/cvtt)、
+// :67 a3GeomTools 映射 4 个,台账 Ruling #57 点名这两项里的 module_astcenc_enabled /
+// module_meshoptimizer_enabled **在旧版本源码里就不存在**(具体哪个版本才有本轮没对着源码核,
+// 所以这里不写版本号,只写"旧版本没有"这条已被评审员实读确认的形态)。
+// 夹具 = 上面那份**全探到的** ALL_ON_OPTS(合成形态:表里每个 flag 都给"算开"的默认值,来源见本节开头)
+// 删掉 astcenc 一项 → 6/7 探到,正是要测的那一格。
+const PARTIAL = Object.assign({}, ALL_ON_OPTS)
+delete PARTIAL.module_astcenc_enabled
+const partInit = T.initialSelection(PARTIAL)
+ok(partInit.fmtCompressed === true, '6/7 探到且默认都开 → 该项初始勾着(旧写法给 false,而面板上它不灰)', JSON.stringify(partInit.fmtCompressed))
+ok(Object.keys(PARTIAL).length === Object.keys(ALL_ON_OPTS).length - 1 && Object.keys(ALL_ON_OPTS).length === F.TPL_FEATURES.reduce((n, f) => n + F.flagsOf(f).length, 0),
+   '夹具守卫:PARTIAL 只是全探到的夹具少一个 flag(不是整表没探到,ALL_ON_OPTS 确实覆盖全部 flag)',
+   JSON.stringify([Object.keys(ALL_ON_OPTS).length, Object.keys(PARTIAL).length, F.TPL_FEATURES.reduce((n, f) => n + F.flagsOf(f).length, 0)]))
+const partUntouched = reg('部分探到 + 用户一个勾没动(default-on)', T.buildProfile(partInit, PARTIAL))
+ok(Object.keys(dboOf(partUntouched)).length === 0 && eqJson(partUntouched.commandExtras, []),
+   '用户不动它 → 两个通道什么都不写(「初始勾选态 = 探测到的源码默认值」;旧写法在这里静默少掉 6 个格式)',
+   JSON.stringify([Object.keys(dboOf(partUntouched)), partUntouched.commandExtras]))
+const partOff = reg('部分探到 + 用户真取消该项', T.buildProfile(Object.assign({}, partInit, { fmtCompressed: false }), PARTIAL))
+ok(['module_dds_enabled', 'module_ktx_enabled', 'module_tinyexr_enabled', 'module_bcdec_enabled', 'module_etcpak_enabled', 'module_cvtt_enabled']
+  .every((k) => dboOf(partOff)[k] === false),
+  '用户真取消 → 照旧把探到的那 6 个兄弟 flag 写成 false(少写就是漏裁)', JSON.stringify(Object.keys(dboOf(partOff))))
+ok(partOff.skipped.some((s) => s.flag === 'module_astcenc_enabled') && !('module_astcenc_enabled' in dboOf(partOff)),
+   '未探到的那一个只进 skipped、不写(「探测不到 = 不写、不猜」这半边守住)', JSON.stringify(partOff.skipped.filter((s) => /astcenc/.test(s.flag))))
+// —— 护栏(Ruling #57 的"别惊动 T5 轮 2 对过号的那 8 条"):PRESETS.minimalSelection 也走 initialSelection,
+// 所以在**全探到的夹具**上 minimal 的命令行 token 必须逐字还是官方 :108 + :110-116 那 8 条。
+// 这条与上面 MIN_OPTS 那条(:181)互为交叉验证:那份是"官方 7 条全探到 + 其余不探",这份是"全表都探到"。
+const minAllOn = reg('minimal(全探到的 ALL_ON_OPTS 夹具, default-off)', T.buildProfile(T.PRESETS.minimalSelection(ALL_ON_OPTS), ALL_ON_OPTS, { mode: 'default-off' }))
+ok(eqJson(minAllOn.commandExtras, MIN_EXPECT_CMD),
+   '全探到的夹具上 minimal 的命令行 token 逐字不变(8 条,少一条多一条都红)—— Ruling #57 没碰这条线', JSON.stringify(minAllOn.commandExtras))
+ok(minAllOn.commandExtras.length === 8,
+   '条数如实是 8(:108 那条模式级 + :110-116 那七条)', String(minAllOn.commandExtras.length))
 const touchedLite = Object.keys(allOn).filter((id) => T.PRESETS.lite2d(ALL_ON_OPTS)[id] !== allOn[id]).sort()
 ok(eqJson(touchedLite, [...T.PRESETS.lite2dIds].sort()),
    'lite2dIds 与 lite2d() 实际取消的集合逐字相等(把预设里的 accesskit 换成别的真 id 就红)', JSON.stringify(touchedLite))
@@ -633,10 +673,37 @@ ok(v.issues.some((i) => i.skippable === true && /反向白名单/.test(i.why) &&
 ok(v.issues.length >= 3, '这一份场景同时出 3 条软问题(未实测 + 缺依赖 + 反向白名单)——下面的 (itemId,flag) 去重检查因此不是空转', JSON.stringify(v.issues.map((i) => [i.itemId, i.flag])))
 ok(v.hardBlocks.every((i) => i.flag !== 'modules_enabled_by_default'),
    '其余模块都点名的到 → 不是零模块产物 → 不硬拦(§5.5:能越过就让他越过)', JSON.stringify(v.hardBlocks))
-// 反面对照:同一份选项表但**没有**勾着探不到的项 → 一条都不报(把 some 判据写死成"总报"这条就红)
-v = T.validateSelection(T.initialSelection(REV_FULL), REV_FULL, { mode: 'default-off' })
+// 反面对照:同一份选项表但**没有**勾着探不到的项 → 一条都不报(把 some 判据写死成"总报"这条就红)。
+// Ruling #57 之后 initialSelection(REV_FULL).fmtCompressed 是 true(6/7 探到且默认都开 → 勾着),
+// 所以"没勾着探不到的项"这一格必须把它**明确取消** —— 否则这条对照测的是修复后的正常态而不是反面对照。
+v = T.validateSelection(Object.assign(T.initialSelection(REV_FULL), { fmtCompressed: false }), REV_FULL, { mode: 'default-off' })
 ok(!v.issues.some((i) => /反向白名单/.test(i.why)),
    '探不到的那一项没被勾着 → 不报(未识别项按源码默认处理,不是用户保留了什么)', JSON.stringify(v.issues))
+
+section('default-on 下「取消一个部分探到的项」→ 一条软问题(Ruling #57 的另一半,与上面那条对称)')
+// 上面那条报的是「面板显示保留、产物里没有」(反向白名单的半个瞎);这一条报的是**反方向**:
+// 「面板显示取消、产物里可能还有」—— 没探到的那个开关发不出去(静默失效),于是它维持自己的源码默认。
+// 真实形态用上面造的 PARTIAL(6/7 探到)。**软问题不是硬拦**:台账 T6 行明文「硬拦保持三条,
+// 别加第四条」,而这里用户少关的本来就是他这份源码里没有的东西,拦他没有任何依据。
+const partOffV = vk('default-on + 取消部分探到的项', T.validateSelection(Object.assign({}, partInit, { fmtCompressed: false }), PARTIAL, {}))
+ok(partOffV.issues.some((i) => i.itemId === 'fmtCompressed' && i.flag === 'module_astcenc_enabled' && i.skippable === true &&
+  /1 个开关不存在/.test(i.why) && /只会关掉探到的那 6 个/.test(i.why) && /不会影响那些格式/.test(i.why)),
+  '取消一个部分探到的项 → 出一条带真实计数的软问题(把判据的 >0 改成恒不触发就红)', JSON.stringify(partOffV.issues))
+ok(partOffV.hardBlocks.length === 0, '它只报不拦(硬拦名单封闭为三条,这条不许进去)', JSON.stringify(partOffV.hardBlocks))
+ok(vk('default-on + 一项都没动', T.validateSelection(partInit, PARTIAL, {})).issues.length === 0,
+  '用户没动它(初始勾着)→ 一条都不报:什么都没写出去,"只关掉一部分"根本没发生(把 !sel[f.id] 那半边删掉就红)',
+  JSON.stringify(T.validateSelection(partInit, PARTIAL, {}).issues))
+ok(!T.validateSelection(Object.assign({}, partInit, { fmtRaster: false }), ALL_ON_OPTS, {}).issues.some((i) => /不会影响那些格式/.test(i.why)),
+  '全探到的项被取消 → 不报(missing > 0 那半边判据;取消得干净的事不该唠叨)',
+  JSON.stringify(T.validateSelection(Object.assign({}, partInit, { fmtRaster: false }), ALL_ON_OPTS, {}).issues.map((i) => i.itemId)))
+ok(!vk('一个 flag 都没探到的项被取消', T.validateSelection(Object.assign({}, partInit, { fmtCompressed: false }), { vulkan: { exists: true, default: true } }, {}))
+    .issues.some((i) => i.itemId === 'fmtCompressed'),
+  '一项里一个 flag 都没探到(面板上是灰的)→ 不报:未探到 ≠ 用户的选择',
+  JSON.stringify(T.validateSelection(Object.assign({}, partInit, { fmtCompressed: false }), { vulkan: { exists: true, default: true } }, {}).issues.map((i) => i.itemId)))
+ok(!T.validateSelection(Object.assign({}, partInit, { fmtCompressed: false }), PARTIAL, { mode: 'default-off' })
+    .issues.some((i) => /不会影响那些格式/.test(i.why)),
+  'default-off 下不报这一条(那里由反向白名单那条负责;mode 判据写死成恒真就红)',
+  JSON.stringify(T.validateSelection(Object.assign({}, partInit, { fmtCompressed: false }), PARTIAL, { mode: 'default-off' }).issues.map((i) => i.why)))
 
 section('校验必须查两通道并集(#38 后四个渲染驱动只出现在命令行)')
 const noDrvSel = sel({ vulkan: false, opengl3: false, angle: false, d3d12: false })

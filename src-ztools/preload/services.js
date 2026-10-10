@@ -94,7 +94,9 @@ const servicesImpl = {
     const probe = await tplprobe.probeSource(params.srcDir)
     // untestedSource 由**宿主**按 version.py 与已实测表算,不接受渲染层传来的同名键(护栏:渲染层塞
     // `untestedSource: false` 就能一键抹掉「版本未实测」这条提示,而它报的是我们自己的无知)。
-    const untestedSource = !probe.ok || !probe.testedVersions.includes(probe.sourceVersion)
+    // 读探测层给的 `tested` 布尔,不在这里重算 `testedVersions.includes(sourceVersion)`(Ruling #58):
+    // 那是 `tplprobe.js:270` 的第二个真源,`tested` 的语义一改(比如 rc 版本怎么算)这里就静默用旧口径。
+    const untestedSource = !probe.tested
     const r = tplprofile.validateSelection(params.features, probe.options || {}, {
       mode: params.mode,
       d3d12SdkInstalled: params.d3d12SdkInstalled,

@@ -106,8 +106,9 @@ export interface Services {
   probeTemplateSource(srcDir: string): Promise<ProbeResult>
   /** 面板数据:功能表 + 探测结果合成,渲染层不自己判存在性。
    *  ok:false 有两种成因,建议不同:① 不是 Godot 源码根(错误串出自探测层原句);
-   *  ② 源码根成立但一个构建选项都没解析出来 →「无法解析此版本源码的构建选项（源码结构可能已变）」。
-   *  第 ② 支是策划书 §5.2 那道「拒绝进面板」的闸(Ruling #26):不给渲染层一张 69 项全灰的面板。 */
+   *  ② 源码根成立但一个构建选项都没解析出来 → 策划书 §5.2 那道「拒绝进面板」的闸(Ruling #26),
+   *  不给渲染层一张全灰的面板。**第 ② 支的文案真源在 `src-ztools/preload/services.js` 的那道闸里**,
+   *  这里不复述整串:复述一遍就多一个漂移点 —— 改了文案不改这里是假背书(同 Ruling #37 的口径)。 */
   listTemplateFeatures(srcDir: string): Promise<{ ok: boolean, error?: string, items?: FeatureWithProbe[] }>
   /** 编译前静态校验。hardBlocks 非空时不允许发起编译。
    *  `mode` 是**顶层具名入参**而不是埋在 `ctx: Record<string, any>` 里(Ruling #53):三条硬拦的第 3 条

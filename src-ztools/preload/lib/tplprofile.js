@@ -156,8 +156,21 @@ function featureKeptByDefault(flag, o) {
 
 /**
  * 已探测到的选项表 → 面板初始勾选态。
- * 规则:flag 的源码默认值决定该项开还是关。一项多 flag 时全部 flag 都"默认为开"才打勾。
- * 探测里没有的 flag 按"未勾选"处理(不猜),由调用方在面板上标灰。
+ * 规则:**只对探到的 flag 求值** —— 探到的 flag 全部"默认为开"才打勾;**一个 flag 都没探到**才给 false。
+ * 未探到的 flag 依旧不猜("探测里没有的 flag 按未勾选处理"那句改在这里生效):它不进求值集合,
+ * 也不会在产物里被写出去(buildProfile 对它只记 skipped)。
+ * 为什么 every 必须先滤掉未探到的(Ruling #57,原写法是 T5 的设计洞、被 T8 第一次接成可达路径):
+ *   一项多 flag 时(真实形态 `tplfeatures.js:51` fmtCompressed 映射 7 个模块开关,旧版本源码里没有
+ *   `module_astcenc_enabled`;`:67` a3GeomTools 的 `module_meshoptimizer_enabled` 同形),
+ *   把"未探到"当成 false 塞进 every 会让整项判成"默认未开",而面板上这项**不灰**
+ *   (`services.js` 的 present 按 `some(flags)` 判)→ 用户一个勾都没动 → default-on 模式下
+ *   `buildProfile` 把探到的那 6 个兄弟 flag 写成 false(它对未探到的那一个只记 skipped)→
+ *   产物静默少掉 3–6 个格式。那同时撞两条全局约束:「初始勾选态 = 探测到的源码默认值」与
+ *   「探测不到 = 不写、不猜」—— 后者被违反了,因为**兄弟 flag 被写了**。
+ * 语义验证点(测试里逐条钉着):fmtCompressed 6/7 探到且默认都开 → `true` → 用户不动 → 什么都不写;
+ *   用户真取消该项 → 照旧写探到的那 6 个 false,`skipped` 记那 1 个未探到。
+ * 「已探到但默认值互不一致」仍然不打勾(every 不是 some,这条没松);
+ * 「已探到但默认值认不出是哪个取值算开」也仍然不打勾(featureKeptByDefault 给 false)。
  * **整个 options 缺失(undefined)与"什么都没探到"同形** —— 全部不打勾、不抛(测试「入参整体缺失
  * 的契约」那一节钉着;面板拿到空探测表也不会显示成满勾,与 buildProfile 的两个兜底是同一条)。
  * @param {OptionMap} options
@@ -168,7 +181,9 @@ function initialSelection(options) {
   const sel = {}
   const srcOpts = options || {}
   for (const f of TPL_FEATURES) {
-    sel[f.id] = f.flags.length > 0 && f.flags.every((k) => featureKeptByDefault(k, srcOpts[k]))
+    // 求值集合 = 这份源码里探得到的 flag;一个都没有才判"未知 → 不打勾"。
+    const probed = f.flags.filter((k) => !!srcOpts[k] && srcOpts[k].exists)
+    sel[f.id] = probed.length > 0 && probed.every((k) => featureKeptByDefault(k, srcOpts[k]))
   }
   return sel
 }
@@ -526,6 +541,32 @@ function validateSelection(selection, options, ctx) {
     }
     if (lostIds.length > 0) {
       issues.push({ itemId: 'source', flag: 'modules_enabled_by_default', why: `反向白名单下有 ${lostIds.length} 项你保留的模块没在这份源码里探到,它们会被整体关掉(面板显示保留、产物里没有)`, action: '把这些项取消勾选,或改用「默认开」的预设', skippable: true })
+    }
+  }
+
+  // 默认开模式的对称半边(Ruling #57,与上面那条反向白名单软问题是同一件事的两个方向):
+  // 上面是「面板显示保留、产物里没有」,这里是「面板显示取消、产物里可能还有」。
+  // 一项多 flag 而**部分没探到**时(真实形态 fmtCompressed 的 module_astcenc_enabled、
+  // a3GeomTools 的 module_meshoptimizer_enabled 在旧版本源码里不存在),面板上这项不灰
+  // (`services.js` 的 present 按 some 判),勾选态由探到的那几个决定(initialSelection 现在也只对
+  // 探到的求值)。用户**取消**它 → 只有探到的那几个会被写出去,剩下 N 个在这份源码里根本没声明,
+  // 发出去是静默失效,于是它们维持自己的源码默认(通常是还开着)→ "这一项只能关掉一部分"。
+  // 判据三条都必要:
+  //   · 用户明确给了「不保留」(面板没给勾选态 ≠ 用户取消了它,那是 buildProfile 的「按默认不写」分支);
+  //   · 有 flag 没探到(missing > 0)—— 全探到的项关得干净,不该报;
+  //   · 也有 flag 探到(probed > 0)—— 一个都没探到的项在面板上是灰的(present:false),
+  //     这项根本没参与裁剪,报它就是把我们的无知说成用户的选择。
+  // **软问题,不是硬拦**:台账 T6 行明文「硬拦保持三条,别加第四条」;这里拦不动任何东西,
+  // 用户少关的本来就是他这份源码里没有的东西。
+  if (mode === 'default-on') {
+    for (const f of TPL_FEATURES) {
+      if (!(f.id in sel) || sel[f.id]) continue
+      const flags = flagsOf(f)
+      const missing = flags.filter((k) => !srcOpts[k] || !srcOpts[k].exists)
+      const probedCount = flags.length - missing.length
+      if (probedCount > 0 && missing.length > 0) {
+        issues.push({ itemId: f.id, flag: missing[0], why: `该项在本版本源码里有 ${missing.length} 个开关不存在,取消它只会关掉探到的那 ${probedCount} 个 —— 不会影响那些格式`, action: '照常取消即可;要精确关掉那些能力得换一份声明了对应开关的源码', skippable: true })
+      }
     }
   }
 

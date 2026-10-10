@@ -13,13 +13,15 @@
 //
 // 解析对象已从 env.d.ts 改为 src/types/services.ts。
 //
-// 自编译模板的三个新契约方法(Task 8)带来的第二段职责:第 5–8 节测的是**合成与透传**,
+// 自编译模板的三个新契约方法(Task 8)带来的第二段职责:第 5–9 节测的是**合成与透传**,
 // 对账 harness 本身管不着的那部分 ——
 //   · `listTemplateFeatures` 的 present / defaultOn / cascadedBy 合成,与策划书 §5.2
 //     那道「一个构建选项都没解析出来 → 拒绝进面板」的闸(Ruling #26);
 //   · `validateTemplateConfig` 的 `mode` 是否真流到了第 3 条硬拦(Ruling #53),以及
 //     `untestedSource` 由宿主算、不被渲染层同名键覆盖(护栏①);
-//   · `buildTemplatePack` 的 `features` 是否整份转交给执行层。
+//   · `buildTemplatePack` 的 `features` 是否整份转交给执行层;
+//   · 第 9 节是两条**源码扫描**:Ruling #60(整份转发这个形状)与 Ruling #58(契约层不重算
+//     `tested`)。它们在行为上观察不到,不扫形状就等于没测。
 // 这些调用是 async,因此全文改成 `async function main()` + `main().catch(() => process.exit(1))`
 // —— 本仓库主流形状(backup/templates/taskqueue/docs/exporter/http 六个 harness 同形)。
 // 形状规则的意义:断言若写在 await 节内而汇总三行在文件末尾同步执行,那些断言既不计 PASS、
@@ -324,6 +326,33 @@ async function main() {
     ok(withFeatures.ok === false && withFeatures.error === '请先完成工具链检测(向导第一步)',
       '带上 features → 越过那道闸、卡在下一闸(证明 params 是整份转交的,features 没在契约里被丢掉)',
       JSON.stringify(withFeatures))
+  }
+
+  section('9. 契约层不养第二个真源:两条源码扫描(行为断言看不见的那半边)')
+  {
+    // 这一节是**静态扫描**,因为这两件事在行为上观察不到:
+    //   · Ruling #60 —— `mode` 进 buildTemplatePack 零断言:`buildtools.js` 的入队闸先拦 `features`,
+    //     再拦工具链,mode 的差异在这一层根本不外漏;只能把「整份 params 转发」这个形状钉住。
+    //     它防的是「有人把转发改成显式字段列表而漏掉 mode」→ 变成**校验用 default-off、编译用 default-on**,
+    //     正是 services.ts:130 注释自己警告的那一形态。先例:T9 简报 :28 与垫片诚实性扫描都用源码正则。
+    //   · Ruling #58 —— `untestedSource` 不许在契约层重算 `testedVersions.includes(sourceVersion)`
+    //     (`tplprobe.js:270` 是同一个表达式的第二处推导;`tested` 的语义一改就静默用旧口径)。
+    //     这条同样是等价重构,行为断言抓不到,所以钉形状。
+    const srcJsRaw = fs.readFileSync(SERVICES, 'utf8')
+    // 只扫**代码行**:这一节防的是"第二处推导",而解释为什么不再有它的那段注释里必然提到那个写法
+    // (本仓的注释规矩如此)。不剥注释的话第一条反向扫描会被自己的注释命中 —— 那是假阳性,
+    // 剥掉后代码里真把旧表达式改回去照样红。切法与 tauriShimHonesty.test.mjs:37 同一条。
+    const srcJs = srcJsRaw.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l)).join('\n')
+    const forward = /buildTemplatePack:\s*\(params\)\s*=>\s*buildtools\.buildTemplatePack\(\s*params\s*\)/.exec(srcJs)
+    ok(!!forward,
+      '★Ruling #60:buildTemplatePack 是「整份 params 转发」的形状(改成显式字段列表就红,而漏掉 mode 在行为层看不见)',
+      '没匹配到 `buildTemplatePack: (params) => buildtools.buildTemplatePack(params)`')
+    ok(/const untestedSource = !probe\.tested\b/.test(srcJs),
+      '★Ruling #58:untestedSource 直接读探测层算好的 `probe.tested`(判定只留 tplprobe.js 那一处)',
+      JSON.stringify((srcJs.match(/const untestedSource = .*/) || ['<没找到>'])[0]))
+    ok(!/testedVersions\s*\.\s*includes/.test(srcJs),
+      '★Ruling #58 反向:契约层代码里不再出现 `testedVersions.includes(...)` 这种第二处推导(把旧表达式改回去就红)',
+      JSON.stringify((srcJs.match(/.*testedVersions\s*\.\s*includes.*/) || ['<无>'])[0]))
   }
 
   // ---------- 结果 ----------
