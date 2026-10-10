@@ -188,8 +188,17 @@
     applyTemplatePreset: (name, srcDir) => invoke('apply_template_preset', { name, srcDir }),
     // P0e-2:检测与编译已接真命令(判据在 tpl/exec.rs,纯函数面有 tests/tpl_build_parity.rs 逐字节对照)
     checkTemplateBuildTools: () => invoke('check_template_build_tools'),
-    downloadTemplateSource: () => Promise.resolve({ ok: false, error: '桌面版暂不支持代下载源码,请使用 ZTools 插件版。' }),
-    cancelTemplateSourceDownload: () => { /* 桌面版没有在途任务,取消是空操作 */ },
+    // P0e-3:代下载已接真命令。进度契约是**回调**不是任务通道,所以这里 listen 一条事件转给它,
+    // 完事必须 unlisten —— 不然每次重开向导都多挂一个监听,进度会往旧闭包里灌。
+    downloadTemplateSource: async (params, onProgress) => {
+      const un = await listen('tplsource://progress', (e) => { if (onProgress) onProgress(e.payload) })
+      try {
+        return await invoke('download_template_source', { params })
+      } finally {
+        try { un() } catch (e) { /* 宿主已回收就没什么可做的 */ }
+      }
+    },
+    cancelTemplateSourceDownload: () => { invoke('cancel_template_source_download', {}).catch(() => {}) },
     listTemplatePacks: () => Promise.resolve({ ok: false, error: '桌面版暂不支持模板库,请使用 ZTools 插件版。' }),
     activateTemplatePack: () => Promise.resolve({ ok: false, error: '桌面版暂不支持模板库,请使用 ZTools 插件版。' }),
     deleteTemplatePack: () => Promise.resolve({ ok: false, error: '桌面版暂不支持模板库,请使用 ZTools 插件版。' }),

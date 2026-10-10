@@ -187,3 +187,144 @@ fn tpl_build_pure_functions_are_byte_identical() {
     println!("  构建层纯函数 parity OK:7 组逐字节相同");
     let _ = fs::remove_dir_all(&base);
 }
+
+/// 第六轮：代下载源码的**前置六闸**与 URL/路径拼装（`tplsource.js:28-89` ↔ `tpl/source.rs`）。
+/// 闸的顺序与文案都是用户看得见的东西，抽成纯函数就是为了能两端逐字比，而不是靠人抄写。
+const JS_SOURCE_HARNESS: &str = r###"
+const fs = require('node:fs')
+const path = require('node:path')
+const cfg = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))
+const S = require(path.join(cfg.repo, 'src-ztools/preload/lib/tplsource.js'))
+
+// 镜像 tplsource.js:71-89 的前置段（受 SOURCE_GUARD 约束）；三个 *_exists 与 active 由入参喂
+function precheck(tagRaw, destRaw, destExists, tarExists, active, topExists) {
+  const tag = String(tagRaw || '').trim()
+  const destDir = String(destRaw || '').trim()
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(tag)) {
+    return { ok: false, error: `tag 形态不合法(只认字母数字与 . _ -):${tag}` }
+  }
+  if (!destDir) return { ok: false, error: '未指定下载父目录' }
+  if (!destExists) return { ok: false, error: `下载父目录不存在:${destDir}` }
+  if (!tarExists) {
+    return { ok: false, error: '未找到 System32\\tar.exe,无法解包源码包。请手动准备源码目录。' }
+  }
+  if (active) return { ok: false, error: '已有代下载在途,先取消或等它完成,再发起新的。' }
+  const top = path.join(destDir, `godot-${tag}`)
+  if (topExists) return { ok: false, error: `目标目录已存在:${top}。请先移除它或换一个父目录(不覆盖既有目录)。` }
+  return { ok: true }
+}
+// 镜像 tplsource.js:116-121 的旁证解析
+function sidecarExpect(text) {
+  const expect = (String(text).trim().split(/\s+/)[0] || '').toLowerCase()
+  return /^[0-9a-f]{64}$/.test(expect) ? expect : ''
+}
+
+const cases = { urls: [], tags: [], sidecar: [], pre: [] }
+for (const t of ['4.7.2-stable', '4.3-stable', '4.7.1-rc1']) cases.urls.push(S.sourceUrls(t))
+for (const t of ['4.7.2-stable', '4.3', 'a_b-c.1', '', '-4.7', 'v4.7.2', '4.7 2', '4.7/..', '4.7\n', 'X9']) {
+  const s = String(t || '').trim()
+  cases.tags.push([s, /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(s)])
+}
+for (const s of ['  AB12  rest\nmore', 'a'.repeat(64), ('A'.repeat(64)) + '  x', 'short 1', '', '   ', 'z'.repeat(64), 'ab'.repeat(32)]) {
+  cases.sidecar.push(sidecarExpect(s))
+}
+for (const p of cfg.pres) {
+  cases.pre.push(precheck(p.tag, p.dest, p.destExists, p.tarExists, p.active, p.topExists))
+}
+process.stdout.write(JSON.stringify(cases))
+"###;
+
+const SOURCE_GUARD: [&str; 4] = [
+    "if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(tag)) {",
+    "if (!destDir) return { ok: false, error: '未指定下载父目录' }",
+    "if (active) return { ok: false, error: '已有代下载在途,先取消或等它完成,再发起新的。' }",
+    "return { ok: false, error: `目标目录已存在:${top}。请先移除它或换一个父目录(不覆盖既有目录)。` }",
+];
+
+#[test]
+fn tpl_source_gates_urls_and_sidecar_match_js() {
+    use godot_workshop::tpl::source as s;
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
+    let js_src = fs::read_to_string(repo.join("src-ztools/preload/lib/tplsource.js")).unwrap();
+    for line in SOURCE_GUARD.iter() {
+        assert!(js_src.contains(line), "tplsource.js 的前置段改了,harness 镜像没同步:缺 {line:?}");
+    }
+
+    let dest = "D:\\dl";
+    type Pre = (&'static str, &'static str, bool, bool, bool, bool);
+    let pres: Vec<Pre> = vec![
+        ("4.7.2-stable", dest, true, true, false, false),
+        ("  4.7.2-stable  ", dest, true, true, false, false),
+        ("-4.7", dest, true, true, false, false),
+        ("4.7/..", dest, true, true, false, false),
+        ("4.7 2", dest, true, true, false, false),
+        ("", dest, true, true, false, false),
+        ("4.7.2-stable", "   ", true, true, false, false),
+        ("4.7.2-stable", dest, false, true, false, false),
+        ("4.7.2-stable", dest, true, false, false, false),
+        ("4.7.2-stable", dest, true, true, true, false),
+        ("4.7.2-stable", dest, true, true, false, true),
+        // 顺序也钉:全坏时先报 tag,不是从一串里挑一个响
+        ("-x", "", false, false, true, true),
+    ];
+    let cfg_pres: Vec<Value> = pres.iter().map(|(t, d, de, te, a, te2)| {
+        json!({ "tag": t, "dest": d, "destExists": de, "tarExists": te, "active": a, "topExists": te2 })
+    }).collect();
+
+    let base = std::env::temp_dir().join(format!("gpm-tpl-src-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    fs::create_dir_all(&base).unwrap();
+    let script = base.join("js-source.js");
+    let cfg_file = base.join("js-cfg.json");
+    fs::write(&cfg_file, json!({ "repo": repo, "pres": cfg_pres }).to_string()).unwrap();
+    fs::write(&script, JS_SOURCE_HARNESS).unwrap();
+
+    let js: Value = match Command::new("node").arg(&script).arg(&cfg_file).output() {
+        Err(e) => panic!("环境里找不到 node({e})—— 按失败处理,不静默跳过"),
+        Ok(out) => {
+            assert!(out.status.success(), "JS source harness 退出非零:{}", String::from_utf8_lossy(&out.stderr));
+            serde_json::from_slice(&out.stdout).expect("JS 侧输出的是 JSON")
+        }
+    };
+    let _ = fs::remove_dir_all(&base);
+
+    // 1) 前置六闸:文案与先后逐字比
+    let rs_pre: Vec<Value> = pres.iter().map(|(t, d, de, te, a, te2)| {
+        let tag = t.trim();
+        let top = Path::new(d).join(format!("godot-{tag}"));
+        s::precheck(tag, d.trim(), *de, *te, *a, *te2, &top.to_string_lossy()).unwrap_or(json!({ "ok": true }))
+    }).collect();
+    assert_eq!(js["pre"], Value::Array(rs_pre), "前置六闸的文案或顺序两端不一致");
+    assert_eq!(js["pre"].as_array().map(|v| v.len()), Some(12), "六闸用例数变了要重看覆盖");
+
+    // 2) sourceUrls
+    let rs_urls: Vec<Value> = ["4.7.2-stable", "4.3-stable", "4.7.1-rc1"].iter().map(|t| {
+        let (a, b) = s::source_urls(t);
+        json!({ "asset": a, "sidecar": b })
+    }).collect();
+    assert_eq!(js["urls"], Value::Array(rs_urls), "sourceUrls 两端不一致");
+
+    // 3) tag 形态闸(含空串、前导非字母数字、空格、路径穿越、换行)
+    let rs_tags: Vec<Value> = ["4.7.2-stable", "4.3", "a_b-c.1", "", "-4.7", "v4.7.2", "4.7 2", "4.7/..", "4.7\n", "X9"]
+        .iter().map(|t| {
+            let s2 = t.trim();
+            json!([s2, s::tag_ok(s2)])
+        }).collect();
+    assert_eq!(js["tags"], Value::Array(rs_tags), "tag 形态闸两端不一致");
+
+    // 4) 旁证解析(64 位十六进制才算,大小写归一,取首段)
+    let sides: Vec<String> = vec![
+        "  AB12  rest\nmore".to_string(),
+        "a".repeat(64),
+        format!("{}  x", "A".repeat(64)),
+        "short 1".to_string(),
+        String::new(),
+        "   ".to_string(),
+        "z".repeat(64),
+        "ab".repeat(32),
+    ];
+    let rs_side: Vec<Value> = sides.iter().map(|t| json!(s::sidecar_expect(t))).collect();
+    assert_eq!(js["sidecar"], Value::Array(rs_side), "旁证解析两端不一致");
+
+    println!("  代下载 parity OK:六闸 12 例 + URL 3 例 + tag 10 例 + 旁证 8 例逐字相同");
+}

@@ -14,3 +14,4 @@ pub mod exec;
 pub mod features;
 pub mod probe;
 pub mod profile;
+pub mod source;

@@ -195,7 +195,9 @@ section('5. 返回形状要对得上契约(不是「像就行」)')
     checkTemplateBuildTools: /invoke\(\s*'check_template_build_tools'\s*\)/,
     buildTemplatePack: /invoke\(\s*'build_template_pack',\s*\{\s*params\s*\}\s*\)/,
     cancelTemplateBuildTask: /invoke\(\s*'cancel_template_build_task',\s*\{\s*id\s*\}\s*\)/,
-    dismissTemplateBuildTask: /invoke\(\s*'dismiss_template_build_task',\s*\{\s*id\s*\}\s*\)/
+    dismissTemplateBuildTask: /invoke\(\s*'dismiss_template_build_task',\s*\{\s*id\s*\}\s*\)/,
+    downloadTemplateSource: /invoke\(\s*'download_template_source',\s*\{\s*params\s*\}\s*\)/,
+    cancelTemplateSourceDownload: /invoke\(\s*'cancel_template_source_download'/
   }
   for (const [name, re] of Object.entries(REAL_INVOKE)) {
     const m = methods.find((x) => x.name === name)

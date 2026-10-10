@@ -449,9 +449,10 @@ async function main() {
     const mainRs = fs.readFileSync(MAIN_RS, 'utf8')
     const handler = (mainRs.match(/generate_handler!\[([\s\S]*?)\]\)/) || [, ''])[1]
     const eight = ['probe_template_source', 'list_template_features', 'validate_template_config', 'apply_template_preset',
-      'check_template_build_tools', 'build_template_pack', 'cancel_template_build_task', 'dismiss_template_build_task']
+      'check_template_build_tools', 'build_template_pack', 'cancel_template_build_task', 'dismiss_template_build_task',
+      'download_template_source', 'cancel_template_source_download']
     ok(eight.every((c) => handler.includes(c)) && eight.every((c) => new RegExp(`fn ${c}\\(`).test(mainRs)),
-      'P0e-1+2 八条命令在 Rust 侧既有定义也在注册表(缺一半就是 invoke 裸拒绝)',
+      'P0e-1+2+3 十条命令在 Rust 侧既有定义也在注册表(缺一半就是 invoke 裸拒绝)',
       eight.filter((c) => !handler.includes(c) || !new RegExp(`fn ${c}\\(`).test(mainRs)).join(','))
   }
 

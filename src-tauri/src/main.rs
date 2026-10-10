@@ -263,6 +263,19 @@ fn dismiss_template_build_task(app: AppHandle, id: String) {
     godot_workshop::tpl::exec::dismiss_template_build_task(&app, id.parse().unwrap_or(0));
 }
 
+/// ---------- 代下载源码(P0e-3) ----------
+/// 进度走 `tplsource://progress` 事件(契约的 onProgress 是回调,不是任务通道),
+/// 垫片侧 listen → 转回调;完整性三种坏法(旁证缺失/形态不认/sha 不匹配)全拒解。
+#[tauri::command]
+async fn download_template_source(app: AppHandle, params: Value) -> Value {
+    godot_workshop::tpl::source::download_template_source(app, params).await
+}
+
+#[tauri::command]
+fn cancel_template_source_download() -> Value {
+    godot_workshop::tpl::source::cancel_template_source_download()
+}
+
 #[tauri::command]
 fn scan_project_tree(state: State<AppState>, project_id: String, opts: Option<Value>) -> Value {
     let root = match project_root_of(&state.store, &project_id) { Ok(r) => r, Err(e) => return serde_json::json!({ "ok": false, "error": e }) };
@@ -1285,7 +1298,7 @@ fn main() {
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, probe_template_source, list_template_features, validate_template_config, apply_template_preset, check_template_build_tools, build_template_pack, cancel_template_build_task, dismiss_template_build_task, scan_project_tree, read_project_text, write_project_text, move_paths_to_trash, hash_paths, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets, create_project, uninstall_addon, install_asset, run_export, cancel_export_task, docs_generate, docs_import, docs_library_status, docs_list_classes, docs_get_class, docs_search, docs_search_full_text, docs_delete_library, docs_diff_libraries, fetch_releases_cmd, cancel_task, dismiss_task, search_assets, list_featured_cmd, list_all_assets_cmd, list_new_assets_cmd, list_recently_updated_cmd, list_project_assets_cmd, restore_backup])
+        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, probe_template_source, list_template_features, validate_template_config, apply_template_preset, check_template_build_tools, build_template_pack, cancel_template_build_task, dismiss_template_build_task, download_template_source, cancel_template_source_download, scan_project_tree, read_project_text, write_project_text, move_paths_to_trash, hash_paths, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets, create_project, uninstall_addon, install_asset, run_export, cancel_export_task, docs_generate, docs_import, docs_library_status, docs_list_classes, docs_get_class, docs_search, docs_search_full_text, docs_delete_library, docs_diff_libraries, fetch_releases_cmd, cancel_task, dismiss_task, search_assets, list_featured_cmd, list_all_assets_cmd, list_new_assets_cmd, list_recently_updated_cmd, list_project_assets_cmd, restore_backup])
         .run(tauri::generate_context!())
         .expect("tauri 应用启动失败");
 }
