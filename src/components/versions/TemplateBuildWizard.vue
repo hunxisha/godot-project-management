@@ -23,7 +23,7 @@ const emit = defineEmits<{ (e: 'close'): void; (e: 'imported', msg: string): voi
 
 type Step = 'checking' | 'check' | 'build' | 'building' | 'done'
 const step = ref<Step>('checking')
-const checkResult = ref<{ ok: boolean; pythonVersion: string; pythonPath: string; sconsVersion: string; vcvarsPath: string; cpuCount: number; problems: string[] } | null>(null)
+const checkResult = ref<{ ok: boolean; pythonVersion: string; pythonPath: string; sconsVersion: string; sconsPath: string; vcvarsPath: string; cpuCount: number; problems: string[] } | null>(null)
 const srcDir = ref('')
 const buildTask = ref<TemplateBuildTask | null>(null)
 const importMsg = ref('')
@@ -273,9 +273,13 @@ function close() {
           <span>Python</span>
           <span>
             <b :class="checkResult.pythonVersion ? 'ok' : 'bad'">{{ checkResult.pythonVersion || '未找到' }}</b>
-            <code v-if="checkResult.pythonPath" class="py-path mono">{{ checkResult.pythonPath }}</code>
+            <code v-if="checkResult.pythonPath" class="check-path mono">{{ checkResult.pythonPath }}</code>
           </span>
-          <span>SCons</span><span :class="checkResult.sconsVersion ? 'ok' : 'bad'">{{ checkResult.sconsVersion || '未找到' }}</span>
+          <span>SCons</span>
+          <span>
+            <b :class="checkResult.sconsVersion ? 'ok' : 'bad'">{{ checkResult.sconsVersion || '未找到' }}</b>
+            <code v-if="checkResult.sconsPath" class="check-path mono">{{ checkResult.sconsPath }}</code>
+          </span>
           <span>MSVC (vcvars64)</span><span :class="checkResult.vcvarsPath ? 'ok' : 'bad'">{{ checkResult.vcvarsPath ? '已找到' : '未找到' }}</span>
           <span>CPU 核数(并行度)</span><span class="ok">{{ checkResult.cpuCount }}</span>
         </div>
@@ -401,7 +405,7 @@ function close() {
   font-weight: 600;
 }
 
-.check-grid .py-path {
+.check-grid .check-path {
   display: block;
   font-size: 11px;
   font-weight: 400;

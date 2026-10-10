@@ -134,6 +134,8 @@ export interface Services {
     /** 命中的解释器自报的 sys.executable(问不到为空串);给用户看「是哪支 python.exe」 */
     pythonPath: string
     sconsVersion: string
+    /** PATH 通道命中时 where scons 的落点(模块通道为空串);给用户看「编译实际跑哪支 scons.exe」 */
+    sconsPath: string
     vcvarsPath: string
     cpuCount: number
     problems: string[]

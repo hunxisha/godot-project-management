@@ -246,6 +246,8 @@ async function main() {
     const seq = []
     const execStub = (cmd) => {
       seq.push(String(cmd))
+      if (/^scons --version/.test(cmd)) return 'SCons by Steven Knight et al.:\n\tSCons: v4.10.1, Sun, 16 Nov 2025'
+      if (/^where scons/.test(cmd)) return 'D:\\py\\Scripts\\scons.exe'
       if (/--version/.test(cmd) && !/SCons/.test(cmd)) return 'Python 3.12.13'
       if (/SCons/.test(cmd)) return 'SCons by Steven Knight et al.:\n\tSCons: v4.10.1, Sun, 16 Nov 2025'
       if (/vswhere/.test(cmd)) return 'D:\\apps\\Microsoft Visual Studio\\Community'
@@ -259,12 +261,52 @@ async function main() {
     ok(r.ok === true && r.pythonVersion === '3.12.13' && r.sconsVersion === '4.10.1' &&
       r.vcvarsPath.includes('D:\\apps\\Microsoft Visual Studio\\Community') && r.cpuCount === 16 && r.problems.length === 0,
       '★三件套齐:ok、版本、vcvars(经 vswhere 找到非默认盘安装位)、核数都对', JSON.stringify(r))
-    ok(seq.some((c) => /python -m SCons --version/.test(c)),
-      'SCons 检测走 python -m(不吃 PATH 里的 scons.exe)', seq.join(' | '))
+    ok(seq.some((c) => /^scons --version/.test(c)) && !seq.some((c) => /python -m SCons/.test(c)),
+      '★SCons 先认 PATH 上的 scons --version(编译 bat 跑的就是它),命中就不再跑模块通道(旧口径会把可用工具链判成「未找到」)', seq.join(' | '))
+    ok(r.sconsPath === 'D:\\py\\Scripts\\scons.exe' && B.checkCache.sconsVia === 'path',
+      '★PATH 通道把 where scons 的落点带回来显示,通道缓存给编译 bat(删掉任一处 → 红)', r.sconsPath)
     ok(r.pythonPath === 'D:\\py\\python.exe' && seq.some((c) => /-c "import sys;print\(sys\.executable\)"/.test(c)),
       '★路径问命中的解释器自己拿 sys.executable(删掉那次 execSync → 空串 → 红:弹窗只剩版本号,用户不知道装 SCons 该用哪支 python.exe)',
       r.pythonPath)
     ok(B.checkCache.vcvarsPath === r.vcvarsPath, '检测结果缓存给构建步(向导第一步本来就是它)')
+  }
+  {
+    // scons 不在 PATH、模块在命中解释器里:检测回落模块通道,bat 随之改由该解释器起
+    const execStub = (cmd) => {
+      if (/^scons --version/.test(cmd) || /^where scons/.test(cmd)) throw new Error('not on path')
+      if (/--version/.test(cmd) && !/SCons/.test(cmd)) return 'Python 3.12.13'
+      if (/SCons/.test(cmd)) return 'SCons by Steven Knight et al.:\n\tSCons: v4.8.0, x'
+      if (/sys\.executable/.test(cmd)) return 'D:\\py\\python.exe'
+      if (/vswhere/.test(cmd)) return 'D:\\vs\\B'
+      throw new Error('unexpected: ' + cmd)
+    }
+    const r = await B.checkTemplateBuildToolsWith({ platform: 'win32' },
+      { execSync: execStub, cpuCount: 8, existsSync: (p) => p.includes('D:') })
+    ok(r.sconsVersion === '4.8.0' && r.sconsPath === '' && B.checkCache.sconsVia === 'python',
+      '★PATH 没有 scons 才回落模块通道:版本号有、落点空、通道缓存为 python(删回落 → 红:这台机器被判未安装)',
+      JSON.stringify(r))
+    ok(B.sconsLineFor(B.checkCache, 'P.json', ['disable_3d=yes'], 8) === '"D:\\py\\python.exe" -m SCons platform=windows target=template_release build_profile="P.json" disable_3d=yes -j8' &&
+      B.sconsLineFor({ sconsVia: 'path' }, 'P.json', [], 8) === 'scons platform=windows target=template_release build_profile="P.json" -j8',
+      '★bat 的 scons 行跟检测通道:模块通道由命中解释器起、PATH 通道仍裸 scons(改任一形态 → 红,检测与编译各说各话)')
+  }
+  {
+    // 两条通道都没有:提示按 PEP 668 托管形态分,别让用户照一句跑不通的命令撞墙
+    const execStub = (cmd) => {
+      if (/^scons --version/.test(cmd) || /^where scons/.test(cmd)) throw new Error('not on path')
+      if (/SCons/.test(cmd)) throw new Error('no module')
+      if (/--version/.test(cmd)) return 'Python 3.12.13'
+      if (/sys\.executable/.test(cmd)) return 'D:\\py\\python.exe'
+      throw new Error('unexpected: ' + cmd)
+    }
+    const managed = await B.checkTemplateBuildToolsWith({ platform: 'win32' },
+      { execSync: execStub, cpuCount: 8, existsSync: (p) => p.endsWith('EXTERNALLY-MANAGED') })
+    ok(managed.problems.some((p) => /--break-system-packages/.test(p) && /PATH/.test(p)),
+      '★uv 等托管解释器(带 EXTERNALLY-MANAGED):提示直接给能跑通的写法,并说明检测与编译都从 PATH 认 scons',
+      JSON.stringify(managed.problems))
+    const plain = await B.checkTemplateBuildToolsWith({ platform: 'win32' },
+      { execSync: execStub, cpuCount: 8, existsSync: () => false })
+    ok(plain.problems.some((p) => /python -m pip install scons/.test(p) && !/--break-system-packages/.test(p)),
+      '★非托管解释器仍走经典 pip 提示(不拿 --break-system-packages 吓普通用户)', JSON.stringify(plain.problems))
   }
   {
     const execStub = (cmd) => { throw new Error('no such file') }

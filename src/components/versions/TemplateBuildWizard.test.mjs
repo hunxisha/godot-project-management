@@ -347,6 +347,9 @@ const checkVar = (/checkTemplateBuildTools\(\)[\s\S]{0,80}?([A-Za-z_$][\w$]*)\.v
 ok(!!checkVar && new RegExp('v-if="' + checkVar + '\\.pythonPath"').test(TPL_CODE) && new RegExp('\\{\\{\\s*' + checkVar + '\\.pythonPath\\s*\\}\\}').test(TPL_CODE),
   '★Python 行把宿主回的 pythonPath 以 v-if + 插值各一处渲染(删掉路径行 → 红:只剩版本号,用户装 SCons 时不知道用哪支 python.exe)',
   JSON.stringify({ checkVar }))
+ok(!!checkVar && new RegExp('v-if="' + checkVar + '\\.sconsPath"').test(TPL_CODE) && new RegExp('\\{\\{\\s*' + checkVar + '\\.sconsPath\\s*\\}\\}').test(TPL_CODE),
+  '★SCons 行同样渲染宿主从 PATH 解析的 sconsPath(编译实际跑哪支 scons.exe 不再靠猜;删掉路径行 → 红)',
+  JSON.stringify({ checkVar }))
 
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) { for (const f of failures) console.log('  - ' + f); process.exit(1) }

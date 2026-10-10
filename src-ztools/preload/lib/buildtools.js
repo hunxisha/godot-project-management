@@ -64,11 +64,13 @@ function isWin() {
 }
 
 /**
- * 检测结果的缓存桥:checkTemplateBuildTools 找到的 vcvarsPath,buildTemplatePack 写进
- * 临时 bat 用。构建前必须先跑过一次检测(向导第一步本来就是它);没检测过就拒绝,
- * 不静默编一个路径。@type {{vcvarsPath: string}}
+ * 检测结果的缓存桥:checkTemplateBuildTools 找到的 vcvarsPath 与 scons 通道,buildTemplatePack
+ * 写进临时 bat 用。构建前必须先跑过一次检测(向导第一步本来就是它);没检测过就拒绝,
+ * 不静默编一个路径。sconsVia='python' 时 bat 改用命中解释器起 `python -m SCons`
+ * (scons 不在 PATH 的那台机器),与检测同通道,不各说各话。
+ * @type {{vcvarsPath: string, pythonPath: string, pythonCmd: string, sconsVia: string}}
  */
-const checkCache = { vcvarsPath: '' }
+const checkCache = { vcvarsPath: '', pythonPath: '', pythonCmd: '', sconsVia: '' }
 
 /**
  * 解析 `python -m SCons --version` 的输出 → 版本号(如 '4.10.1')。认不出给空串。
@@ -134,7 +136,7 @@ function vcvarsFallbackDirs() {
 /**
  * 工具链检测(只读;跑三个子进程,总量毫秒到秒级)。
  * 缺什么就把「下一步动作」放进 problems —— 闸门③的要求:不许只说缺,不说怎么补。
- * @returns {Promise<{ok: boolean, pythonVersion: string, pythonPath: string, sconsVersion: string, vcvarsPath: string, cpuCount: number, problems: string[]}>}
+ * @returns {Promise<{ok: boolean, pythonVersion: string, pythonPath: string, sconsVersion: string, sconsPath: string, vcvarsPath: string, cpuCount: number, problems: string[]}>}
  */
 function checkTemplateBuildTools() {
   return checkTemplateBuildToolsWith(
@@ -151,8 +153,8 @@ function checkTemplateBuildTools() {
  */
 async function checkTemplateBuildToolsWith(env, deps) {
   const cpuCount = deps.cpuCount
-  /** @type {{ok: boolean, pythonVersion: string, pythonPath: string, sconsVersion: string, vcvarsPath: string, cpuCount: number, problems: string[]}} */
-  const out = { ok: false, pythonVersion: '', pythonPath: '', sconsVersion: '', vcvarsPath: '', cpuCount, problems: [] }
+  /** @type {{ok: boolean, pythonVersion: string, pythonPath: string, sconsVersion: string, sconsPath: string, vcvarsPath: string, cpuCount: number, problems: string[]}} */
+  const out = { ok: false, pythonVersion: '', pythonPath: '', sconsVersion: '', sconsPath: '', vcvarsPath: '', cpuCount, problems: [] }
   if (env.platform !== 'win32') {
     out.problems.push('自编译模板构建目前只在 Windows 宿主提供(需要 MSVC 与 vcvars 环境)。')
     return out
@@ -177,13 +179,35 @@ async function checkTemplateBuildToolsWith(env, deps) {
       out.pythonPath = String(deps.execSync(`${pythonCmd} -c "import sys;print(sys.executable)"`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || '').trim()
     } catch (e) { /* 路径问不到不影响检测结论 */ }
   }
-  // SCons:走 `python -m SCons --version`,不吃 PATH 里的 scons.exe(pip 装在哪个解释器都能找到)
-  if (pythonCmd) {
+  // SCons:先认 PATH 上的 `scons --version` —— 编译 bat 跑的就是 PATH 上的 scons,检测判据必须
+  // 与它同口径(旧口径只认 `python -m SCons`,把「scons 装在另一支已在 PATH 的解释器里」的可用
+  // 工具链判成未找到,还会把 uv 托管解释器的用户引去 pip 撞 PEP 668);PATH 没有再回落模块通道,
+  // 此时 bat 改由命中解释器起 `python -m SCons`(sconsLineFor),两端始终同一条通道。
+  let sconsVia = ''
+  try {
+    const pv = parseSconsVersion(String(deps.execSync('scons --version', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || ''))
+    if (pv) { out.sconsVersion = pv; sconsVia = 'path' }
+  } catch (e) { /* PATH 上没有,试模块通道 */ }
+  if (!sconsVia && pythonCmd) {
     try {
-      const v = String(deps.execSync(`${pythonCmd} -m SCons --version`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || '')
-      out.sconsVersion = parseSconsVersion(v)
+      const pv = parseSconsVersion(String(deps.execSync(`${pythonCmd} -m SCons --version`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || ''))
+      if (pv) { out.sconsVersion = pv; sconsVia = 'python' }
     } catch (e) { /* 认不出就是没装 */ }
-    if (!out.sconsVersion) out.problems.push('没有 SCons。请用与上面相同的 Python 执行:python -m pip install scons')
+  }
+  if (sconsVia === 'path') {
+    try {
+      out.sconsPath = (String(deps.execSync('where scons', { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0]) || ''
+    } catch (e) { /* 落点问不到就只显示版本号 */ }
+  }
+  if (!sconsVia && pythonCmd) {
+    // uv 等托管解释器带 EXTERNALLY-MANAGED 标记(PEP 668),裸 pip install 必拒 —— 提示里直接给
+    // 能跑通的写法,别让用户照着一句跑不通的命令撞墙再回来
+    const managed = out.pythonPath
+      ? deps.existsSync(path.win32.join(path.win32.dirname(out.pythonPath), 'Lib', 'EXTERNALLY-MANAGED'))
+      : false
+    out.problems.push(managed
+      ? '没有 SCons。上面的 Python 受 PEP 668 外部管理(uv 等),裸 pip install 会被拒:请改用 python -m pip install --break-system-packages scons,或装进任一已在 PATH 的解释器 —— 检测与编译都从 PATH 认 scons。'
+      : '没有 SCons。请用上面的 Python 执行:python -m pip install scons,或直接装进任一已在 PATH 的解释器 —— 检测与编译都从 PATH 认 scons。')
   }
   // vcvars64.bat:vswhere 优先(能找到非默认盘的 VS),fallback 扫常见安装位
   let vsOut = ''
@@ -193,9 +217,27 @@ async function checkTemplateBuildToolsWith(env, deps) {
   out.vcvarsPath = pickVcvars(vsOut, vcvarsFallbackDirs(), (p) => deps.existsSync(p))
   if (!out.vcvarsPath) out.problems.push('没有找到 MSVC 工具链。请安装 Visual Studio(Community 即可)并在 Installer 里勾选「使用 C++ 的桌面开发」。')
   out.ok = out.problems.length === 0
-  // 检测到的 vcvars 缓存给构建步;重跑检测会覆盖 —— 换了 VS 安装位后重检即可生效
+  // 检测到的 vcvars / python / scons 通道缓存给构建步;重跑检测会覆盖 —— 换了安装位后重检即可生效
   checkCache.vcvarsPath = out.vcvarsPath
+  checkCache.pythonPath = out.pythonPath
+  checkCache.pythonCmd = pythonCmd
+  checkCache.sconsVia = sconsVia
   return out
+}
+
+/**
+ * bat 里的 scons 行:默认裸 scons 从 PATH 解析(与检测判据同口径);检测走的是模块通道
+ * (scons 不在 PATH)时改由命中解释器起 `python -m SCons`,检测与编译始终同一条通道。
+ * 前缀之后只出现 commandExtras 的 token(核心 flag 与模式键),module_* 一律不在行上。
+ * @param {{sconsVia?: string, pythonPath?: string, pythonCmd?: string}} cache checkCache 的形状
+ * @param {string} profilePath 临时 profile 文件路径
+ * @param {string[]} extras 查表生成的命令行 token
+ * @param {number} jobs 并行度
+ * @returns {string}
+ */
+function sconsLineFor(cache, profilePath, extras, jobs) {
+  const head = cache.sconsVia === 'python' ? `"${cache.pythonPath || cache.pythonCmd}" -m SCons` : 'scons'
+  return [head, 'platform=windows', 'target=template_release', `build_profile="${profilePath}"`, ...extras, `-j${jobs}`].join(' ')
 }
 
 /**
@@ -364,14 +406,13 @@ function buildTemplatePackWith(params, deps) {
       const prof = buildProfile(features, probe.options, { mode })
       // 一条都没写也照样落盘:命令行上的 build_profile= 指向它,scons 读不到这个文件会直接失败。
       fs.writeFileSync(profilePath, profileText(prof.json), 'utf8')
-      // scons 行的前缀恒定;前缀之后只出现 commandExtras 的 token(核心 flag 与模式键,
-      // module_* 一律不在行上 —— 它们只在 profile 文件里),最后是 -j。
+      // scons 行经 sconsLineFor:通道由检测缓存定(PATH 裸 scons / 命中解释器 -m SCons);
+      // 前缀之后只出现 commandExtras 的 token(核心 flag 与模式键),module_* 一律不在行上,最后是 -j。
       fs.writeFileSync(batPath, [
         '@echo off',
         `call "${checkCache.vcvarsPath}"`,
         `cd /d "${srcDir}"`,
-        ['scons', 'platform=windows', 'target=template_release', `build_profile="${profilePath}"`,
-          ...prof.commandExtras, `-j${jobs}`].join(' ')
+        sconsLineFor(checkCache, profilePath, prof.commandExtras, jobs)
       ].join('\r\n'), 'utf8')
       // "当时编了什么"回查用:两个通道写出去的键都记在任务上(profile 里也留着整份 JSON)
       setTask(id, { writtenFlags: prof.written, profilePath })
@@ -483,6 +524,7 @@ module.exports = {
   checkCache,
   checkTemplateBuildTools,
   checkTemplateBuildToolsWith,
+  sconsLineFor,
   buildTemplatePack,
   buildTemplatePackWith,
   cancelTemplateBuildTask,
