@@ -272,6 +272,230 @@ fn selection_turning_off(options: &Value, ids: &[&str]) -> Value {
     Value::Object(sel)
 }
 
+/// 对应 tplprofile.js:349 RENDER_DRIVERS
+const RENDER_DRIVERS: [&str; 4] = ["vulkan", "opengl3", "angle", "d3d12"];
+
+fn feature_by_id(id: &str) -> Option<&'static crate::tpl::features::TplFeature> {
+    features().iter().find(|f| f.id == id)
+}
+
+/// 对应 tplprofile.js:364 productValue —— **两个通道的并集**，都没发才回落到源码默认。
+/// `None` = 这份源码里没有这个变量（未声明的 scons 变量是静默忽略的，校验一律按未知处理）。
+fn product_value(flag: &str, built: &ProfileResult, options: &Value) -> Option<Value> {
+    if let Some(v) = built.json.get("disabled_build_options").and_then(|d| d.get(flag)) {
+        return Some(v.clone());
+    }
+    if let Some(tok) = built.command_extras.iter().find(|t| t.split('=').next() == Some(flag)) {
+        let raw = &tok[tok.find('=').unwrap() + 1..];
+        return Some(match raw {
+            "yes" => Value::Bool(true),
+            "no" => Value::Bool(false),
+            other => Value::String(other.to_string()),
+        });
+    }
+    let o = options.get(flag)?;
+    if o.get("exists").and_then(|e| e.as_bool()).unwrap_or(false) {
+        o.get("default").cloned()
+    } else {
+        None
+    }
+}
+
+/// 对应 tplprofile.js:384 productOn —— 有事实才回答，`None` 即真源那个 `null`
+fn product_on(flag: &str, built: &ProfileResult, options: &Value) -> Option<bool> {
+    let v = product_value(flag, built, options)?;
+    let mut probe = Map::new();
+    probe.insert("exists".to_string(), Value::Bool(true));
+    probe.insert("default".to_string(), v);
+    is_on_by_default(flag, Some(&Value::Object(probe)))
+}
+
+/// 对应 tplprofile.js:396 productOff —— 方向只在这一处翻；未知一律 false（「没探到」≠「已关闭」）
+fn product_off(flag: &str, built: &ProfileResult, options: &Value) -> bool {
+    match product_on(flag, built, options) {
+        None => false,
+        Some(st) => {
+            if is_negated_flag(flag) {
+                st
+            } else {
+                !st
+            }
+        }
+    }
+}
+
+/// 对应 tplprofile.js:407 itemOffInProduct —— 一项多 flag 时任一被确定关掉就算这项没了
+fn item_off_in_product(id: &str, built: &ProfileResult, options: &Value) -> bool {
+    match feature_by_id(id) {
+        None => false,
+        Some(f) => f.flags.iter().any(|k| product_off(k, built, options)),
+    }
+}
+
+fn issue(item_id: &str, flag: &str, why: &str, action: &str, skippable: bool) -> Value {
+    // 键序 itemId/flag/why/action/skippable 与真源的字面量一致，逐字节对照要连键序一起比
+    let mut m = Map::new();
+    m.insert("itemId".to_string(), Value::String(item_id.to_string()));
+    m.insert("flag".to_string(), Value::String(flag.to_string()));
+    m.insert("why".to_string(), Value::String(why.to_string()));
+    m.insert("action".to_string(), Value::String(action.to_string()));
+    m.insert("skippable".to_string(), Value::Bool(skippable));
+    Value::Object(m)
+}
+
+/// 对应 tplprofile.js:449 validateSelection 的第四参 ctx
+pub struct ValidateCtx {
+    pub mode: String,
+    pub d3d12_sdk_installed: Option<bool>,
+    pub accesskit_sdk_installed: Option<bool>,
+    pub untested_source: Option<bool>,
+}
+
+/// 对应 tplprofile.js:449 validateSelection —— 三条硬拦 + 若干软问题。
+/// 校验的对象是**将要发出去的那份产物**，所以先跑一遍 `build_profile` 再从产物读，
+/// 不直接看勾选真值（真源 `:458-466` 那段注释是这一层的契约）。
+pub fn validate_selection(selection: &Value, options: &Value, ctx: Option<&ValidateCtx>) -> Value {
+    let mode = ctx.and_then(|c| if c.mode.is_empty() { None } else { Some(c.mode.as_str()) }).unwrap_or("default-on");
+    let sel = selection.as_object().cloned().unwrap_or_default();
+    let built = build_profile(selection, options, mode);
+    let mut issues: Vec<Value> = Vec::new();
+    let mut hard: Vec<Value> = Vec::new();
+    let off = |flag: &str| product_off(flag, &built, options);
+    let gone = |id: &str| item_off_in_product(id, &built, options);
+
+    // 硬拦 1：四个渲染驱动全关（只按有事实的下判断，未探到的不算「已关闭」）
+    if RENDER_DRIVERS.iter().all(|d| gone(d)) {
+        hard.push(issue("vulkan", "vulkan", "四个渲染驱动全关,编出来的模板不会有任何画面", "至少保留一个;Windows 上建议保留 Vulkan", false));
+    }
+    // 硬拦 2：一项不剩
+    if sel.values().filter(|v| truthy(v)).count() == 0 {
+        hard.push(issue("source", "", "一项都没保留,这不是一个能跑的模板", "至少保留渲染驱动与文字渲染", false));
+    }
+    // 硬拦 3：反向白名单活着却没有任何模块被点名保留（判据只看已发出的 token，不再叠 exists 前置）
+    let whitelist_live = built.command_extras.iter().any(|t| t == "modules_enabled_by_default=no");
+    let named_modules: Vec<String> = built
+        .json
+        .get("disabled_build_options")
+        .map(|d| d.as_object().map(|m| m.keys().filter(|k| is_module_flag(k)).cloned().collect()).unwrap_or_default())
+        .unwrap_or_default();
+    if whitelist_live && named_modules.is_empty() {
+        let mut probed: Vec<&str> = Vec::new();
+        for f in features() {
+            for k in f.flags {
+                if is_module_flag(k)
+                    && options.get(k).and_then(|o| o.get("exists")).and_then(|e| e.as_bool()).unwrap_or(false)
+                    && !probed.contains(&k)
+                {
+                    probed.push(k);
+                }
+            }
+        }
+        let (why, action) = if probed.is_empty() {
+            (
+                "「最小可跑」会整体关掉所有模块,而这次一个模块开关都没探到、无法点名保留 —— 产物会是没有脚本也没有文字的零模块模板".to_string(),
+                "换一份完整解压、能探到 modules/ 的源码再编,或改用「默认开」的预设".to_string(),
+            )
+        } else {
+            (
+                format!("「最小可跑」会整体关掉所有模块,这次探到 {} 个模块开关但一个都没点名保留 —— 产物会是没有脚本也没有文字的零模块模板", probed.len()),
+                "至少点名保留脚本与文字渲染要用的模块(勾回对应面板项),或改用「默认开」的预设".to_string(),
+            )
+        };
+        hard.push(issue("source", "modules_enabled_by_default", &why, &action, false));
+    }
+
+    // 软问题：物理两条轴都没了（Jolt 只提供 3D，救不了 2D）
+    let phys2d_gone = off("disable_physics_2d") || off("module_godot_physics_2d_enabled");
+    let phys3d_gone = off("disable_physics_3d")
+        || (off("module_godot_physics_3d_enabled") && off("module_jolt_physics_enabled"));
+    if phys2d_gone && phys3d_gone {
+        issues.push(issue("a3GodotPhys", "module_godot_physics_2d_enabled", "2D 与 3D 物理后端都被关掉了,CharacterBody/RigidBody 不会有任何碰撞", "至少保留一套物理后端", true));
+    }
+    // 依赖缺失：只在「这个驱动真会被编进产物」时报，且 ctx 必须是显式 false（undefined ≠ false）
+    if product_on("d3d12", &built, options) == Some(true) && ctx.and_then(|c| c.d3d12_sdk_installed) == Some(false) {
+        issues.push(issue("d3d12", "d3d12", "保留 Direct3D 12 驱动,但本机没装它的依赖 —— 实测这样会直接编译失败", "取消该项,或先跑 python misc\\scripts\\install_d3d12_sdk_windows.py", true));
+    }
+    if product_on("accesskit", &built, options) == Some(true) && ctx.and_then(|c| c.accesskit_sdk_installed) == Some(false) {
+        issues.push(issue("accesskit", "accesskit", "保留 AccessKit,但本机没装它的依赖 —— 实测会撞 accesskit 报错", "取消该项(无障碍树对导出模板通常无关)", true));
+    }
+    if gone("netMbedtls") {
+        issues.push(issue("netMbedtls", "module_mbedtls_enabled", "关掉 mbedTLS 后 HTTPS / TLS 全断,任何联网需求都会静默失败", "勾回该项,或确认项目不含任何联网调用", true));
+    }
+    // 反向白名单的「半个瞎」：勾着但有模块 flag 没探到 → 会被整体关掉
+    if whitelist_live && !named_modules.is_empty() {
+        let mut lost = 0usize;
+        for f in features() {
+            if !truthy(sel.get(f.id).unwrap_or(&Value::Null)) {
+                continue;
+            }
+            if f.flags.iter().filter(|k| is_module_flag(k)).any(|k| product_value(k, &built, options).is_none()) {
+                lost += 1;
+            }
+        }
+        if lost > 0 {
+            issues.push(issue("source", "modules_enabled_by_default", &format!("反向白名单下有 {lost} 项你保留的模块没在这份源码里探到,它们会被整体关掉(面板显示保留、产物里没有)"), "把这些项取消勾选,或改用「默认开」的预设", true));
+        }
+    }
+    // 默认开模式的对称半边：勾了取消但有 flag 没探到 → 只能关掉一部分
+    if mode == "default-on" {
+        for f in features() {
+            match sel.get(f.id) {
+                None => continue,
+                Some(v) if truthy(v) => continue,
+                Some(_) => {}
+            }
+            let missing: Vec<&str> = f.flags.iter().copied()
+                .filter(|k| !options.get(k).and_then(|o| o.get("exists")).and_then(|e| e.as_bool()).unwrap_or(false))
+                .collect();
+            let probed_count = f.flags.len() - missing.len();
+            if probed_count > 0 && !missing.is_empty() {
+                issues.push(issue(f.id, missing[0], &format!("该项在本版本源码里有 {} 个开关不存在,取消它只会关掉探到的那 {} 个 —— 不会影响那些格式", missing.len(), probed_count), "照常取消即可;要精确关掉那些能力得换一份声明了对应开关的源码", true));
+            }
+        }
+    }
+    if ctx.and_then(|c| c.untested_source).unwrap_or(false) {
+        issues.push(issue("source", "", "这份源码的版本不在已实测表内,面板按探测结果工作;未识别的项保持源码默认,不猜参数", "如产物异常,先按已实测版本复现", true));
+    }
+
+    let mut out = Map::new();
+    out.insert("issues".to_string(), Value::Array(issues));
+    out.insert("hardBlocks".to_string(), Value::Array(hard));
+    Value::Object(out)
+}
+
+/// 对应 tplprofile.js:618 selectionSuppressed —— 当前勾选下被连带关闭的面板项 id。
+/// 只有**严格 false** 的伞项才算被取消（缺键按「用户没取消它」）；表外源 flag 取保守态进表；
+/// 只走一层不做传递闭包（Ruling #73）；输出按表序而不是 Set 的插入序。
+pub fn selection_suppressed(selection: &Value, cascades: &Value) -> Value {
+    let sel = selection.as_object().cloned().unwrap_or_default();
+    let graph = cascades.as_object().cloned().unwrap_or_default();
+    let mut hit: Vec<String> = Vec::new();
+    for (src_flag, targets) in graph.iter() {
+        let owns = |id: &str| feature_by_id(id).map(|f| f.flags.contains(&src_flag.as_str())).unwrap_or(false);
+        let owners: Vec<&str> = features().iter().filter(|f| owns(f.id)).map(|f| f.id).collect();
+        let umbrella_off = owners.is_empty()
+            || owners.iter().any(|id| sel.get(*id) == Some(&Value::Bool(false)));
+        if !umbrella_off {
+            continue;
+        }
+        if let Value::Array(list) = targets {
+            for t in list {
+                let Some(t) = t.as_str() else { continue };
+                for f in features() {
+                    if f.flags.contains(&t) && !hit.contains(&f.id.to_string()) {
+                        hit.push(f.id.to_string());
+                    }
+                }
+            }
+        }
+    }
+    let ordered: Vec<Value> = features().iter()
+        .filter(|f| hit.contains(&f.id.to_string()))
+        .map(|f| Value::String(f.id.to_string()))
+        .collect();
+    Value::Array(ordered)
+}
+
 /// 对应 tplprofile.js:668 PRESETS.apply(name, options) —— **未知名不猜**，直接 ok:false
 pub fn presets_apply(name: &str, options: &Value) -> Value {
     let (features, mode) = match name {

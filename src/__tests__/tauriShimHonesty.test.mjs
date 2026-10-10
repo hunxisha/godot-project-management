@@ -81,15 +81,9 @@ const NAMED = {
   listAssetReleases: '恒空列表:版本选择会说成「没有可用版本」(界面已按宿主给如实文案,数据侧等命令)',
   getReleaseInfos: '恒空对象:卡片版本/兼容信息缺失(不构成假结论,等 Rust 侧 release 命令)',
   docsGetClassExtras: '回 null 且不说为什么(详情扩展区静默)',
-  listBackupTasks: '恒空列表:桌面版任务走 watchBackupTasks 通道,视为如实,留此备案',
-  // 这条不是欠账而是**形状盲区**:占位确实给了原因(见 tauri-shim.js 里 hardBlocks[0].why/action),
-  // 但这条契约的返回类型是 { ok, issues, hardBlocks } —— 没有 error/problems 两个字段,
-  // BARE 那条句法代理只认这两个键名,于是把「原因写在 TplIssue.why 里」读成了「不给原因」。
-  // 不放宽 BARE(它抓的是真债),也不往契约里塞一个渲染层不读的 error 字段;记名等 Rust 侧命令,
-  // 命令一注册,这个占位连同本条一起删(stale 反向检查会盯着)。
-  // 记名的代价是「同一入口以后任何真债也会被放过」—— 那半边由第 5 节那条逐形状断言兜住(Ruling #61),
-  // 所以这里挂名不等于免检。
-  validateTemplateConfig: 'ok:false 的原因走契约自己的 hardBlocks[].why(BARE 只认 error/problems 两个键名);Rust 侧注册 validate_template_config 后连占位带这条一起删'
+  listBackupTasks: '恒空列表:桌面版任务走 watchBackupTasks 通道,视为如实,留此备案'
+  // validateTemplateConfig 已从 NAMED 摘掉:P0e-1 的 Rust 命令注册了,占位连同这条一起删
+  // (第 5 节改成钉「四条已接真 invoke」,占位复辟当场红 —— 记名条目不能只进不出)。
 }
 
 // 「做了事」的证据:真发命令、走那条带 _rev 的读-改-写辅助、或如实抛错。
@@ -189,14 +183,21 @@ section('5. 返回形状要对得上契约(不是「像就行」)')
   const detail = methods.find((m) => m.name === 'getAssetDetail')
   ok(!!detail && /Promise\.resolve\(\s*null\s*\)/.test(detail.body) && !/ok:\s*false/.test(detail.body),
     'getAssetDetail 取不到回 null,不回带 ok 的假对象', detail ? detail.body.split('\n')[0].trim() : '没找到该方法')
-  // Ruling #61:validateTemplateConfig 挂在 NAMED 名单上(名单记名的代价是**同一入口以后任何真债
-  // 也会被这条记名放过**,而 BARE 本来就看不见写在 hardBlocks[].why 里的那个原因),所以这里按本节
-  // 的办法逐形状钉住:占位必须给出**非空的 hardBlocks**,且那一条自带 why 与 skippable:false。
-  // 占位退化成 `hardBlocks: []` 就是「ok:false 却一句为什么都不给」,名单救不了它。
-  const vtc = methods.find((m) => m.name === 'validateTemplateConfig')
-  ok(!!vtc && /hardBlocks:\s*\[\s*\{/.test(vtc.body) && /why:\s*'[^']+'/.test(vtc.body) && /skippable:\s*false/.test(vtc.body),
-    'validateTemplateConfig 占位的 hardBlocks 非空且那条带 why/skippable(记名不等于免检)',
-    vtc ? vtc.body.split('\n')[0].trim() : '没找到该方法')
+  // P0e-1:这四条已从「如实占位」换成真 invoke(Rust 侧命令已注册,判据两端逐字节对照)。
+  // 原来这里钉的是占位形状(Ruling #61),占位没了那条就成了空壳 —— 换成反向钉:
+  // **占位复辟当场红**。桌面版向导一旦退回 ok:false 的占位,渲染层看不出任何异常,
+  // 只有这一处能喊出来(用户看到的就是「桌面版怎么又不支持了」)。
+  const REAL_INVOKE = {
+    probeTemplateSource: /invoke\(\s*'probe_template_source',\s*\{\s*srcDir\s*\}\s*\)/,
+    listTemplateFeatures: /invoke\(\s*'list_template_features',\s*\{\s*srcDir\s*\}\s*\)/,
+    validateTemplateConfig: /invoke\(\s*'validate_template_config',\s*\{\s*params\s*\}\s*\)/,
+    applyTemplatePreset: /invoke\(\s*'apply_template_preset',\s*\{\s*name,\s*srcDir\s*\}\s*\)/
+  }
+  for (const [name, re] of Object.entries(REAL_INVOKE)) {
+    const m = methods.find((x) => x.name === name)
+    ok(!!m && re.test(m.body) && !/暂不支持/.test(m.body),
+      `${name} 已接真命令(占位复辟或参数名漂移即红)`, m ? m.body.split('\n')[0].trim() : '没找到该方法')
+  }
 }
 
 section('6. 垫片必须真的被宿主取到(index.html 的 URL ↔ Vite publicDir 对得上)')

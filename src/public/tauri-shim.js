@@ -176,10 +176,13 @@
     // 渲染层对 ok:false + problems 的展示路径与缺工具链同一条。ZTools 插件宿主提供真实现。
     // 这一组占位同一条规矩:Rust 侧命令注册之前不给任何真通道 —— 缺能力是状态不是假成功;
     // 而返回形状必须与契约对齐(字段齐、类型对),否则渲染层对 undefined 取属性就是 TypeError。
-    probeTemplateSource: () => Promise.resolve({ ok: false, error: '桌面版暂不支持源码探测,请使用 ZTools 插件版。', sourceVersion: '', tested: false, options: {}, cascades: {}, testedVersions: [] }),
-    listTemplateFeatures: () => Promise.resolve({ ok: false, error: '桌面版暂不支持自编译模板,请使用 ZTools 插件版。', items: [] }),
-    validateTemplateConfig: () => Promise.resolve({ ok: false, issues: [], suppressed: [], hardBlocks: [{ itemId: 'source', flag: '', why: '桌面版暂不支持自编译模板', action: '请使用 ZTools 插件版', skippable: false }] }),
-    applyTemplatePreset: () => Promise.resolve({ ok: false, error: '桌面版暂不支持自编译模板,请使用 ZTools 插件版。' }),
+    // ---------- 自编译模板 · P0e-1 四条:已接真命令 ----------
+    // 判据不在这里 —— 桌面版走 Rust 的 tpl::{probe,profile,api},与 JS 宿主的 services.js:61-131
+    // 同构;两端的产出由 src-tauri/tests/tpl_parity.rs 逐字节对照钉着(30 例)。
+    probeTemplateSource: (srcDir) => invoke('probe_template_source', { srcDir }),
+    listTemplateFeatures: (srcDir) => invoke('list_template_features', { srcDir }),
+    validateTemplateConfig: (params) => invoke('validate_template_config', { params }),
+    applyTemplatePreset: (name, srcDir) => invoke('apply_template_preset', { name, srcDir }),
     checkTemplateBuildTools: () => Promise.resolve({
       ok: false, pythonVersion: '', pythonPath: '', sconsVersion: '', sconsPath: '', vcvarsPath: '', tarPath: '',
       d3d12SdkInstalled: false, accesskitSdkInstalled: false,

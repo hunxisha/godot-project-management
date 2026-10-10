@@ -484,3 +484,306 @@ fn tpl_probe_and_profile_chain_are_byte_identical() {
     println!("  探测 parity OK:{n} 例逐字节相同(含 chain-profile)");
     let _ = fs::remove_dir_all(&base);
 }
+
+/// 第三轮：校验层与连带层（`validateSelection` / `selectionSuppressed` / `PRESETS.apply`）。
+/// 这一层是「用户勾坏了什么、我们敢不敢让他编」的判据所在，三条硬拦与五条软问题
+/// 每一条都有真实成因（见 tplprofile.js:422-580 的注释），所以逐格对照而不是抽查。
+const JS_VALIDATE_HARNESS: &str = r###"
+const fs = require('node:fs')
+const path = require('node:path')
+const cfg = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))
+const B = require(path.join(cfg.repo, 'src-ztools/preload/lib/tplprobe.js'))
+const P = require(path.join(cfg.repo, 'src-ztools/preload/lib/tplprofile.js'))
+const F = require(path.join(cfg.repo, 'src-ztools/preload/lib/tplfeatures.js'))
+
+;(async () => {
+  const probe = await B.probeSource(cfg.tree)
+  const opts = probe.options
+  const sel = P.initialSelection(opts)
+  const allOff = Object.fromEntries(F.TPL_FEATURES.map((f) => [f.id, false]))
+  const cases = {}
+  const put = (k, v) => { cases[k] = JSON.stringify(v) }
+  put('v:default', P.validateSelection(sel, opts, { mode: 'default-on' }))
+  put('v:off-mode', P.validateSelection(sel, opts, { mode: 'default-off' }))
+  put('v:sdk-missing', P.validateSelection(sel, opts, { mode: 'default-on', d3d12SdkInstalled: false, accesskitSdkInstalled: false }))
+  put('v:untested', P.validateSelection(sel, opts, { mode: 'default-on', untestedSource: true }))
+  put('v:all-off', P.validateSelection(allOff, opts, { mode: 'default-off' }))
+  put('v:no-selection', P.validateSelection({}, opts, { mode: 'default-on' }))
+  put('v:no-options', P.validateSelection(sel, undefined, { mode: 'default-on' }))
+  put('v:no-ctx', P.validateSelection(sel, opts))
+  put('s:default', P.selectionSuppressed(sel, probe.cascades))
+  const off3d = Object.assign({}, sel, { sys3d: false })
+  put('s:3d-off', P.selectionSuppressed(off3d, probe.cascades))
+  put('s:no-selection', P.selectionSuppressed({}, probe.cascades))
+  put('s:no-graph', P.selectionSuppressed(off3d, undefined))
+  put('p:full', P.PRESETS.apply('full', opts))
+  put('p:minimal', P.PRESETS.apply('minimal', opts))
+  process.stdout.write(JSON.stringify({ cases, sourceVersion: probe.sourceVersion }))
+})()
+"###;
+
+fn rust_validate_side(tree: &Path) -> (Map<String, Value>, String) {
+    use rp::ValidateCtx;
+    let probe = tp::probe_source(tree, None);
+    let opts = probe.get("options").cloned().unwrap_or(json!({}));
+    let cascades = probe.get("cascades").cloned().unwrap_or(json!({}));
+    let sel = rp::initial_selection(&opts);
+    let all_off = {
+        let mut m = Map::new();
+        for f in features::features() {
+            m.insert(f.id.to_string(), Value::Bool(false));
+        }
+        Value::Object(m)
+    };
+    let mut cases = Map::new();
+    let mut put = |k: &str, v: Value| {
+        cases.insert(k.to_string(), Value::String(serde_json::to_string(&v).unwrap()));
+    };
+    let c = |mode: &str, d3d: Option<bool>, ak: Option<bool>, untested: Option<bool>| ValidateCtx {
+        mode: mode.to_string(),
+        d3d12_sdk_installed: d3d,
+        accesskit_sdk_installed: ak,
+        untested_source: untested,
+    };
+    put("v:default", rp::validate_selection(&sel, &opts, Some(&c("default-on", None, None, None))));
+    put("v:off-mode", rp::validate_selection(&sel, &opts, Some(&c("default-off", None, None, None))));
+    put("v:sdk-missing", rp::validate_selection(&sel, &opts, Some(&c("default-on", Some(false), Some(false), None))));
+    put("v:untested", rp::validate_selection(&sel, &opts, Some(&c("default-on", None, None, Some(true)))));
+    put("v:all-off", rp::validate_selection(&all_off, &opts, Some(&c("default-off", None, None, None))));
+    put("v:no-selection", rp::validate_selection(&json!({}), &opts, Some(&c("default-on", None, None, None))));
+    put("v:no-options", rp::validate_selection(&sel, &Value::Null, Some(&c("default-on", None, None, None))));
+    put("v:no-ctx", rp::validate_selection(&sel, &opts, None));
+    put("s:default", rp::selection_suppressed(&sel, &cascades));
+    let off3d = {
+        let mut m = sel.as_object().cloned().unwrap();
+        m.insert("sys3d".into(), Value::Bool(false));
+        Value::Object(m)
+    };
+    put("s:3d-off", rp::selection_suppressed(&off3d, &cascades));
+    put("s:no-selection", rp::selection_suppressed(&json!({}), &cascades));
+    put("s:no-graph", rp::selection_suppressed(&off3d, &Value::Null));
+    put("p:full", rp::presets_apply("full", &opts));
+    put("p:minimal", rp::presets_apply("minimal", &opts));
+    let sv = probe.get("sourceVersion").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    (cases, sv)
+}
+
+#[test]
+fn tpl_validate_and_cascade_rules_are_byte_identical() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
+    let tree = repo.join("src-tauri/tests/fixtures/tplsrc");
+    let base = std::env::temp_dir().join(format!("gpm-tpl-validate-parity-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    fs::create_dir_all(&base).unwrap();
+    let script = base.join("js-validate.js");
+    fs::write(&script, JS_VALIDATE_HARNESS).unwrap();
+    let cfg_file = base.join("js-cfg.json");
+    fs::write(&cfg_file, json!({ "repo": repo, "tree": tree }).to_string()).unwrap();
+
+    let js: Value = match Command::new("node").arg(&script).arg(&cfg_file).output() {
+        Err(e) => panic!("环境里找不到 node({e})—— 按失败处理,不静默跳过"),
+        Ok(out) => {
+            if !out.status.success() {
+                panic!("JS validate harness 退出非零:{}", String::from_utf8_lossy(&out.stderr));
+            }
+            serde_json::from_slice(&out.stdout).expect("JS 侧输出的是 JSON")
+        }
+    };
+
+    let (rc, rs_sv) = rust_validate_side(&tree);
+    assert_eq!(js["sourceVersion"], json!(rs_sv), "两端读出的源码版本串不一致");
+    assert_eq!(rs_sv, "4.7.2-stable", "夹具版本变了?对照用例的期望要跟着重看");
+
+    let jc = js["cases"].as_object().unwrap().clone();
+    let mut jkeys: Vec<&String> = jc.keys().collect();
+    let mut rkeys: Vec<&String> = rc.keys().collect();
+    jkeys.sort();
+    rkeys.sort();
+    assert_eq!(jkeys, rkeys, "校验层用例集合两端不一致");
+    assert!(jkeys.len() >= 14, "只有 {} 例,少于 14 说明漏跑了", jkeys.len());
+
+    // 自检:这一轮的产出不能全同(全同 = ctx 与 selection 压根没参与判定,harness 白跑)。
+    // 刻意**不**去钉「哪两例必须不同」：第一版写了 `v:default != v:off-mode`，实跑直接假红 ——
+    // 初始勾选下没有任何项被关，这两例的产物本就一样。哪对例子有区分度由数据说，不由猜说。
+    use std::collections::HashSet;
+    let distinct: HashSet<String> = jkeys
+        .iter()
+        .filter_map(|k| jc.get((*k).as_str()).and_then(|v| v.as_str()).map(|s| s.to_string()))
+        .collect();
+    assert!(
+        distinct.len() >= 4,
+        "校验层 {} 例只产出 {} 种结果,ctx 或 selection 没参与判定",
+        jkeys.len(),
+        distinct.len()
+    );
+
+    for k in jkeys {
+        let j = canon(jc[k].as_str().unwrap());
+        let r = canon(rc[k].as_str().unwrap());
+        assert_eq!(j, r, "校验层用例 {k} 不是逐字节相同 → {}", first_diff(&j, &r));
+    }
+    println!("  校验层 parity OK:{} 例逐字节相同", jc.len());
+    let _ = fs::remove_dir_all(&base);
+}
+
+/// 第四轮：宿主组合层（`services.js:61-131` ↔ `tpl/api.rs`）。
+///
+/// 为什么值得单开一轮：这份组合在 JS 侧**没有运行时测试**（`services.test.js` 比的是方法名与类型，
+/// 判据那部分它直接调 lib 拿），所以桌面版面板真正吃的这一层是第一次被测。
+/// harness 里的组合是 services.js 的**镜像**，镜像会漂 —— 于是 `SERVICES_GUARD` 拿源码扫描钉住
+/// 四句承重文案与判据：改了 services.js 而没同步 harness，红在这里，而不是让桌面版悄悄分叉。
+const JS_API_HARNESS: &str = r###"
+const fs = require('node:fs')
+const path = require('node:path')
+const cfg = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))
+const B = require(path.join(cfg.repo, 'src-ztools/preload/lib/tplprobe.js'))
+const P = require(path.join(cfg.repo, 'src-ztools/preload/lib/tplprofile.js'))
+const F = require(path.join(cfg.repo, 'src-ztools/preload/lib/tplfeatures.js'))
+
+// ---- 以下三段逐字镜像 services.js:63-131（受 SERVICES_GUARD 约束）----
+async function listTemplateFeatures(srcDir) {
+  const probe = await B.probeSource(srcDir)
+  if (!probe.ok) return { ok: false, error: probe.error }
+  if (Object.keys(probe.options).length === 0) {
+    return { ok: false, error: '无法解析此版本源码的构建选项（源码结构可能已变）' }
+  }
+  const sel = P.initialSelection(probe.options)
+  const cascadeSources = Object.keys(probe.cascades)
+  const items = F.TPL_FEATURES.map((f) => {
+    const present = f.flags.some((k) => probe.options[k] && probe.options[k].exists)
+    const cascadedBy = cascadeSources.find((srcFlag) => probe.cascades[srcFlag].some((t) => f.flags.includes(t)))
+    return {
+      id: f.id, label: f.label, group: f.group, desc: f.desc,
+      sizeImpact: f.sizeImpact, risk: f.risk, flags: f.flags,
+      present,
+      defaultOn: !!sel[f.id],
+      ...(cascadedBy ? { cascadedBy } : {})
+    }
+  })
+  return { ok: true, items }
+}
+async function validateTemplateConfig(params) {
+  const probe = await B.probeSource(params.srcDir)
+  const untestedSource = !probe.tested
+  const r = P.validateSelection(params.features, probe.options || {}, {
+    mode: params.mode,
+    d3d12SdkInstalled: params.d3d12SdkInstalled,
+    accesskitSdkInstalled: params.accesskitSdkInstalled,
+    untestedSource
+  })
+  return {
+    ok: r.hardBlocks.length === 0,
+    issues: r.issues,
+    hardBlocks: r.hardBlocks,
+    suppressed: P.selectionSuppressed(params.features, probe.cascades || {})
+  }
+}
+async function applyTemplatePreset(name, srcDir) {
+  const probe = await B.probeSource(srcDir)
+  if (!probe.ok) return { ok: false, error: probe.error || '无法探测这份源码' }
+  const r = P.PRESETS.apply(name, probe.options)
+  if (!r.ok) return { ok: false, error: r.error }
+  return { ok: true, features: r.features, mode: r.mode }
+}
+
+;(async () => {
+  const t = cfg.tree
+  const probe = await B.probeSource(t)
+  const sel = P.initialSelection(probe.options)
+  const cases = {}
+  cases['features'] = JSON.stringify(await listTemplateFeatures(t))
+  cases['features-notroot'] = JSON.stringify(await listTemplateFeatures(path.join(t, 'platform')))
+  cases['features-empty'] = JSON.stringify(await listTemplateFeatures(cfg.junk))
+  cases['validate'] = JSON.stringify(await validateTemplateConfig({ srcDir: t, features: sel, mode: 'default-on' }))
+  cases['validate-off'] = JSON.stringify(await validateTemplateConfig({ srcDir: t, features: sel, mode: 'default-off', d3d12SdkInstalled: false }))
+  cases['validate-notroot'] = JSON.stringify(await validateTemplateConfig({ srcDir: path.join(t, 'platform'), features: {}, mode: 'default-on' }))
+  cases['preset-minimal'] = JSON.stringify(await applyTemplatePreset('minimal', t))
+  cases['preset-unknown'] = JSON.stringify(await applyTemplatePreset('nope', t))
+  cases['preset-notroot'] = JSON.stringify(await applyTemplatePreset('full', path.join(t, 'platform')))
+  process.stdout.write(JSON.stringify({ cases }))
+})()
+"###;
+
+/// harness 镜像的判据必须仍是 services.js 里的那几句 —— 改了那边不同步这里就该红
+const SERVICES_GUARD: [&str; 5] = [
+    "return { ok: false, error: probe.error }",
+    "无法解析此版本源码的构建选项（源码结构可能已变）",
+    "const present = f.flags.some((k) => probe.options[k] && probe.options[k].exists)",
+    "suppressed: tplprofile.selectionSuppressed(params.features, probe.cascades || {})",
+    "if (!probe.ok) return { ok: false, error: probe.error || '无法探测这份源码' }",
+];
+
+fn rust_api_side(tree: &Path, junk: &Path) -> Map<String, Value> {
+    use godot_workshop::tpl::api;
+    let probe = tp::probe_source(tree, None);
+    let options = probe.get("options").cloned().unwrap_or(json!({}));
+    let sel = rp::initial_selection(&options);
+    let mut cases = Map::new();
+    let mut put = |k: &str, v: Value| {
+        cases.insert(k.to_string(), Value::String(serde_json::to_string(&v).unwrap()));
+    };
+    let notroot = tree.join("platform");
+    put("features", api::list_template_features(&tree.to_string_lossy()));
+    put("features-notroot", api::list_template_features(&notroot.to_string_lossy()));
+    put("features-empty", api::list_template_features(&junk.to_string_lossy()));
+    put("validate", api::validate_template_config(&json!({ "srcDir": tree.to_string_lossy(), "features": sel, "mode": "default-on" })));
+    put("validate-off", api::validate_template_config(&json!({ "srcDir": tree.to_string_lossy(), "features": sel, "mode": "default-off", "d3d12SdkInstalled": false })));
+    put("validate-notroot", api::validate_template_config(&json!({ "srcDir": notroot.to_string_lossy(), "features": {}, "mode": "default-on" })));
+    put("preset-minimal", api::apply_template_preset("minimal", &tree.to_string_lossy()));
+    put("preset-unknown", api::apply_template_preset("nope", &tree.to_string_lossy()));
+    put("preset-notroot", api::apply_template_preset("full", &notroot.to_string_lossy()));
+    cases
+}
+
+#[test]
+fn tpl_host_composition_matches_services_js_byte_for_byte() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
+    let tree = repo.join("src-tauri/tests/fixtures/tplsrc");
+
+    let services = fs::read_to_string(repo.join("src-ztools/preload/services.js")).unwrap();
+    for line in SERVICES_GUARD.iter() {
+        assert!(services.contains(line), "services.js 的组合层改了,但 harness 镜像没同步:缺 {line:?}");
+    }
+
+    let base = std::env::temp_dir().join(format!("gpm-tpl-api-parity-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    fs::create_dir_all(&base).unwrap();
+    // 两支闸的第②支要的是「SConstruct 在、但一个构建选项都解析不出来」——现造一棵这种树,
+    // 两端共用同一个路径(不是各造一份),否则比的不是同一份输入。
+    let junk = base.join("junksrc");
+    fs::create_dir_all(&junk).unwrap();
+    fs::write(junk.join("SConstruct"), "# 一个 BoolVariable 都没有的源码根\n").unwrap();
+
+    let script = base.join("js-api.js");
+    fs::write(&script, JS_API_HARNESS).unwrap();
+    let cfg_file = base.join("js-cfg.json");
+    fs::write(&cfg_file, json!({ "repo": repo, "tree": tree, "junk": junk }).to_string()).unwrap();
+
+    let js: Value = match Command::new("node").arg(&script).arg(&cfg_file).output() {
+        Err(e) => panic!("环境里找不到 node({e})—— 按失败处理,不静默跳过"),
+        Ok(out) => {
+            if !out.status.success() {
+                panic!("JS api harness 退出非零:{}", String::from_utf8_lossy(&out.stderr));
+            }
+            serde_json::from_slice(&out.stdout).expect("JS 侧输出的是 JSON")
+        }
+    };
+
+    let rc = rust_api_side(&tree, &junk);
+    let jc = js["cases"].as_object().unwrap().clone();
+    let mut jkeys: Vec<&String> = jc.keys().collect();
+    let mut rkeys: Vec<&String> = rc.keys().collect();
+    jkeys.sort();
+    rkeys.sort();
+    assert_eq!(jkeys, rkeys, "组合层用例集合两端不一致");
+    assert!(jkeys.len() >= 9, "只有 {} 例,少于 9 说明漏跑了", jkeys.len());
+
+    let n = jkeys.len();
+    for k in jkeys {
+        let j = canon(jc[k].as_str().unwrap());
+        let r = canon(rc[k].as_str().unwrap());
+        assert_eq!(j, r, "组合层用例 {k} 不是逐字节相同 → {}", first_diff(&j, &r));
+    }
+    println!("  组合层 parity OK:{n} 例逐字节相同(含两支拒绝进面板的闸)", );
+    let _ = fs::remove_dir_all(&base);
+}
