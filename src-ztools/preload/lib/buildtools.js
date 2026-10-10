@@ -134,7 +134,7 @@ function vcvarsFallbackDirs() {
 /**
  * 工具链检测(只读;跑三个子进程,总量毫秒到秒级)。
  * 缺什么就把「下一步动作」放进 problems —— 闸门③的要求:不许只说缺,不说怎么补。
- * @returns {Promise<{ok: boolean, pythonVersion: string, sconsVersion: string, vcvarsPath: string, cpuCount: number, problems: string[]}>}
+ * @returns {Promise<{ok: boolean, pythonVersion: string, pythonPath: string, sconsVersion: string, vcvarsPath: string, cpuCount: number, problems: string[]}>}
  */
 function checkTemplateBuildTools() {
   return checkTemplateBuildToolsWith(
@@ -151,8 +151,8 @@ function checkTemplateBuildTools() {
  */
 async function checkTemplateBuildToolsWith(env, deps) {
   const cpuCount = deps.cpuCount
-  /** @type {{ok: boolean, pythonVersion: string, sconsVersion: string, vcvarsPath: string, cpuCount: number, problems: string[]}} */
-  const out = { ok: false, pythonVersion: '', sconsVersion: '', vcvarsPath: '', cpuCount, problems: [] }
+  /** @type {{ok: boolean, pythonVersion: string, pythonPath: string, sconsVersion: string, vcvarsPath: string, cpuCount: number, problems: string[]}} */
+  const out = { ok: false, pythonVersion: '', pythonPath: '', sconsVersion: '', vcvarsPath: '', cpuCount, problems: [] }
   if (env.platform !== 'win32') {
     out.problems.push('自编译模板构建目前只在 Windows 宿主提供(需要 MSVC 与 vcvars 环境)。')
     return out
@@ -170,6 +170,13 @@ async function checkTemplateBuildToolsWith(env, deps) {
     } catch (e) { /* 换下一个 */ }
   }
   if (!pythonCmd) out.problems.push('没有可用的 Python 3。请安装 Python 3.8+ 并勾选「加入 PATH」后重试。')
+  // 是哪支 python.exe 只有解释器自己答得上(PATH 别名 / py 启动器 / 商店别名各指一处,where 猜不准);
+  // 问不到就留空串 —— 版本行照显示,只是少一行路径,不影响齐不齐的结论
+  if (pythonCmd) {
+    try {
+      out.pythonPath = String(deps.execSync(`${pythonCmd} -c "import sys;print(sys.executable)"`, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) || '').trim()
+    } catch (e) { /* 路径问不到不影响检测结论 */ }
+  }
   // SCons:走 `python -m SCons --version`,不吃 PATH 里的 scons.exe(pip 装在哪个解释器都能找到)
   if (pythonCmd) {
     try {

@@ -131,6 +131,8 @@ export interface Services {
   checkTemplateBuildTools(): Promise<{
     ok: boolean
     pythonVersion: string
+    /** 命中的解释器自报的 sys.executable(问不到为空串);给用户看「是哪支 python.exe」 */
+    pythonPath: string
     sconsVersion: string
     vcvarsPath: string
     cpuCount: number

@@ -11,7 +11,9 @@
 //   5. 修复轮 1(Ruling #80–#83):发起编译的重入闸、三处过时恢复闸、预设错误位与面板错误位分离、buildErr 随目录清空;
 //   6. 终审修复波:C1(换目录即把 mode 复位 default-on —— 该状态迁移扫描结构上看不见,由真机条目 T21 兜底)、
 //      T10-①(srcDirVar 反查改走 pickDirectory → @click → v-model 链,不再锚「源码根」文案)、
-//      T10-②(watch 形态认 ref 直传与 `() => srcDir.value` 两种等价写法)。
+//      T10-②(watch 形态认 ref 直传与 `() => srcDir.value` 两种等价写法);
+//   7. 第一步检测的 Python 行渲染宿主回的 pythonPath(是哪支解释器由它自报 sys.executable,
+//      宿主侧对应断言在 buildtools.test.js §2)。
 //
 // 写法纪律(沿用 TemplateFeaturePanel.test.mjs 的轮 2 口径):
 //   · 断言只钉**方向与形状**,函数名/变量名一律从模板绑定或赋值处**反查**,改名与等价写法都该继续绿;
@@ -339,6 +341,12 @@ const modeResetRe = modeVar ? new RegExp('\\b' + modeVar + "\\.value\\s*=\\s*['\
 ok(!!modeVar && !!modeResetRe && modeResetRe.test(srcWatchSeg),
   '★C1:watch(srcDir) 里把编译模式复位回 default-on(预设的 default-off 不跟着新目录跑;把这行删掉 → 红)',
   JSON.stringify({ srcDirVar, modeVar, watchSeg: srcWatchSeg.slice(0, 200).replace(/\n/g, ' ') }))
+
+console.log('\n=== 9. 检测的 Python 行渲染宿主回的解释器路径(是哪支 python.exe 不再靠猜) ===')
+const checkVar = (/checkTemplateBuildTools\(\)[\s\S]{0,80}?([A-Za-z_$][\w$]*)\.value\s*=/.exec(SCRIPT) || [])[1] || ''
+ok(!!checkVar && new RegExp('v-if="' + checkVar + '\\.pythonPath"').test(TPL_CODE) && new RegExp('\\{\\{\\s*' + checkVar + '\\.pythonPath\\s*\\}\\}').test(TPL_CODE),
+  '★Python 行把宿主回的 pythonPath 以 v-if + 插值各一处渲染(删掉路径行 → 红:只剩版本号,用户装 SCons 时不知道用哪支 python.exe)',
+  JSON.stringify({ checkVar }))
 
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) { for (const f of failures) console.log('  - ' + f); process.exit(1) }

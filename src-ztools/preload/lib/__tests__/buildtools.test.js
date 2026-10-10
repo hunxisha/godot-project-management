@@ -249,6 +249,7 @@ async function main() {
       if (/--version/.test(cmd) && !/SCons/.test(cmd)) return 'Python 3.12.13'
       if (/SCons/.test(cmd)) return 'SCons by Steven Knight et al.:\n\tSCons: v4.10.1, Sun, 16 Nov 2025'
       if (/vswhere/.test(cmd)) return 'D:\\apps\\Microsoft Visual Studio\\Community'
+      if (/sys\.executable/.test(cmd)) return 'D:\\py\\python.exe'
       throw new Error('unexpected: ' + cmd)
     }
     // existsSync 桩:检测的 vcvars 落点是 Windows 路径,Linux CI 上真 existsSync 必然 false ——
@@ -260,6 +261,9 @@ async function main() {
       '★三件套齐:ok、版本、vcvars(经 vswhere 找到非默认盘安装位)、核数都对', JSON.stringify(r))
     ok(seq.some((c) => /python -m SCons --version/.test(c)),
       'SCons 检测走 python -m(不吃 PATH 里的 scons.exe)', seq.join(' | '))
+    ok(r.pythonPath === 'D:\\py\\python.exe' && seq.some((c) => /-c "import sys;print\(sys\.executable\)"/.test(c)),
+      '★路径问命中的解释器自己拿 sys.executable(删掉那次 execSync → 空串 → 红:弹窗只剩版本号,用户不知道装 SCons 该用哪支 python.exe)',
+      r.pythonPath)
     ok(B.checkCache.vcvarsPath === r.vcvarsPath, '检测结果缓存给构建步(向导第一步本来就是它)')
   }
   {

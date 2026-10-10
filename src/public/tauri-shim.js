@@ -181,7 +181,7 @@
     validateTemplateConfig: () => Promise.resolve({ ok: false, issues: [], suppressed: [], hardBlocks: [{ itemId: 'source', flag: '', why: '桌面版暂不支持自编译模板', action: '请使用 ZTools 插件版', skippable: false }] }),
     applyTemplatePreset: () => Promise.resolve({ ok: false, error: '桌面版暂不支持自编译模板,请使用 ZTools 插件版。' }),
     checkTemplateBuildTools: () => Promise.resolve({
-      ok: false, pythonVersion: '', sconsVersion: '', vcvarsPath: '',
+      ok: false, pythonVersion: '', pythonPath: '', sconsVersion: '', vcvarsPath: '',
       cpuCount: navigator.hardwareConcurrency || 0,
       problems: ['桌面版暂不支持自编译模板构建,请使用 ZTools 插件版。']
     }),
