@@ -260,7 +260,7 @@ function close() {
 
 <template>
   <div v-if="open" class="modal-mask" @click.self="close">
-    <div class="modal lg wizard">
+    <div class="card modal lg wizard">
       <div class="modal-head">
         <h3><Icon name="package" :size="14" /> 自编译模板 · {{ tag }}</h3>
         <button class="btn small ghost" @click="close">关闭</button>
@@ -270,10 +270,10 @@ function close() {
       <p v-if="step === 'checking'" class="hint"><span class="spin"></span> 正在检测 python / SCons / MSVC 工具链…</p>
       <template v-else-if="step === 'check' && checkResult">
         <div class="check-grid">
-          <span :class="checkResult.pythonVersion ? 'ok' : 'bad'">{{ checkResult.pythonVersion || '未找到' }}</span><span>Python</span>
-          <span :class="checkResult.sconsVersion ? 'ok' : 'bad'">{{ checkResult.sconsVersion || '未找到' }}</span><span>SCons</span>
-          <span :class="checkResult.vcvarsPath ? 'ok' : 'bad'">{{ checkResult.vcvarsPath ? '已找到' : '未找到' }}</span><span>MSVC (vcvars64)</span>
-          <span class="ok">{{ checkResult.cpuCount }}</span><span>CPU 核数(并行度)</span>
+          <span>Python</span><span :class="checkResult.pythonVersion ? 'ok' : 'bad'">{{ checkResult.pythonVersion || '未找到' }}</span>
+          <span>SCons</span><span :class="checkResult.sconsVersion ? 'ok' : 'bad'">{{ checkResult.sconsVersion || '未找到' }}</span>
+          <span>MSVC (vcvars64)</span><span :class="checkResult.vcvarsPath ? 'ok' : 'bad'">{{ checkResult.vcvarsPath ? '已找到' : '未找到' }}</span>
+          <span>CPU 核数(并行度)</span><span class="ok">{{ checkResult.cpuCount }}</span>
         </div>
         <ul v-if="checkResult.problems.length" class="problems">
           <li v-for="p in checkResult.problems" :key="p">{{ p }}</li>
@@ -388,13 +388,12 @@ function close() {
 
 .check-grid {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: auto 1fr;
   gap: 4px 12px;
   font-size: 12.5px;
 }
 
-.check-grid span:nth-child(odd) {
-  text-align: right;
+.check-grid span:nth-child(even) {
   font-weight: 600;
 }
 
