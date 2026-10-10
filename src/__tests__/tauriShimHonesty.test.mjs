@@ -13,12 +13,14 @@
 // 三条是同一个形状:**没做事却给出肯定式判定**。这里把判定写成句法,让下一次写桩时当场红。
 //
 // 用法: node src/__tests__/tauriShimHonesty.test.mjs
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { pathToFileURL, fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const SRC = readFileSync(path.resolve(__dirname, '../public/tauri-shim.js'), 'utf8')
+const SHIM = path.resolve(__dirname, '../public/tauri-shim.js')
+const SRC = readFileSync(SHIM, 'utf8')
+const ROOT = path.resolve(__dirname, '../..')
 
 let pass = 0
 const failures = []
@@ -27,6 +29,20 @@ const ok = (cond, label, extra) => {
   else { failures.push(label); console.log(`  FAIL  ${label}  → ${extra}`) }
 }
 const section = (t) => console.log(`\n=== ${t} ===`)
+
+/**
+ * index.html 里指向垫片的脚本 src。只认**非 module 的经典脚本**:垫片必须在主包之前同步跑完
+ * (构造 window.ztools/window.services),写成 type="module" 就变成异步,主包先执行。
+ */
+const shimTagSrc = (html) => {
+  const m = /<script\b(?![^>]*type=["']module)[^>]*\bsrc=["']([^"']*tauri-shim\.js)["']/.exec(html)
+  return m ? m[1] : null
+}
+/** Vite 生效的 publicDir:配置没写就是默认的 `<root>/public`(Vite 不会报错,只是永远取不到文件)。 */
+const publicDirOf = (cfg) =>
+  typeof cfg.publicDir === 'string' ? path.resolve(ROOT, cfg.publicDir) : path.join(ROOT, 'public')
+/** 浏览器按 index.html 里那个 src 发请求时,Vite 实际送出的那个文件。 */
+const servedShim = (cfg, src) => (src ? path.join(publicDirOf(cfg), path.posix.basename(src)) : '')
 
 // ---------- 拆出 services 注册块里每个方法的函数体 ----------
 // 方法一律缩进 4 空格(嵌套字面量更深),按缩进切即可。整块从 `window.services = {` 起算:
@@ -179,6 +195,35 @@ section('5. 返回形状要对得上契约(不是「像就行」)')
   ok(!!vtc && /hardBlocks:\s*\[\s*\{/.test(vtc.body) && /why:\s*'[^']+'/.test(vtc.body) && /skippable:\s*false/.test(vtc.body),
     'validateTemplateConfig 占位的 hardBlocks 非空且那条带 why/skippable(记名不等于免检)',
     vtc ? vtc.body.split('\n')[0].trim() : '没找到该方法')
+}
+
+section('6. 垫片必须真的被宿主取到(index.html 的 URL ↔ Vite publicDir 对得上)')
+{
+  // 为什么钉这条:垫片是桌面版**唯一**构造 window.ztools / window.services 的地方,它取不到就等于
+  // 桌面版开屏即死。2026-10-11 的真事故正是这里 —— 垫片放在 src/public/,而 vite.config.js 从未配
+  // publicDir,Vite 于是按默认的 <root>/public 找(该目录根本不存在),/tauri-shim.js 落到 SPA 回落
+  // 返回 index.html(text/html),浏览器把 HTML 当 JS 解析报语法错,main.ts 的守卫弹「未检测到 ZTools 环境」。
+  // 两端表现还不一样:ZTools 宿主自己注入 window.ztools,这个 404 完全看不出来 —— 只有桌面版会红。
+  const cfg = (await import(pathToFileURL(path.join(ROOT, 'vite.config.js')).href)).default
+  const src = shimTagSrc(readFileSync(path.join(ROOT, 'index.html'), 'utf8'))
+
+  // 自检(同第 0 节的道理):判定式必须分得开「当年那条红路」和「修好」,否则这一节会静默通过。
+  ok(servedShim({ publicDir: undefined }, '/tauri-shim.js') === path.join(ROOT, 'public', 'tauri-shim.js'),
+    '自检:publicDir 缺省时判定的是 Vite 默认的 <root>/public', publicDirOf({}))
+  ok(!existsSync(servedShim({ publicDir: undefined }, '/tauri-shim.js')),
+    '自检:垫片不在 <root>/public 时判定为红(即事故当时的形态)', servedShim({ publicDir: undefined }, '/tauri-shim.js'))
+  ok(shimTagSrc('<script type="module" src="/tauri-shim.js"></script>') === null,
+    '自检:type="module" 的垫片标签算红(异步执行会晚于主包)')
+
+  ok(!!src, 'index.html 里有一条非 module 的脚本标签指向 tauri-shim.js', '找不到标签')
+  const served = servedShim(cfg, src)
+  ok(!!src && existsSync(served), `请求 ${src} 取到的是垫片本体,而不是 SPA 回落的 index.html`,
+    `publicDir=${publicDirOf(cfg)}`)
+  // 反向核账:publicDir 里那份必须就是上面第 1~5 节扫描的那一份。复制一份到 public/ 也能让桌面版跑起来,
+  // 但那些断言扫的就是假身了 —— 改垫片改到没人运行的那份,比不修更糟。
+  ok(!!src && existsSync(served) && realpathSync(served) === realpathSync(SHIM),
+    'publicDir 里那份与本文件扫描的那份是同一个文件(realpath 相同,否则第 1~5 节是自证)')
+  console.log(`  注:publicDir = ${publicDirOf(cfg)}`)
 }
 
 console.log(`\n${'='.repeat(56)}`)
