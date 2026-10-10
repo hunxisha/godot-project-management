@@ -15,10 +15,9 @@ pub struct Versions {
 }
 
 fn emit_snapshot(app: &AppHandle) {
-    if let Some(v) = app.try_state::<Versions>() {
-        let snap = v.book.lock().unwrap().snapshot();
-        let _ = app.emit("tasks://snapshot", snap);
-    }
+    // 统一走 tpl::exec 的合并出口:自编译任务(kind=tplbuild)不在本本上,
+    // 各域各发各的快照会让对方的任务在渲染层一闪一闪地消失
+    crate::tpl::exec::emit_snapshot(app);
 }
 
 /// 从归档资产里挑出对应平台/变体的安装包(对齐 lib/releases.js 的文件名规则)

@@ -35,6 +35,18 @@ fn plain_re() -> &'static Regex {
     R.get_or_init(|| Regex::new(r"^godot\.windows\.template_release\.(.+?)\.(exe|lib|exp)$").unwrap())
 }
 
+/// 对应 buildtools.js:137 batBaseDir —— bat 路径是 `cmd /c` 后的**第一个 token**，
+/// 带空格会被加引号，触发 cmd「四个引号以上剥首尾」的老规则把整条命令行吃坏；
+/// 临时目录带空格时退到 C:\Windows\Temp（默认 ACL 普通用户可写）。其余路径走 argv，空格中文都安全。
+pub fn bat_base_dir() -> std::path::PathBuf {
+    let t = std::env::temp_dir();
+    if t.to_string_lossy().contains(' ') {
+        std::path::PathBuf::from("C:\\Windows\\Temp")
+    } else {
+        t
+    }
+}
+
 /// 对应 buildtools.js:83 parseSconsVersion —— 版本号与构建哈希同用点分隔，只取纯数字的前两三段
 pub fn parse_scons_version(text: &str) -> String {
     scons_version_re()
@@ -124,7 +136,8 @@ pub fn scons_line_for(scons_via: &str, profile_path: &str, extras: &[String], jo
 
 /// 对应 buildtools.js:441-447 写进临时 .bat 的那五行（CRLF 连接）。
 /// 守卫行用**相对** `exist`：cmd 在 `if exist` 里吃 `%~n\` 的后置反斜杠（真机实测），相对写法绕开。
-pub fn bat_text(scons_via: &str, profile_path: &str, extras: &[String], jobs: u32) -> String {
+/// 没有 profile 路径这个入参不是漏了：正文里只出现 `%~1..%~4` 占位，真路径走 argv 传（见文件头那条铁律）。
+pub fn bat_text(scons_via: &str, extras: &[String], jobs: u32) -> String {
     [
         "@echo off".to_string(),
         "call \"%~2\"".to_string(),

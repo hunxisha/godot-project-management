@@ -13,7 +13,7 @@
   // ---------- window.ztools ----------
   const listeners = { tasks: [], backup: [], export: [], docs: [], tplbuild: [] }
   const channelFor = (fn) => {
-    // 四类订阅共用 tasks://snapshot,按任务 kind 分流
+    // 五类订阅共用 tasks://snapshot,按任务 kind 分流
     void fn
     return null
   }
@@ -23,6 +23,9 @@
     for (const f of listeners.backup) f(by('backup'))
     for (const f of listeners.export) f(by('export'))
     for (const f of listeners.docs) f(by('docs'))
+    // tplbuild 这一支之前漏了:listeners.tplbuild 收了回调却没人叫它,
+    // 于是 Rust 侧注册完编译命令,桌面版的编译进度与尾行仍然一条都不会来(P0e-2 补)
+    for (const f of listeners.tplbuild) f(by('tplbuild'))
   }
   listen('tasks://snapshot', (e) => dispatch(e.payload)).then(() => {})
 
@@ -183,22 +186,18 @@
     listTemplateFeatures: (srcDir) => invoke('list_template_features', { srcDir }),
     validateTemplateConfig: (params) => invoke('validate_template_config', { params }),
     applyTemplatePreset: (name, srcDir) => invoke('apply_template_preset', { name, srcDir }),
-    checkTemplateBuildTools: () => Promise.resolve({
-      ok: false, pythonVersion: '', pythonPath: '', sconsVersion: '', sconsPath: '', vcvarsPath: '', tarPath: '',
-      d3d12SdkInstalled: false, accesskitSdkInstalled: false,
-      cpuCount: navigator.hardwareConcurrency || 0,
-      problems: ['桌面版暂不支持自编译模板构建,请使用 ZTools 插件版。']
-    }),
+    // P0e-2:检测与编译已接真命令(判据在 tpl/exec.rs,纯函数面有 tests/tpl_build_parity.rs 逐字节对照)
+    checkTemplateBuildTools: () => invoke('check_template_build_tools'),
     downloadTemplateSource: () => Promise.resolve({ ok: false, error: '桌面版暂不支持代下载源码,请使用 ZTools 插件版。' }),
     cancelTemplateSourceDownload: () => { /* 桌面版没有在途任务,取消是空操作 */ },
     listTemplatePacks: () => Promise.resolve({ ok: false, error: '桌面版暂不支持模板库,请使用 ZTools 插件版。' }),
     activateTemplatePack: () => Promise.resolve({ ok: false, error: '桌面版暂不支持模板库,请使用 ZTools 插件版。' }),
     deleteTemplatePack: () => Promise.resolve({ ok: false, error: '桌面版暂不支持模板库,请使用 ZTools 插件版。' }),
     adoptTemplatePack: () => Promise.resolve({ ok: false, error: '桌面版暂不支持模板库,请使用 ZTools 插件版。' }),
-    buildTemplatePack: () => Promise.resolve({ ok: false, error: '桌面版暂不支持自编译模板构建,请使用 ZTools 插件版。' }),
+    buildTemplatePack: (params) => invoke('build_template_pack', { params }),
     watchTemplateBuildTasks: (fn) => { listeners.tplbuild.push(fn); return () => { listeners.tplbuild = listeners.tplbuild.filter((f) => f !== fn) } },
-    cancelTemplateBuildTask: (id) => { void id },
-    dismissTemplateBuildTask: (id) => { void id },
+    cancelTemplateBuildTask: (id) => invoke('cancel_template_build_task', { id }),
+    dismissTemplateBuildTask: (id) => invoke('dismiss_template_build_task', { id }),
     // ---------- 工具页原语(spec §5.4;rel 一律正斜杠相对路径) ----------
     // 参数名必须用**驼峰**传进 invoke(maxBytes / skipDirs / maxEntries):写成下划线会被
     // Tauri 静默反序列化成 None,限额直接失效(命令层拿不到就等于用户没设限)。

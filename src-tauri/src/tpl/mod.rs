@@ -10,6 +10,7 @@
 //   tpllib.js      (342 行,模板库)   →  tpl/pack.rs     (P0e-4)
 pub mod api;
 pub mod build;
+pub mod exec;
 pub mod features;
 pub mod probe;
 pub mod profile;

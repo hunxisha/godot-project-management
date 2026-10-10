@@ -448,10 +448,11 @@ async function main() {
       JSON.stringify((shim.match(/validateTemplateConfig:[^\n]*/) || ['<没找到>'])[0].slice(0, 120)))
     const mainRs = fs.readFileSync(MAIN_RS, 'utf8')
     const handler = (mainRs.match(/generate_handler!\[([\s\S]*?)\]\)/) || [, ''])[1]
-    const four = ['probe_template_source', 'list_template_features', 'validate_template_config', 'apply_template_preset']
-    ok(four.every((c) => handler.includes(c)) && four.every((c) => new RegExp(`fn ${c}\\(`).test(mainRs)),
-      'P0e-1 四条命令在 Rust 侧既有定义也在注册表(缺一半就是 invoke 裸拒绝)',
-      four.filter((c) => !handler.includes(c) || !new RegExp(`fn ${c}\\(`).test(mainRs)).join(','))
+    const eight = ['probe_template_source', 'list_template_features', 'validate_template_config', 'apply_template_preset',
+      'check_template_build_tools', 'build_template_pack', 'cancel_template_build_task', 'dismiss_template_build_task']
+    ok(eight.every((c) => handler.includes(c)) && eight.every((c) => new RegExp(`fn ${c}\\(`).test(mainRs)),
+      'P0e-1+2 八条命令在 Rust 侧既有定义也在注册表(缺一半就是 invoke 裸拒绝)',
+      eight.filter((c) => !handler.includes(c) || !new RegExp(`fn ${c}\\(`).test(mainRs)).join(','))
   }
 
   section('11. applyTemplatePreset:预设与 mode 都出自输出层(Ruling #74;契约+注册+垫片三处齐补)')

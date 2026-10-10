@@ -191,7 +191,11 @@ section('5. 返回形状要对得上契约(不是「像就行」)')
     probeTemplateSource: /invoke\(\s*'probe_template_source',\s*\{\s*srcDir\s*\}\s*\)/,
     listTemplateFeatures: /invoke\(\s*'list_template_features',\s*\{\s*srcDir\s*\}\s*\)/,
     validateTemplateConfig: /invoke\(\s*'validate_template_config',\s*\{\s*params\s*\}\s*\)/,
-    applyTemplatePreset: /invoke\(\s*'apply_template_preset',\s*\{\s*name,\s*srcDir\s*\}\s*\)/
+    applyTemplatePreset: /invoke\(\s*'apply_template_preset',\s*\{\s*name,\s*srcDir\s*\}\s*\)/,
+    checkTemplateBuildTools: /invoke\(\s*'check_template_build_tools'\s*\)/,
+    buildTemplatePack: /invoke\(\s*'build_template_pack',\s*\{\s*params\s*\}\s*\)/,
+    cancelTemplateBuildTask: /invoke\(\s*'cancel_template_build_task',\s*\{\s*id\s*\}\s*\)/,
+    dismissTemplateBuildTask: /invoke\(\s*'dismiss_template_build_task',\s*\{\s*id\s*\}\s*\)/
   }
   for (const [name, re] of Object.entries(REAL_INVOKE)) {
     const m = methods.find((x) => x.name === name)

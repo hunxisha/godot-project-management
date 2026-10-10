@@ -141,8 +141,8 @@ fn rust_build_side() -> Value {
             b::scons_line_for("", "%~3", &["modules_enabled_by_default=no".into()], 8)
         ],
         "bat": [
-            b::bat_text("path", "C:\\Windows\\Temp\\ztools-godot-profile-1.json", &["disable_3d=yes".into()], 16),
-            b::bat_text("python", "C:\\a b\\profile.json", &[], 8)
+            b::bat_text("path", &["disable_3d=yes".into()], 16),
+            b::bat_text("python", &[], 8)
         ],
         "tarExe": [b::TAR_EXE]
     })
