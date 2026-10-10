@@ -12,6 +12,7 @@ pub mod api;
 pub mod build;
 pub mod exec;
 pub mod features;
+pub mod pack;
 pub mod probe;
 pub mod profile;
 pub mod source;

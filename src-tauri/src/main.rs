@@ -147,7 +147,7 @@ fn export_template_status(exe_path: String, tag: String) -> Value {
 /// 安装导出模板:缺省从官方 release 下载;src_path 提供时改从本地导入(.tpz 文件或已解压目录),
 /// 不发起网络请求。version_dir 提供时作为目标目录名(须过 templates::is_valid_version_dir_name 白名单)。
 #[tauri::command]
-fn install_export_templates(app: AppHandle, state: State<Versions>, exe_path: String, tag: String, url: Option<String>, src_path: Option<String>, version_dir: Option<String>) -> Value {
+fn install_export_templates(app: AppHandle, state: State<Versions>, exe_path: String, tag: String, url: Option<String>, src_path: Option<String>, version_dir: Option<String>, archive: Option<serde_json::Value>, version_id: Option<String>) -> Value {
     let platform = if cfg!(target_os = "windows") { "windows" } else if cfg!(target_os = "macos") { "macos" } else { "linux" };
     let appdata = std::env::var("APPDATA").ok().map(std::path::PathBuf::from);
     let base = godot_workshop::templates::templates_base(Some(Path::new(&exe_path)), &home_dir(), appdata.as_deref(), platform);
@@ -196,7 +196,22 @@ fn install_export_templates(app: AppHandle, state: State<Versions>, exe_path: St
         if let Err(e) = ex { set(taskqueue::Status::Error, Some(e), serde_json::json!({})); let _ = std::fs::remove_dir_all(&stage); return; }
         let tag_now = v.book.lock().unwrap().get_mut(task_id).map(|t| t.payload["tag"].as_str().unwrap_or("").to_string()).unwrap_or_default();
         match godot_workshop::templates::install_from_stage(&stage, &base, &tag_now, platform, version_dir.as_deref()) {
-            Ok((files, vd)) => { let _ = std::fs::remove_dir_all(&stage); set(taskqueue::Status::Done, None, serde_json::json!({ "versionDir": vd, "files": files })); }
+            Ok((files, vd)) => {
+                let mut patch = serde_json::json!({ "versionDir": vd, "files": files });
+                // 自编译导入自动存档(tpllib.js:102 同一条):生效位复制一份独立副本进槽。
+                // **存档失败不碰已成功的安装**,原因挂任务 archiveError 如实回(与 JS 侧同形)。
+                if let (Some(ar), Some(vid)) = (archive.as_ref(), version_id.as_deref()) {
+                    let dest = base.join(&vd);
+                    let st = app2.state::<AppState>();
+                    let mut store = st.store.lock().unwrap();
+                    match godot_workshop::tpl::pack::archive_from_install(&mut store, &base, &dest, vid, &tag_now, &vd, ar) {
+                        Ok(pack_id) => patch["packId"] = serde_json::json!(pack_id),
+                        Err(e) => patch["archiveError"] = serde_json::json!(e),
+                    }
+                }
+                let _ = std::fs::remove_dir_all(&stage);
+                set(taskqueue::Status::Done, None, patch);
+            }
             Err(e) => { let _ = std::fs::remove_dir_all(&stage); set(taskqueue::Status::Error, Some(e), serde_json::json!({})); }
         }
     });
@@ -274,6 +289,33 @@ async fn download_template_source(app: AppHandle, params: Value) -> Value {
 #[tauri::command]
 fn cancel_template_source_download() -> Value {
     godot_workshop::tpl::source::cancel_template_source_download()
+}
+
+/// ---------- 模板库(P0e-4)----------
+/// 存档根 = 生效基目录同级 tplpack/;切换 = 两次 move + 第二步失败回滚第一步;
+/// 删除进回收站、`dir=''` 只除名。语义与 tpllib.js 一一对应(见 tpl/pack.rs 文件头)。
+#[tauri::command]
+fn list_template_packs(state: State<AppState>, version_id: String) -> Value {
+    let st = state.store.lock().unwrap();
+    godot_workshop::tpl::pack::list_for_version(&st, &version_id)
+}
+
+#[tauri::command]
+fn activate_template_pack(state: State<AppState>, version_id: String, pack_id: String) -> Value {
+    let mut st = state.store.lock().unwrap();
+    godot_workshop::tpl::pack::activate_for_version(&mut st, &version_id, &pack_id)
+}
+
+#[tauri::command]
+fn delete_template_pack(state: State<AppState>, version_id: String, pack_id: String) -> Value {
+    let mut st = state.store.lock().unwrap();
+    godot_workshop::tpl::pack::delete_for_version(&mut st, &version_id, &pack_id)
+}
+
+#[tauri::command]
+fn adopt_template_pack(state: State<AppState>, version_id: String) -> Value {
+    let mut st = state.store.lock().unwrap();
+    godot_workshop::tpl::pack::adopt_for_version(&mut st, &version_id)
 }
 
 #[tauri::command]
@@ -1298,7 +1340,7 @@ fn main() {
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, probe_template_source, list_template_features, validate_template_config, apply_template_preset, check_template_build_tools, build_template_pack, cancel_template_build_task, dismiss_template_build_task, download_template_source, cancel_template_source_download, scan_project_tree, read_project_text, write_project_text, move_paths_to_trash, hash_paths, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets, create_project, uninstall_addon, install_asset, run_export, cancel_export_task, docs_generate, docs_import, docs_library_status, docs_list_classes, docs_get_class, docs_search, docs_search_full_text, docs_delete_library, docs_diff_libraries, fetch_releases_cmd, cancel_task, dismiss_task, search_assets, list_featured_cmd, list_all_assets_cmd, list_new_assets_cmd, list_recently_updated_cmd, list_project_assets_cmd, restore_backup])
+        .invoke_handler(tauri::generate_handler![probe, db_get, db_put, db_remove, db_all_docs, run_network_diagnostics, versions::download_and_install, add_project, scan_projects, remove_project, export_template_status, install_export_templates, uninstall_export_templates, probe_template_source, list_template_features, validate_template_config, apply_template_preset, check_template_build_tools, build_template_pack, cancel_template_build_task, dismiss_template_build_task, download_template_source, cancel_template_source_download, list_template_packs, activate_template_pack, delete_template_pack, adopt_template_pack, scan_project_tree, read_project_text, write_project_text, move_paths_to_trash, hash_paths, launch_project, backup_project, verify_backup, delete_backup, prune_backups, list_export_presets, create_project, uninstall_addon, install_asset, run_export, cancel_export_task, docs_generate, docs_import, docs_library_status, docs_list_classes, docs_get_class, docs_search, docs_search_full_text, docs_delete_library, docs_diff_libraries, fetch_releases_cmd, cancel_task, dismiss_task, search_assets, list_featured_cmd, list_all_assets_cmd, list_new_assets_cmd, list_recently_updated_cmd, list_project_assets_cmd, restore_backup])
         .run(tauri::generate_context!())
         .expect("tauri 应用启动失败");
 }

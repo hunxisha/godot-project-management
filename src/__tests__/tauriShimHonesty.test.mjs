@@ -197,7 +197,11 @@ section('5. 返回形状要对得上契约(不是「像就行」)')
     cancelTemplateBuildTask: /invoke\(\s*'cancel_template_build_task',\s*\{\s*id\s*\}\s*\)/,
     dismissTemplateBuildTask: /invoke\(\s*'dismiss_template_build_task',\s*\{\s*id\s*\}\s*\)/,
     downloadTemplateSource: /invoke\(\s*'download_template_source',\s*\{\s*params\s*\}\s*\)/,
-    cancelTemplateSourceDownload: /invoke\(\s*'cancel_template_source_download'/
+    cancelTemplateSourceDownload: /invoke\(\s*'cancel_template_source_download'/,
+    listTemplatePacks: /invoke\(\s*'list_template_packs',\s*\{\s*versionId\s*\}\s*\)/,
+    activateTemplatePack: /invoke\(\s*'activate_template_pack',\s*\{\s*versionId,\s*packId\s*\}\s*\)/,
+    deleteTemplatePack: /invoke\(\s*'delete_template_pack',\s*\{\s*versionId,\s*packId\s*\}\s*\)/,
+    adoptTemplatePack: /invoke\(\s*'adopt_template_pack',\s*\{\s*versionId\s*\}\s*\)/
   }
   for (const [name, re] of Object.entries(REAL_INVOKE)) {
     const m = methods.find((x) => x.name === name)

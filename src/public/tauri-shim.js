@@ -143,7 +143,10 @@
         // srcPath 有值 = 本地导入(命令层不再下载),url 就不需要了
         url: o.srcPath ? null : '',
         srcPath: o.srcPath || null,
-        versionDir: o.versionDir || null
+        versionDir: o.versionDir || null,
+        // 自编译导入的自动存档元数据 + versionId(存档记录要挂到这台引擎上)
+        archive: o.archive || null,
+        versionId
       }).catch((e) => {
         console.warn('[tauri-shim] installExportTemplates', String((e && e.message) || e))
         return { ok: false, error: '安装失败' }
@@ -199,10 +202,11 @@
       }
     },
     cancelTemplateSourceDownload: () => { invoke('cancel_template_source_download', {}).catch(() => {}) },
-    listTemplatePacks: () => Promise.resolve({ ok: false, error: '桌面版暂不支持模板库,请使用 ZTools 插件版。' }),
-    activateTemplatePack: () => Promise.resolve({ ok: false, error: '桌面版暂不支持模板库,请使用 ZTools 插件版。' }),
-    deleteTemplatePack: () => Promise.resolve({ ok: false, error: '桌面版暂不支持模板库,请使用 ZTools 插件版。' }),
-    adoptTemplatePack: () => Promise.resolve({ ok: false, error: '桌面版暂不支持模板库,请使用 ZTools 插件版。' }),
+    // P0e-4:模板库四条已接真命令(存档根同级 tplpack/、两次 move + 回滚、删除进回收站、收编只记不搬)
+    listTemplatePacks: (versionId) => invoke('list_template_packs', { versionId }),
+    activateTemplatePack: (versionId, packId) => invoke('activate_template_pack', { versionId, packId }),
+    deleteTemplatePack: (versionId, packId) => invoke('delete_template_pack', { versionId, packId }),
+    adoptTemplatePack: (versionId) => invoke('adopt_template_pack', { versionId }),
     buildTemplatePack: (params) => invoke('build_template_pack', { params }),
     watchTemplateBuildTasks: (fn) => { listeners.tplbuild.push(fn); return () => { listeners.tplbuild = listeners.tplbuild.filter((f) => f !== fn) } },
     cancelTemplateBuildTask: (id) => invoke('cancel_template_build_task', { id }),

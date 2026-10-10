@@ -154,6 +154,27 @@ function main() {
     ok(r.ok === false && /回滚/.test(r.error) && fs.existsSync(dest) && readMarker(dest) === 'A' &&
       db.get('godot/tplpack/pB').dir === 'pB',
       '★换入失败:换出搬回去、记录复原、生效位内容还是 A(删回滚 → 红:用户生效模板凭空消失)', r.error)
+    // 换出时**新建**的那条收编记账，回滚后必须撤掉：文件已回生效位，留一条「dir=槽名」的记录
+    // 就是幽灵槽 —— 下一次切换会报「存档目录已不在」，而面板上那行显示成未生效。
+    ok(db.size === 1 && db.has('godot/tplpack/pB'),
+      '★回滚后不留幽灵记账(原本没有 dir=\'\' 记录 → 换出新建的那条要撤掉)', JSON.stringify([...db.keys()]))
+  }
+
+  console.log('\n=== 6b. 换入失败回滚:已有 dir=\'\' 记录时还原成空 ===')
+  {
+    const s = scene()
+    const dest = path.join(s.base, VD)
+    mkDir(dest, 'A')
+    mkDir(path.join(s.root, 'pB'), 'B')
+    const docs = [
+      ['godot/tplpack/pB', { packId: 'pB', versionId: 'v1', tag: '4.7.2-stable', versionDir: VD, source: 'selfbuild', dir: 'pB', bytes: 1, createdAt: 5, writtenFlags: [], mode: '' }],
+      ['godot/tplpack/pA', { packId: 'pA', versionId: 'v1', tag: '4.7.2-stable', versionDir: VD, source: 'adopted', dir: '', bytes: 1, createdAt: 9, writtenFlags: [], mode: '' }]
+    ]
+    const { deps, db } = makeDeps({ docs, renameFailSrc: path.join(s.root, 'pB') })
+    const r = L.activateTemplatePack({ base: s.base, versionId: 'v1', versionDir: VD, packId: 'pB' }, deps)
+    ok(r.ok === false && readMarker(dest) === 'A' && db.get('godot/tplpack/pA').dir === '',
+      '★换出前那条 dir=\'\' 记录要还原(写成 dir=pA 就是记账与磁盘分叉)', JSON.stringify(db.get('godot/tplpack/pA')))
+    ok(db.size === 2, '回滚不新增记录', JSON.stringify([...db.keys()]))
   }
 
   console.log('\n=== 7. 跨盘 EXDEV:moveSync 回退复制+删 ===')

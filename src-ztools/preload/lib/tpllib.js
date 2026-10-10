@@ -209,14 +209,18 @@ function activateTemplatePack(params, deps) {
   const dest = path.join(params.base, params.versionDir)
   let outSlot = ''
   let outRec = null
+  // 回滚要还原的是**换出前**那份记账：文件搬回生效位了、记录却写着「在槽里」，
+  // 下一次切换就会报「存档目录已不在」而面板显示成未生效（Rust 侧 tpl/pack.rs 同一条，两端一起改）
+  let outPrev = null
   // ---- 换出:生效位 → 活跃存档槽(无 dir='' 记录则新建收编槽)
   if (d.existsSync(dest)) {
     const listed = listTemplatePacks({ base: params.base, versionDir: params.versionDir }, d)
     const activeRec = listed.packs.find((p) => p.active)
     outSlot = activeRec ? activeRec.packId : newPackId(d)
     moveSync(dest, path.join(root, outSlot), d)
-    outRec = activeRec
-      ? { ...readPack(activeRec.packId, d), dir: activeRec.packId }
+    outPrev = activeRec ? readPack(activeRec.packId, d) : null
+    outRec = outPrev
+      ? { ...outPrev, dir: outSlot }
       : {
           packId: outSlot,
           versionId: params.versionId,
@@ -237,7 +241,9 @@ function activateTemplatePack(params, deps) {
   } catch (e) {
     if (outSlot) {
       try { moveSync(path.join(root, outSlot), dest, d) } catch (e2) { /* 回滚也失败时保留现场,错误里点名 */ }
-      d.putDoc(PACK_PREFIX + outSlot, outRec)
+      // 原来有 dir='' 记录 → 还原它；这条记账是换出时才新建的 → 撤掉，留它就是幽灵槽
+      if (outPrev) d.putDoc(PACK_PREFIX + outSlot, outPrev)
+      else d.removeDoc(PACK_PREFIX + outSlot)
     }
     return { ok: false, error: `换入失败已回滚:${(e && e.message) || e}` }
   }
