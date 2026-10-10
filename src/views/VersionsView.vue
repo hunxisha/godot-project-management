@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { getSettings, notify, pickDirectory, pickFile, isWindows, saveSettings, showInFolder } from '../services/bridge'
+import { getSettings, notify, pickDirectory, pickFile, isWindows, saveSettings, showInFolder, openPath } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import { useExportTemplates } from '../composables/useExportTemplates'
@@ -367,6 +367,12 @@ function progressOf(t: DownloadTask): number {
             :title="`卸载导出模板(${tplStatuses[v._id]?.versionDir})`"
             @click="askUninstallTemplates(v)"
           >{{ confirmingTplId === v._id ? '确认卸载?' : '卸载模板' }}</button>
+          <button
+            v-if="tplStatuses[v._id]?.installed"
+            class="btn small ghost"
+            :title="`打开导出模板所在目录:${tplStatuses[v._id]?.path}`"
+            @click="openPath(tplStatuses[v._id].path)"
+          ><Icon name="folder" :size="13" /> 模板目录</button>
           <button class="btn small ghost" title="打开所在目录" @click="showInFolder(v.exePath)">
             <Icon name="folder" :size="13" /> 目录
           </button>

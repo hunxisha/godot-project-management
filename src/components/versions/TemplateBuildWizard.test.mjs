@@ -386,6 +386,9 @@ console.log('\n=== 12. SDK 软拦的料:检测位透传进 validate ===')
 ok(/d3d12SdkInstalled/.test(vtcArgs) && /accesskitSdkInstalled/.test(vtcArgs),
   '★validateTemplateConfig 调用点透传两个 SDK 位(不传 → 红:宿主软拦永远不喊,保留 d3d12/accesskit 缺 SDK 要等 scons 配置阶段才停)',
   JSON.stringify({ vtcArgs: vtcArgs.slice(0, 120) }))
+ok(/模板目录/.test(V) && /openPath\(/.test(V) && /tplStatuses\[v\._id\]\?\.path/.test(V),
+  '★版本卡有「模板目录」按钮且开的是状态查询回的真路径(删按钮或改开别处 → 红:编完/装完的模板用户找不到落点)',
+  '')
 
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) { for (const f of failures) console.log('  - ' + f); process.exit(1) }
