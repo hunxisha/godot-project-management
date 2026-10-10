@@ -287,7 +287,7 @@ async function main() {
     ok(r.sconsVersion === '4.8.0' && r.sconsPath === '' && B.checkCache.sconsVia === 'python',
       '★PATH 没有 scons 才回落模块通道:版本号有、落点空、通道缓存为 python(删回落 → 红:这台机器被判未安装)',
       JSON.stringify(r))
-    ok(B.sconsLineFor(B.checkCache, 'P.json', ['disable_3d=yes'], 8) === '"D:\\py\\python.exe" -m SCons platform=windows target=template_release build_profile="P.json" disable_3d=yes -j8' &&
+    ok(B.sconsLineFor(B.checkCache, 'P.json', ['disable_3d=yes'], 8) === '"%~4" -m SCons platform=windows target=template_release build_profile="P.json" disable_3d=yes -j8' &&
       B.sconsLineFor({ sconsVia: 'path' }, 'P.json', [], 8) === 'scons platform=windows target=template_release build_profile="P.json" -j8',
       '★bat 的 scons 行跟检测通道:模块通道由命中解释器起、PATH 通道仍裸 scons(改任一形态 → 红,检测与编译各说各话)')
   }
@@ -343,18 +343,22 @@ async function main() {
       ok(r.ok === true && !!r.taskId, '构建入队成功', r.error)
       const t = await waitTask(r.taskId, 5000)
       ok(t.status === 'done', `任务完成(${t.status} ${t.error || ''})`, JSON.stringify(t))
-      ok(f.calls.length === 1 && f.calls[0].cmd === 'cmd.exe' && /build-.*\.bat$/.test(f.calls[0].args[3]),
-        '编译经临时 bat 文件执行(路径带空格的 vcvars 手动实测同形态)', JSON.stringify(f.calls[0].args))
-      const batPath = f.calls[0].args[3]
+      ok(f.calls.length === 1 && f.calls[0].cmd === 'cmd.exe' && /build-.*\.bat$/.test(f.calls[0].args[2]) &&
+        f.calls[0].args[3] === src && f.calls[0].args[4] === 'D:\\vs\\VC\\Auxiliary\\Build\\vcvars64.bat' &&
+        f.calls[0].args[5] === cap.file('json'),
+        '★编译经临时 bat 执行,源码根/vcvars/profile 各占独立 argv(加引号是 node 的事;手工包引号或写回正文 → 红:前者 cmd 不认 \\" 转义,后者 UTF-8 中文路径在 GBK 码页下必花,cd 失败报 No SConstruct)',
+        JSON.stringify(f.calls[0].args))
+      const batPath = f.calls[0].args[2]
       const bat = cap.text('bat')
       ok(bat !== '' && cap.file('json') !== '' && cap.text('json') !== '',
         '★两份临时文件都真写了盘(后面所有断言的前提,防"读不到东西还恒真")', cap.file('json'))
       ok(fs.existsSync(batPath) === false, '★构建脚本用完即删(临时目录不留 .bat 残骸)')
       ok(fs.existsSync(cap.file('json')) === false, '★临时 profile 同样用完即删')
-      ok(bat.includes(`call "D:\\vs\\VC\\Auxiliary\\Build\\vcvars64.bat"`), 'bat 里 call 的是检测缓存的 vcvars', bat)
+      ok(bat.includes('call "%~2"') && bat.includes('cd /d "%~1"') && bat.includes('if not exist SConstruct') && !/[^\x00-\x7F]/.test(bat),
+        '★bat 正文纯 ASCII、路径全占位符(%~1..%~4),且带 cd 失败守卫行(正文里出现任一非 ASCII 或字面路径 → 红)', bat)
       const sconsLine = bat.split(/\r?\n/).find((l) => l.startsWith('scons ')) || ''
-      ok(sconsLine === `scons platform=windows target=template_release build_profile="${cap.file('json')}" -j8`,
-        '★scons 行前缀逐字恒定,可变部分全在 -j 之前', sconsLine)
+      ok(sconsLine === `scons platform=windows target=template_release build_profile="%~3" -j8`,
+        '★scons 行前缀逐字恒定,profile 走 %~3,可变部分全在 -j 之前', sconsLine)
       // 这棵真树只有 SConstruct + version.py:真实的 tplprobe.probeSource 在上面探不到任何
       // BoolVariable,也没有 modules/ 目录 → 两个通道都该是空的。这就是"接线接到了真探测"的
       // 可观察后果 —— 桩若被写死成一份完整选项表,这里会冒出 disable_3d=yes 与 module_regex_enabled。
@@ -432,12 +436,13 @@ async function main() {
     const src = makeTree('src-two', { artifacts: true })
     const stub = probeStub()
     const a = await runBuild(src, { sys3d: false, uiRegex: false }, stub)
-    const pfx = (o) => `scons platform=windows target=template_release build_profile="${o.profilePath}"`
+    const pfx = (o) => `scons platform=windows target=template_release build_profile="%~3"`
     ok(a.t && a.t.status === 'done', '取消 3D + 取消正则:任务走完', a.t && a.t.error)
     ok(a.sconsLine === `${pfx(a)} disable_3d=yes -j8`,
       '★用户取消的核心 flag 必须以 token 出现在行上(前缀逐字恒定、-j 收尾)', a.sconsLine)
-    ok(a.profilePath.endsWith('.json') && a.bat.includes(`build_profile="${a.profilePath}"`),
-      '★行上的 build_profile 就是真写了盘的那个路径', a.profilePath)
+    ok(a.profilePath.endsWith('.json') && a.bat.includes('build_profile="%~3"') &&
+      a.calls[0].args[5] === a.profilePath,
+      '★行上 build_profile 走 %~3,真写了盘的那个路径由 argv 第 5 位携带(写回正文 → 红)', a.profilePath)
     ok(JSON.stringify(a.dbo) === '{"module_regex_enabled":false}',
       '★模块开关进 profile 文件(dbo 里逐字只有它)', JSON.stringify(a.dbo))
     ok(!/module_[a-z0-9_]+_enabled=/.test(a.sconsLine), '★行上不得出现任何 module_ token(模块一律只在 profile 文件里)')
@@ -455,7 +460,7 @@ async function main() {
       '勾回正则后 profile 里没有它(与源码默认相同就不输出)', JSON.stringify(b.dbo))
 
     const c = await runBuild(src, { sys3d: true, uiRegex: false }, stub)
-    ok(c.lineShape === 'scons platform=windows target=template_release build_profile="<profile>" -j8',
+    ok(c.lineShape === 'scons platform=windows target=template_release build_profile="%~3" -j8',
       '★只改核心 flag → 命令行随之变短(3D 是源码默认,不点名就不发 token)', c.lineShape)
     ok(JSON.stringify(c.dbo) === '{"module_regex_enabled":false}',
       '模块通道不受核心 flag 影响', JSON.stringify(c.dbo))

@@ -8,6 +8,8 @@
 //     实测验证过的那组(disable_3d / accesskit)仍是勾掉 2D-only 时的产物,只是不再写死。
 //     命令经**临时 .bat 文件**执行(与手动实测同款),
 //     绕开 spawn 数组参数里带引号路径被 cmd 二次解释的问题。
+//     bat 正文纯 ASCII,源码根/vcvars/profile/解释器四条路径走 argv %~1..%~4 ——
+//     cmd.exe 按 ANSI 码页解析 .bat 字节,UTF-8 路径写进正文必花(真机:cd 花掉 → No SConstruct)。
 //   · 产物:`bin/godot.windows.template_release.<arch>.*` 改名拷贝到
 //     `stage/templates/windows_release_<arch>.*`(官方 tpz 的文件名形态),由第 5 项的
 //     installExportTemplates **目录形态导入**直接吃下(stage 被 move 就位,无残留)。
@@ -126,6 +128,16 @@ const VSWHERE = 'C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vs
 /** Windows 自带 tar(bsdtar,Win10 1803+;吃得动 .tar.xz)的固定落点;代下载解包与第四探头共用 */
 const TAR_EXE = 'C:\\Windows\\System32\\tar.exe'
 
+/**
+ * bat 与 profile 的落点:bat 路径是 `cmd /c` 后的**第一个 token**,带空格会被 node 加引号,
+ * 触发 /c「四个引号以上剥首尾」的老规则把整条命令行吃坏 —— 临时目录带空格时退到
+ * C:\\Windows\\Temp(默认 ACL 普通用户可写)。其余路径走 argv,空格中文都安全。
+ * @returns {string}
+ */
+function batBaseDir() {
+  return /\s/.test(os.tmpdir()) ? 'C:\\Windows\\Temp' : os.tmpdir()
+}
+
 /** vswhere 找不到时的候选安装根(常见盘符 × 常见 SKU) */
 function vcvarsFallbackDirs() {
   const roots = ['C:', 'D:', 'E:', 'D:\\apps', 'E:\\apps']
@@ -233,16 +245,17 @@ async function checkTemplateBuildToolsWith(env, deps) {
 
 /**
  * bat 里的 scons 行:默认裸 scons 从 PATH 解析(与检测判据同口径);检测走的是模块通道
- * (scons 不在 PATH)时改由命中解释器起 `python -m SCons`,检测与编译始终同一条通道。
+ * (scons 不在 PATH)时由 argv 第 4 位(%~4,检测缓存的解释器)起 `python -m SCons`,
+ * 检测与编译始终同一条通道。profile 走 %~3(见 bat 注释:路径一律 argv,正文纯 ASCII)。
  * 前缀之后只出现 commandExtras 的 token(核心 flag 与模式键),module_* 一律不在行上。
  * @param {{sconsVia?: string, pythonPath?: string, pythonCmd?: string}} cache checkCache 的形状
- * @param {string} profilePath 临时 profile 文件路径
+ * @param {string} profilePath 临时 profile 文件路径(bat 内写 %~3 占位)
  * @param {string[]} extras 查表生成的命令行 token
  * @param {number} jobs 并行度
  * @returns {string}
  */
 function sconsLineFor(cache, profilePath, extras, jobs) {
-  const head = cache.sconsVia === 'python' ? `"${cache.pythonPath || cache.pythonCmd}" -m SCons` : 'scons'
+  const head = cache.sconsVia === 'python' ? '"%~4" -m SCons' : 'scons'
   return [head, 'platform=windows', 'target=template_release', `build_profile="${profilePath}"`, ...extras, `-j${jobs}`].join(' ')
 }
 
@@ -398,8 +411,8 @@ function buildTemplatePackWith(params, deps) {
     const cleanupProfile = () => { try { fs.existsSync(profilePath) && fs.unlinkSync(profilePath) } catch (e) { /* ignore */ } }
     const cleanupTmp = () => { cleanupBat(); cleanupProfile() }
     try {
-      batPath = path.join(os.tmpdir(), `ztools-godot-build-${id}.bat`)
-      profilePath = path.join(os.tmpdir(), `ztools-godot-profile-${id}.json`)
+      batPath = path.join(batBaseDir(), `ztools-godot-build-${id}.bat`)
+      profilePath = path.join(batBaseDir(), `ztools-godot-profile-${id}.json`)
       // 探测这份源码:选项的存在性与默认值决定两条通道各写什么。探不到就停 ——
       // 未声明的 scons 变量是静默失效的,拿一份"以为裁了其实没裁"的产物比失败更糟。
       const probe = await runProbe(deps.probeSource || probeSource, srcDir)
@@ -412,13 +425,17 @@ function buildTemplatePackWith(params, deps) {
       const prof = buildProfile(features, probe.options, { mode })
       // 一条都没写也照样落盘:命令行上的 build_profile= 指向它,scons 读不到这个文件会直接失败。
       fs.writeFileSync(profilePath, profileText(prof.json), 'utf8')
-      // scons 行经 sconsLineFor:通道由检测缓存定(PATH 裸 scons / 命中解释器 -m SCons);
-      // 前缀之后只出现 commandExtras 的 token(核心 flag 与模式键),module_* 一律不在行上,最后是 -j。
+      // bat 正文**纯 ASCII**:cmd.exe 按 ANSI 码页(中文机 GBK)解析 .bat 字节,把 UTF-8 的中文路径
+      // 写进正文必花(真机踩过:cd 花掉 → cwd 停在原处 → scons 报 No SConstruct)。四条可能带非 ASCII
+      // 的路径(源码根 / vcvars / 临时 profile / 解释器)全走独立 argv(%~1..%~4,node 负责加引号;
+      // 手工包引号不行 —— node 会把内嵌引号转义成 \",cmd 不认)。守卫行用**相对** exist:
+      // cmd 在 if exist / 重定向目标里吃 `%~n\` 的后置反斜杠(真机实测),相对写法绕开且 cd 失败时给出明错。
       fs.writeFileSync(batPath, [
         '@echo off',
-        `call "${checkCache.vcvarsPath}"`,
-        `cd /d "${srcDir}"`,
-        sconsLineFor(checkCache, profilePath, prof.commandExtras, jobs)
+        'call "%~2"',
+        'cd /d "%~1"',
+        'if not exist SConstruct (echo ERROR: SConstruct not found in "%~1" after cd >&2 & exit /b 2)',
+        sconsLineFor(checkCache, '%~3', prof.commandExtras, jobs)
       ].join('\r\n'), 'utf8')
       // "当时编了什么"回查用:两个通道写出去的键都记在任务上(profile 里也留着整份 JSON)
       setTask(id, { writtenFlags: prof.written, profilePath })
@@ -432,7 +449,7 @@ function buildTemplatePackWith(params, deps) {
     const tail = []
     let canceled = false
     await /** @type {Promise<void>} */ (new Promise((resolve) => {
-      const child = deps.spawn('cmd.exe', ['/d', '/s', '/c', batPath], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+      const child = deps.spawn('cmd.exe', ['/d', '/c', batPath, srcDir, checkCache.vcvarsPath, profilePath, checkCache.pythonPath || checkCache.pythonCmd], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
       tasks.setToken(id, {
         cancel: () => {
           canceled = true
