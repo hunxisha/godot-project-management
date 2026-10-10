@@ -390,6 +390,14 @@ ok(/模板目录/.test(V) && /openPath\(/.test(V) && /tplStatuses\[v\._id\]\?\.p
   '★版本卡有「模板目录」按钮且开的是状态查询回的真路径(删按钮或改开别处 → 红:编完/装完的模板用户找不到落点)',
   '')
 
+console.log('\n=== 13. 模板库接线:向导自动存档透传 + 版本卡下拉四动作 ===')
+const importBody = defOf('startImport') || ''
+ok(/archive\s*:/.test(importBody) && /writtenFlags/.test(importBody) && /mode\.value/.test(importBody),
+  '★向导导入透传 archive 元数据(构建快照取自任务记录;不传 → 红:自编译变体不进库,下次覆盖安装就找不回)',
+  JSON.stringify({ has: /archive\s*:/.test(importBody) }))
+ok(/模板库/.test(V) && /listTemplatePacks\(/.test(V) && /activateTemplatePack\(/.test(V) && /adoptTemplatePack\(/.test(V) && /deleteTemplatePack\(/.test(V),
+  '★版本卡下拉列存档且切换/删除/收编四动作齐(缺一 → 红:库只能看不能动)', '')
+
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) { for (const f of failures) console.log('  - ' + f); process.exit(1) }
 console.log('全部通过')

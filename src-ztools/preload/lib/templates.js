@@ -20,6 +20,7 @@ const { extractZip, ensureDir, dirSize, inspectZip } = require('./extract')
 const fsutil = require('./fsutil')
 const { currentPlatform } = require('./godotExe')
 const { getDoc, putDoc, removeDoc } = require('./store')
+const tpllib = require('./tpllib')
 
 // ---------- 任务队列 ----------
 // 复用 install.js 的下载任务队列:与引擎下载同一条串行流水线,
@@ -316,6 +317,16 @@ function downloadAndInstallTemplates(params, opts) {
         size: dirSize(dest),
         installedAt: Date.now()
       })
+      // 自编译导入自动存档(任务书 §0 第 2 拍):生效位 cpSync 一份独立副本进 tplpack 槽。
+      // 存档是附加语义:失败不碰已成功的安装,原因挂任务 archiveError 如实回
+      if (params.archive) {
+        try {
+          const ar = tpllib.archiveFromInstall({ base: baseDir, dest, versionId, tag: v.tag, versionDir, archive: params.archive })
+          setTask(id, { packId: ar.packId })
+        } catch (e) {
+          setTask(id, { archiveError: (e && e.message) || String(e) })
+        }
+      }
       succeeded = true
       setTask(id, { status: 'done', versionId })
     } catch (e) {

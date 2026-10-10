@@ -365,6 +365,40 @@ async function main() {
     ok(fs.readFileSync(path.join(tplBase, 'from.dir', 'windows_release_x86_64.exe'), 'utf8') === 'from-dir', '目录内容就位')
     ok(!fs.existsSync(path.join(dirSrc, 'templates')),
       '★目录形态安装拿走的是模板本体(templates/ 子目录被移走),用户自己的外壳目录保留')
+
+    // 自动存档(模板库 P0c):安装成功后 cpSync 独立副本进 tplpack 槽 + 写记录(dir=槽名)
+    const dirSrc2 = path.join(WORK, 'staged-templates-2')
+    fs.mkdirSync(path.join(dirSrc2, 'templates'), { recursive: true })
+    fs.writeFileSync(path.join(dirSrc2, 'templates', 'windows_release_x86_64.exe'), 'from-dir-2')
+    const rA = templates.downloadAndInstallTemplates(
+      { versionId: vidLocal, srcPath: dirSrc2, versionDir: 'from.arc', archive: { source: 'selfbuild', writtenFlags: ['disable_3d'], mode: 'default-on' } },
+      { templatesBase: tplBase, platform: 'win32' }
+    )
+    const tA = await waitTask(rA.taskId)
+    const packDocs = window.ztools.db.allDocs('godot/tplpack/') || []
+    ok(tA.status === 'done' && !!tA.packId && packDocs.length === 1 && !tA.archiveError &&
+      fs.readFileSync(path.join(path.dirname(tplBase), 'tplpack', tA.packId, 'windows_release_x86_64.exe'), 'utf8') === 'from-dir-2' &&
+      fs.readFileSync(path.join(tplBase, 'from.arc', 'windows_release_x86_64.exe'), 'utf8') === 'from-dir-2',
+      '★自动存档:独立副本进槽 + 记录 + 任务带 packId(删钩子 → 红:自编译变体被下次覆盖安装带走,找不回)',
+      JSON.stringify({ packId: tA.packId, n: packDocs.length }))
+
+    // 存档失败不碰安装:把 tplpack 根换成文件 → cpSync 必败 → 安装仍 done、任务带 archiveError
+    const blockRoot = path.join(path.dirname(tplBase), 'tplpack')
+    fs.rmSync(blockRoot, { recursive: true, force: true })
+    fs.writeFileSync(blockRoot, 'blocker')
+    const dirSrc3 = path.join(WORK, 'staged-templates-3')
+    fs.mkdirSync(path.join(dirSrc3, 'templates'), { recursive: true })
+    fs.writeFileSync(path.join(dirSrc3, 'templates', 'windows_release_x86_64.exe'), 'from-dir-3')
+    const rA2 = templates.downloadAndInstallTemplates(
+      { versionId: vidLocal, srcPath: dirSrc3, versionDir: 'from.arc2', archive: { source: 'selfbuild' } },
+      { templatesBase: tplBase, platform: 'win32' }
+    )
+    const tA2 = await waitTask(rA2.taskId)
+    ok(tA2.status === 'done' && !!tA2.archiveError && !tA2.packId &&
+      fs.readFileSync(path.join(tplBase, 'from.arc2', 'windows_release_x86_64.exe'), 'utf8') === 'from-dir-3',
+      '★存档失败:安装仍成功、原因挂 archiveError 如实回(把存档失败改成安装失败 → 红:附加语义绑架主语义)',
+      JSON.stringify({ archiveError: tA2.archiveError }))
+    fs.rmSync(blockRoot, { force: true })
   }
 
   // ---------- 7 ----------

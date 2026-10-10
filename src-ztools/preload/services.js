@@ -20,6 +20,7 @@ const docs = require('./lib/docs')
 const inspectfs = require('./lib/inspectfs')
 const buildtools = require('./lib/buildtools')
 const tplsource = require('./lib/tplsource')
+const tpllib = require('./lib/tpllib')
 const tplfeatures = require('./lib/tplfeatures')
 const tplprobe = require('./lib/tplprobe')
 const tplprofile = require('./lib/tplprofile')
@@ -142,14 +143,21 @@ const servicesImpl = {
   cancelTemplateBuildTask: (id) => buildtools.cancelTemplateBuildTask(id),
   /** 移除已结束的自编译任务记录 */
   dismissTemplateBuildTask: (id) => buildtools.dismissTemplateBuildTask(id),
-  /** 安装导出模板:缺省从官方 release 下载;opts.srcPath 提供时从本地 .tpz/目录导入 */
+  /** 安装导出模板:缺省从官方 release 下载;opts.srcPath 提供时从本地 .tpz/目录导入;
+   *  opts.archive 提供时安装成功后自动存档进模板库(自编译导入链路) */
   installExportTemplates: (versionId, opts) => templates.downloadAndInstallTemplates({
     versionId,
     srcPath: opts && opts.srcPath,
-    versionDir: opts && opts.versionDir
+    versionDir: opts && opts.versionDir,
+    archive: opts && opts.archive
   }),
   /** 卸载导出模板(删除模板目录与记录) */
   uninstallExportTemplates: (versionId) => templates.uninstallExportTemplates({ versionId }),
+  /** 模板库:列表 / 切换 / 删除 / 收编(存档根与两次 move 全在 tpllib.js) */
+  listTemplatePacks: (versionId) => tpllib.listForVersion(versionId),
+  activateTemplatePack: (versionId, packId) => tpllib.activateForVersion(versionId, packId),
+  deleteTemplatePack: (versionId, packId) => tpllib.deleteForVersion(versionId, packId),
+  adoptTemplatePack: (versionId) => tpllib.adoptForVersion(versionId),
   /** 添加项目(目录或 project.godot 文件) */
   addProject: (inputPath) => projects.addProject(inputPath),
   /** 新建项目(生成 project.godot 与默认图标并加入列表) */

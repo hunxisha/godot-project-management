@@ -295,7 +295,12 @@ async function startImport() {
   const t = buildTask.value
   if (!t || !t.stageDir) return
   const name = importDirName.value.trim()
-  const r = await window.services.installExportTemplates(props.versionId, { srcPath: t.stageDir, versionDir: name })
+  // archive 元数据让宿主在安装成功后自动存档一份独立副本(模板库);构建快照取自本任务记录
+  const r = await window.services.installExportTemplates(props.versionId, {
+    srcPath: t.stageDir,
+    versionDir: name,
+    archive: { source: 'selfbuild', writtenFlags: t.writtenFlags || [], mode: mode.value }
+  })
   if (!r.ok) {
     importMsg.value = r.error || '导入失败'
     return

@@ -6,6 +6,7 @@ import Icon from '../components/Icon.vue'
 import { useExportTemplates } from '../composables/useExportTemplates'
 import TemplateBuildWizard from '../components/versions/TemplateBuildWizard.vue'
 import { DEFAULT_SETTINGS, type DownloadTask, type GodotRelease, type GodotSettings, type GodotVersion, type ReleaseAsset, type Variant } from '../types/godot'
+import type { TemplatePack } from '../types/services'
 
 // 设置异步读取(阶段 A):先给默认值,onMounted 后用持久化值覆盖
 const settings = reactive<GodotSettings>({ ...DEFAULT_SETTINGS })
@@ -238,6 +239,75 @@ const {
   askUninstallTemplates
 } = useExportTemplates({ installed, tasks, notify })
 
+// ---------- 模板库(docs/tpllib-plan.md):列存档 / 切换 / 删除 / 收编,判据全在宿主 tpllib.js ----------
+const libFor = ref('')
+const libPacks = ref<TemplatePack[]>([])
+const libBusy = ref(false)
+const libErr = ref('')
+const confirmingPackId = ref('')
+
+async function reloadLib(versionId: string) {
+  const r = await window.services.listTemplatePacks(versionId)
+  libPacks.value = r.ok ? r.packs : []
+  libErr.value = r.ok ? '' : r.error || '模板库读取失败'
+}
+
+async function toggleLib(v: { _id: string }) {
+  if (libFor.value === v._id) {
+    libFor.value = ''
+    return
+  }
+  libFor.value = v._id
+  libErr.value = ''
+  confirmingPackId.value = ''
+  await reloadLib(v._id)
+}
+
+async function actActivate(v: { _id: string }, p: TemplatePack) {
+  if (libBusy.value) return
+  libBusy.value = true
+  libErr.value = ''
+  try {
+    const r = await window.services.activateTemplatePack(v._id, p.packId)
+    if (!r.ok) {
+      libErr.value = r.error || '切换失败'
+      return
+    }
+    notify(r.moved === false ? '该存档本就在生效位' : '已切换生效模板,重启编辑器后生效')
+    await reloadLib(v._id)
+    void refreshTplStatuses()
+  } finally {
+    libBusy.value = false
+  }
+}
+
+async function actDelete(v: { _id: string }, p: TemplatePack) {
+  if (confirmingPackId.value !== p.packId) {
+    confirmingPackId.value = p.packId
+    setTimeout(() => {
+      if (confirmingPackId.value === p.packId) confirmingPackId.value = ''
+    }, 2500)
+    return
+  }
+  confirmingPackId.value = ''
+  const r = await window.services.deleteTemplatePack(v._id, p.packId)
+  if (!r.ok) {
+    libErr.value = r.error || '删除失败'
+    return
+  }
+  await reloadLib(v._id)
+}
+
+async function actAdopt(v: { _id: string }) {
+  libErr.value = ''
+  const r = await window.services.adoptTemplatePack(v._id)
+  if (!r.ok) {
+    libErr.value = r.error || '收编失败'
+    return
+  }
+  await reloadLib(v._id)
+}
+
 // ---------- 自编译模板向导(检测/构建/导入的判据都在宿主侧,这里只装配) ----------
 const tplWizardFor = ref('')
 
@@ -373,6 +443,11 @@ function progressOf(t: DownloadTask): number {
             :title="`打开导出模板所在目录:${tplStatuses[v._id]?.path}`"
             @click="openPath(tplStatuses[v._id].path)"
           ><Icon name="folder" :size="13" /> 模板目录</button>
+          <button
+            class="btn small ghost"
+            title="模板库:列存档 / 切换生效 / 删除 / 收编(同版本串引擎共享存档)"
+            @click="toggleLib(v)"
+          ><Icon name="archive" :size="13" /> 模板库</button>
           <button class="btn small ghost" title="打开所在目录" @click="showInFolder(v.exePath)">
             <Icon name="folder" :size="13" /> 目录
           </button>
@@ -393,6 +468,27 @@ function progressOf(t: DownloadTask): number {
           <button class="btn small" @click="confirmLocalImport">开始导入</button>
           <button class="btn small ghost" @click="cancelLocalImport">取消</button>
           <span class="tpl-import-hint">只允许字母数字、点、下划线、连字符</span>
+        </div>
+        <!-- 模板库下拉:列存档 + 切换/删除/收编;切换 = 宿主两次 move,重启编辑器后生效 -->
+        <div v-if="libFor === v._id" class="tpl-import tpl-lib">
+          <div class="tpl-lib-head">
+            <span class="tpl-import-label">模板库存档(同版本串引擎共享)</span>
+            <button
+              v-if="tplStatuses[v._id]?.installed && !libPacks.some((p) => p.active)"
+              class="btn small ghost"
+              title="把当前生效目录登记为存档(不搬文件,首次被换出时才进存档槽)"
+              @click="actAdopt(v)"
+            >收编当前</button>
+          </div>
+          <p v-if="libErr" class="tpl-lib-note bad-line">{{ libErr }}</p>
+          <div v-for="p in libPacks" :key="p.packId" class="tpl-lib-row">
+            <span class="tag">{{ p.source === 'selfbuild' ? '自编译' : '收编' }}</span>
+            <span v-if="p.active" class="tag ok">生效中</span>
+            <span class="tpl-lib-note">{{ Math.round(p.bytes / 1048576) }} MB · {{ p.packId }}</span>
+            <button class="btn small ghost" :disabled="libBusy || p.active" @click="actActivate(v, p)">切换</button>
+            <button class="btn small ghost" @click="actDelete(v, p)">{{ confirmingPackId === p.packId ? '确认删除?' : '删除' }}</button>
+          </div>
+          <p v-if="!libPacks.length && !libErr" class="tpl-lib-note">暂无存档:自编译导入会自动存档,或点「收编当前」把生效目录登记入库。</p>
         </div>
       </div>
     </div>
@@ -652,6 +748,31 @@ function progressOf(t: DownloadTask): number {
   border-top: 1px dashed var(--border);
   padding-top: 8px;
   margin-top: 8px;
+}
+
+/* 模板库下拉:容器纵排(头行 + 存档行),其余沿用 .tpl-import 的虚线分隔 */
+.tpl-lib {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.tpl-lib-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tpl-lib-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tpl-lib-note {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-3);
 }
 
 .tpl-import-label {

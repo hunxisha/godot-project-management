@@ -79,6 +79,22 @@ export interface BackupProgress {
   bytes: number
 }
 
+/** 模板库存档记录(docs/tpllib-plan.md):dir='' = 正在生效位(收编登记,没搬过文件) */
+export interface TemplatePack {
+  packId: string
+  versionId: string
+  tag: string
+  versionDir: string
+  source: 'selfbuild' | 'adopted'
+  dir: string
+  active: boolean
+  bytes: number
+  createdAt: number
+  writtenFlags: string[]
+  mode: string
+  path: string
+}
+
 export interface Services {
   currentPlatform(): Platform
   fetchReleases(force?: boolean): Promise<GodotRelease[]>
@@ -98,9 +114,26 @@ export interface Services {
   /** 下载安装导出模板(入队,进度走 watchTasks,任务 kind='templates')。
    *  opts.srcPath 提供时改从本地导入(.tpz 文件或已解压的模板目录),不再发起下载;
    *  opts.versionDir 提供时作为目标目录名(默认:该引擎记录里已有的 versionDir,否则 tag 派生) */
-  installExportTemplates(versionId: string, opts?: { srcPath?: string; versionDir?: string }): { ok: boolean, error?: string, taskId?: string }
+  installExportTemplates(
+    versionId: string,
+    opts?: {
+      srcPath?: string
+      versionDir?: string
+      /** 自编译导入时传:安装成功后自动存档一份独立副本进模板库;失败不影响安装,回执带 archiveError */
+      archive?: { source?: 'selfbuild'; writtenFlags?: string[]; mode?: string }
+    }
+  ): { ok: boolean, error?: string, taskId?: string }
   /** 卸载导出模板(删除模板目录与记录) */
   uninstallExportTemplates(versionId: string): { ok: boolean, error?: string }
+  /** ---------- 模板库(多套裁剪变体存档 + 切换;docs/tpllib-plan.md) ---------- */
+  /** 某版本串下的存档列表(同 tag 多引擎共享);active = 正在生效位(dir='') */
+  listTemplatePacks(versionId: string): Promise<{ ok: true, packs: TemplatePack[] } | { ok: false, error: string }>
+  /** 切换生效:两次 move(换出→换入),第二步失败回滚第一步;重启编辑器后生效 */
+  activateTemplatePack(versionId: string, packId: string): Promise<{ ok: true, moved?: boolean } | { ok: false, error: string }>
+  /** 删除存档:有槽目录的进回收站;dir='' 的只除名不动生效位 */
+  deleteTemplatePack(versionId: string, packId: string): Promise<{ ok: true } | { ok: false, error: string }>
+  /** 收编当前生效目录为 dir='' 存档(不搬文件) */
+  adoptTemplatePack(versionId: string): Promise<{ ok: true, packId: string } | { ok: false, error: string }>
   /** ---------- 导出模板自编译(裁剪向导;ZTools 插件宿主提供,其他宿主 ok:false 并说明) ---------- */
   /** 探测一份源码树:选项存在性、源码默认值、该版本真实的连带关系、version.py 版本串 */
   probeTemplateSource(srcDir: string): Promise<ProbeResult>
