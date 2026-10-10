@@ -7,6 +7,7 @@ pub mod fsutil;
 pub mod inspectfs;
 pub mod launcher;
 pub mod templates;
+pub mod tpl;
 pub mod http;
 pub mod projects;
 pub mod releases;
