@@ -20,6 +20,7 @@
 //   .gpm-test/out/tkschema.mjs        ← src/toolkit/schema.ts(声明式参数 schema) (src/toolkit/__tests__/schema.test.mjs)
 //   .gpm-test/out/tkgpm.mjs             ← src/toolkit/gpm.ts(window.gpm 受限层组装) (src/toolkit/__tests__/gpm.test.mjs)
 //   .gpm-test/out/tkloader.mjs          ← src/toolkit/loader.ts(注册与错误隔离的纯部分) (src/toolkit/__tests__/loader.test.mjs)
+//   .gpm-test/out/tkfeatures.mjs        ← src/toolkit/features.ts(feature 注册与冲突让位) (src/toolkit/__tests__/features.test.mjs)
 //
 // 一次打包供全部渲染层测试共用(npm run test:renderer),避免每个测试各起一次 vite。
 //
@@ -73,6 +74,7 @@ await build({
         tkmanifest: path.join(root, 'src', 'toolkit', 'manifest.ts'),
         tkgpm: path.join(root, 'src', 'toolkit', 'gpm.ts'),
         tkloader: path.join(root, 'src', 'toolkit', 'loader.ts'),
+        tkfeatures: path.join(root, 'src', 'toolkit', 'features.ts'),
         tkorchestrate: path.join(root, 'src', 'toolkit', 'orchestrate.ts'),
         tkdiff: path.join(root, 'src', 'toolkit', 'diff.ts'),
         tkschema: path.join(root, 'src', 'toolkit', 'schema.ts'),
@@ -87,6 +89,6 @@ await build({
   }
 })
 
-for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'format', 'godotversion', 'markettags', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'vueshim', 'tools', 'tkmanifest', 'tkorchestrate', 'tkdiff', 'tkschema', 'tkgpm', 'tkloader']) {
+for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'format', 'godotversion', 'markettags', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'vueshim', 'tools', 'tkmanifest', 'tkorchestrate', 'tkdiff', 'tkschema', 'tkgpm', 'tkloader', 'tkfeatures']) {
   console.log(`bundle built: ${path.join(root, OUT_DIR, `${name}.mjs`)}`)
 }
