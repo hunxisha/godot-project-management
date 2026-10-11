@@ -2,6 +2,7 @@
   "name": "godot-project-management",
   "version": "2.1.0",
   "description": "下载并管理Godot版本,可隔离不同Godot版本项目,快捷打开Godot项目",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",
