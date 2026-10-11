@@ -14,6 +14,7 @@
 //   .gpm-test/out/markettags.mjs      ← src/utils/marketTags.ts             (src/__tests__/marketUtils.test.mjs)
 //   .gpm-test/out/usedocs.mjs         ← src/composables/useDocs.ts          (src/composables/__tests__/useDocs.test.mjs)
 //   .gpm-test/out/tools.mjs           ← src/tools/index.ts(barrel,Godot 文件解析器 + 树工具) (src/tools/__tests__/*.test.mjs)
+//   .gpm-test/out/tkmanifest.mjs      ← src/toolkit/manifest.ts(工具箱 manifest 校验) (src/toolkit/__tests__/manifest.test.mjs)
 //
 // 一次打包供全部渲染层测试共用(npm run test:renderer),避免每个测试各起一次 vite。
 //
@@ -62,6 +63,9 @@ await build({
         godotdocs: path.join(root, 'src', 'utils', 'godotDocs.ts'),
         doctree: path.join(root, 'src', 'utils', 'docTree.ts'),
         tools: path.join(root, 'src', 'tools', 'index.ts'),
+        // 工具箱(第 1 批)按模块各开一个入口:纯函数层进 Node harness,
+        // 不建 barrel —— 建了就把碰 window 的 loader/gpm 一起拖进测试产物。
+        tkmanifest: path.join(root, 'src', 'toolkit', 'manifest.ts'),
         // 测试专用:暴露 vue(与各入口共享同一个 chunk),供测试创建 ref
         vueshim: path.join(root, 'src', 'composables', '__tests__', 'vue-shim.mjs')
       },
@@ -73,6 +77,6 @@ await build({
   }
 })
 
-for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'format', 'godotversion', 'markettags', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'vueshim', 'tools']) {
+for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'format', 'godotversion', 'markettags', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'vueshim', 'tools', 'tkmanifest']) {
   console.log(`bundle built: ${path.join(root, OUT_DIR, `${name}.mjs`)}`)
 }
