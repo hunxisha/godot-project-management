@@ -67,6 +67,8 @@ await build({
         usedocs: path.join(root, 'src', 'composables', 'useDocs.ts'),
         // 工具箱首页的装配层(内置注册 + 用户插件扫描的**编排**,不是真执行路径:Q33)
         usetoolkit: path.join(root, 'src', 'composables', 'useToolkit.ts'),
+        // 工具独立页的三段式状态机(预览勾选 → 执行 → 回执 → 账本 → 回滚)
+        usetoolpage: path.join(root, 'src', 'composables', 'useToolPage.ts'),
         format: path.join(root, 'src', 'utils', 'format.ts'),
         godotversion: path.join(root, 'src', 'utils', 'godotVersion.ts'),
         markettags: path.join(root, 'src', 'utils', 'marketTags.ts'),
@@ -99,6 +101,6 @@ await build({
   }
 })
 
-for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'usetoolkit', 'format', 'godotversion', 'markettags', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'vueshim', 'tools', 'tkmanifest', 'tkorchestrate', 'tkdiff', 'tkschema', 'tkgpm', 'tkloader', 'tkfeatures', 'tktoollog', 'tkscaffold', 'tkformat', 'tkform']) {
+for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'usetoolkit', 'usetoolpage', 'format', 'godotversion', 'markettags', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'vueshim', 'tools', 'tkmanifest', 'tkorchestrate', 'tkdiff', 'tkschema', 'tkgpm', 'tkloader', 'tkfeatures', 'tktoollog', 'tkscaffold', 'tkformat', 'tkform']) {
   console.log(`bundle built: ${path.join(root, OUT_DIR, `${name}.mjs`)}`)
 }

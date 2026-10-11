@@ -298,10 +298,24 @@ export async function loadLog(store: LogStore): Promise<LoadResult> {
 }
 
 /**
- * 记一笔账。两种「没记上」都必须回报,不许静默:
+ * 「这次 put 真落下去了吗」—— 判据与 orchestrate 写盘那侧同一条:**拿不到成功证据就是失败**。
+ * 桥接层的 `putDoc` 用返回值 `false` 表示 LMDB 写失败(它不抛异常),
+ * 只看「有没有抛」会把没记上的账当成记上了 —— 那是 A-16 最不能有的形态。
+ */
+function putLanded(r: unknown): boolean {
+  if (r === true) return true
+  if (!r || typeof r !== 'object') return false
+  const o = r as { ok?: unknown, success?: unknown, error?: unknown }
+  if (str(o.error).trim()) return false
+  return o.ok === true || o.success === true
+}
+
+/**
+ * 记一笔账。三种「没记上」都必须回报,不许静默:
  *   · 这一轮的账目本身不合格(没时间戳/没有 toolId)⇒ 一条都没写;
- *   · **读失败时拒绝写** —— 单文档方案里 putDoc 是整份覆盖,拿不到旧记录就写会把 50 条历史抹掉。
- *     宁可这一轮少一条账(备份文件仍在盘上,退路没断),也不能抹掉用户的既有记录。
+ *   · **读失败时拒绝写** —— 单文档方案里 putDoc 是整份覆盖,拿不到旧记录就写会把 50 条历史抹掉;
+ *   · 写入没给成功证据:抛异常,**或像桥接层那样回 `false`**(见 putLanded)。
+ *     宁可这一轮少一条账(备份文件仍在盘上,退路没断),也不能抹掉既有记录或假装记上了。
  */
 export async function appendRun(store: LogStore, entry: ToolLogEntry): Promise<{ ok: boolean, overflow: number, error: string }> {
   const norm = normOne(entry)
@@ -312,10 +326,14 @@ export async function appendRun(store: LogStore, entry: ToolLogEntry): Promise<{
   }
   const merged = [norm.entry].concat(loaded.entries)
   const trimmed = trimLog(merged)
+  let put: unknown
   try {
-    await store.putDoc(LOG_DOC_ID, trimmed.kept)
+    put = await store.putDoc(LOG_DOC_ID, trimmed.kept)
   } catch (e) {
     return { ok: false, overflow: 0, error: `账本写入失败:${msg(e)}` }
+  }
+  if (!putLanded(put)) {
+    return { ok: false, overflow: 0, error: `账本写入没给成功证据(拿到 ${JSON.stringify(put) ?? String(put)}),这一轮没记上(备份文件仍在磁盘上)` }
   }
   return { ok: true, overflow: trimmed.overflow, error: '' }
 }

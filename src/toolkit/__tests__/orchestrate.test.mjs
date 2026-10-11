@@ -437,6 +437,35 @@ section('16. 写盘原语自己失败:如实落账,不重试不吞')
   ok(WR(bin) === 0 && N(FA(F(bin).backups).length) === 0, 'ok:true 但 skippedBinary ⇒ 没写也没备份,不许进成功集合', bin)
 }
 
+section('16b. 原语是异步的:框架必须等它(本仓库 services 全是 Promise)')
+{
+  // 这一节是接上工具页(Task 12)之后补的:原来 executePlan 不 await deps 的返回值,
+  // 拿到的是一个 Promise 就判「拿不到成功证据 = 失败」⇒ 真实宿主上一次都写不成,
+  // 而纯函数测试的夹具给的是同步返回值,所以一直没红。
+  const r = await AR(T.executePlan({
+    plan: PLAN([CH({ id: 'i1' }), CH({ id: 'i2', rel: 'b.gd' })]),
+    apply: async (c) => ({ ok: true, text: 'new-' + c.rel }),
+    deps: {
+      writeText: (rel) => Promise.resolve({ ok: true, bytes: 3, backupRel: rel + '.bak' }),
+      trash: (rels) => Promise.resolve({ ok: true, moved: rels.length, failed: [] })
+    }
+  }))
+  ok(FA(F(r).written).join(',') === 'a.gd,b.gd', '异步写盘原语的成功被认下来(不是判成「写入失败」)', F(r).written)
+  ok(FA(F(r).backups).length === 2, '异步返回里的 backupRel 也读得到', FA(F(r).backups))
+  const rej = await AR(T.executePlan({
+    plan: PLAN([CH({ id: 'i1' })]),
+    apply: async () => ({ ok: true, text: 'x' }),
+    deps: { writeText: () => Promise.reject(new Error('EPERM')), trash: () => Promise.resolve({ ok: true }) }
+  }))
+  ok(FA(F(rej).written).length === 0 && S(P(FA(F(rej).failed), 0).error).includes('EPERM'), 'reject 变成这一条的失败,不冒到视图层', F(rej).failed)
+  const slowTrash = await AR(T.executePlan({
+    plan: PLAN([CH({ id: 't1', kind: 'trash', rel: 'x.gd' })]),
+    deps: { writeText: () => ({ ok: true }), trash: () => Promise.resolve({ ok: true, moved: 1, failed: [{ rel: 'x.gd', error: '被占用' }] }) }
+  }))
+  ok(S(P(FA(F(slowTrash).failed), 0).error) === '被占用', '异步回收站回报里的逐条失败照样落账', F(slowTrash).failed)
+  ok(FA(slowTrash.moved).length === 0, 'failed 里点名了就不算移走', F(slowTrash).moved)
+}
+
 section('17. trash 批量:一次调用,逐条落账')
 {
   let calls = []

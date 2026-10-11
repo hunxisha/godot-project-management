@@ -472,6 +472,21 @@ section('14. appendRun 的另两种失败:账目不合格 / 写不进去')
   const st3 = mkStore({ doc: {} })
   const r3 = await T.appendRun(st3.store, ENTRY(3))
   ok(F(r3).ok === false && S(F(r3).error).includes('不是一个数组'), '文档形状不对 ⇒ 同样拒绝覆盖', F(r3).error)
+  // 桥接层的 putDoc 是「返回 false 表示写失败」(bridge.ts:15),它不抛异常。
+  // 只看抛不抛会把没记上的账当成记上了 —— 判据与 orchestrate 写盘同一条:拿不到成功证据就是失败。
+  for (const bad of [false, undefined, null, 0, 'ok', {}, { ok: false }, { error: 'LMDB 写失败' }, Promise.resolve(false)]) {
+    const s = mkStore({ doc: [] })
+    s.store.putDoc = () => bad
+    const rr = await T.appendRun(s.store, ENTRY(40 + JSON.stringify(String(bad)).length))
+    ok(rr.ok === false && S(rr.error).includes('没给成功证据'), `putDoc 回 ${JSON.stringify(bad) ?? String(bad)} ⇒ 算没记上`, rr)
+    ok(S(rr.error).includes('备份文件仍在磁盘上'), `回 ${JSON.stringify(bad) ?? String(bad)} 那句也要说退路`, rr.error)
+  }
+  for (const good of [true, { ok: true }, { success: true }]) {
+    const s = mkStore({ doc: [] })
+    s.store.putDoc = () => good
+    const rr = await T.appendRun(s.store, ENTRY(60))
+    ok(rr.ok === true && rr.overflow === 0, `putDoc 回 ${JSON.stringify(good)} ⇒ 记上了`, rr)
+  }
 }
 
 section('15. 按项目筛选与「最近 5 条」(Q29=C)')

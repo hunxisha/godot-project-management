@@ -312,9 +312,15 @@ export interface WriteResultLike {
  * 更不能被当成成功 —— 判据统一是「拿不到成功证据 = 失败」(Task 2 的变异刀 K6 就是撞在这上面)。
  */
 export interface WriteDeps {
-  /** 正常形态是宿主 `writeProjectText` 的原话 `{ok, bytes, truncated, skippedBinary, error?, backupRel?}` */
+  /**
+   * 正常形态是宿主 `writeProjectText` 的原话 `{ok, bytes, truncated, skippedBinary, error?, backupRel?}`。
+   *
+   * ⚠ 允许返回 Promise:本仓库的宿主原语**全是异步的**(`services.js` 走 IPC,`bridge.ts` 一律 async)。
+   * 这里曾经不 await ⇒ 拿到的是一个 Promise 对象,`changeLanded` 认不出成功证据就判「写入失败」,
+   * 整轮一个字节没写成。接上工具页(Task 12)才暴露出来:纯函数测试的夹具给的是同步返回值。
+   */
   writeText: (rel: string, text: string) => unknown
-  /** 正常形态照宿主 `movePathsToTrash`:顶层错只有一条,逐条错在 failed 里 */
+  /** 正常形态照宿主 `movePathsToTrash`:顶层错只有一条,逐条错在 failed 里。同样允许返回 Promise */
   trash: (rels: string[]) => unknown
 }
 
@@ -400,7 +406,8 @@ export async function executePlan(opts: {
     }
     let w: WriteResultLike | unknown
     try {
-      w = opts.deps.writeText(c.rel, text)
+      // await 同步返回值也照样工作;不写 await 就是把宿主那个 Promise 当成结果判失败(见 WriteDeps 注释)
+      w = await opts.deps.writeText(c.rel, text)
     } catch (e) {
       push({ id: c.id, rel: c.rel, kind: c.kind, ok: false, error: `写入抛异常:${e instanceof Error ? e.message : String(e)}` })
       continue
@@ -428,7 +435,7 @@ export async function executePlan(opts: {
     const rels = [...byRel.keys()]
     let r: { ok?: boolean; error?: string; moved?: number; failed?: { rel: string; error: string }[] }
     try {
-      r = (opts.deps.trash(rels) || {}) as typeof r
+      r = ((await opts.deps.trash(rels)) || {}) as typeof r
     } catch (e) {
       r = { ok: false, error: `回收站调用抛异常:${e instanceof Error ? e.message : String(e)}`, failed: [] }
     }
