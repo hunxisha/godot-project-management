@@ -256,27 +256,54 @@ section('12. 执行级验证:把生成的 index.js 当 ES 模块跑起来')
     const entry = path.join(dir, 'gen-action.mjs')
     writeFileSync(entry, TEXT(act, 'index.js'), 'utf8')
     const mod = await import(pathToFileURL(entry).href)
+    // 生成的 schema 交给**真校验器**(跨 bundle 取 schema.ts):help/def 写成 hint/default 时校验器不报错,
+    // 只会把它们当陌生键丢掉 ⇒ 光看 ok 抓不住,必须回头看归一后的字段还带不带说明与默认值。
+    const SCHEMA_BUNDLE = path.resolve(ROOT, '.gpm-test/out/tkschema.mjs')
+    const SC = await import(pathToFileURL(SCHEMA_BUNDLE).href)
+    const v = F(SC.validateSchema(mod.schema))
+    ok(v.ok === true, '骨架的 schema 过真校验器', FA(v.issues).map((i) => F(i).message))
+    const vf = FA(v.fields)
+    ok(S(P(vf, 0).help).length > 0, 'files 字段的说明落在 help 键上(写成 hint 会被静默丢掉)', P(vf, 0))
+    ok(P(vf, 1).def === true, 'boolean 字段的默认值落在 def 键上(写成 default 会被静默丢掉)', P(vf, 1))
+    ok(FA(P(vf, 0).exts).join(',') === 'gd', 'exts 被归一成不带点的形态', P(vf, 0))
+    const defs = F(SC.defaultsOf(vf))
+    ok(defs.mark_lines === true && Array.isArray(defs.targets), '表单初值真按骨架的 def 给(而不是回落到 false)', defs)
     ok(Array.isArray(mod.schema) && mod.schema.length === 2, 'action:schema 真的导出了数组', FA(mod.schema).length)
     ok(FA(mod.schema).map((f) => F(f).type).join(',') === 'files,boolean', '字段类型都是第 1 批那七种之内', FA(mod.schema).map((f) => F(f).type))
-    ok(FA(mod.schema).every((f) => /^[a-z][a-z0-9_]{0,31}$/.test(S(F(f).key)) && S(F(f).label) && S(F(f).hint)), '每个字段都有合法 key/label/hint(schema.ts 的必填面)')
+    ok(FA(mod.schema).every((f) => /^[a-z][a-z0-9_]{0,31}$/.test(S(F(f).key)) && S(F(f).label) && S(F(f).help)), '每个字段都有合法 key/label/help(FieldDesc 的必填面)')
     ok(typeof mod.plan === 'function', 'action:plan 是函数')
     ok(mod.apply === undefined, 'action:没导出 apply(正文由 payload.text 交出去)')
 
+    // ctx 用**框架自己的组装层**造(gpm.buildGpm + 假 services),不是手搓一个形状:
+    // 手搓夹具会和模板一起错在同一个假形状上(这里就栽过一次:readText 的真实形状是 {text,truncated,...},
+    // 而夹具当时写的是 {ok,content},模板跟着错,两条断言照样绿)。
+    const GP = await import(pathToFileURL(path.resolve(ROOT, '.gpm-test/out/tkgpm.mjs')).href)
     const logs = []
-    const ctx = {
-      cancelled: false,
-      toolId: 'demo-tool',
-      toolName: 'demo-tool',
-      projectId: 'proj',
-      readText: async (rel) => (rel === 'bad.gd' ? { ok: false, error: '太大没读' } : { ok: true, content: 'extends Node\n\nfunc _ready():\n\tpass\n' }),
-      log: (lvl, m) => logs.push(lvl + ':' + m),
-      notify: () => {}
-    }
+    let cancelFlag = false
+    const GD = 'extends Node\n\nfunc _ready():\n\tpass\n'
+    const ctx = GP.buildGpm({
+      services: {
+        readProjectText: async (pid, rel) => {
+          if (rel === 'bad.gd') return { ok: false, error: '文件不存在' }
+          if (rel === 'big.gd') return { ok: true, bytes: 900000, truncated: true }
+          if (rel === 'bin.gd') return { ok: true, bytes: 120, skippedBinary: true }
+          return { ok: true, text: GD, bytes: GD.length, truncated: false, skippedBinary: false }
+        }
+      },
+      toolId: 'demo-tool', toolName: 'demo-tool', projectId: 'proj',
+      capabilities: ['tree', 'text', 'write'], unsafe: false,
+      onLog: (lvl, m) => logs.push(lvl + ':' + m),
+      cancelled: () => cancelFlag
+    })
+    ok(ctx.cancelled === false, 'ctx.cancelled 是布尔快照(§F 契约补充第 3 条)', ctx.cancelled)
     // plan 可能压根没导出(模板被换掉/生成被拒时产物是空文本):调用前先判类型,要红不要撞停
     const runPlan = async (c, fs2, ps) => (typeof mod.plan === 'function' ? FA(await mod.plan(c, fs2, ps)) : [])
     const changes = await runPlan(ctx, [{ rel: 'a.gd', size: 10 }, { rel: 'bad.gd', size: 1 }, { rel: 'b.gd', size: 4 }], { mark_lines: true })
     ok(changes.length === 2, '读失败的那条被跳过而不是造一条空 change', changes.length)
     ok(P(changes, 0).rel === 'a.gd' && P(changes, 1).rel === 'b.gd', '顺序照 files 参数(不重排)', changes.map((c) => F(c).rel))
+    const partial = await runPlan(ctx, [{ rel: 'big.gd', size: 900000 }, { rel: 'bin.gd', size: 120 }], { mark_lines: true })
+    ok(partial.length === 0, 'truncated / skippedBinary 两种「调用成功但没给正文」绝不被改写(改了就是把半个文件写回去)', partial)
+    ok(logs.some((l) => l.includes('big.gd') && l.includes('完整正文')), '被跳过的那一条要说得出为什么被跳过', logs.slice(-3))
     ok(P(changes, 0).kind === 'rewrite' && P(changes, 0).risk === 'low', 'kind/risk 在场(框架按 risk 决定默认勾选)')
     ok(S(P(changes, 0).reason).length > 0, 'reason 非空:预览悬停要显示,插件必须给', P(changes, 0))
     const c0text = S(F(F(P(changes, 0)).payload).text)
@@ -288,7 +315,9 @@ section('12. 执行级验证:把生成的 index.js 当 ES 模块跑起来')
     const off = await runPlan(ctx, [{ rel: 'a.gd', size: 1 }], { mark_lines: false })
     ok(!S(P(off, 0).label).includes('共'), 'mark_lines 关 ⇒ 少那半句:参数确实被读', P(off, 0))
     ok(logs.some((l) => l.startsWith('warn:') && l.includes('bad.gd')), '读不到的那条走 ctx.log,不静默消失', logs)
-    const gone = await runPlan({ ...ctx, cancelled: true }, [{ rel: 'a.gd', size: 1 }], { mark_lines: true })
+    cancelFlag = true
+    const gone = await runPlan(ctx, [{ rel: 'a.gd', size: 1 }], { mark_lines: true })
+    cancelFlag = false
     ok(gone.length === 0, '取消 ⇒ 提前返回已完成部分(这里是一条都没做)', gone)
 
     const vw = BUILD(VIEW(), [])

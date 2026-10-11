@@ -5,9 +5,9 @@
 // 这里钉的就是那六条纪律在 ChangePlan 形状上的后继版本 + Q28 的越界兜底 + A-8 明写的四条
 // (plan 返回空 / 非数组 / 抛异常;apply 单条失败不中断;越界强制 high 且 outOfScope)。
 //
-// ⚠ DEV-7 还没兑现的部分:本文件的夹具是**手写 plan 函数**跑的,而旧 gate.test.mjs:9 的意图是
-//   「夹具直接吃生产者的真实产物」。第 11 个任务(内置格式化工具)落地后,要补一节把它的
-//   真实 plan() 输出喂进 buildPlan,证明两边说的是同一件事。
+// ⚠ DEV-7 的两半都在这里:第 22 节的夹具**直接吃内置格式化工具的真实 plan() 产物**(旧 gate.test.mjs:9
+//   「门不许另写措辞」的同一条意图换了生产者),证明 buildPlan 认得下真实 Change、
+//   且框架那句风险话与插件的 label 各说各的、互不复述。
 //
 // 用法:node src/composables/__tests__/build-bundle.mjs && node src/toolkit/__tests__/orchestrate.test.mjs
 import { existsSync } from 'node:fs'
@@ -44,7 +44,11 @@ function F(x) {
 }
 /** 同上,但用在数组上:变异让 ok() 变成 null 时,`.changes.length` 之类要报 false 而不是撞停 */
 const FA = (x) => (Array.isArray(x) ? x : [])
+/** 同上,但用在字符串上:变异让某个文案字段变成 undefined 时,`.includes(...)` 要报 false 而不是撞停 */
+const S = (x) => (typeof x === 'string' ? x : '')
 const N = (x) => (typeof x === 'number' ? x : -1)
+/** 按位置取成员(变异让数组短一节时给空对象,断言红一条而不是撞停) */
+const P = (arr, i) => F(FA(arr)[i])
 function buildPlanSafe(opts) {
   // 关键:async 包装让**await 里的**异常也落进 catch(同步 try 接不到 promise rejection)
   return (async () => {
@@ -529,6 +533,91 @@ section('21. 纯函数红线与契约面')
   ok(L(usesGlobal) === 1, 'plan 里写 globalThis 也照样跑完(不抛、不白屏)', PERR(usesGlobal))
   ok(globalThis.__gpm_probe === 1, '插件确实改到了全局:所以「这不是安全边界」必须写在 UI 上(A-12)')
   delete globalThis.__gpm_probe
+}
+
+section('22. DEV-7 兑现:夹具吃内置格式化工具的真实 plan() 产物(门与生产者同源)')
+{
+  // 跨 bundle 取第 11 个任务落地的内置工具与框架自己的组装层。
+  // 这里不是「假加载器」(Q33 禁的那个):执行的就是真实 entry 模块,ctx 也是 buildGpm 造的真的 ctx,
+  // 只有底层 services 是假的 —— 与 gpm.test.mjs 同一档做法。
+  const FM = await import(pathToFileURL(path.resolve(ROOT, '.gpm-test/out/tkform.mjs')).href)
+  const GM = await import(pathToFileURL(path.resolve(ROOT, '.gpm-test/out/tkgpm.mjs')).href)
+  const SM = await import(pathToFileURL(path.resolve(ROOT, '.gpm-test/out/tkschema.mjs')).href)
+  const SRC = 'extends Node   \n\tvar a = 1  \n'
+  const mkCtx = () => GM.buildGpm({
+    services: { readProjectText: async () => ({ ok: true, text: SRC, bytes: SRC.length, truncated: false, skippedBinary: false }) },
+    toolId: 'gdscript-format', toolName: 'GDScript 代码格式化', projectId: 'p1',
+    capabilities: ['tree', 'text', 'write'], unsafe: false
+  })
+  const params = F(SM.defaultsOf(FA(F(SM.validateSchema(FM.schema)).fields)))
+  const real = FA(await FM.plan(mkCtx(), [{ rel: 'a.gd', size: 1 }, { rel: 'b.gd', size: 1 }], params))
+  ok(real.length === 2, '真实 plan() 交出两条(下面每一个断言吃的都是这份产物,不是手搓夹具)', String(real.length))
+  ok(FA(real).every((c) => !c || typeof F(c).id !== 'string'), '插件没给 id ⇒ 稳定键完全由框架补(两边不许各补一套)')
+
+  // buildPlan 吃的是**插件的 plan 函数**(框架自己调它),不是数组:
+  // 手搓 Change[] 会让「门与生产者同源」这件事重新变成口头承诺(DEV-7②)。
+  const FILES = [{ rel: 'a.gd', size: 1 }, { rel: 'b.gd', size: 1 }]
+  const ARGS = (over) => ({
+    toolId: 'gdscript-format', plan: FM.plan, ctx: mkCtx(), files: FILES, params,
+    selectedRels: ['a.gd', 'b.gd'], treeRels: ['a.gd', 'b.gd', 'c.gd'], ...(over || {})
+  })
+  const plan = await T.buildPlan(ARGS())
+  const built = FA(plan.changes)
+  ok(S(F(plan).planError) === '', '框架接得住真实产物(不报「plan() 没实现/返回不对」)', S(F(plan).planError))
+  ok(F(plan).rejected.length === 0, '一条都没被丢', JSON.stringify(F(plan).rejected))
+  ok(built.length === 2, '两条都归一成功', String(built.length))
+  ok(P(built, 0).id === 'gdscript-format:rewrite:a.gd', '补出来的稳定键 = toolId:kind:rel', S(P(built, 0).id))
+  ok(P(built, 0).risk === 'low' && P(built, 0).outOfScope === false && P(built, 0).defaultSelected === true,
+    '项目内 + 插件自报 low ⇒ 默认勾上(Q28 只兜越界,不降插件的档)')
+  ok(P(built, 0).creates === false, 'treeRels 里有它 ⇒ creates false,措辞走「有备份」那一档')
+  const again = await T.buildPlan(ARGS())
+  ok(JSON.stringify(FA(again.changes).map((c) => F(c).id)) === JSON.stringify(built.map((c) => F(c).id)),
+    '同一份真实产物两次生成的 id 一字不差(预览→勾选→执行之间认得出「还是那一条」)')
+
+  // 措辞同源的两半:框架那句风险话不含插件 label;预览那一行就是插件原句
+  const warn = S(T.warnText(built))
+  ok(warn.includes('gpm-bak') && warn.includes('可随时还原'), '备份那句说的是真的退路(creates 全 false 这一档)', warn)
+  ok(!warn.includes('文本卫生'), '框架不复述插件的 label,也就不可能把它说成别的东西(DEV-7①)', warn)
+  ok(S(P(built, 0).label) === S(F(real[0]).label), '预览那一行原样是插件给的那句', S(P(built, 0).label))
+  ok(S(P(built, 0).reason) === S(F(real[0]).reason), '悬停那句也是原样,框架没另写判断', S(P(built, 0).reason).slice(0, 40))
+
+  // 同一份产物,换一种「框架知不知道清单」⇒ 风险话必须换成另一句实话
+  const noTree = await T.buildPlan(ARGS({ treeRels: undefined }))
+  ok(FA(noTree.changes).every((c) => F(c).creates === true), '没给 treeRels ⇒ creates 一律按 true 判(宁可少承诺)', JSON.stringify(FA(noTree.changes).map((c) => F(c).creates)))
+  const warn2 = S(T.warnText(FA(noTree.changes)))
+  ok(warn2.includes('新建没有备份可还原') && !warn2.includes('可随时还原'), '这一档绝不许说「可随时还原」(旧三档措辞的意义)', warn2)
+
+  // 越界兜底:插件说的是 low,框架只看用户勾了哪些
+  const out = await T.buildPlan(ARGS({ selectedRels: [] }))
+  ok(FA(out.changes).every((c) => F(c).risk === 'high' && F(c).outOfScope === true && F(c).defaultSelected === false),
+    '选中集为空 ⇒ 全部越界:强制 high + 不默认勾(Q28)', JSON.stringify(FA(out.changes).map((c) => [F(c).risk, F(c).outOfScope, F(c).defaultSelected])))
+  ok(S(T.planSummary(out)) === '共 2 条(默认勾选 0 条);2 条在选中范围外', '摘要那句把越界数说出口', S(T.planSummary(out)))
+  ok(S(T.planSummary(plan)) === '共 2 条(默认勾选 2 条)', '范围内的正常摘要不带越界那段', S(T.planSummary(plan)))
+  const groups = FA(T.groupPreview(out))
+  ok(groups.length === 1 && F(groups[0]).key === 'out', '全越界时只剩那一组(空组不出现)', JSON.stringify(groups.map((g) => F(g).key)))
+  ok(S(F(groups[0]).title).includes('框架强制逐条确认'), '越界那组的标题说清框架在做什么', S(F(groups[0]).title))
+
+  // 「选了 0 条时怎么说」—— 旧 gate 的那条纪律在 ChangePlan 上的后继版本
+  const gate = F(T.runGate(plan, []))
+  ok(gate.ok === false && S(gate.reason) === S(T.NO_SELECTION_REASON), '一条都没勾 ⇒ 门拒,并给出那句话', S(gate.reason))
+  ok(S(T.NO_SELECTION_REASON).length > 0 && !S(T.NO_SELECTION_REASON).includes('null'), '那句话不是空串也不是怪话', S(T.NO_SELECTION_REASON))
+  const gate2 = F(T.runGate(out, []))
+  ok(gate2.ok === false, '全越界且没勾 ⇒ 同样拒', S(gate2.reason))
+  ok(F(T.runGate(plan, T.allIds(plan))).ok === true, '全勾上就放行', S(F(T.runGate(plan, T.allIds(plan))).reason))
+
+  // 真产物一路走到执行:两条都写、都拿到备份
+  const r = await T.executePlan({
+    plan,
+    deps: {
+      writeText: (rel) => ({ ok: true, backupRel: `${rel}.gpm-bak-1` }),
+      trash: () => ({ ok: true })
+    },
+    projectId: 'p1'
+  })
+  ok(F(r).written.join(',') === 'a.gd,b.gd', '真实 payload.text 被框架认成正文并写了两个文件', JSON.stringify(F(r).written))
+  ok(FA(F(r).backups).length === 2, '两个备份名进了回执(账本就靠这一组对应关系)', FA(F(r).backups).length)
+  ok(F(r).failed.length === 0 && F(r).ok === true, '零失败', JSON.stringify(F(r).failed))
+  ok(S(T.summaryText(r)) === '完成:改写 2 个文件', '回执那句话与真实条数同源', S(T.summaryText(r)))
 }
 
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)

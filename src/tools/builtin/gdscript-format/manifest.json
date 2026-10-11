@@ -1,0 +1,14 @@
+{
+  "id": "gdscript-format",
+  "name": "GDScript 代码格式化",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "kind": "action",
+  "ui": "schema",
+  "summary": "文本卫生级格式化:行尾空白、缩进折算、空行折叠、换行符统一、末尾换行补齐;不碰多行字符串与续行",
+  "cmds": ["格式化", "gdformat", "godot格式化"],
+  "entry": "index.ts",
+  "capabilities": ["tree", "text", "write"],
+  "author": "Godot 工坊(内置)",
+  "tags": ["gdscript", "格式化"]
+}
