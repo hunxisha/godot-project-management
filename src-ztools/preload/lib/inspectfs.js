@@ -236,6 +236,137 @@ function writeProjectText(projectId, rel, text, opts) {
 }
 
 /**
+ * rel 的**规范形态**:反斜杠归正斜杠、吃掉空段与 `.` 段、见到 `..` 直接判非法。
+ * 与 `resolveRel` 的切段规则同一个,但产出的是 rel 而不是绝对路径 —— 对外只有 rel 一个键,
+ * 回报里的 from/to 必须与 scanProjectTree 给的 rel 同形,否则渲染层对不回自己点名的那一条。
+ * @param {unknown} v
+ * @returns {string} 归一后的 rel;非法(非字符串 / 空 / 越界)给空串
+ */
+function canonRel(v) {
+  if (typeof v !== 'string' || !v) return ''
+  const stack = []
+  for (const p of v.replace(/\\/g, '/').split('/')) {
+    if (!p || p === '.') continue
+    if (p === '..') return ''
+    stack.push(p)
+  }
+  return stack.join('/')
+}
+
+/**
+ * 改名**边车**的尾缀:Godot 由主文件生成的旁路文件。
+ * 名字一律是「主 rel + 尾缀」(`player.gd.uid`、`icon.png.import`)—— 旧 `inspectors/uid.ts`
+ * 的 UID_SUFFIX 注释点过这个坑:`X.a.b.uid` 的源是 `X.a.b`,用 dirOf/basename 重拼会拼错。
+ * 边车**只有是普通文件才算**(目录名撞成 `*.uid` 的形态不搬、也不报错)。
+ */
+const SIDECAR_SUFFIXES = ['.uid', '.import']
+
+/**
+ * 项目内改名(含边车)。**唯一**能改名字的原语 —— 渲染层拿不到 fs。
+ *
+ * 为什么不能用 `movePathsToTrash` + `writeProjectText` 拼(§F DEV-11 判死过这条):
+ *   1. 写完新文件 mtime 就是「现在」,Godot 的导入器按 mtime 判是否重导 ⇒ 每个被改名的资产都被重导一遍;
+ *   2. `.uid` / `.import` 边车留在旧名底下 ⇒ 旧边车成孤儿、新文件掉回未导入态;
+ *   3. `writeProjectText` 会为新名**落一份 `.gpm-bak-` 备份**,而它备份的是「新名那个还不存在的文件」= 没有。
+ * `rename` 是同一 inode 的移动:内容、mtime、边车(搬完仍指同一份内容)全部原样,uid 也不必重算。
+ *
+ * 三条纪律与兄弟原语同形:
+ *   · 闸用 `resolveInside`(旧名与新名各过一道):字面越界与「项目内链接通向外面」都拒,
+ *     错误串一律 `'非法路径'` —— 不透露挡掉的是哪一类(见文件头那段);
+ *   · **预检在动盘之前**:每个目标都不许已被占(含边车槽位被占)、父目录必须存在(绝不 mkdir);
+ *     唯一放行形态是「目标与源是同一份真实文件」——大小写不敏感的平台把 `Foo.gd` 与 `foo.gd`
+ *     看成同一个,这类改名要做得成,不能误报「目标已存在」;
+ *   · **主文件先搬、边车随后**:最常见失败(Windows 上文件被编辑器占用)落在第一步,此时盘上干净;
+ *     后续步失败则把已搬的原路退回,退不动时点名是哪个文件(宁可报得难听,也不留半截状态谎报成功)。
+ *
+ * 一条**测不到**的分支(不许算成已验):预检全过后仍失败的只有真实 I/O 错误,而它落在第 2、3 个
+ * move 上时的回退路径,本机造不出确定性触发(同进程持有句柄在共享模式下不拦 rename)。断言只钉
+ * 「第一步就失败 ⇒ 盘上干净」,多步那一支进 docs/manual-verification.md 的 §12 真机项。
+ *
+ * @param {string} projectId
+ * @param {string} rel 旧名(相对项目根、正斜杠)
+ * @param {string} to 新名(相对项目根;可以换目录,但本批的 UI 只改同目录名)
+ * @param {{sidecar?:boolean}} [opts] 默认 true:同名的 `.uid` / `.import` 一起搬;false 只搬主文件
+ * @returns {import('../../../src/types/godot').RenameResult}
+ */
+function renameProjectPath(projectId, rel, to, opts) {
+  const o = opts || {}
+  const root = projectRoot(projectId)
+  if (!root) return { ok: false, error: '项目不存在' }
+  const fromRel = canonRel(rel)
+  const toRel = canonRel(to)
+  if (!fromRel || !toRel) return { ok: false, error: '非法路径' }
+  const g1 = resolveInside(root, fromRel)
+  if (!g1.abs) return { ok: false, error: g1.error || '非法路径' }
+  const g2 = resolveInside(root, toRel)
+  if (!g2.abs) return { ok: false, error: g2.error || '非法路径' }
+  // 归一后落到同一个绝对路径(含 './a.gd' vs 'a.gd'):不必碰盘,也不许回一次假成功
+  if (g1.abs === g2.abs) return { ok: false, error: '改名前后是同一个名字' }
+  // project.godot 是项目的身份:改名等于把这份登记作废(宿主与 Godot 都按它认项目)
+  if (fromRel === 'project.godot') return { ok: false, error: '项目主配置文件不改名' }
+  let st
+  try { st = fs.statSync(g1.abs) } catch (e) { return { ok: false, error: '文件不存在' } }
+  if (st.isDirectory()) return { ok: false, error: '目录改名不支持' }
+  if (!st.isFile()) return { ok: false, error: '文件不存在' }
+  const toDir = path.dirname(g2.abs)
+  if (!fs.existsSync(toDir)) return { ok: false, error: '目标目录不存在' }
+
+  // ---- 待搬清单:主文件在第一位,边车按 SIDECAR_SUFFIXES 顺序随后 ----
+  const pairs = [{ fromRel, fromAbs: g1.abs, toRel, toAbs: g2.abs }]
+  if (o.sidecar !== false) {
+    for (const suffix of SIDECAR_SUFFIXES) {
+      const sRel = fromRel + suffix
+      const dRel = toRel + suffix
+      const gs = resolveInside(root, sRel)
+      if (!gs.abs) return { ok: false, error: gs.error || '非法路径' }
+      const gd = resolveInside(root, dRel)
+      if (!gd.abs) return { ok: false, error: gd.error || '非法路径' }
+      let sst = null
+      try { sst = fs.statSync(gs.abs) } catch (e) { sst = null }
+      if (!sst || !sst.isFile()) {
+        // 源这一侧没有边车可搬(不存在 / 名字叫边车尾缀其实是目录)——但**新名的边车槽位已被占**时仍要拒:
+        // 把主文件搬进去等于让它继承一份不属于它的所有权声明(那个 `.uid` 里写的 uid 是别人家的文件)。
+        if (fs.existsSync(gd.abs)) return { ok: false, error: '目标已存在' }
+        continue
+      }
+      pairs.push({ fromRel: sRel, fromAbs: gs.abs, toRel: dRel, toAbs: gd.abs })
+    }
+  }
+
+  // ---- 预检:动盘之前把每一对都问一遍 ----
+  for (const p of pairs) {
+    if (!fs.existsSync(p.toAbs)) continue
+    // 有一种「看着像占用其实不是」必须放行:大小写不敏感的文件系统把 `Foo.gd` 与 `foo.gd` 看成同一份文件,
+    // 这类改名要做得成。**判据用 (dev, ino),不用 realpath** —— 本机实测 `fs.realpathSync` 在 Windows 上
+    // **原样保留输入的大小写**(给 foo.gd 就回 foo.gd),拿它比对会恒判「不是同一个」而误拒每一次大小写改名。
+    let same = false
+    try {
+      const s1 = fs.statSync(p.fromAbs)
+      const s2 = fs.statSync(p.toAbs)
+      same = s1.ino === s2.ino && s1.dev === s2.dev
+    } catch (e) { return { ok: false, error: '路径无法解析' } }
+    if (!same) return { ok: false, error: '目标已存在' }
+  }
+
+  const done = []
+  for (const p of pairs) {
+    try {
+      fs.renameSync(p.fromAbs, p.toAbs)
+    } catch (e) {
+      const stuck = []
+      for (let i = done.length - 1; i >= 0; i--) {
+        const d = done[i]
+        try { fs.renameSync(d.toAbs, d.fromAbs) } catch (e2) { stuck.push(d.fromRel) }
+      }
+      if (stuck.length) return { ok: false, error: `重命名失败,且这些文件没能退回:${stuck.join('、')}` }
+      return { ok: false, error: p.fromRel === fromRel ? '重命名失败' : '边车改名失败,已回退' }
+    }
+    done.push(p)
+  }
+  return { ok: true, from: fromRel, to: toRel, moved: done.map((p) => ({ from: p.fromRel, to: p.toRel })) }
+}
+
+/**
  * 遍历项目文件树。默认**跳过**任意层级的 `.godot`(与 fsutil.walkFiles 的默认相反)。
  * @param {string} projectId
  * @param {{includeCache?:boolean, exts?:string[], skipDirs?:string[], maxEntries?:number}} [opts]
@@ -406,4 +537,4 @@ function hashPaths(projectId, rels) {
   return { ok: failed.length === 0, hashes, failed }
 }
 
-module.exports = { projectRoot, resolveRel, resolveInside, DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES, scanProjectTree, readProjectText, writeProjectText, movePathsToTrash, hashPaths }
+module.exports = { projectRoot, resolveRel, resolveInside, DEFAULT_MAX_BYTES, DEFAULT_MAX_ENTRIES, scanProjectTree, readProjectText, writeProjectText, renameProjectPath, movePathsToTrash, hashPaths }

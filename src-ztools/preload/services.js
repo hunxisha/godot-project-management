@@ -184,6 +184,8 @@ const servicesImpl = {
   readProjectText: (projectId, rel, opts) => inspectfs.readProjectText(projectId, rel, opts),
   /** 写项目内文本文件(原子落盘 + 自动备份) */
   writeProjectText: (projectId, rel, text, opts) => inspectfs.writeProjectText(projectId, rel, text, opts),
+  /** 项目内改名(§G Task 15:同 inode 移动,内容与 mtime 不变,`.uid`/`.import` 边车跟着搬) */
+  renameProjectPath: (projectId, rel, to, opts) => inspectfs.renameProjectPath(projectId, rel, to, opts),
   /** 批量移入回收站(工具页删除类修复的唯一出口) */
   movePathsToTrash: (projectId, rels) => inspectfs.movePathsToTrash(projectId, rels),
   /** 批量计算项目内文件的 SHA-256(流式分块读;重复文件检测的真相通道) */

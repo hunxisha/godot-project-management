@@ -37,6 +37,8 @@ export interface GpmHost {
     scanProjectTree?: (pid: string, opts?: { includeCache?: boolean, exts?: string[], skipDirs?: string[], maxEntries?: number }) => Promise<unknown> | unknown
     readProjectText?: (pid: string, rel: string, opts?: { maxBytes?: number }) => Promise<unknown> | unknown
     writeProjectText?: (pid: string, rel: string, text: string, opts?: { backup?: boolean }) => Promise<unknown> | unknown
+    /** §G Task 15 的新原语:项目内改名(同 inode 移动 + 边车跟着搬) */
+    renameProjectPath?: (pid: string, rel: string, to: string, opts?: { sidecar?: boolean }) => Promise<unknown> | unknown
     movePathsToTrash?: (pid: string, rels: string[]) => Promise<unknown> | unknown
     hashPaths?: (pid: string, rels: string[]) => Promise<unknown> | unknown
     getDoc?: (id: string) => Promise<unknown> | unknown
@@ -95,9 +97,10 @@ export interface GpmCtx {
   onCancel(fn: () => void): void
   /** render 型工具的框架级 Vue 入口(不引运行时编译器,Q10=D) */
   vue: { h: typeof h, ref: typeof ref, computed: typeof computed, onMounted: typeof onMounted }
-  /** 仅 unsafe:true 可见:裸写三件套里的两个(rename 的原语第 2 批才建) */
+  /** 仅 unsafe:true 可见:§5.3 那张表里的裸写三件套(rename 是 §G Task 15 才建的第三条) */
   writeText?: (rel: string, text: string) => Promise<unknown>
   movePathsToTrash?: (rels: string[]) => Promise<unknown>
+  renamePath?: (rel: string, to: string, opts?: { sidecar?: boolean }) => Promise<unknown>
 }
 
 export const STORE_PREFIX_ROOT = 'gpm/plugin'
@@ -303,8 +306,9 @@ export function buildGpm(host: GpmHost): GpmCtx {
   if (o.unsafe === true) {
     ctx.writeText = async (rel, text) => await callMaybe(svc.writeProjectText, ctx.projectId, rel, text)
     ctx.movePathsToTrash = async (rels) => await callMaybe(svc.movePathsToTrash, ctx.projectId, Array.isArray(rels) ? rels : [])
-    // 这里**没有 rename**:仓库里还没有项目内改名原语(§F DEV-11,第 2 批建)。
-    // 宁可少给一个 API,也不拿 writeText + trash 拼一个会丢 .uid 边车与 mtime 语义的假改名。
+    ctx.renamePath = async (rel, to, opts) => await callMaybe(svc.renameProjectPath, ctx.projectId, rel, to, opts || {})
+    // §5.3 那句「裸写 writeText / movePathsToTrash / rename」到这一批才真的齐 —— 第 1 批没有项目内改名原语,
+    // 宁可少给一条 API,也没拿 writeText + trash 拼一个会丢 .uid 边车与 mtime 语义的假改名(§F DEV-11)。
   }
 
   return ctx

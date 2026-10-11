@@ -47,6 +47,7 @@ function fakeSvc(over) {
     scanProjectTree: rec('scanProjectTree', { ok: true, files: [{ rel: 'a.gd', size: 10, mtimeMs: 1, ext: 'gd' }], truncated: false }),
     readProjectText: rec('readProjectText', { ok: true, text: 'extends Node\n', bytes: 13, truncated: false }),
     writeProjectText: rec('writeProjectText', { ok: true, backupRel: 'a.gd.gpm-bak-1' }),
+    renameProjectPath: rec('renameProjectPath', { ok: true, from: 'a.gd', to: 'b.gd', moved: [{ from: 'a.gd', to: 'b.gd' }] }),
     movePathsToTrash: rec('movePathsToTrash', { ok: true, moved: 1, failed: [] }),
     hashPaths: rec('hashPaths', { ok: true, hashes: [{ rel: 'a.gd', sha256: 'ab' }], failed: [] }),
     getDoc: rec('getDoc', null),
@@ -230,7 +231,8 @@ section('6. refIndex:只喂 RefScanSource 的三个成员(第 0 批 DEV-3 的下
 section('7. unsafe 门:裸写只给 view 型(§5.2)')
 {
   const safe = host({ unsafe: false }).ctx
-  ok(safe.writeText === undefined && safe.movePathsToTrash === undefined, 'unsafe:false ⇒ 裸写接口**不存在**', Object.keys(safe).filter((k) => /write|trash/i.test(k)))
+  ok(safe.writeText === undefined && safe.movePathsToTrash === undefined && safe.renamePath === undefined,
+    'unsafe:false ⇒ 裸写三件套一律**不存在**(不是「调了会抛」)', Object.keys(safe).filter((k) => /write|trash|rename/i.test(k)))
   const bare = host({ unsafe: true, projectId: 'godot/project/AAA' })
   ok(typeof bare.ctx.writeText === 'function', 'unsafe:true ⇒ writeText 出现')
   await bare.ctx.writeText('a.gd', 'x')
@@ -239,7 +241,15 @@ section('7. unsafe 门:裸写只给 view 型(§5.2)')
   await bare.ctx.movePathsToTrash(['b.gd'])
   const mv = bare.calls.find((c) => c[0] === 'movePathsToTrash')
   ok(mv && mv[1] === 'godot/project/AAA', 'trash 同样带 pid', mv)
-  ok(bare.ctx.rename === undefined, '第 1 批**没有** rename 裸写(项目内改名原语还没建,§F DEV-11)', Object.keys(bare.ctx).filter((k) => /rename/i.test(k)))
+  // §5.3 那句「裸写 writeText / movePathsToTrash / rename」到 §G Task 15 才凑齐第三条
+  ok(typeof bare.ctx.renamePath === 'function', 'unsafe:true ⇒ renamePath 出现(§5.3 裸写三件套补齐)')
+  await bare.ctx.renamePath('a.gd', 'b.gd')
+  const rn = bare.calls.find((c) => c[0] === 'renameProjectPath')
+  ok(rn && rn[1] === 'godot/project/AAA' && rn[2] === 'a.gd' && rn[3] === 'b.gd', 'rename 同样走框架注入的 pid,rel 原样交出', rn)
+  ok(rn && !!rn[4] && typeof rn[4] === 'object', '第四个参数恒是个对象(opts 没给时补 {}),不把 undefined 递给原语', rn && rn[4])
+  await bare.ctx.renamePath('a.gd', 'b.gd', { sidecar: false })
+  const rn2 = bare.calls.filter((c) => c[0] === 'renameProjectPath').pop()
+  ok(rn2 && rn2[4] && rn2[4].sidecar === false, 'opts 原样透传(sidecar:false 那条显式选择不能被框架吞掉)', rn2 && rn2[4])
   const junk = await host({ unsafe: true }).ctx.movePathsToTrash('not-an-array')
   ok(junk.ok === true, 'rels 非数组时按空清单交给原语(原语自己收口),不炸', junk)
 }

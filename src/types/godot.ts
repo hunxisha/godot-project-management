@@ -656,6 +656,25 @@ export interface TrashResult {
   failed?: { rel: string; error: string }[]
 }
 
+/**
+ * 项目内改名的回报(§G Task 15 的新原语,与 WriteTextResult / TrashResult 同一族)。
+ * 全仓只有 rel:绝对路径与盘符一个都不回显,渲染层拿 from/to 去对账。
+ */
+export interface RenameResult {
+  ok: boolean
+  /** 失败原因(逐字固定那批串:项目不存在 / 非法路径 / 文件不存在 / 目标已存在 /
+   *  目标目录不存在 / 改名前后是同一个名字 / 目录改名不支持 / 项目主配置文件不改名 /
+   *  重命名失败 / 边车改名失败,已回退) */
+  error?: string
+  /** 归一后的旧名 */
+  from?: string
+  /** 归一后的新名 */
+  to?: string
+  /** 实际搬动的每一对(主文件在第一行,随后是 `.uid` / `.import` 边车)。
+   *  回执那句「改名 N 个文件(连带 M 个边车)」按它数,不许另外再算一遍。 */
+  moved?: { from: string; to: string }[]
+}
+
 /** 自编译导出模板任务(buildtools,kind='tplbuild') */
 export interface TemplateBuildTask {
   id: string

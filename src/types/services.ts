@@ -50,6 +50,7 @@ import type {
   ScanTreeResult,
   ReadTextResult,
   WriteTextResult,
+  RenameResult,
   TrashResult
 } from './godot'
 
@@ -242,6 +243,9 @@ export interface Services {
   readProjectText(projectId: string, rel: string, opts?: { maxBytes?: number }): ReadTextResult
   /** 写项目内文本文件(同目录临时文件 + rename;默认先备份 .gpm-bak-<时间戳>) */
   writeProjectText(projectId: string, rel: string, text: string, opts?: { backup?: boolean }): WriteTextResult
+  /** 项目内改名(§G Task 15)。同 inode 移动:内容与 mtime 都不变,`.uid`/`.import` 边车随主文件一起搬。
+   *  渲染层拿它而不是 writeProjectText + movePathsToTrash 拼假改名(那版会丢边车、把 mtime 推到「现在」) */
+  renameProjectPath(projectId: string, rel: string, to: string, opts?: { sidecar?: boolean }): RenameResult
   /** 批量移入回收站(Windows)/永久删除(其他平台);单个失败不中断,失败项如实返回 */
   movePathsToTrash(projectId: string, rels: string[]): TrashResult
   /** 批量计算项目内文件的 SHA-256(流式分块读,不整文件进内存;单个失败不中断,失败项如实返回) */

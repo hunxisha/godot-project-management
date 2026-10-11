@@ -56,6 +56,15 @@ interface GpmStats {
   mode: number
   mtime: any
   mtimeMs: number
+  /**
+   * 文件序号 + 设备号:§G 改名原语用来判「这两条路径指的是**同一份文件**」。
+   * 为什么补这两个字段:Windows 上 `fs.realpathSync` **原样保留输入的大小写**
+   * (给 `foo.gd` 就回 `foo.gd`,实测如此),拿 realpath 比对会把 `Foo.gd`→`foo.gd` 这类
+   * 大小写改名误判成「目标已存在」而永远拒掉;`(dev, ino)` 在两个平台上都认得出同一个 inode
+   * (Windows 上 ino 是文件索引,同样唯一)。libuv 保证这两个字段总是可得。
+   */
+  ino: number
+  dev: number
   isDirectory(): boolean
   isFile(): boolean
 }
