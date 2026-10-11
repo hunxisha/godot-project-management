@@ -13,6 +13,8 @@ import BackupsView from './views/BackupsView.vue'
 import ToolsView from './views/ToolsView.vue'
 import SettingsView from './views/SettingsView.vue'
 import { notify } from './services/bridge'
+import { useToolkit } from './composables/useToolkit'
+import { toolIdOfCode } from './toolkit/features'
 import type { BackupTask, DocsTask, DownloadTask, ExportTask } from './types/godot'
 
 const tab = ref('dashboard')
@@ -146,6 +148,13 @@ onMounted(() => {
   // 主题(色板 × 明暗)已在 main.ts 挂载前应用,见 composables/useTheme.ts
   window.ztools.setExpendHeight(600)
   window.ztools.onPluginEnter(({ code, payload }) => {
+    // 工具插件的直达:我们这层注册的 code 一律是 tool-<id>(前缀判据在 features.ts,只有一份)
+    const toolId = toolIdOfCode(code)
+    if (toolId) {
+      tab.value = 'tools'
+      useToolkit().openTool(toolId)
+      return
+    }
     if (code === 'projects') tab.value = 'projects'
     else if (code === 'versions') tab.value = 'versions'
     else if (code === 'plugins') tab.value = 'marketplace'
@@ -300,8 +309,7 @@ function gotoCreateBackup(id: string) {
            而 select 的 value 前后一致(排除了「误触发 change 把结论清空」);同一次实验里
            市场页的元素身份是保留的。根因未定(§D #12)。
            工具箱重做第 0 批补一句:这条「实测不生效」的结论**仍然有效**,第 1 批的新工具箱
-           状态照样走模块级单例(useToolkitShared),不要再试 include。
-           旧的 useToolsShared 连同它的体检状态已在第 0 批拆掉,本页现在是空壳。 -->
+           状态照样走模块级单例(useToolkit / 项目上下文 currentProjectId 都在那儿),不要再试 include。 -->
       <KeepAlive include="MarketplaceView">
         <Dashboard v-if="tab === 'dashboard'" @navigate="tab = $event" @create="gotoCreate" />
         <ProjectsView
@@ -345,8 +353,8 @@ function gotoCreateBackup(id: string) {
           @navigate="tab = $event"
           @backup-project="gotoCreateBackup"
         />
-        <!-- 工具页:第 0 批的空壳(旧的体检控制台已拆,理由与去向见 docs/toolkit-redesign-plan.md)。
-             空壳不 emit navigate,所以这里不再绑 @navigate。 -->
+        <!-- 工具箱:列表 ⇄ 工具页是这一页内部的二级导航(activeToolId 在 useToolkit 的模块单例上),
+             这样 ZTools 搜索框直达某个工具只需要 openTool(id),不必给整个应用引一个路由。 -->
         <ToolsView v-else-if="tab === 'tools'" />
         <SettingsView v-else />
       </KeepAlive>

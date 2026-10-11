@@ -341,6 +341,8 @@ export interface GodotSettings {
    * 作者声明与用户意图分两层:作者后来把 status 改了不许翻掉用户已经按过的开关。
    */
   toolEnabled?: Record<string, boolean>
+  /** 工具箱:全局共享的当前项目 id(Q26;插件不许自己挑项目) */
+  toolProjectId?: string
   /** 工具箱:上次扫描时已经见过的插件目录名(用于「首次装进新插件」时弹权限面,A-12) */
   toolKnownDirs?: string[]
   /** 默认备份方式:zip 打包 | copy 完整快照 */

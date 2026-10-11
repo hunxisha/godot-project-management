@@ -76,6 +76,8 @@ global.window = {
     },
     readProjectText: async (pid, rel) => {
       reads.push(rel)
+      if (rel === 'big.gd') return { ok: true, bytes: 900000, truncated: true }
+      if (rel === 'bin.gd') return { ok: true, bytes: 40, skippedBinary: true }
       if (!(rel in DISK)) return { ok: false, error: '文件不存在' }
       return { ok: true, text: DISK[rel], bytes: DISK[rel].length, truncated: false, skippedBinary: false }
     },
@@ -419,6 +421,37 @@ section('10. view 型工具:不跑三段式,页面不给执行按钮')
   ok(P.plan.value !== null && FA(P.plan.value.changes).length === 0, '不跑三段式:交一个空计划而不是崩', F(P.plan.value).planError)
   ok(S(P.plan.value.planError).includes('plan'), '原因说清是缺 plan', S(P.plan.value.planError))
   ok(P.canExecute.value === false, 'view 型的页面不该有可点的执行按钮')
+}
+
+section('11. diff 预览:只裁展示,三种「给不出 diff」各自说清')
+{
+  resetDisk()
+  P = T.useToolPage(toolOf(MOD), pid)
+  await P.open()
+  P.picked.value = ['a.gd']
+  P.rawParams.value.limit = 1
+  await P.makePlan()
+  const ch = AT(FA(P.plan.value.changes), 0)
+  ok(P.diffible(ch) === true, '正文在 payload 里 ⇒ 这条可以看差异')
+  reads.length = 0
+  const d1 = F(await P.loadDiff(ch))
+  ok(d1.ready === true && S(d1.error) === '', '读到旧正文并算出 diff', d1.error)
+  // 'A1\nA2\n' 按仓库的行数口径(split('\n'),末尾换行多出一个空元素)是 3 行 ⇒ 换成 1 行就是 +1 / -3
+  ok(F(d1.diff).added === 1 && F(d1.diff).removed === 3, '增删数与行数口径同源(见 diff.ts 的 toLines)', F(d1.diff))
+  ok(d1.oldText === 'A1\nA2\n' && d1.newText === 'X-a.gd', '新旧两边都交出去(UI 要画 hunks)', [d1.oldText, d1.newText])
+  await P.loadDiff(ch)
+  ok(reads.length === 1, '第二条不重复读盘(展开→收起→再展开只读一次)', reads)
+  // 计划重算 ⇒ 缓存作废:同一 rel 也要重新读一次
+  await P.makePlan()
+  ok(Object.keys(F(P.previews.value)).length === 0, '重算计划后 diff 缓存清空(不然显示的是上一轮的正文)')
+  const noText = F(await P.loadDiff({ id: 'x', rel: 'a.gd', kind: 'rewrite', payload: {} }))
+  ok(noText.ready === false && S(noText.error).includes('执行那一刻'), 'payload 里没正文 ⇒ 说清是插件的形状决定没有 diff', noText.error)
+  ok(noText.oldText === 'A1\nA2\n', '旧正文还是给了(只缺新正文,不该一起装没有)')
+  const gone = F(await P.loadDiff({ id: 'y', rel: 'nope.gd', kind: 'rewrite', payload: { text: 'z' } }))
+  ok(gone.ready === false && S(gone.error).includes('文件不存在'), '读不到原文件时不画空 diff', gone.error)
+  const half = F(await P.loadDiff({ id: 'z', rel: 'big.gd', kind: 'rewrite', payload: { text: 'z' } }))
+  ok(half.ready === false && S(half.error).includes('完整正文'), '只拿到部分内容就不画 diff(改了会把半个文件写回去)', half.error)
+  ok(F(await P.loadDiff(null)).ready === false, '脏入参不抛')
 }
 
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)

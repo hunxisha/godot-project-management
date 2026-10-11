@@ -84,6 +84,12 @@ const kindFilter = ref<ToolKindFilter>('all')
 const tagFilter = ref('all')
 /** 工具箱内的二级导航(整个应用没有 vue-router,路由就是这种 ref + 分支;见 App.vue:18) */
 const activeToolId = ref('')
+/**
+ * Q26 的项目上下文:整个工具箱共享**一个**当前项目 id。
+ * 挂在这里(而不是各页面各存一份)是为了让「换个工具还是同一个项目」这件事成立;
+ * 插件永远不许自己挑项目 —— `plan()` 的 pid 由框架经 `buildGpm` 注入。
+ */
+const currentProjectId = ref('')
 
 // ── 计算 ─────────────────────────────────────────────────────────────────
 const registry = computed<ToolRegistry>(() => buildRegistry(tools.value))
@@ -301,6 +307,7 @@ async function ensureLoaded(deps: ScanDeps = REAL_DEPS): Promise<void> {
   viewMode.value = s.toolViewMode === 'grid' ? 'grid' : 'list'
   enabledMap.value = (s.toolEnabled && typeof s.toolEnabled === 'object' ? s.toolEnabled : {}) as Record<string, boolean>
   toolsRootSetting.value = typeof s.toolsRoot === 'string' ? s.toolsRoot : ''
+  currentProjectId.value = typeof s.toolProjectId === 'string' ? s.toolProjectId : ''
   loadedOnce.value = true
   await rescan(deps)
 }
@@ -309,6 +316,12 @@ async function ensureLoaded(deps: ScanDeps = REAL_DEPS): Promise<void> {
 async function setViewMode(m: 'list' | 'grid'): Promise<void> {
   viewMode.value = m === 'grid' ? 'grid' : 'list'
   await saveSettings({ toolViewMode: viewMode.value })
+}
+
+/** Q26:当前项目全局共享并记住,重启后回到上次那个 */
+async function setCurrentProject(id: string): Promise<void> {
+  currentProjectId.value = typeof id === 'string' ? id : ''
+  await saveSettings({ toolProjectId: currentProjectId.value })
 }
 
 /** Q25 / DEV-6:禁用 = 灰显 + 不注册 feature;开关写进 settings,不回写 manifest.status */
@@ -384,6 +397,8 @@ export function useToolkit() {
     loadedOnce,
     viewMode,
     enabledMap,
+    currentProjectId,
+    setCurrentProject,
     toolsRootSetting,
     query,
     kindFilter,

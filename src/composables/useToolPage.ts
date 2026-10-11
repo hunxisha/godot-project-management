@@ -17,7 +17,7 @@
 // 把「上一轮的勾选」留在模块缓存里,更常见的是让用户按执行时面对一份已经过期、文件已被改动的计划。
 // 首页的工具列表反过来必须挂模块级(见 useToolkit 文件头),两者的取舍不一样,别照着抄。
 
-import { computed, ref } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 import type { CancelBox } from '../toolkit/gpm'
 import type { Change, ChangePlan, PlannedChange } from '../toolkit/change'
 import type { ApplyReceipt } from '../toolkit/change'
@@ -26,6 +26,8 @@ import { buildGpm, makeCancelBox } from '../toolkit/gpm'
 import type { RegisteredTool } from '../toolkit/loader'
 import type { FieldDesc, ParamResult } from '../toolkit/schema'
 import { resolveParams, usableFields, validateSchema } from '../toolkit/schema'
+import type { FileDiff } from '../toolkit/diff'
+import { diffText } from '../toolkit/diff'
 import type { LoadResult } from '../toolkit/toollog'
 import { appendRun, entryFromRun, loadLog, recentFor, rollbackPlan } from '../toolkit/toollog'
 import type { ToolLogEntry } from '../toolkit/toollog'
@@ -59,7 +61,24 @@ export interface RollbackResult {
   failed: { rel: string, error: string }[]
 }
 
-export function useToolPage(tool: RegisteredTool, projectIdRef: { value: string }) {
+/**
+ * 单条改写的 diff 预览。
+ *
+ * 三种「不给 diff」分开说,而不是画一张空表糊弄过去:
+ *   · 原文件读不出来 / 没拿到完整正文(超限、二进制)—— 那连"旧"都没有;
+ *   · 这一条的正文要执行那一刻才产出(插件实现了 `apply` 而 payload 里没放 text)—— 旧文本有,新文本还没有。
+ *     这一档是**插件的形状**决定的,不是页面偷懒,所以措辞要把责任说清。
+ */
+export interface DiffPreview {
+  ready: boolean
+  oldText: string
+  newText: string
+  diff: unknown
+  error: string
+}
+
+/** 只读也行:传 computed / ref 都算,页面不许反过来通过它改当前项目 */
+export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value: string }) {
   const fields = ref<FieldDesc[]>([])
   const schemaIssues = ref<string[]>([])
   const rawParams = ref<Record<string, unknown>>({})
@@ -75,7 +94,9 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { value: string 
   const notice = ref('')
   const history = ref<ToolLogEntry[]>([])
   const historyError = ref('')
-  const cancelBox = ref<CancelBox | null>(null)
+  const cancelBox = shallowRef<CancelBox | null>(null)
+  /** diff 预览按 change.id 缓存:展开一条只读一次盘,收起再展开不重复读 */
+  const previews = ref<Record<string, DiffPreview>>({})
 
   const manifest = computed(() => (tool && tool.manifest) || null)
   const usable = computed(() => !!manifest.value && tool.state === 'ok' && !!tool.module)
@@ -198,9 +219,38 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { value: string 
     })
     plan.value = built
     checked.value = defaultSelectedIds(built)
+    // 计划一重算,旧的 diff 预览就过期了(同一 rel 的新正文可能已经不同):缓存必须跟着作废
+    previews.value = {}
     if (built.planError) notice.value = built.planError
     else if (!built.changes.length) notice.value = planSummary(built)
     planning.value = false
+  }
+
+  /**
+   * 展开某一条时按需读旧正文并算 diff(§5.8:diff 只裁展示,不影响能不能勾)。
+   *
+   * 读盘走同一个 ctx(能力门与前缀隔离都照 manifest 的声明),不新开第二条读文件的通路。
+   */
+  async function loadDiff(change: PlannedChange | null): Promise<DiffPreview> {
+    const id = change && typeof change.id === 'string' ? change.id : ''
+    if (!change || !id) return { ready: false, oldText: '', newText: '', diff: null, error: '没有这一条的标识,读不到它要改什么' }
+    const hit = previews.value[id]
+    if (hit) return hit
+    const ctx = ctxFor(projectIdRef.value, makeCancelBox())
+    const r = await ctx.readText(change.rel)
+    const payload = F(change.payload)
+    let out: DiffPreview
+    if (r.error) out = { ready: false, oldText: '', newText: '', diff: null, error: `读不到原文件:${r.error}` }
+    else if (r.truncated || r.skippedBinary) out = { ready: false, oldText: '', newText: '', diff: null, error: '没拿到完整正文(超出读取上限或被判成二进制),不拿半截内容画 diff' }
+    else if (typeof payload.text !== 'string') out = { ready: false, oldText: r.text, newText: '', diff: null, error: '这条的正文由插件在执行那一刻产出,预览阶段没有 diff' }
+    else out = { ready: true, oldText: r.text, newText: payload.text, diff: diffText(r.text, payload.text), error: '' }
+    previews.value = { ...previews.value, [id]: out }
+    return out
+  }
+
+  /** 这条能不能给出 diff(决定 UI 上那个「看差异」按钮要不要亮着) */
+  function diffible(change: PlannedChange | null): boolean {
+    return !!change && typeof F(change.payload).text === 'string'
   }
 
   const groups = computed(() => (plan.value ? groupPreview(plan.value) : []))
@@ -393,9 +443,14 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { value: string 
     pickedBytes,
     canExecute,
     cancelled,
+    /** view 型工具要的 ctx(同一套能力门与前缀隔离,不另开一条给插件的通路) */
+    ctx: () => ctxFor(projectIdRef.value, cancelBox.value || makeCancelBox()),
     open,
     loadTree,
     makePlan,
+    loadDiff,
+    diffible,
+    previews,
     toggleChange,
     checkAll,
     checkNone,
