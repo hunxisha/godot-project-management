@@ -7,7 +7,7 @@ type Tab = { key: string; label: string; icon: string; match?: string[] }
 // 顺序按使用频率:项目 → 文档(查 API 高频,与项目相邻)→ 插件(市场+已安装合并)→ 版本 → 备份。
 // 「插件」匹配 marketplace / addons 两个内部 key(App.vue 负责转发与记忆子页)。
 // 设置不放导航:右上角齿轮直达(低频,不占黄金位)。
-// 「工具」放最后:体检是按需功能,不该挤占高频位(与设置不进导航同一理由)。
+// 「工具」放最后:工具箱是按需功能,不该挤占高频位(与设置不进导航同一理由)。
 const tabs: Tab[] = [
   { key: 'dashboard', label: '概览', icon: 'grid' },
   { key: 'projects', label: '项目', icon: 'folder' },

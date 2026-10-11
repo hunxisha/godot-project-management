@@ -174,8 +174,9 @@ export async function buildRefIndex(ctx: RefScanSource): Promise<RefIndex> {
     const res = await ctx.readText(rel)
     const text = res && typeof res.text === 'string' ? res.text : undefined
     if (text === undefined) {
-      // 判据 6(同 brokenRefs 的三态):readText 给不出 text 就是「读不到」—— 缺文件 / 超
-      // maxBytes / 二进制 / 非法路径(见 inspectfs.js:116-125 与 useTools.ts:249-268 的收敛)。
+      // 判据 6(旧 brokenRefs 检查器也是这套三态;该检查器已随工具箱重做第 0 批拆除):
+      // readText 给不出 text 就是「读不到」—— 缺文件 / 超 maxBytes / 二进制 / 非法路径。
+      // 收敛落在 inspectfs.js:116-125;旧 useTools.ts:249-268 那一层已拆,要对照请走 git 历史。
       // 只有白名单来源读不到才记 readFailures:png 本来就不该被读,记了就是把噪声当结论。
       // reason 用 ctx 给的原语串(skipped / error),不编造宿主没说的原因。
       readFailures.push({ rel, reason: res && res.skipped ? 'skipped' : 'error' })

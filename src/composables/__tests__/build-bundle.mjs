@@ -13,8 +13,7 @@
 //   .gpm-test/out/godotversion.mjs    ← src/utils/godotVersion.ts           (src/__tests__/marketUtils.test.mjs)
 //   .gpm-test/out/markettags.mjs      ← src/utils/marketTags.ts             (src/__tests__/marketUtils.test.mjs)
 //   .gpm-test/out/usedocs.mjs         ← src/composables/useDocs.ts          (src/composables/__tests__/useDocs.test.mjs)
-//   .gpm-test/out/usetools.mjs        ← src/composables/useTools.ts + 工具注册表 (useTools.test.mjs)
-//   .gpm-test/out/tools.mjs           ← src/tools/index.ts(barrel,全部工具页纯函数) (src/tools/__tests__/tools.test.mjs)
+//   .gpm-test/out/tools.mjs           ← src/tools/index.ts(barrel,Godot 文件解析器 + 树工具) (src/tools/__tests__/*.test.mjs)
 //
 // 一次打包供全部渲染层测试共用(npm run test:renderer),避免每个测试各起一次 vite。
 //
@@ -55,7 +54,6 @@ await build({
         usebackuppageactions: path.join(root, 'src', 'composables', 'useBackupPageActions.ts'),
         useupdatescan: path.join(root, 'src', 'composables', 'useUpdateScan.ts'),
         usedocs: path.join(root, 'src', 'composables', 'useDocs.ts'),
-        usetools: path.join(root, 'src', 'composables', 'useTools.ts'),
         format: path.join(root, 'src', 'utils', 'format.ts'),
         godotversion: path.join(root, 'src', 'utils', 'godotVersion.ts'),
         markettags: path.join(root, 'src', 'utils', 'marketTags.ts'),
@@ -75,6 +73,6 @@ await build({
   }
 })
 
-for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'usetools', 'format', 'godotversion', 'markettags', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'vueshim', 'tools']) {
+for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'format', 'godotversion', 'markettags', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'vueshim', 'tools']) {
   console.log(`bundle built: ${path.join(root, OUT_DIR, `${name}.mjs`)}`)
 }

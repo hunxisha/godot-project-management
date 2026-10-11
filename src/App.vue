@@ -298,8 +298,10 @@ function gotoCreateBackup(id: string) {
            工具页试过加进 include(字符串与数组两种写法、并给组件补 defineOptions name),
            实测不生效:dev-mock 里切页回来后 .rail 与 .pick select 的元素身份都是新的,
            而 select 的 value 前后一致(排除了「误触发 change 把结论清空」);同一次实验里
-           市场页的元素身份是保留的。根因未定(§D #12),改用另一条确定生效的路:
-           工具页状态走 useToolsShared() 模块级单例,重挂载也带着这一轮结论回来。 -->
+           市场页的元素身份是保留的。根因未定(§D #12)。
+           工具箱重做第 0 批补一句:这条「实测不生效」的结论**仍然有效**,第 1 批的新工具箱
+           状态照样走模块级单例(useToolkitShared),不要再试 include。
+           旧的 useToolsShared 连同它的体检状态已在第 0 批拆掉,本页现在是空壳。 -->
       <KeepAlive include="MarketplaceView">
         <Dashboard v-if="tab === 'dashboard'" @navigate="tab = $event" @create="gotoCreate" />
         <ProjectsView
@@ -343,8 +345,9 @@ function gotoCreateBackup(id: string) {
           @navigate="tab = $event"
           @backup-project="gotoCreateBackup"
         />
-        <!-- 工具页:体检进度只活在本页的汇总条里(P0a 不接全局任务栏 taskqueue) -->
-        <ToolsView v-else-if="tab === 'tools'" @navigate="tab = $event" />
+        <!-- 工具页:第 0 批的空壳(旧的体检控制台已拆,理由与去向见 docs/toolkit-redesign-plan.md)。
+             空壳不 emit navigate,所以这里不再绑 @navigate。 -->
+        <ToolsView v-else-if="tab === 'tools'" />
         <SettingsView v-else />
       </KeepAlive>
     </main>
