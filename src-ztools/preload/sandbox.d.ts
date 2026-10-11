@@ -98,6 +98,12 @@ declare module 'node:fs' {
     name: string
     isDirectory(): boolean
     isFile(): boolean
+    /**
+     * 是不是符号链接(工具箱的 `toolplugins.js` 用它把链接目录从插件清单里排除)。
+     * 补这条声明是因为**列目录时必须区分链接与真目录**:跟随链接去读/写,
+     * 就等于允许「插件目录」通向任意路径。`isDirectory()` 对链接目录也返回 true,分不开它。
+     */
+    isSymbolicLink(): boolean
   }
   // 编码字面量优先,这样 readFileSync(p, 'utf8') 能拿到 string
   export function readFileSync(path: string, encoding: 'utf8' | 'utf-8' | 'ascii'): string

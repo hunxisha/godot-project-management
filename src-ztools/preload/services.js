@@ -18,6 +18,7 @@ const datatransfer = require('./lib/datatransfer')
 const diagnostics = require('./lib/diagnostics')
 const docs = require('./lib/docs')
 const inspectfs = require('./lib/inspectfs')
+const toolplugins = require('./lib/toolplugins')
 const buildtools = require('./lib/buildtools')
 const tplsource = require('./lib/tplsource')
 const tpllib = require('./lib/tpllib')
@@ -187,6 +188,14 @@ const servicesImpl = {
   movePathsToTrash: (projectId, rels) => inspectfs.movePathsToTrash(projectId, rels),
   /** 批量计算项目内文件的 SHA-256(流式分块读;重复文件检测的真相通道) */
   hashPaths: (projectId, rels) => inspectfs.hashPaths(projectId, rels),
+  /** 工具箱:解析「工具目录」设置(~/.gpm-tools 或用户改过的绝对路径);不碰盘,只给结论 */
+  toolsRoot: () => toolplugins.toolsRoot(),
+  /** 工具箱:扫描工具目录,返回每个插件子目录的 manifest 原文 + 文件清单(单个插件坏了自己带 error) */
+  listToolPlugins: (dir) => toolplugins.listToolPlugins(dir),
+  /** 工具箱:读插件目录内的文件(entry 正文 / 图标);三道闸语义同 readProjectText,根换成工具目录 */
+  readToolPlugin: (dir, pluginDir, rel, opts) => toolplugins.readToolPlugin(dir, pluginDir, rel, opts),
+  /** 工具箱:写插件目录(骨架生成器专用);默认不覆已存在,要覆必须显式 overwrite:true */
+  writeToolPlugin: (dir, pluginDir, files, opts) => toolplugins.writeToolPlugin(dir, pluginDir, files, opts),
   /** 列出项目的导出预设(解析 export_presets.cfg) */
   listExportPresets: (projectId) => exporter.listExportPresets(projectId),
   /** 发起导出(入队,进度走 watchExportTasks,任务 kind='export') */

@@ -245,7 +245,37 @@ export interface Services {
   /** 批量移入回收站(Windows)/永久删除(其他平台);单个失败不中断,失败项如实返回 */
   movePathsToTrash(projectId: string, rels: string[]): TrashResult
   /** 批量计算项目内文件的 SHA-256(流式分块读,不整文件进内存;单个失败不中断,失败项如实返回) */
-  hashPaths(projectId: string, rels: string[]): HashPathsResult
+  hashPaths(projectId: string, rels: string[]): HashPathsResult,
+  /** 工具箱:解析「工具目录」(设置里的 toolsRoot 优先,缺省 ~/.gpm-tools)。
+   *  相对路径配置会被拒 —— 相对路径随 cwd 漂,列表会无端端变空或变出不存在的插件 */
+  toolsRoot(): { ok: boolean, dir: string, source: 'default' | 'settings', error: string }
+  // (listToolPlugins 的 dir 回报里没有 source 字段:调用方知道自己传没传目录)
+  /** 工具箱:扫描工具目录。manifest 只给**原文**,解析在渲染层 src/toolkit/manifest.ts(唯一一份判据);
+   *  单个插件坏了自己带 error,不影响其他条目。目录不存在时会被创建(created 标出来) */
+  listToolPlugins(dir?: string): {
+    ok: boolean
+    dir: string
+    created: boolean
+    error: string
+    entries: {
+      name: string
+      abs: string
+      manifestText: string
+      files: string[]
+      bytes: number
+      error?: string
+    }[]
+  }
+  /** 工具箱:读插件目录内的文件(三道闸同 readProjectText,根换成工具目录;符号链接按真实落点拒) */
+  readToolPlugin(dir: string, pluginDir: string, rel: string, opts?: { maxBytes?: number }): ReadTextResult
+  /** 工具箱:写插件目录(骨架生成器)。默认**不覆已存在**的文件,要覆必须显式 overwrite:true */
+  writeToolPlugin(dir: string, pluginDir: string, files: { rel: string, text: string }[], opts?: { overwrite?: boolean }): {
+    ok: boolean
+    dir: string
+    written: string[]
+    failed: { rel: string, error: string }[]
+    error: string
+  }
   /** 添加项目(目录或 project.godot 文件路径) */
   addProject(inputPath: string): {
     ok: boolean
