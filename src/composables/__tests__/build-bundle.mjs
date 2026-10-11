@@ -15,6 +15,7 @@
 //   .gpm-test/out/usedocs.mjs         ← src/composables/useDocs.ts          (src/composables/__tests__/useDocs.test.mjs)
 //   .gpm-test/out/tools.mjs           ← src/tools/index.ts(barrel,Godot 文件解析器 + 树工具) (src/tools/__tests__/*.test.mjs)
 //   .gpm-test/out/tkmanifest.mjs      ← src/toolkit/manifest.ts(工具箱 manifest 校验) (src/toolkit/__tests__/manifest.test.mjs)
+//   .gpm-test/out/tkorchestrate.mjs   ← src/toolkit/orchestrate.ts(三段式调度) (src/toolkit/__tests__/orchestrate.test.mjs)
 //
 // 一次打包供全部渲染层测试共用(npm run test:renderer),避免每个测试各起一次 vite。
 //
@@ -66,6 +67,7 @@ await build({
         // 工具箱(第 1 批)按模块各开一个入口:纯函数层进 Node harness,
         // 不建 barrel —— 建了就把碰 window 的 loader/gpm 一起拖进测试产物。
         tkmanifest: path.join(root, 'src', 'toolkit', 'manifest.ts'),
+        tkorchestrate: path.join(root, 'src', 'toolkit', 'orchestrate.ts'),
         // 测试专用:暴露 vue(与各入口共享同一个 chunk),供测试创建 ref
         vueshim: path.join(root, 'src', 'composables', '__tests__', 'vue-shim.mjs')
       },
@@ -77,6 +79,6 @@ await build({
   }
 })
 
-for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'format', 'godotversion', 'markettags', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'vueshim', 'tools', 'tkmanifest']) {
+for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'format', 'godotversion', 'markettags', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'vueshim', 'tools', 'tkmanifest', 'tkorchestrate']) {
   console.log(`bundle built: ${path.join(root, OUT_DIR, `${name}.mjs`)}`)
 }
