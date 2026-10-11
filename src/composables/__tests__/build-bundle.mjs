@@ -90,6 +90,8 @@ await build({
         tkorchestrate: path.join(root, 'src', 'toolkit', 'orchestrate.ts'),
         tkdiff: path.join(root, 'src', 'toolkit', 'diff.ts'),
         tkschema: path.join(root, 'src', 'toolkit', 'schema.ts'),
+        // 引用改写(第 2 批 Task 17):它改的是用户文件里的字节,判据必须能单测
+        tkrefs: path.join(root, 'src', 'tools', 'builtin', 'gdscript-rename', 'refs.ts'),
         // 测试专用:暴露 vue(与各入口共享同一个 chunk),供测试创建 ref
         vueshim: path.join(root, 'src', 'composables', '__tests__', 'vue-shim.mjs')
       },
@@ -101,6 +103,6 @@ await build({
   }
 })
 
-for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'usetoolkit', 'usetoolpage', 'format', 'godotversion', 'markettags', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'vueshim', 'tools', 'tkmanifest', 'tkorchestrate', 'tkdiff', 'tkschema', 'tkgpm', 'tkloader', 'tkfeatures', 'tktoollog', 'tkscaffold', 'tkformat', 'tkform']) {
+for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'usetoolkit', 'usetoolpage', 'format', 'godotversion', 'markettags', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'vueshim', 'tools', 'tkmanifest', 'tkorchestrate', 'tkdiff', 'tkschema', 'tkgpm', 'tkloader', 'tkfeatures', 'tktoollog', 'tkscaffold', 'tkformat', 'tkform', 'tkrefs']) {
   console.log(`bundle built: ${path.join(root, OUT_DIR, `${name}.mjs`)}`)
 }
