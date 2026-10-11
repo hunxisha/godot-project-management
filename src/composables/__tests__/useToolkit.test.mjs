@@ -140,8 +140,13 @@ section('1. 内置工具与用户插件汇入同一条注册路径(DEV-4 / Q23=A
   const rows = rowsOf()
   ok(rows.some((r) => r.id === 'gdscript-format' && r.src === 'builtin' && r.state === 'ok'),
     '内置的 GDScript 格式化注册成功(source=builtin,state=ok)', rows)
+  ok(rows.some((r) => r.id === 'gdscript-rename' && r.src === 'builtin' && r.state === 'ok'),
+    '内置的批量重命名也走同一条路注册成功(它多要一个 ref 能力,能力门同样得放行)', rows)
   ok(rows.some((r) => r.id === 'hello' && r.src === 'user' && r.state === 'ok'), '用户插件同一条路径进来了', rows)
-  ok(K.counts.value.ok === 2, '两个都是可用状态(能力门必须放行:granted 没传会全员 no-capability)', K.counts.value)
+  // 不写死「几个」:内置工具会一批批增加,写死个数就等于每加一个工具都要来改这条(钉写法的那一族假红)。
+  // 这条真正要钉的是「能力门放行 ⇒ 没有任何一条落在 no-capability」。
+  ok(rows.length === 3 && K.counts.value.ok === rows.length,
+    '三条全部可用(能力门必须放行:granted 没传会全员 no-capability)', K.counts.value)
   ok(K.hasBroken.value === false, '没有坏条目时不亮「有插件没载入」的标')
   ok(K.scanState.value === 'done', '扫完是 done', K.scanState.value)
   // 内置在前的排序是 loader 的判据,这里只验装配没把它排丢

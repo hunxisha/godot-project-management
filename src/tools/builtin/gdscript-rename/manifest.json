@@ -1,0 +1,15 @@
+{
+  "id": "gdscript-rename",
+  "name": "GDScript 批量重命名",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "kind": "action",
+  "ui": "schema",
+  "summary": "按正则 / 前后缀 / 命名模板 / 大小写批量改文件名,并连引用一起改:load 与 preload、ext_resource、project.godot 的配置点,边车跟着走",
+  "description": "选一批 .gd / .tscn / .tres,按一种模式改文件名;改名的同时把引用这些文件的地方一起改到新路径(注释里、多行字符串里的路径不动)。扩展名永远不动,.uid 与 .import 边车由框架随主文件一起搬,uid 本身一个字节都不改。",
+  "cmds": ["重命名", "改名", "批量改名", "rename"],
+  "entry": "index.ts",
+  "capabilities": ["tree", "text", "ref", "write"],
+  "author": "Godot 工坊(内置)",
+  "tags": ["gdscript", "重命名", "引用"]
+}

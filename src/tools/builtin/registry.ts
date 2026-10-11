@@ -12,6 +12,8 @@
 
 import gdFormatManifest from './gdscript-format/manifest.json'
 import * as gdFormat from './gdscript-format/index'
+import gdRenameManifest from './gdscript-rename/manifest.json'
+import * as gdRename from './gdscript-rename/index'
 
 export interface BuiltinTool {
   /** manifest 原文(交给 validateManifest 解析,不在这里手写对象) */
@@ -22,5 +24,7 @@ export interface BuiltinTool {
 }
 
 export const BUILTIN_TOOLS: BuiltinTool[] = [
-  { manifest: gdFormatManifest, mod: gdFormat, files: ['manifest.json', 'index.ts'] }
+  { manifest: gdFormatManifest, mod: gdFormat, files: ['manifest.json', 'index.ts'] },
+  // 第 2 批的第二个内置工具:它同时是 rename 执行通道(Task 15/16)与引用改写(Task 17)的真实使用者
+  { manifest: gdRenameManifest, mod: gdRename, files: ['manifest.json', 'index.ts', 'refs.ts', 'modes.ts'] }
 ]
