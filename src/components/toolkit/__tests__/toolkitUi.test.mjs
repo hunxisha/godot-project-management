@@ -41,8 +41,45 @@ const FILES = {
   pkg: 'package.json'
 }
 const SRC = {}
-/** 去掉注释后的扫描面:注释是给人讲理由的,拿它判「代码里有没有这句话」会一直假红 */
-const code = (x) => String(x).replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n')
+/**
+ * 剥注释,给禁令类断言当扫描面。**不能**用「先 replace 掉块注释,再按行剔双斜杠」那种写法:
+ * 行注释里 `toolkit/` 后面紧跟一个星号,就会被当成块注释的开头,于是从那一行一路吃到下一个
+ * 块注释结束符之间**所有真实代码**都被剥掉 —— 这次就是 ToolPageView 第 6 行那句注释让它的
+ * script 第 6~96 行整体从扫描面消失,落在那一段里的断言全部静默失明(一把本该红的刀因此「存活」)。
+ * 所以这里按字符扫一遍:注释只在**字符串外**才算,三种引号与模板串各自成段。
+ * (本段刻意不写出那两组成对符号 —— 写了就会在这里先把本注释提前关掉,变成语法错。这本身就是同一类坑。)
+ */
+function code(src) {
+  const s = String(src)
+  let out = ''
+  let i = 0
+  while (i < s.length) {
+    const c = s[i]
+    const d = s[i + 1]
+    if (c === '/' && d === '/') { while (i < s.length && s[i] !== '\n') i++; continue }
+    if (c === '/' && d === '*') {
+      i += 2
+      while (i < s.length && !(s[i] === '*' && s[i + 1] === '/')) i++
+      i += 2
+      continue
+    }
+    if (c === "'" || c === '"' || c === '`') {
+      out += c
+      i++
+      while (i < s.length) {
+        if (s[i] === '\\') { out += s[i] + (s[i + 1] || ''); i += 2; continue }
+        if (s[i] === c) { out += s[i]; i++; break }
+        if (s[i] === '\n' && c !== '`') { i++; break }        // 单双引号串不跨行,别让它一路吞到文件尾
+        out += s[i]
+        i++
+      }
+      continue
+    }
+    out += c
+    i++
+  }
+  return out
+}
 section('0. 文件都在,且都是 `<script setup>` + `<template>` 的形状')
 for (const [k, rel] of Object.entries(FILES)) {
   if (k === 'css' || k === 'pkg' || k === 'scaffoldTs') continue
@@ -56,6 +93,26 @@ for (const [k, rel] of Object.entries(FILES)) {
 SRC.css = read(FILES.css) || ''
 SRC.pkg = read(FILES.pkg) || ''
 SRC.scaffoldTs = read(FILES.scaffoldTs) || ''
+
+section('0b. 扫描面自检:剥注释这一步不许把真实代码吃掉')
+{
+  // 教训来自这一轮:code() 以前把行注释里的 `toolkit/*` 当成块注释开头,于是 ToolPageView 的
+  // script 第 6~96 行整段从扫描面消失 —— 落在那一段的禁令断言全部静默失明,一把本该红的刀因此「存活」。
+  // **断言的靶子塌了,比根本没写这条断言更坏**:它继续报绿,而它已经什么都看不见了。
+  const ANCHORS = {
+    page: ['async function onRollback', '<FilePicker', '.notice {', 'showPicker'],
+    form: ["f.type === 'files'", '<slot', "emit('pick-files')"],
+    notice: ['PERMISSION_TEXT', 'perm-more'],
+    home: ['consentOpen', '<PermissionNotice', 'onRescan'],
+    scaffoldTs: ['PERMISSION_TEXT', 'buildSkeleton']
+  }
+  for (const [k, list] of Object.entries(ANCHORS)) {
+    const raw = SRC[k] !== undefined ? SRC[k] : (read(FILES[k]) || '')
+    const stripped = code(raw)
+    for (const a of list) ok(stripped.includes(a), `${k}:剥注释后扫描面里还留着 ${a}`)
+    ok(stripped.length > raw.length * 0.6, `${k}:剥注释后剩下的字节数没塌掉四成`, [stripped.length, raw.length])
+  }
+}
 
 section('1. 只用 main.css 里已有的变量(不新增令牌 / 不臆造名字)')
 {
@@ -207,6 +264,44 @@ section('10. 工具页:状态门、取消、回滚、账本都接上了')
   ok(SRC.page.includes('watch(pidRef'), '换项目会重拉文件树并重算计划(旧计划属于上一个项目)')
   ok(SRC.page.includes('try {') && SRC.page.includes('抛异常'), 'view 型渲染包在 try 里:插件炸了只塌这一块')
   ok(SRC.page.includes('<SchemaForm') && SRC.page.includes('<ChangeList'), 'action 型走表单 + 预览勾选')
+
+  // ── 真宿主反馈的两条:「点挑选文件无反应」与「被拦的提示是绿的」 ──────────────
+  // 这一组全部扫**剥注释后的面**(code()):禁令类断言扫原文的话,一句解释「以前这里写成什么样」的
+  // 注释就会把自己打红 —— 而那种红只会引人去删注释,不是去改代码。(位置判据同理:注释里提一次
+  // `#files-picker` 就能把 indexOf 指错地方。)
+  const pageCode = code(SRC.page)
+  const formCode = code(SRC.form)
+  // ① 面板必须就地展开在它服务的那个字段下面。以前 FilePicker 挂在**整张表单卡片之后**,
+  //    而内置格式化有七个字段 ⇒ 点完按钮视口里什么都不变,用户的原话就是「无反应」。
+  const iSlot = pageCode.indexOf('#files-picker')
+  const iPick = pageCode.indexOf('<FilePicker')
+  const iFormClose = pageCode.indexOf('</SchemaForm>')
+  ok(iSlot >= 0 && iPick > iSlot && iFormClose > iPick,
+    '文件面板交给 SchemaForm 的 files-picker 插槽(在表单内部、字段正下方),不是表单下面那块独立卡片',
+    [iSlot, iPick, iFormClose])
+  ok(formCode.includes('name="files-picker"'), 'SchemaForm 那侧留了插槽(候选仍然不由它自己画 —— 选中集只有一个真源)')
+  // ② 按钮要表达开合:它是 toggle,再点一次会收起,文案不跟着变就像「点了没反应」的第二次
+  ok(formCode.includes('pickerOpen'), '面板开合状态传进了表单组件', null)
+  ok(formCode.includes('收起'), '「挑选文件」按钮有收起态文案(toggle 必须看得出来)')
+  ok(pageCode.includes('picker-open'), '页面把状态传下去(不是两边各存一份)')
+  // ③ notice 的两种语义要有两种颜色。判的是**方向**:除了成功色,还得有一条坏色规则,
+  //    而且模板挂类要由级别驱动 —— 只判「含不含 .bad」的话,写个死类名也能过。
+  ok(/\.notice[.\s]+bad\b[^{]*\{[^}]*var\(--(danger|warn)/.test(pageCode),
+    '样式里存在 notice 的坏色一档(只有一种 --ok 色 = 失败冒充成功)', null)
+  ok(pageCode.includes('noticeKind'), '那条提示的类由 notice 的级别驱动,不是写死一种颜色')
+  ok((pageCode.match(/page\.notice\.value\s*=/g) || []).length === 0,
+    '视图不直接写 notice(回滚那句以前是视图覆盖上去的 ⇒ 永远是绿,而且多一处真源)',
+    (pageCode.match(/page\.notice[^\n]*/g) || []).slice(0, 3))
+}
+
+section('10b. notice 只有一个写入口(漏定级要在结构上不可能,而不是靠自觉)')
+{
+  const ts = code(read('src/composables/useToolPage.ts') || '')   // 同样扫剥注释后的面:注释里引用旧写法不该打红
+  ok((ts.match(/notice\.value\s*=/g) || []).length === 1,
+    'useToolPage 里对 notice 的直接赋值恰好一处(在 say 内部);八处语义各自赋值迟早漏一级',
+    (ts.match(/[^\n]*notice\.value\s*=[^\n]*/g) || []))
+  ok(ts.includes('noticeKind'), '级别与文本同一次设置(noticeKind 在场)')
+  ok((ts.match(/say\(/g) || []).length >= 8, '各处提示都走 say(数一下调用点)', (ts.match(/say\(/g) || []).length)
 }
 
 section('11. 首页:§3 第 10 项列的东西逐项在场(Q13=B / Q25)')

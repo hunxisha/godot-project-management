@@ -77,9 +77,10 @@ async function onExecute() {
 
 async function onRollback(entry: any) {
   rolling.value = `${entry.toolId}|${entry.at}`
-  const r = await page.rollback(entry)
+  // 结论由 page.rollback() 自己写进 notice(连级别一起)—— 视图以前在这里 `page.notice.value = r.text`
+  // 覆盖一次,等于把「成了没成」的判断搬到颜色那一侧,而且 notice 有了第二个真源。
+  await page.rollback(entry)
   rolling.value = ''
-  page.notice.value = r.text
 }
 
 const expandedRel = computed(() => {
@@ -144,19 +145,21 @@ const ViewHost = defineComponent({
           :model="page.rawParams.value"
           :issues="page.paramIssues.value"
           :picked-count="page.picked.value.length"
+          :picker-open="showPicker"
           @set="setParam"
           @pick-files="showPicker = !showPicker"
-        />
+        >
+          <!-- 面板就地展开在那个字段下面(以前是整张表单之后的一块独立卡片 ⇒ 点了像没反应) -->
+          <template v-if="showPicker" #files-picker>
+            <FilePicker
+              :candidates="page.candidates.value"
+              :model="page.picked.value"
+              :truncated="page.treeTruncated.value"
+              @update:model="setPicked"
+            />
+          </template>
+        </SchemaForm>
         <p v-for="(s, i) in page.schemaIssues.value" :key="'s' + i" class="bad">{{ s }}</p>
-      </div>
-
-      <div v-if="showPicker" class="card">
-        <FilePicker
-          :candidates="page.candidates.value"
-          :model="page.picked.value"
-          :truncated="page.treeTruncated.value"
-          @update:model="setPicked"
-        />
       </div>
 
       <div class="bar">
@@ -186,7 +189,7 @@ const ViewHost = defineComponent({
         <span v-else-if="page.gate.value.ok === false" class="gate">{{ page.gate.value.reason }}</span>
       </div>
 
-      <p v-if="page.notice.value" class="notice">{{ page.notice.value }}</p>
+      <p v-if="page.notice.value" class="notice" :class="page.noticeKind.value">{{ page.notice.value }}</p>
 
       <h4 class="sec">这个工具最近几条</h4>
       <p v-if="page.historyError.value" class="bad">{{ page.historyError.value }}</p>
@@ -293,6 +296,15 @@ const ViewHost = defineComponent({
   color: var(--ok);
   font-size: 12.5px;
   font-weight: 600;
+}
+
+/*
+ * 同一句话的位置,两种语义:`.notice` 自己只该在「这一轮真的落盘了」时亮成功色。
+ * 被拦、插件算失败、回滚做不成、账本没记上 ⇒ 级别是 bad,颜色跟着翻(以前八处语义共用一种绿,
+ * 用户把「参数还没填对」读成了「显示错误」—— 颜色说的和文字说的正好相反)。
+ */
+.notice.bad {
+  color: var(--danger);
 }
 
 .bad {

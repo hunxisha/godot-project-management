@@ -612,6 +612,83 @@ section('13. 插件的 apply 收到的必须是 (ctx, change) —— §F 的 ent
   ok(S(P.notice.value).includes('2') && FA(F(P.receipt.value).failed).length === 0, '回执是成功那一条', P.notice.value)
 }
 
+section('14. notice 按「成了没成」分级(真宿主反馈:被拦的提示是绿色的,读起来像成功)')
+{
+  // `.notice` 以前只有一种颜色 var(--ok),而 notice 承载八处语义 —— 门拒绝、planError、回滚失败全是绿的。
+  // 判据方向:**只有「这一轮真的落盘并记上了」才算 ok,其余一律 bad**。
+  // 「没算出东西」也归 bad 是有意的:用户点「算一遍」而什么都没成,下一步动作正是被这条提示驱动的;
+  // 颜色只负责回答「成没成」,原因归措辞。反悔成本低(要三级就是再加一个分支)。
+  ok(typeof P.noticeKind === 'object' && typeof F(P.noticeKind).value === 'string', 'noticeKind 在导出面上(渲染层靠它挂类)', typeof P.noticeKind)
+
+  // ① 参数没过校验 ⇒ 被拦
+  resetDisk()
+  P = T.useToolPage(toolOf(MOD), pid)
+  await P.open()
+  P.picked.value = ['a.gd']
+  P.rawParams.value.limit = 99          // 超出 schema 的 max:2
+  await P.makePlan()
+  ok(S(P.notice.value).includes('参数还没填对'), '被拦时那句话还在(措辞一个字没动)', P.notice.value)
+  ok(F(P.noticeKind).value === 'bad', '但它是 bad 不是 ok —— 用户报的那条「显示错误」就是这个绿色', F(P.noticeKind).value)
+
+  // ② 插件算失败(planError)
+  resetDisk()
+  P = T.useToolPage(toolOf({ schema: MOD.schema, plan: async () => '不是数组' }), pid)
+  await P.open()
+  P.picked.value = ['a.gd']
+  P.rawParams.value.limit = 1
+  await P.makePlan()
+  ok(S(P.notice.value).length > 0 && F(P.noticeKind).value === 'bad', 'planError 同级(失败冒充成功是最坏的一种)', [P.notice.value, F(P.noticeKind).value])
+
+  // ③ 门拒绝(一条都没勾)
+  resetDisk()
+  P = T.useToolPage(toolOf(MOD), pid)
+  await P.open()
+  P.picked.value = ['a.gd']
+  P.rawParams.value.limit = 1
+  await P.makePlan()
+  P.checkNone()
+  await P.execute()
+  ok(S(P.notice.value).length > 0 && F(P.noticeKind).value === 'bad', '执行被门拦下 ⇒ bad', [P.notice.value, F(P.noticeKind).value])
+
+  // ④ 真的做完了 ⇒ ok(这一级只留给它)
+  resetDisk()
+  P = T.useToolPage(toolOf(MOD), pid)
+  await P.open()
+  P.picked.value = ['a.gd']
+  P.rawParams.value.limit = 1
+  await P.makePlan()
+  await P.execute()
+  ok(F(P.noticeKind).value === 'ok' && S(P.notice.value).includes('改写 1 个文件'), '执行成功才是 ok', [P.notice.value, F(P.noticeKind).value])
+
+  // ⑤ 回滚失败 ⇒ bad(它以前是「绿字里追加一段失败」)
+  const entry = AT(logDoc(), 0)
+  const bak = S(AT(FA(entry.backups), 0).backupRel)
+  delete DISK[bak]                      // 备份没了:还原做不成,这一轮就是没成
+  const res = F(await P.rollback(entry))
+  ok(res.ok !== true, '夹具确实造出了失败那一支', res.ok)
+  ok(F(P.noticeKind).value === 'bad', '回滚失败 ⇒ bad(不许接着用成功色)', [S(P.notice.value), F(P.noticeKind).value])
+
+  // ⑥ 没话可说时不留一条「看着像成功」的着色
+  resetDisk()
+  P = T.useToolPage(toolOf(MOD), pid)
+  await P.open()
+  ok(S(P.notice.value) === '' && F(P.noticeKind).value === '', 'notice 空 ⇒ 级别也空(类不挂上去)', [P.notice.value, F(P.noticeKind).value])
+
+  // ⑦ 部分完成:回执那句自己会写「失败 N 条」,颜色必须跟着翻 —— 它是最容易被当成成功的一种没成
+  resetDisk()
+  const savedWrite = global.window.services.writeProjectText
+  global.window.services.writeProjectText = async () => ({ ok: false, error: '磁盘是只读的' })
+  P = T.useToolPage(toolOf(MOD), pid)
+  await P.open()
+  P.picked.value = ['a.gd']
+  P.rawParams.value.limit = 1
+  await P.makePlan()
+  await P.execute()
+  global.window.services.writeProjectText = savedWrite
+  ok(S(P.notice.value).includes('失败'), '回执说的是失败', P.notice.value)
+  ok(F(P.noticeKind).value === 'bad', '部分完成 ⇒ bad(不是那条成功绿)', F(P.noticeKind).value)
+}
+
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) {
   console.log('失败项:')

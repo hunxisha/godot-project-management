@@ -132,6 +132,20 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
   const planning = ref(false)
   const receipt = ref<ApplyReceipt | null>(null)
   const notice = ref('')
+  /**
+   * 那条提示「这一轮成了没」:'' 没话 / 'ok' 真的落盘并记上了 / 'bad' 被拦、失败、没算出东西。
+   *
+   * 以前 `.notice` 只有一种颜色 var(--ok),而 notice 承载八处语义 —— 门拒绝、planError、
+   * 回滚失败、账本没记上全都是绿的(真宿主上用户读成「显示错误」的那条就是它)。
+   * 定级收在 `say()` 一个口子里:新增一条提示**必须**经过它,漏定级在结构上不可能。
+   */
+  const noticeKind = ref('')
+
+  /** notice 唯一的写入口:文本与级别一次设好;清空时级别跟着清(不挂一个看着像成功的类) */
+  function say(text: string, kind = ''): void {
+    notice.value = text
+    noticeKind.value = text ? kind : ''
+  }
   const history = ref<ToolLogEntry[]>([])
   const historyError = ref('')
   const cancelBox = shallowRef<CancelBox | null>(null)
@@ -239,9 +253,9 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
    */
   async function makePlan(): Promise<void> {
     if (!usable.value || !manifest.value) return
-    if (paramIssues.value.length) { notice.value = '参数还没填对,没有去算改动'; return }
+    if (paramIssues.value.length) { say('参数还没填对,没有去算改动', 'bad'); return }
     planning.value = true
-    notice.value = ''
+    say('')
     receipt.value = null
     const box = makeCancelBox()
     cancelBox.value = box
@@ -261,8 +275,8 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
     checked.value = defaultSelectedIds(built)
     // 计划一重算,旧的 diff 预览就过期了(同一 rel 的新正文可能已经不同):缓存必须跟着作废
     previews.value = {}
-    if (built.planError) notice.value = built.planError
-    else if (!built.changes.length) notice.value = planSummary(built)
+    if (built.planError) say(built.planError, 'bad')
+    else if (!built.changes.length) say(planSummary(built), 'bad')
     planning.value = false
   }
 
@@ -320,9 +334,9 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
    */
   async function execute(): Promise<void> {
     if (!plan.value || !manifest.value) return
-    if (gate.value.ok !== true) { notice.value = S(gate.value.reason); return }
+    if (gate.value.ok !== true) { say(S(gate.value.reason), 'bad'); return }
     running.value = true
-    notice.value = ''
+    say('')
     const box = cancelBox.value || makeCancelBox()
     cancelBox.value = box
     const pid = projectIdRef.value
@@ -345,7 +359,8 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
       }
     })
     receipt.value = r
-    notice.value = summaryText(r)
+    // 部分完成(有失败项)不算成:回执那句自己会写「失败 N 条」,颜色跟着走
+    say(summaryText(r), FA(F(r).failed).length ? 'bad' : 'ok')
     running.value = false
     await recordToLog(subset, r)
   }
@@ -362,8 +377,8 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
       receipt: r
     })
     const res = await appendRun(storeBridge(), entry)
-    if (res.ok !== true) notice.value = `${notice.value};${res.error}`
-    else if (res.overflow > 0) notice.value = `${notice.value};已丢弃 ${res.overflow} 条最旧记录,备份文件仍在磁盘上`
+    if (res.ok !== true) say(`${notice.value};${res.error}`, 'bad')
+    else if (res.overflow > 0) say(`${notice.value};已丢弃 ${res.overflow} 条最旧记录,备份文件仍在磁盘上`, 'ok')
     await loadHistory()
   }
 
@@ -400,7 +415,14 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
    * 备份内容读回来当作新正文,组成一份 rewrite 计划交给 executePlan:于是回滚本身也有备份、
    * 有回执、进账本(用户能看到「我回滚过一次」,而不是盘上悄悄变了)。
    */
+  /** 外面看到的这一个只多做一件事:把「成了没成」定好级 —— 每一条 return 都经过这里,包括早退的拒绝 */
   async function rollback(entry: ToolLogEntry): Promise<RollbackResult> {
+    const r = await doRollback(entry)
+    say(r.text, r.ok === true ? 'ok' : 'bad')
+    return r
+  }
+
+  async function doRollback(entry: ToolLogEntry): Promise<RollbackResult> {
     const pid = entry && entry.projectId ? entry.projectId : projectIdRef.value
     const s = svc()
     const rp = rollbackPlan(entry)
@@ -476,6 +498,7 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
     planning,
     receipt,
     notice,
+    noticeKind,
     history,
     historyError,
     recent,

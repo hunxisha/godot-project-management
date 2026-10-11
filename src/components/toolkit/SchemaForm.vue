@@ -21,6 +21,11 @@ const props = defineProps<{
   model: Record<string, unknown>
   issues?: string[]
   pickedCount?: number
+  /**
+   * 文件面板此刻开着没有。它是**页面的状态**(ToolPageView 的 showPicker),这里只接过来做两件事:
+   * 按钮文案跟着翻(toggle 不表达状态就像「点了没反应」)、插槽知道该不该渲染。
+   */
+  pickerOpen?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -51,8 +56,8 @@ function asNum(v: unknown): number | string { return typeof v === 'number' ? v :
       <div class="ctl">
         <!-- files:选中集在页面另一块里挑,这里只报状态 -->
         <template v-if="f.type === 'files'">
-          <button class="btn small" type="button" @click="emit('pick-files')">
-            <Icon name="folder" :size="13" /> 挑选文件
+          <button class="btn small" type="button" :aria-expanded="props.pickerOpen ? 'true' : 'false'" @click="emit('pick-files')">
+            <Icon name="folder" :size="13" /> {{ props.pickerOpen ? '收起文件清单' : '挑选文件' }}
           </button>
           <span class="picked">已选 {{ props.pickedCount || 0 }} 个</span>
         </template>
@@ -75,6 +80,13 @@ function asNum(v: unknown): number | string { return typeof v === 'number' ? v :
 
       <p v-if="f.help || fieldHint(f)" class="hint">{{ [f.help, fieldHint(f)].filter(Boolean).join(' · ') }}</p>
       <p v-if="errOf(f.key)" class="err"><Icon name="alert" :size="12" /> {{ errOf(f.key) }}</p>
+      <!--
+        文件面板由页面用插槽交进来,渲染在**这个字段正下方**。
+        以前它是整张表单卡片之后的一块独立卡片 —— 内置格式化有七个字段,点完按钮面板出现在视口外,
+        用户的原话就是「点击挑选文件无反应」。候选依旧不由这里画(选中集只有一个真源);
+        而一个工具只有一个 files 字段(loadTree 用 find 取第一个),所以这份内容不会重复渲染。
+      -->
+      <slot v-if="f.type === 'files'" name="files-picker" />
     </div>
     <p v-if="!props.fields.length" class="none">这个工具不需要参数,直接选文件就能算。</p>
   </div>
