@@ -467,8 +467,14 @@ export async function executePlan(opts: {
   }
 }
 
-/** 回执那句话(措辞唯一来源):执行朝与展示朝读同一份 items,不许各自再算一遍 */
-export function summaryText(receipt: ApplyReceipt): string {
+/**
+ * `summaryText` 真正读的那几个字段。账本里存的是同一份数据的另一副形状(`failed` 已经降成
+ * `{rel,error}`),按结构而不是按 `ApplyReceipt` 命名,才能让账本复用这句话而不必假装是完整回执。
+ */
+export type ReceiptSummary = Pick<ApplyReceipt, 'written' | 'moved' | 'cancelled' | 'ok'> & { failed: readonly unknown[] }
+
+/** 回执那句话(措辞唯一来源):执行朝与展示朝读同一份 items,不许各自再算一遍;账本行文案也走这里(toollog.entrySummaryText) */
+export function summaryText(receipt: ReceiptSummary): string {
   const parts: string[] = []
   if (receipt.written.length) parts.push(`改写 ${receipt.written.length} 个文件`)
   if (receipt.moved.length) parts.push(`移入回收站 ${receipt.moved.length} 个`)
