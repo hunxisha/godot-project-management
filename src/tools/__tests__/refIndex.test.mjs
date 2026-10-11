@@ -664,6 +664,40 @@ async function main() {
     '索引里剩下的键:只有「清单里真有其名」那一条带尾巴(证明撤的是 phantom 而不是所有脏形状)', dirtyKeys.join('|'))
 }
 
+// ---------- 11. 入参面收窄(工具箱重做 · 第 0 批 Task 2) ----------
+section('11. 入参面收窄:RefScanSource 三成员就够,projectId/root 从来不被读')
+{
+  // 第 0 批要删掉体检产品层的 types.ts,而引用图是留下来的(第 2 批「批量重命名」要靠它改引用)。
+  // buildRefIndex 从此吃 refIndex.ts 里本地声明的结构子集
+  // RefScanSource{tree, truncated, readText},不再 import ToolContext。
+  //
+  // 这里给一份**刻意最小**的 ctx:没有 projectId、没有 root、没有 hash、没有 refIndex。
+  // 如果 buildRefIndex 其实偷偷用了其中任何一个,这一节要么抛、要么给出与五成员 ctx 不同的图
+  // —— 那条收窄就是假的(只改了类型标注,没改真实依赖)。
+  //
+  // 判据 7(ctx.truncated)已由第 8 节测透(一次 readText 都不发 / 空索引 / partial 真 /
+  // 没有 readFailures),这里**不重复**那些断言,只补一件第 8 节没测的事:
+  // 那条判据在**没有 projectId 与 root** 的形状上同样成立。
+  const minCtx = {
+    truncated: false,
+    tree: tree(SPECS),
+    readText: async (rel) => (typeof TEXTS[rel] === 'string' ? { text: TEXTS[rel] } : { skipped: true })
+  }
+  const minIdx = await T.buildRefIndex(minCtx)
+  const fullIdx = await T.buildRefIndex(makeCtx(SPECS, { texts: TEXTS }).ctx)
+  const keysOf = (i) => [...i.to.keys()].sort().join('|')
+  ok(minIdx.to.size > 0 && minIdx.sourcesScanned === fullIdx.sourcesScanned,
+    '先证明索引**真有内容**:不是两边都空对空才相等(那条相等就成了自证)',
+    JSON.stringify({ to: minIdx.to.size, scanned: minIdx.sourcesScanned, fullScanned: fullIdx.sourcesScanned }))
+  ok(keysOf(minIdx) === keysOf(fullIdx),
+    '最小 ctx 与五成员 ctx 建出同一套被引用者集合:projectId/root 从来不是判据的输入',
+    `${keysOf(minIdx)} ## ${keysOf(fullIdx)}`)
+  const tMin = await T.buildRefIndex({ ...minCtx, truncated: true })
+  ok(tMin.partial === true && tMin.to.size === 0,
+    '截断路径在最小 ctx 上同样成立(判据 7 不依赖被砍掉的那两个成员)',
+    JSON.stringify({ partial: tMin.partial, to: tMin.to.size }))
+}
+
 main().catch((e) => {
   console.error(`\n测试脚本抛错: ${e && e.stack ? e.stack : e}`)
   process.exit(1)

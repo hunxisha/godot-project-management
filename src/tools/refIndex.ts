@@ -29,10 +29,34 @@
 // 收窄到 a–y/0–8 会把引擎认得的合法输入判成不是 uid,放宽到大写则会把引擎拒掉的串当成引用。
 // 同一形状在 addUid 里还有第二道锚定校验(UID_TOKEN):扫描正则与校验各挡一半,
 // 变异取证证明「只放宽其中一道」不会改变结果(两道都放宽才会红)。
-import type { ToolContext } from './types'
+import type { TreeEntry } from '../types/godot'
 import { iniResPaths, parseGodotIni, stringLiterals } from './parsers/godotIni'
 import { parseExtResources, resPathShapeOk, resToRel } from './parsers/sceneRefs'
 import { hasRelCI, isCache, lowerRelSet } from './treeUtils'
+
+/**
+ * `buildRefIndex` 实际用到的通道子集。
+ *
+ * 原来这里 import 的是 `ToolContext` —— 体检产品层(`types.ts`)的类型。工具箱重做把那一层
+ * 整个删掉,而引用图**要留下来**(第 2 批「GDScript 批量重命名」要靠它把改动同步到引用点),
+ * 所以改成只声明自己真用到的三件事,不反过来依赖一个已作废的「一次扫描的体检上下文」概念。
+ *
+ * 真实依赖被 `refIndex.test.mjs` 第 11 节钉着:拿最小 ctx 与五成员 ctx 建出的索引必须是同一套键,
+ * 且截断路径在最小 ctx 上同样成立 —— 也就是 `projectId` / `root` / `hash` 从来不是判据的输入。
+ * 收窄只动类型标注;那三个成员一个都不能少(`truncated` 少了就把判据 7 改没了)。
+ *
+ * ⚠ 三条纪律与旧 ToolContext 完全一致,本次收窄**不改变**它们:
+ *   · `tree` 与 `readText` 必须同属一个项目 —— 世代闸归调用方(旧 `useTools` 里那套 scanGen 记账),
+ *     这里不建第二份账,也不能在这里补:拿到手的 tree 已经晚了。
+ *   · `truncated` 为真时**一个文件都不读**(判据 7):清单不全时「查不到引用」不是证据。
+ *   · `readText` 给不出 text 就是「读不到」,按 skipped 处理,不抛。
+ */
+export interface RefScanSource {
+  tree: TreeEntry[]
+  /** 宿主在 maxEntries 处截断了 tree */
+  truncated: boolean
+  readText(rel: string): Promise<{ text?: string; skipped?: boolean }>
+}
 
 /** 一条引用站点:from(引用者 rel)在什么通道、哪一行提到了目标 */
 export interface RefSite {
@@ -108,7 +132,7 @@ function isSidecar(ext: string): boolean {
  * 一次遍历建索引。顺序 = ctx.tree 顺序,文件内顺序 = 出现顺序:
  * B4/B5 的 Finding.id 由这些内容推导,构建顺序抖一次就等于给用户换了一批结论 id。
  */
-export async function buildRefIndex(ctx: ToolContext): Promise<RefIndex> {
+export async function buildRefIndex(ctx: RefScanSource): Promise<RefIndex> {
   const to = new Map<string, RefSite[]>()
   const from = new Map<string, string[]>()
   const uids = new Map<string, string[]>()
