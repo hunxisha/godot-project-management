@@ -36,6 +36,7 @@ import { copyText, getDoc, listDocs, notify, openPath, pickPaths, pickSavePath, 
 import {
   allIds,
   buildPlan,
+  danglingWarn,
   defaultSelectedIds,
   executePlan,
   groupPreview,
@@ -151,6 +152,16 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
   const cancelBox = shallowRef<CancelBox | null>(null)
   /** diff 预览按 change.id 缓存:展开一条只读一次盘,收起再展开不重复读 */
   const previews = ref<Record<string, DiffPreview>>({})
+  /**
+   * 插件自己 `ctx.log` 出来的话(§G DEV-27)。
+   *
+   * 第 1 批这两个注入物**根本没传**:`makeHost` 不给 `onLog` / `onProgress` ⇒ `ctx.log` 是静默 no-op,
+   * 内置格式化那两处「这个文件为什么没做」一个字都没上卡面(纯函数测试各自测自己那一层,照不出装配层漏接)。
+   * 现在接上了,并且每次「算一遍 / 执行」都清空 —— 上一轮的跳过原因留着,用户会以为这一轮也跳过了。
+   */
+  const logs = ref<{ level: string, msg: string }[]>([])
+  /** 插件报的进度(done/total);拿不到就是 null(不画 0/0 那种假进度) */
+  const progress = ref<{ done: number, total: number } | null>(null)
 
   const manifest = computed(() => (tool && tool.manifest) || null)
   const usable = computed(() => !!manifest.value && tool.state === 'ok' && !!tool.module)
@@ -166,7 +177,20 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
       capabilities: (m ? m.capabilities : []) as any,
       unsafe: !!m && m.unsafe === true,
       cancelled: box.isCancelled,
-      onCancel: box.onCancel
+      onCancel: box.onCancel,
+      // DEV-27:这两条就是「插件的话能不能上卡面」的唯一通道。少接一条,插件里所有 ctx.log/progress
+      // 都会静默消失 —— 而它在自己那层的单测里永远是好的(它测的是 buildGpm 收不收,不收谁都不说)。
+      onLog: (level: string, msg: string) => {
+        const list = logs.value.concat([{ level: String(level ?? ''), msg: String(msg ?? '') }])
+        // 上限只护住内存;卡面上显示最近几条 + 「还有 N 条」,不做起伏滚动组件
+        logs.value = list.length > 60 ? list.slice(-60) : list
+      },
+      onProgress: (done: number, total: number) => {
+        const t = Number(total)
+        const d = Number(done)
+        if (!Number.isFinite(t) || t <= 0 || !Number.isFinite(d)) return
+        progress.value = { done: Math.max(0, Math.min(d, t)), total: t }
+      }
     }
   }
 
@@ -256,6 +280,8 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
     if (paramIssues.value.length) { say('参数还没填对,没有去算改动', 'bad'); return }
     planning.value = true
     say('')
+    logs.value = []
+    progress.value = null
     receipt.value = null
     const box = makeCancelBox()
     cancelBox.value = box
@@ -310,6 +336,26 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
   const groups = computed(() => (plan.value ? groupPreview(plan.value) : []))
   const summary = computed(() => (plan.value ? planSummary(plan.value) : ''))
   const warn = computed(() => (plan.value ? warnText(plan.value.changes) : ''))
+  /** A-22 那句红字:整句由框架生成(`orchestrate.danglingWarn`),这里只搬 —— 视图不许自己拼数字 */
+  const dangling = computed(() => (plan.value ? danglingWarn(plan.value.changes) : ''))
+  /**
+   * 表单旁边那句**参数预览**(§5.7 的「匹配到 12 处」)。
+   * 话由插件的可选导出 `count(params, files)` 说(§G DEV-28):它才知道自己的正则作用于什么之上。
+   * 没有这个导出、或它抛异常 ⇒ 空串不画条(一个工具的坏导出不能把整个表单弄白屏)。
+   */
+  const paramHint = computed(() => {
+    const mod = tool.module as { count?: unknown } | null | undefined
+    if (!mod || typeof mod.count !== 'function' || !paramResult.value) return ''
+    try {
+      const v = (mod.count as (p: unknown, f: unknown) => unknown)(paramResult.value.values, fileArgs.value)
+      return typeof v === 'string' ? v : ''
+    } catch {
+      return ''
+    }
+  })
+  /** 卡面上显示的最近几条(视图不做切片运算:那是判断,不是排版) */
+  const logsTail = computed(() => logs.value.slice(-3))
+  const logsMore = computed(() => Math.max(0, logs.value.length - 3))
   const gate = computed(() => (plan.value ? runGate(plan.value, checked.value) : { ok: false, reason: '还没有计划' }))
   const pickedCount = computed(() => (plan.value ? selectionCount(plan.value, checked.value) : 0))
   const pickedBytes = computed(() => (plan.value ? selectionBytes(plan.value, checked.value) : { bytes: 0, unknown: 0 }))
@@ -337,6 +383,8 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
     if (gate.value.ok !== true) { say(S(gate.value.reason), 'bad'); return }
     running.value = true
     say('')
+    logs.value = []
+    progress.value = null
     const box = cancelBox.value || makeCancelBox()
     cancelBox.value = box
     const pid = projectIdRef.value
@@ -504,6 +552,12 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
     receipt,
     notice,
     noticeKind,
+    logs,
+    logsTail,
+    logsMore,
+    progress,
+    dangling,
+    paramHint,
     history,
     historyError,
     recent,

@@ -351,6 +351,27 @@ section('11. 首页:§3 第 10 项列的东西逐项在场(Q13=B / Q25)')
   ok(SRC.home.includes("histProject.value === '*'"), '「全部项目」用哨兵 *,不与 toollog 里「没归属」的空串混用')
 }
 
+section('12. 第 2 批的四处渲染:改名对照、断链红字、参数预览、插件的 log')
+{
+  const list = code(SRC.list)
+  const page = code(SRC.page)
+  const form = code(SRC.form)
+  ok(list.includes("c.kind === 'rename'") && list.includes('c.to'),
+    'ChangeList 会画「旧名 → 新名」(§5.8 那条 rename 预览在第 1 批根本没落地:当时没有 rename 的使用者)', list.slice(0, 0))
+  ok(!/c\.to\.(replace|slice|split|toLowerCase)/.test(list), '视图只显示计划给的 to,不重算也不改写它')
+  ok(page.includes('page.dangling.value') && page.includes('dang-live'),
+    'A-22 那句断链警告有自己一行,与黄字的备份说明分开(颜色只回答一件事)', page.slice(0, 0))
+  ok(!page.includes('处引用断链'), '整句话来自 orchestrate.danglingWarn:视图里搜不到这句话 = 措辞没有第二处(DEV-7)')
+  ok(!page.includes('将有 ') || !page.includes('断链'), '视图不自己拼「将有 N 处」那种句子,数字也不是在这里加的')
+  ok(page.includes('page.paramHint.value') && form.includes('props.hint') && form.includes('live-hint'),
+    '参数预览句:页面搬、表单决定画在哪个字段下面(它不自己算)')
+  ok(!/new RegExp|regexHits|\.match\(/.test(form), '表单不自己数命中处数 —— 那句活话由插件的 count() 给(§G DEV-28)')
+  ok(page.includes('logsTail') && page.includes('logsMore'),
+    '插件 ctx.log 的话上卡面(DEV-27 的最后一环:接了 onLog 却不显示,等于没接)', page.slice(0, 0))
+  ok(page.includes('page.progress.value'), 'ctx.progress 有可视位置(不新做进度条,只报数)')
+  ok(!/logs\.value\s*=|progress\.value\s*=/.test(page), '视图不写页面状态:log/进度都由 useToolPage 管(单一真源)')
+}
+
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) {
   console.log('失败项:')

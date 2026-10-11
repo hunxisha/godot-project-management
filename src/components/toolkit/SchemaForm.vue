@@ -26,6 +26,12 @@ const props = defineProps<{
    * 按钮文案跟着翻(toggle 不表达状态就像「点了没反应」)、插槽知道该不该渲染。
    */
   pickerOpen?: boolean
+  /**
+   * 参数预览句(§5.7 的「匹配到 12 处」)。话由插件的可选 `count()` 说、由页面搬过来,
+   * 这里只决定**画在哪个字段下面**:最后一个 regex 字段;没有 regex 字段就画在表单末尾。
+   * 空串不画条 —— 没有工具该看到一句空提示。
+   */
+  hint?: string
 }>()
 
 const emit = defineEmits<{
@@ -43,11 +49,23 @@ function errOf(key: string): string {
 
 function asText(v: unknown): string { return typeof v === 'string' ? v : '' }
 function asNum(v: unknown): number | string { return typeof v === 'number' ? v : '' }
+/** 预览句挂在最后一个 regex 字段下面(没有 regex 字段就挂在末尾)—— 它说的是那条规则命中几个 */
+function hintRow(i: number): boolean {
+  if (!props.hint) return false
+  const list = props.fields || []
+  for (let k = list.length - 1; k > i; k--) if (list[k] && list[k].type === 'regex') return false
+  return !!list[i] && list[i].type === 'regex'
+}
+const hintTail = () => {
+  const list = props.fields || []
+  for (const f of list) if (f && f.type === 'regex') return false
+  return !!props.hint
+}
 </script>
 
 <template>
   <div class="schema-form">
-    <div v-for="f in props.fields" :key="f.key" class="row" :class="{ bad: !!errOf(f.key) }">
+    <div v-for="(f, i) in props.fields" :key="f.key" class="row" :class="{ bad: !!errOf(f.key) }">
       <label class="lab">
         {{ f.label }}
         <span v-if="f.required" class="req">必填</span>
@@ -80,6 +98,7 @@ function asNum(v: unknown): number | string { return typeof v === 'number' ? v :
 
       <p v-if="f.help || fieldHint(f)" class="hint">{{ [f.help, fieldHint(f)].filter(Boolean).join(' · ') }}</p>
       <p v-if="errOf(f.key)" class="err"><Icon name="alert" :size="12" /> {{ errOf(f.key) }}</p>
+      <p v-if="hintRow(i)" class="live-hint">{{ props.hint }}</p>
       <!--
         文件面板由页面用插槽交进来,渲染在**这个字段正下方**。
         以前它是整张表单卡片之后的一块独立卡片 —— 内置格式化有七个字段,点完按钮面板出现在视口外,
@@ -88,6 +107,7 @@ function asNum(v: unknown): number | string { return typeof v === 'number' ? v :
       -->
       <slot v-if="f.type === 'files'" name="files-picker" />
     </div>
+    <p v-if="hintTail()" class="live-hint">{{ props.hint }}</p>
     <p v-if="!props.fields.length" class="none">这个工具不需要参数,直接选文件就能算。</p>
   </div>
 </template>
@@ -151,6 +171,14 @@ function asNum(v: unknown): number | string { return typeof v === 'number' ? v :
   color: var(--text-3);
   font-size: 11.5px;
   line-height: 1.55;
+}
+
+/* 参数预览句(命中几个):比静态 hint 亮一档颜色,它是随输入实时变的活信息 */
+.live-hint {
+  margin: 4px 0 0;
+  color: var(--brand);
+  font-size: 11.5px;
+  font-weight: 600;
 }
 
 .err {

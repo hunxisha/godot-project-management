@@ -22,6 +22,13 @@ const emit = defineEmits<{
 }>()
 
 const set = () => new Set(props.checked || [])
+
+/** 改名那一行显示文件名就够(目录没变时整条路径会把两列挤成省略号);完整新路径在 title 里 */
+function baseOf(rel: string): string {
+  const s = String(rel || '')
+  const i = s.lastIndexOf('/')
+  return i >= 0 ? s.slice(i + 1) : s
+}
 </script>
 
 <template>
@@ -33,6 +40,10 @@ const set = () => new Set(props.checked || [])
       <div v-for="c in g.changes" :key="c.id" class="row" :class="{ on: set().has(c.id), high: c.risk === 'high' }">
         <input type="checkbox" class="chk" :checked="set().has(c.id)" @change="emit('toggle', c.id)" />
         <span class="rel" :title="c.rel">{{ c.rel }}</span>
+        <!-- 旧名 → 新名对照(§5.8 的 rename 预览)。框架只在这里显示计划给出的 to,不重算、不猜 -->
+        <span v-if="c.kind === 'rename' && c.to" class="pair" :title="'新名:' + c.to">
+          → <b>{{ baseOf(c.to) }}</b>
+        </span>
         <span v-if="c.risk === 'high'" class="tag danger">{{ c.outOfScope ? '越界 · 高危' : '高危' }}</span>
         <span v-if="c.creates" class="tag warn">新建</span>
         <span class="label">{{ c.label }}</span>
@@ -102,6 +113,18 @@ const set = () => new Set(props.checked || [])
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-2);
+}
+
+.pair {
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.pair b {
+  color: var(--brand);
+  font-family: var(--mono);
+  font-weight: 700;
 }
 
 .reason {

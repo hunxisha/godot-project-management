@@ -689,6 +689,104 @@ section('14. notice 按「成了没成」分级(真宿主反馈:被拦的提示�
   ok(F(P.noticeKind).value === 'bad', '部分完成 ⇒ bad(不是那条成功绿)', F(P.noticeKind).value)
 }
 
+section('15. 插件面的三条话路:ctx.log / ctx.progress / 参数预览 count(§G DEV-27 / DEV-28)')
+{
+  // 第 1 批的断线:`makeHost` 没传 onLog / onProgress ⇒ 插件里所有 ctx.log 都是静默 no-op。
+  // gpm.ts 那层的单测只回答「给了 onLog 会不会往外传」,**照不出装配层传没传**(与 DEV-18/19 同一族)。
+  ok(typeof P.logs === 'object' && Array.isArray(F(P.logs).value), 'logs 在导出面上(视图靠它显示最近几条)')
+  ok(typeof P.logsTail === 'object' && Array.isArray(F(P.logsTail).value), 'logsTail:切几条这件事在页面里做,视图不判断')
+  ok(typeof P.paramHint === 'object' && typeof S(F(P.paramHint).value) === 'string', 'paramHint 在导出面上')
+  ok(typeof P.dangling === 'object' && typeof S(F(P.dangling).value) === 'string', 'dangling(断链那句)在导出面上')
+
+  // ① log 真的落地
+  resetDisk()
+  const LOUD = {
+    schema: MOD.schema,
+    plan: async (ctx) => {
+      ctx.log('warn', 'big.gd:超出读取上限,不改写')
+      ctx.log('warn', 'bin.gd:被认成二进制,不改写')
+      ctx.progress(3, 10)
+      return [{ rel: 'a.gd', kind: 'rewrite', label: '加一行 X', risk: 'low', reason: 'r', payload: { text: 'X' } }]
+    }
+  }
+  P = T.useToolPage(toolOf(LOUD), pid)
+  await P.open()
+  P.picked.value = ['a.gd']
+  P.rawParams.value.limit = 1
+  await P.makePlan()
+  ok(FA(P.logs.value).length === 2, '插件 ctx.log 的两条都收到了(没接 onLog 时这里必定是 0)', FA(P.logs.value).length)
+  ok(S(F(AT(P.logsTail.value, 1)).msg).includes('二进制'), 'tail 给的是最近几条、按顺序', P.logsTail.value)
+  ok(F(P.progress).value && F(P.progress).value.done === 3 && F(P.progress).value.total === 10,
+    'ctx.progress 接到了(不传 onProgress 时永远是 null)', F(P.progress).value)
+  ok(F(P.logs).value.length === 2, 'total<=0 / 脏数字不许把它画成 0/0 —— 只挡在写入口')
+  // ② 重算一次要清空:上一轮的「为什么没做」留着,用户会以为这一轮也跳过了
+  await P.makePlan()
+  ok(FA(P.logs.value).length === 2, '清的是这一轮重算出来的那两条(重算后又填回两条)', FA(P.logs.value).length)
+  P = T.useToolPage(toolOf({ schema: MOD.schema, plan: async () => [] }), pid)
+  await P.open()
+  P.picked.value = ['a.gd']
+  P.rawParams.value.limit = 1
+  await P.makePlan()
+  ok(FA(P.logs.value).length === 0 && F(P.progress).value === null, '新的工具实例从头开始:没有残留的 log 与进度')
+
+  // ③ log 条数上限(长清单里插件每条都 log 一句时不许无界涨)
+  resetDisk()
+  const SPAM = {
+    schema: MOD.schema,
+    plan: async (ctx) => {
+      for (let i = 0; i < 200; i++) ctx.log('info', '第 ' + i + ' 条')
+      return []
+    }
+  }
+  P = T.useToolPage(toolOf(SPAM), pid)
+  await P.open()
+  P.picked.value = ['a.gd']
+  P.rawParams.value.limit = 1
+  await P.makePlan()
+  ok(FA(P.logs.value).length <= 60, 'log 有上限(60 条)', FA(P.logs.value).length)
+  ok(S(F(AT(P.logs.value, P.logs.value.length - 1)).msg).includes('199'),
+    '留的是最近的那批,不是最早那批', S(F(AT(P.logs.value, P.logs.value.length - 1)).msg))
+  ok(P.logsMore.value >= 57, '"还有 N 条更早的没显示" 要算得出(视图不做算术)', P.logsMore.value)
+
+  // ④ 参数预览:话由插件的 count() 说,页面只搬;没有 / 抛异常 / 返回脏值都不能把表单弄坏
+  const withCount = (fn) => ({ schema: MOD.schema, plan: async () => [], count: fn })
+  P = T.useToolPage(toolOf(withCount((params, files) => `在 ${FA(files).length} 个文件名里命中 ${params.limit} 处`)), pid)
+  await P.open()
+  P.picked.value = ['a.gd']
+  P.rawParams.value.limit = 1
+  ok(S(P.paramHint.value).includes('命中 1 处'), 'count() 的句子原样上卡面', P.paramHint.value)
+  ok(S(P.paramHint.value).includes('1 个文件名'), '传进去的 files 就是页面上勾中的那些(同一份真源)', P.paramHint.value)
+  P = T.useToolPage(toolOf(withCount(() => { throw new Error('插件写坏了') })), pid)
+  await P.open()
+  P.picked.value = ['a.gd']
+  ok(S(P.paramHint.value) === '', 'count() 抛异常 ⇒ 空串:一个工具的坏导出不能把整个表单弄白屏')
+  P = T.useToolPage(toolOf({ schema: MOD.schema, plan: async () => [] }), pid)
+  await P.open()
+  ok(S(P.paramHint.value) === '', '没有 count 导出(第 1 批的工具都是这样)⇒ 空串,不画条')
+  P = T.useToolPage(toolOf(withCount(() => 42)), pid)
+  await P.open()
+  ok(S(P.paramHint.value) === '', 'count() 返回非字符串 ⇒ 当没给,不把数字拼成一句话')
+
+  // ⑤ 断链那句:整句话来自 orchestrate.danglingWarn,页面只搬数字之外的整句
+  resetDisk()
+  const REN = {
+    schema: MOD.schema,
+    plan: async () => [{ rel: 'a.gd', to: 'b.gd', kind: 'rename', label: '改名:a.gd → b.gd', risk: 'low', reason: '只改文件名', dangling: 4 }]
+  }
+  P = T.useToolPage(toolOf(REN), pid)
+  await P.open()
+  P.picked.value = ['a.gd']
+  P.rawParams.value.limit = 1
+  await P.makePlan()
+  ok(S(P.dangling.value).includes('将有 4 处引用断链'), 'A-22 那句红字在场,数字是插件给的 4', P.dangling.value)
+  ok(S(P.dangling.value).indexOf('加一行 X') < 0, '框架不复述插件的 label(那句里的数字与措辞都来自 danglingWarn)')
+  const noRef = await P.execute()
+  ok(noRef === undefined && FA(F(P.receipt.value).failed).length === 1, 'rename 走真执行通道了(第 1 批是直接被拒)')
+  ok(S(F(AT(F(P.receipt.value).failed, 0)).error).includes('宿主没有改名原语'),
+    '假宿主没给 renameProjectPath ⇒ 原样说清是缺原语,而不是悄悄成功', F(P.receipt.value).failed)
+  ok(FA(F(P.receipt.value).renamed).length === 0, '没改成就不进 renamed(回执不替用户高兴)')
+}
+
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) {
   console.log('失败项:')

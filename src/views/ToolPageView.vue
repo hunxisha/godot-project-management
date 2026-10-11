@@ -146,6 +146,7 @@ const ViewHost = defineComponent({
           :issues="page.paramIssues.value"
           :picked-count="page.picked.value.length"
           :picker-open="showPicker"
+          :hint="page.paramHint.value"
           @set="setParam"
           @pick-files="showPicker = !showPicker"
         >
@@ -168,9 +169,15 @@ const ViewHost = defineComponent({
           <Icon name="refresh" :size="13" /> {{ page.planning.value ? '计算中' : '算一遍要改什么' }}
         </button>
         <span class="sum">{{ page.summary.value }}</span>
+        <span v-if="page.progress.value" class="tool-prog">{{ page.progress.value.done }}/{{ page.progress.value.total }}</span>
       </div>
 
       <p v-if="page.warn.value" class="warn">{{ page.warn.value }}</p>
+      <!--
+        A-22:关掉「同时更新引用」时的断链警告。它必须与上面那句黄字**分开**(颜色只回答一件事:
+        这句是代价,那句是备份说明),而整句话来自 orchestrate.danglingWarn —— 视图不自己拼数字。
+      -->
+      <p v-if="page.dangling.value" class="dang-live"><Icon name="alert" :size="13" /> {{ page.dangling.value }}</p>
 
       <ChangeList
         :groups="page.groups.value"
@@ -191,6 +198,16 @@ const ViewHost = defineComponent({
       </div>
 
       <p v-if="page.notice.value" class="notice" :class="page.noticeKind.value">{{ page.notice.value }}</p>
+
+      <!--
+        插件自己 `ctx.log` 的话(§G DEV-27)。以前这条线是断的:makeHost 不传 onLog,
+        于是「这个文件为什么没做」在页面上一个字都看不见 —— 那是 §1.5 第三条红线的漏口。
+        只显示最近 3 条,更早的用一句「还有 N 条」交代(不做起伏滚动组件,那是另一个需求)。
+      -->
+      <ul v-if="page.logsTail.value.length" class="plugin-log">
+        <li v-for="(l, i) in page.logsTail.value" :key="'pl' + i">{{ l.msg }}</li>
+      </ul>
+      <p v-if="page.logsMore.value" class="dim">还有 {{ page.logsMore.value }} 条更早的说明没显示</p>
 
       <h4 class="sec">这个工具最近几条</h4>
       <p v-if="page.historyError.value" class="bad">{{ page.historyError.value }}</p>
@@ -285,6 +302,35 @@ const ViewHost = defineComponent({
   background: var(--warn-weak);
   color: var(--text);
   font-size: 12px;
+}
+
+/* 断链警告:与上面那句黄字分开 —— 这句是代价,那句只是备份说明 */
+.dang-live {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin: 0;
+  padding: 6px 8px;
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--danger-weak);
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tool-prog {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.plugin-log {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.55;
 }
 
 .gate {
