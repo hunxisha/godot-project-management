@@ -18,6 +18,7 @@
 //   .gpm-test/out/tkorchestrate.mjs   ← src/toolkit/orchestrate.ts(三段式调度) (src/toolkit/__tests__/orchestrate.test.mjs)
 //   .gpm-test/out/tkdiff.mjs          ← src/toolkit/diff.ts(行级 LCS diff) (src/toolkit/__tests__/diff.test.mjs)
 //   .gpm-test/out/tkschema.mjs        ← src/toolkit/schema.ts(声明式参数 schema) (src/toolkit/__tests__/schema.test.mjs)
+//   .gpm-test/out/tkgpm.mjs             ← src/toolkit/gpm.ts(window.gpm 受限层组装) (src/toolkit/__tests__/gpm.test.mjs)
 //
 // 一次打包供全部渲染层测试共用(npm run test:renderer),避免每个测试各起一次 vite。
 //
@@ -69,6 +70,7 @@ await build({
         // 工具箱(第 1 批)按模块各开一个入口:纯函数层进 Node harness,
         // 不建 barrel —— 建了就把碰 window 的 loader/gpm 一起拖进测试产物。
         tkmanifest: path.join(root, 'src', 'toolkit', 'manifest.ts'),
+        tkgpm: path.join(root, 'src', 'toolkit', 'gpm.ts'),
         tkorchestrate: path.join(root, 'src', 'toolkit', 'orchestrate.ts'),
         tkdiff: path.join(root, 'src', 'toolkit', 'diff.ts'),
         tkschema: path.join(root, 'src', 'toolkit', 'schema.ts'),
@@ -83,6 +85,6 @@ await build({
   }
 })
 
-for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'format', 'godotversion', 'markettags', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'vueshim', 'tools', 'tkmanifest', 'tkorchestrate', 'tkdiff', 'tkschema']) {
+for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'format', 'godotversion', 'markettags', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'vueshim', 'tools', 'tkmanifest', 'tkorchestrate', 'tkdiff', 'tkschema', 'tkgpm']) {
   console.log(`bundle built: ${path.join(root, OUT_DIR, `${name}.mjs`)}`)
 }
