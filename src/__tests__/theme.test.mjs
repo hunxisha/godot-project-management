@@ -24,6 +24,31 @@ const PALETTE_TOKENS = [
 /** 语义色与头像渐变:设计上不随色板变化 */
 const MODE_TOKENS = ['--danger', '--danger-weak', '--ok', '--ok-weak', '--warn', '--warn-weak', '--gold', '--gold-weak']
 const FIXED_TOKENS = ['--grad-a', '--grad-b', '--grad-c', '--grad-d', '--mono', '--radius', '--radius-sm', '--radius-lg']
+/**
+ * **暴露给插件的 CSS 变量清单(A-13 / §5.6)** —— 快照,增删一个名字就要红。
+ *
+ * 为什么锁这一张表:第三方插件的 CSS 只能靠 `var(--...)` 跟随主题(骨架模板注释就这么写的),
+ * 这张表就是它对外的**样式契约**。改名或删一个,已经装出去的插件那块颜色当场塌;
+ * 随手加一个,契约就悄悄长了一块、再没人记得哪个能用了(§5.6 的「不新增令牌」纪律形同虚设)。
+ * 所以动了 `src/main.css` 就得**显式**回到这里改这张表 —— 红一次、想清楚,而不是无人看见。
+ *
+ * 口径:全部 `:root` 规则块里声明过的自定义属性**名字**取并集(不看值、不看它出现在哪个色板块里)。
+ * `--syn-*` 与 `--shadow*` 也在内 —— 代码预览与浮层都在用,插件同样有权引用。
+ */
+const EXPOSED_TO_PLUGINS = [
+  '--bg', '--border', '--border-strong',
+  '--brand', '--brand-deep', '--brand-grad', '--brand-strong', '--brand-weak',
+  '--danger', '--danger-weak',
+  '--gold', '--gold-weak',
+  '--grad-a', '--grad-b', '--grad-c', '--grad-d',
+  '--mono', '--ok', '--ok-weak',
+  '--radius', '--radius-lg', '--radius-sm',
+  '--shadow', '--shadow-lift', '--shadow-sm',
+  '--surface', '--surface-2', '--surface-3',
+  '--syn-com', '--syn-kw', '--syn-num', '--syn-str', '--syn-ty',
+  '--text', '--text-2', '--text-3',
+  '--warn', '--warn-weak'
+]
 
 let pass = 0
 const failures = []
@@ -206,7 +231,29 @@ for (const theme of THEMES) {
   }
 }
 
-section('5. 最差项汇总(供设计参考)')
+section('5. 暴露给插件的 CSS 变量清单快照(A-13 / §5.6)')
+{
+  // 复用上面已经解析好的 blocks:另起一套 CSS 解析就有两份口径,改一处漏一处
+  const exposed = [...new Set(blocks.flatMap((b) => Object.keys(b.tokens)))].sort()
+  const added = exposed.filter((n) => !EXPOSED_TO_PLUGINS.includes(n))
+  const removed = EXPOSED_TO_PLUGINS.filter((n) => !exposed.includes(n))
+  ok(
+    added.length === 0 && removed.length === 0,
+    `插件可见的变量清单与快照逐名一致(${EXPOSED_TO_PLUGINS.length} 个)`,
+    `新增 ${added.join(', ') || '无'} / 缺失 ${removed.join(', ') || '无'}`
+  )
+  // 名单一致还不够:名字只在**某一个色板**的块里出现过,插件换个主题就取到空值。
+  // 所以逐个「色板 × 明暗」组合验一遍齐全 —— 契约说的是「任何主题下都能用」。
+  for (const theme of THEMES) {
+    for (const mode of MODES) {
+      const t = resolve(theme, mode)
+      const miss = EXPOSED_TO_PLUGINS.filter((n) => t[n] === undefined)
+      ok(miss.length === 0, `${theme}/${mode} 这组下 ${EXPOSED_TO_PLUGINS.length} 个变量全部有值`, miss.join(', '))
+    }
+  }
+}
+
+section('6. 最差项汇总(供设计参考)')
 for (const [name, w] of Object.entries(worst)) {
   console.log(`        ${name.padEnd(16)} 最低 ${w.c.toFixed(2)}  (${w.key})`)
 }

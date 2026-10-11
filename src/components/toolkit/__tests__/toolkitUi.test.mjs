@@ -5,7 +5,7 @@
 // 那套已确立的做法:**读源码文本 + 正则判结构**。它测不出「点下去行为对不对」,
 // 那些由 useToolkit / useToolPage / toolkit/* 的纯函数与组装层断言负责(都有真执行)。
 // 因此这里只钉两类东西:① 结构与接线在不在;② **措辞与判据不许在这一层另写一份**(最容易悄悄漂移的地方)。
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -108,6 +108,11 @@ section('5. 权限面(A-12):文案只有一份,且不含「已沙箱」式暗示
   ok(SRC.notice.includes("import { PERMISSION_TEXT } from '../../toolkit/scaffold'"), 'PermissionNotice 引的是 scaffold 里那份常量')
   ok(!SRC.notice.includes('插件能读写你的 Godot 项目文件'), '那句话没有被复制进组件(复制一份就是第二份真相)')
   ok(SRC.notice.includes('{{ PERMISSION_TEXT }}'), '渲染的是常量本身')
+  // 提示框的标题也是措辞红线的一部分:把「这不是安全边界」换成中性词(比如「权限说明」),
+  // 正文那句就会被读成「虽然能提权,但环境本身是安全的」。允许同义否定,不允许把否定删掉。
+  const DENY = /(不是|不构成|并非|谈不上|算不上)安全边界/
+  ok(DENY.test(SRC.notice), 'PermissionNotice 的默认标题明说这层边界不存在(A-12)')
+  ok(DENY.test(SRC.home), '首次装插件那个模态的标题也自带这句否定(A-12)')
   // 数出现次数而不是「有没有出现过」:首页有两处用途(目录那一块 + 首次弹的模态),
   // 只判「含不含」的话,拔掉其中一处照样绿(U1 那把刀就是这么活下来的)
   ok((SRC.home.match(/<PermissionNotice/g) || []).length >= 2, '首页两处都摆:目录那一块 + 首次装插件的模态(A-12)')
@@ -115,9 +120,36 @@ section('5. 权限面(A-12):文案只有一份,且不含「已沙箱」式暗示
   ok(SRC.home.includes('consentOpen') && SRC.home.includes('acknowledgeNewTools'), '首次装新插件时弹一次,并记住见过的目录')
   // 触发点要有两处(进页面 + 手动重扫);只判「声明了 consentOpen」的话,把赋值全删掉也照样绿
   ok((SRC.home.match(/consentOpen\.value = true/g) || []).length >= 2, '两条触发都在(U4b 那把刀就是这么抓到的)')
-  for (const [name, text] of [['notice', SRC.notice], ['home', SRC.home], ['page', SRC.page], ['scaffold', SRC.scaffold], ['scaffold.ts', SRC.scaffoldTs]]) {
-    const bad = text.split('\n').filter((l) => /(沙箱|隔离)/.test(l) && !/(不|别|没|非|假|挡不住)/.test(l))
-    ok(bad.length === 0, `${name}:每句提到「沙箱/隔离」的话都在否定式里(R-1③)`, bad.slice(0, 2))
+  // R-1③ 按**行**判,不是子串黑名单:凡提到「沙箱/隔离」的行必须自带否定词,否则就是在暗示「它是安全的」
+  // —— 宿主实测 contextIsolation:false + webSecurity:false,那句话是假的(§6 R-1)。
+  // 扫描面按目录整片扫(新加一个组件自动进来),不是手挑五份:当年「属性绑定不在扫描面」
+  // 就是靠这种缺口让已经修掉的谎原样回归的。
+  // 「错误隔离 / 前缀隔离」说的是框架机制(一条坏插件不连累其他条、store 键各归各插件),不是安全承诺。
+  // 放行只针对**机制名本身**:把机制名抹掉后如果那句话还在提「沙箱/隔离」,就照样按承诺判红 ——
+  // 否则「前缀隔离,插件在隔离环境里运行」这种半句机制半句谎的写法会躲在白名单里。
+  const NEG = /(不|别|没|非|假|挡不住)/
+  const stripMechanism = (l) => l.replace(/(错误|前缀|命名|实例|作用域)隔离/g, '')
+  const isBadLine = (l) => /(沙箱|隔离)/.test(l) && !NEG.test(l) && /(沙箱|隔离)/.test(stripMechanism(l))
+  const norm = (p) => p.replace(/\\/g, '/')
+  const wording = new Map()
+  for (const rel of ['src/App.vue', 'src/main.css', 'src/views/ToolsView.vue', 'src/views/ToolPageView.vue', 'src/composables/useToolkit.ts', 'src/composables/useToolPage.ts']) {
+    const t = read(rel)
+    if (typeof t === 'string') wording.set(norm(rel), t)
+  }
+  for (const dir of ['src/toolkit', 'src/components/toolkit', 'src/tools/builtin/gdscript-format']) {
+    const abs = path.resolve(ROOT, dir)
+    if (!existsSync(abs)) continue
+    for (const f of readdirSync(abs)) {
+      if (!/\.(ts|vue|json)$/.test(f)) continue
+      const t = read(`${dir}/${f}`)
+      if (typeof t === 'string') wording.set(norm(`${dir}/${f}`), t)
+    }
+  }
+  // 下限:目录改名或整体挪走时扫描面会塌成 0,那时候「全绿」是最坏的假绿
+  ok(wording.size >= 20, `措辞红线扫到 ${wording.size} 个文件(整片工具箱面)`, wording.size)
+  for (const [rel, text] of wording) {
+    const bad = text.split(/\r?\n/).filter(isBadLine)
+    ok(bad.length === 0, `${rel}:每句提到「沙箱/隔离」都在否定式或机制名里(R-1③)`, bad.slice(0, 2).map((l) => l.trim().slice(0, 80)))
   }
 }
 
