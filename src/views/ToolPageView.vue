@@ -162,7 +162,8 @@ const ViewHost = defineComponent({
         <p v-for="(s, i) in page.schemaIssues.value" :key="'s' + i" class="bad">{{ s }}</p>
       </div>
 
-      <div class="bar">
+      <!-- 同 FilePicker:不叫 .bar(main.css 里那是 6px 高的进度条轨道),这一行装的是按钮与摘要 -->
+      <div class="run-bar">
         <button class="btn primary" type="button" :disabled="page.planning.value || !page.usable.value" @click="onPlan">
           <Icon name="refresh" :size="13" /> {{ page.planning.value ? '计算中' : '算一遍要改什么' }}
         </button>
@@ -255,7 +256,7 @@ const ViewHost = defineComponent({
   border-radius: var(--radius);
 }
 
-.bar,
+.run-bar,
 .foot {
   display: flex;
   align-items: center;

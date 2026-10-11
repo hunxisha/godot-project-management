@@ -46,7 +46,9 @@ function kb(n: number): string {
 
 <template>
   <div class="picker">
-    <div class="bar">
+    <!-- 类名不叫 .bar:main.css:703 那个 `.bar` 是**进度条轨道**(height:6px + overflow:hidden),
+         撞名会把这一行工具栏压成 6px 高,里面的输入框上下溢出盖到相邻文字上(scoped 只覆盖自己声明的属性)。 -->
+    <div class="pick-bar">
       <input v-model="q" class="input grow" placeholder="在候选里过滤(按路径子串)" />
       <button class="btn small" type="button" @click="toggleAll">
         <Icon name="check" :size="13" /> {{ allChecked ? '全部取消' : '全选可见' }}
@@ -70,7 +72,7 @@ function kb(n: number): string {
 </template>
 
 <style scoped>
-.bar {
+.pick-bar {
   display: flex;
   align-items: center;
   gap: 8px;

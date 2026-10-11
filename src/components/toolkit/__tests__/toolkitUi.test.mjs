@@ -126,6 +126,39 @@ section('1. 只用 main.css 里已有的变量(不新增令牌 / 不臆造名字
   }
 }
 
+section('1b. scoped 类名不许与 main.css 的顶层类撞名')
+{
+  // 真宿主反馈的第二条根因:FilePicker 的工具栏与 ToolPageView 的按钮行都叫 `.bar`,
+  // 而 main.css:703 的 `.bar` 是**进度条轨道**(`height:6px` + `overflow:hidden` + 底色 + 圆角)。
+  // scoped 样式只覆盖**自己声明了的那些属性**,全局那条的 height/overflow 照样漏进来 ⇒
+  // 一行工具栏被压成 6px 高,里面的 35px 输入框上下溢出,盖到相邻文字上(截图里那团重叠字就是这个)。
+  // 这类撞名肉眼看不出来,所以在这里按集合判。
+  const globalClasses = new Set()
+  for (const m of SRC.css.matchAll(/^\.([a-zA-Z][\w-]*)\s*[,{:\s]/gm)) globalClasses.add(m[1])
+  ok(globalClasses.size >= 25, `先从 main.css 读到 ${globalClasses.size} 个顶层类名(实数 30,低于 25 说明抽取本身塌了)`, globalClasses.size)
+  // 白名单是**故意复用全局语义**的三个,不是撞车;每个都写清为什么可以重名
+  const REUSE = {
+    grow: '全局就是 `flex:1`,与本地同一意图',
+    card: '全局是那层面板外观(底色/边框/圆角/阴影),本地只补内边距',
+    mono: '全局是 `font-family: var(--mono)`,同一件事'
+  }
+  for (const [k, rel] of Object.entries(FILES)) {
+    if (!/\.vue$/.test(rel)) continue
+    const t = SRC[k] !== undefined ? SRC[k] : (read(rel) || '')
+    if (!t) continue
+    const own = new Set()
+    for (const m of t.slice(t.indexOf('<style')).matchAll(/^\s*\.([a-zA-Z][\w-]*)/gm)) own.add(m[1])
+    const clash = [...own].filter((c) => globalClasses.has(c) && !REUSE[c])
+    ok(clash.length === 0, `${rel}:自有 ${own.size} 个类,没有一个与全局同名`, clash)
+  }
+  // 反向对照:那两个改过名的地方确实不再与全局 `.bar` 撞。
+  // 这里**刻意不钉新类名叫什么**(叫 .pick-bar / .toolbar / .bar-row 都行)—— 钉死写法的话,
+  // 下一次合法改名会假红,而真正要守的是「别和全局同名」这件事,上面那个集合判据已经守着。
+  const definesBar = (t) => /^\s*\.bar\s*[,{]/m.test(t.slice(t.indexOf('<style')))
+  ok(!definesBar(SRC.picker) && !SRC.picker.includes('class="bar"'), 'FilePicker 不再用 .bar 这个名字')
+  ok(!definesBar(SRC.page) && !SRC.page.includes('class="bar"'), 'ToolPageView 不再用 .bar 这个名字')
+}
+
 section('2. 不新增依赖(工具箱不引路由/状态库/样式框架)')
 {
   const pkg = JSON.parse(SRC.pkg)
