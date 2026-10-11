@@ -10,7 +10,7 @@
 //   · `id` —— 插件可给;没给时框架按 `${toolId}:${kind}:${rel}` 补一个**稳定键**
 //     (不含时间戳、不含序号:预览→勾选→执行三步之间要认得出「还是那一条」,旧 Finding.id 同一动机)。
 
-/** 三种动盘形态。rename 在第 1 批只允许出现在预览里,执行通道第 2 批接(见 orchestrate.ts 的 RENAMED_UNSUPPORTED) */
+/** 三种动盘形态。rename 的执行通道是 §G Task 15 建的那条宿主原语(第 1 批只能在预览里看到它) */
 export type ChangeKind = 'rewrite' | 'rename' | 'trash'
 
 /** 插件自报的风险档。框架只会把它**升**到 high(越界),从不降级 */
@@ -30,6 +30,12 @@ export interface Change {
   reason: string
   /** kind:'rename' 的新名(相对项目根);非 rename 给了也忽略 */
   to?: string
+  /**
+   * kind:'rename' 专用:这一条如果**只改文件名、不改引用**,会有几处引用落在地上(§G DEV-24)。
+   * 插件只给数字,那句红字由 `orchestrate.danglingWarn()` 生成 —— DEV-7 的分工:面向用户的整句
+   * 风险话永远只有一处出处,而断链处数只有插件自己算得出。非 rename 给了也忽略。
+   */
+  dangling?: number
   /** 体积:预览说「已选 N 个 / 共 X KB」用。不知道就别填,框架不臆造成 0 */
   bytes?: number
   /** apply 时才用得上的数据;'rewrite' 的正文可以放这里(payload.text) */
@@ -87,6 +93,10 @@ export interface ExecutedItem {
   error?: string
   /** 写盘成功时原语回报的备份名(回滚要靠它) */
   backupRel?: string
+  /** kind:'rename' 成功后的新名(回执与账本按它数改名了几条) */
+  to?: string
+  /** 改名时跟着搬走的**边车**个数(`.uid` / `.import`;回执那句要如实说出来) */
+  sidecars?: number
 }
 
 /** 一次执行的回执:账本的一条、UI 回执卡的同一份数据 */
@@ -98,6 +108,11 @@ export interface ApplyReceipt {
   items: ExecutedItem[]
   written: string[]
   moved: string[]
+  /**
+   * 真正改成的名(每一对 = 一条成功的 rename)。`sidecars` 是跟着一起搬走的边车数,
+   * 回执那句「改名 N 个文件(连带 M 个边车)」与账本行都读它 —— **不许在别处再数一遍**。
+   */
+  renamed: { from: string; to: string; sidecars: number }[]
   failed: ExecutedItem[]
   backups: { rel: string; backupRel: string }[]
   /** 用户中途取消:剩余条目标 '已取消',已做的不回滚(回滚是账本的独立动作) */

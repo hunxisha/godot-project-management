@@ -110,7 +110,8 @@ const build = (rows, over) => buildPlanSafe({
 section('0. 导出面')
 for (const n of ['buildPlan', 'subsetPlan', 'runGate', 'defaultSelectedIds', 'allIds', 'selectionCount',
   'selectionBytes', 'groupPreview', 'planSummary', 'executePlan', 'summaryText', 'rewriteWarn', 'warnText',
-  'NO_SELECTION_REASON', 'EMPTY_PLAN_REASON', 'RENAME_UNSUPPORTED']) {
+  'danglingWarn', 'renameCollisions',
+  'NO_SELECTION_REASON', 'EMPTY_PLAN_REASON', 'RENAME_COLLISION_REASON']) {
   ok(T[n] !== undefined, `${n} 已在打包产物里导出`)
 }
 
@@ -183,7 +184,7 @@ section('4. 越界兜底:插件说了不算(Q28 / A-8 末条)')
   ok(ONE(none).outOfScope === true, '一个文件都没选中时,所有条都是越界')
 }
 
-section('5. rename 的形态闸(第 1 批只验形状,执行通道在第 2 批)')
+section('5. rename 的形态闸与 dangling 的取值闸(§G DEV-24)')
 {
   const good = await build([CH({ kind: 'rename', to: 'b.gd' })])
   ok(L(good) === 1 && ONE(good).to === 'b.gd', 'rename + to 过')
@@ -195,6 +196,15 @@ section('5. rename 的形态闸(第 1 批只验形状,执行通道在第 2 批)'
   ok(L(sameTo) === 0 && REJ0(sameTo).why.includes('同一个名字'), '改前改后同名 ⇒ 丢条(那根本不是变更)', sameTo.rejected[0]?.why)
   const bsTo = await build([CH({ kind: 'rename', to: 'sub\\b.gd' })])
   ok(L(bsTo) === 1 && ONE(bsTo).to === 'sub/b.gd', '新名的反斜杠同样归一(与 rel 用同一个键比对)')
+  // dangling:插件只给数字,那句红字归 danglingWarn(DEV-7 / DEV-24)
+  const dg = await build([CH({ kind: 'rename', to: 'b.gd', dangling: 7 })])
+  ok(N(ONE(dg).dangling) === 7, 'rename 的 dangling 原样带进 PlannedChange')
+  const dgs = await build([CH({ kind: 'rename', to: 'b.gd', dangling: '7' })])
+  ok(ONE(dgs).dangling === undefined, 'dangling 是字符串 ⇒ 当没给(不猜数,也不拿它去拼那句红字)', ONE(dgs).dangling)
+  const dgn = await build([CH({ kind: 'rename', to: 'b.gd', dangling: -3 })])
+  ok(N(P(dgn.changes, 0).dangling) === -1, '负数 ⇒ 不接受(拿到 -3 就说 -3 处断链是谎话)', dgn.rejected.length)
+  const dgnw = await build([CH({ kind: 'rewrite', to: 'b.gd', dangling: 5 })])
+  ok(ONE(dgnw).dangling === undefined, '非 rename 的 dangling 忽略(那句断链话只在改名那一侧有意义)')
 }
 
 section('6. 同一个文件被改写两次:只留第一条')
@@ -508,17 +518,56 @@ section('17. trash 批量:一次调用,逐条落账')
   ok(ERR0(throwTrash).includes('回收站调用抛异常'), 'trash 抛异常同样收口成失败项', throwTrash.failed)
 }
 
-section('18. rename 在第 1 批拒绝执行:不假装能做,也不先跑副作用')
+section('18. rename 走真执行通道(§G Task 16:第 1 批那条拒绝已经删掉)')
 {
   let applied = 0
   const r = await AR(T.executePlan({
     plan: PLAN([CH({ id: 'n1', kind: 'rename', rel: 'a.gd', to: 'b.gd' })]),
     apply: async () => { applied++; return { ok: true, text: 'x' } },
+    deps: {
+      writeText: () => ({ ok: true }),
+      trash: () => ({ ok: true, moved: 0, failed: [] }),
+      rename: (rel, to) => ({ ok: true, from: rel, to, moved: [{ from: rel, to }, { from: rel + '.uid', to: to + '.uid' }] })
+    }
+  }))
+  ok(applied === 0, 'rename 不调插件的 apply:执行的是框架原语,那一轮插件没有副作用要跑')
+  ok(FA(F(r).renamed).length === 1, '回执记下一条改名', F(r).renamed)
+  ok(P(F(r).renamed, 0).from === 'a.gd' && P(F(r).renamed, 0).to === 'b.gd', 'from/to 出自原语的回报而不是计划里的字符串', F(r).renamed)
+  ok(N(P(F(r).renamed, 0).sidecars) === 1, '边车数 = moved 减掉主文件那一条(原语把主文件放第一位)', F(r).renamed)
+  ok(FL(r) === 0 && F(r).ok === true, '成功的一条不进 failed', F(r).failed)
+  ok(WR(r) === 0, '改名不进 written:它没改内容')
+  const one = T.summaryText(F(r))
+  ok(S(one).includes('改名 1 个文件(连带 1 个边车)'), '回执那句说得出改名与边车(G-8 那句「什么都没做成」的谎话在这儿修掉)', one)
+  ok(S(one).indexOf('什么都没做成') < 0, '一轮纯改名不许被说成「什么都没做成」', one)
+  // 原语回报「没搬成」的三种形态,都算失败并带原因
+  const noMoved = await AR(T.executePlan({
+    plan: PLAN([CH({ id: 'n2', kind: 'rename', rel: 'a.gd', to: 'b.gd' })]),
+    deps: { writeText: () => ({ ok: true }), trash: () => ({ ok: true }), rename: (rel, to) => ({ ok: true, from: rel, to }) }
+  }))
+  ok(FA(F(noMoved).renamed).length === 1 && N(P(F(noMoved).renamed, 0).sidecars) === 0,
+    '原语没给 moved ⇒ 边车数按 0 说,不臆造成「有个边车」', F(noMoved).renamed)
+  const dirty = await AR(T.executePlan({
+    plan: PLAN([CH({ id: 'n3', kind: 'rename', rel: 'a.gd', to: 'b.gd' })]),
+    deps: { writeText: () => ({ ok: true }), trash: () => ({ ok: true }), rename: () => undefined }
+  }))
+  ok(FL(dirty) === 1 && ERR0(dirty) === '重命名失败', '原语漏 return(拿到 undefined)不算成功', F(dirty).failed)
+  const errStr = await AR(T.executePlan({
+    plan: PLAN([CH({ id: 'n4', kind: 'rename', rel: 'a.gd', to: 'b.gd' })]),
+    deps: { writeText: () => ({ ok: true }), trash: () => ({ ok: true }), rename: () => ({ ok: true, error: '目标已存在' }) }
+  }))
+  ok(FL(errStr) === 1 && ERR0(errStr) === '目标已存在',
+    'ok:true 却带着 error ⇒ 仍判失败并交出原语的原话(与 changeLanded 同一方向)', F(errStr).failed)
+  const threw = await AR(T.executePlan({
+    plan: PLAN([CH({ id: 'n5', kind: 'rename', rel: 'a.gd', to: 'b.gd' })]),
+    deps: { writeText: () => ({ ok: true }), trash: () => ({ ok: true }), rename: () => { throw new Error('EPERM') } }
+  }))
+  ok(S(ERR0(threw)).includes('改名抛异常'), '改名原语抛异常也收口成失败项', F(threw).failed)
+  ok(FA(F(threw).renamed).length === 0, '抛异常那条不进 renamed', F(threw).renamed)
+  const noDep = await AR(T.executePlan({
+    plan: PLAN([CH({ id: 'n6', kind: 'rename', rel: 'a.gd', to: 'b.gd' })]),
     deps: { writeText: () => ({ ok: true }), trash: () => ({ ok: true }) }
   }))
-  ok(ERR0(r) === T.RENAME_UNSUPPORTED, '原因说清「第 2 批接入」,而不是含糊的失败', r.failed)
-  ok(applied === 0, '既然不写盘,就不该先跑插件的副作用')
-  ok(WR(r) === 0 && MR(r) === 0, '一条盘都没动')
+  ok(S(ERR0(noDep)).includes('宿主没有改名原语'), 'deps 没给 rename 时说得清是没原语,而不是悄悄成功', F(noDep).failed)
 }
 
 section('19. 取消语义:剩余条目标「已取消」')
@@ -647,6 +696,141 @@ section('22. DEV-7 兑现:夹具吃内置格式化工具的真实 plan() 产物(
   ok(FA(F(r).backups).length === 2, '两个备份名进了回执(账本就靠这一组对应关系)', FA(F(r).backups).length)
   ok(F(r).failed.length === 0 && F(r).ok === true, '零失败', JSON.stringify(F(r).failed))
   ok(S(T.summaryText(r)) === '完成:改写 2 个文件', '回执那句话与真实条数同源', S(T.summaryText(r)))
+}
+
+section('25. 执行顺序:先写内容、后移文件(§G DEV-23)')
+{
+  const calls = []
+  const r = await AR(T.executePlan({
+    plan: PLAN([
+      CH({ id: 'w1', rel: 'a.gd' }),
+      CH({ id: 'n1', kind: 'rename', rel: 'b.gd', to: 'c.gd' }),
+      CH({ id: 'w2', rel: 'z.gd' }),
+      CH({ id: 't1', kind: 'trash', rel: 'd.gd' })
+    ]),
+    apply: async (c) => { calls.push('apply:' + F(c).rel); return { ok: true, text: '正文' } },
+    deps: {
+      writeText: (rel) => { calls.push('write:' + rel); return { ok: true } },
+      trash: (rels) => { calls.push('trash:' + FA(rels).join('+')); return { ok: true, moved: FA(rels).length, failed: [] } },
+      rename: (rel, to) => { calls.push('rename:' + rel + '>' + to); return { ok: true, from: rel, to, moved: [{ from: rel, to }] } }
+    }
+  }))
+  const seq = FA(calls).map((c) => S(c).split(':')[0]).join(',')
+  ok(seq === 'apply,write,apply,write,rename,trash',
+    '两条改写都落完才改名,trash 最后(反过来先改名再按旧 rel 写,writeProjectText 会在项目里新建一份旧名文件且不落备份)', seq)
+  ok(calls.some((c) => S(c) === 'rename:b.gd>c.gd'), 'rename 用的是计划里那个旧名(框架不擅自重映射)', calls)
+  ok(WR(r) === 2 && FA(F(r).renamed).length === 1 && MR(r) === 1, '三种落点各自计数,不互相顶替', JSON.stringify({ w: F(r).written, n: F(r).renamed, m: F(r).moved }))
+  ok(FA(F(r).items).length === 4, '四条都有落账条目(items 是完整清单)', FA(F(r).items).length)
+  // 多条 rename 要逐条调原语,不是攒一次批量(§G DEV-21:逐条才能与 rewrite 同样的失败隔离与取消语义)
+  const many = []
+  await AR(T.executePlan({
+    plan: PLAN([
+      CH({ id: 'n1', kind: 'rename', rel: 'a.gd', to: 'a2.gd' }),
+      CH({ id: 'n2', kind: 'rename', rel: 'b.gd', to: 'b2.gd' }),
+      CH({ id: 'n3', kind: 'rename', rel: 'c.gd', to: 'c2.gd' })
+    ]),
+    deps: {
+      writeText: () => ({ ok: true }), trash: () => ({ ok: true }),
+      rename: (rel, to) => { many.push(rel); return { ok: true, from: rel, to, moved: [{ from: rel, to }] } }
+    }
+  }))
+  ok(FA(many).length === 3, '三条 rename ⇒ 原语被调三次(一次一条,单条失败不中断其余)', many)
+  ok(FA(many).join(',') === 'a.gd,b.gd,c.gd', '调用顺序按父计划,不按点选顺序(纪律 5)', many)
+}
+
+section('26. 批次内撞名预检:那几条一起拒,一条都不碰盘')
+{
+  const A = CH({ id: 'n1', kind: 'rename', rel: 'a.gd', to: 'b.gd' })
+  const B = CH({ id: 'n2', kind: 'rename', rel: 'b.gd', to: 'c.gd' })
+  /** Set 直读会在变异态(返回 undefined / 抛异常)把套件撞停,所以统一收成字符串再判 */
+  const COLL = (x) => {
+    try {
+      const s = T.renameCollisions(x)
+      if (!s || typeof s.size !== 'number') return '__BAD__'
+      return [...s].sort().join(',')
+    } catch (e) { return '__THREW__' }
+  }
+  ok(COLL([A, B]) === 'n1,n2', 'A→B 与 B→C 互撞 ⇒ 两条一起进拒绝集(只拒后手会做成一半停一半)', COLL([A, B]))
+  ok(COLL([A, CH({ id: 'n3', kind: 'rename', rel: 'x.gd', to: 'y.gd' })]) === '', '新名不撞别人的旧名 ⇒ 空集')
+  ok(COLL([A, CH({ id: 'w1', rel: 'b.gd' })]) === '', '改写那条的 rel 不参与撞名判据(它指的是已存在的文件,原语自己会拒)')
+  ok(COLL(undefined) === '', '入参不是数组 ⇒ 空集,不抛')
+  ok(COLL([null, undefined, CH({ id: 'n9' })]) === '', '数组里塞 null / 非对象 ⇒ 跳过,不抛')
+
+  const called = []
+  const r = await AR(T.executePlan({
+    plan: PLAN([A, B, CH({ id: 'n3', kind: 'rename', rel: 'x.gd', to: 'y.gd' })]),
+    deps: {
+      writeText: () => ({ ok: true }), trash: () => ({ ok: true }),
+      rename: (rel, to) => { called.push(rel); return { ok: true, from: rel, to, moved: [{ from: rel, to }] } }
+    }
+  }))
+  ok(FA(called).join(',') === 'x.gd', '撞名那两条一次都没碰原语,不撞的那条照做', called)
+  ok(FL(r) === 2, '两条撞名的进 failed(整批一起拒)', F(r).failed)
+  ok(S(ERR0(r)) === S(T.RENAME_COLLISION_REASON), '理由用的是框架那一句,不是原语的串', ERR0(r))
+  ok(FA(F(r).renamed).length === 1 && FA(F(r).items).length === 3, '成功一条进 renamed,三条都有落账', F(r).renamed)
+}
+
+section('27. danglingWarn:那句红字由框架生成,插件只给数字(A-22 / DEV-24)')
+{
+  const two = [CH({ id: 'n1', kind: 'rename', rel: 'a.gd', to: 'b.gd', dangling: 3 }), CH({ id: 'n2', kind: 'rename', rel: 'c.gd', to: 'd.gd', dangling: 4 })]
+  const w = S(T.danglingWarn(two))
+  ok(w.includes('将有 7 处引用断链'), '两条的断链数相加并进了同一句话', w)
+  ok(w.indexOf('整理缩进') < 0, '这句话不复述插件的 label、也不自己判断风险(DEV-7)', w)
+  ok(S(T.danglingWarn([CH({ id: 'n1', kind: 'rename', rel: 'a.gd', to: 'b.gd' })])) === '', '没给 dangling ⇒ 空串,UI 不画条(不画「0 处断链」那种废话)')
+  ok(S(T.danglingWarn([CH({ kind: 'rewrite' })])) === '', '没有改名条目 ⇒ 空串')
+  ok(S(T.danglingWarn([CH({ id: 'n1', kind: 'rewrite', rel: 'a.gd', dangling: 9 })])) === '', '非 rename 的数字不计(那句断链话只属于改名)')
+  ok(S(T.danglingWarn([CH({ id: 'n1', kind: 'rename', rel: 'a.gd', to: 'b.gd', dangling: '7' })])) === '', '脏值(字符串)不拼进句子,免得写出「将有 7 处」那种假数')
+  ok(S(T.danglingWarn([CH({ id: 'n1', kind: 'rename', rel: 'a.gd', to: 'b.gd', dangling: NaN })])) === '', 'NaN ⇒ 当没给')
+  ok(S(T.danglingWarn(undefined)) === '', '入参不是数组 ⇒ 空串,不抛')
+  ok(S(T.warnText(two)).indexOf('断链') < 0, 'warnText 不管断链那句(两句各说各的,合并会让危险色与备份色混在一行)')
+}
+
+section('28. 取消语义要盖住攒批的队列(items 是完整清单)')
+{
+  let n = 0
+  const r = await AR(T.executePlan({
+    plan: PLAN([
+      CH({ id: 'n1', kind: 'rename', rel: 'a.gd', to: 'a2.gd' }),
+      CH({ id: 'n2', kind: 'rename', rel: 'b.gd', to: 'b2.gd' }),
+      CH({ id: 'n3', kind: 'rename', rel: 'c.gd', to: 'c2.gd' })
+    ]),
+    deps: {
+      writeText: () => ({ ok: true }), trash: () => ({ ok: true }),
+      rename: (rel, to) => { n++; return { ok: true, from: rel, to, moved: [{ from: rel, to }] } }
+    },
+    isCancelled: () => n >= 1
+  }))
+  ok(FA(F(r).items).length === 3, '三条都在账上:第二条起没执行的也要标,不许凭空少', FA(F(r).items).length)
+  ok(FA(F(r).failed).filter((f) => S(F(f).error) === '已取消').length === 2, '第二条与第三条各带「已取消」', F(r).failed)
+  ok(FA(F(r).renamed).length === 1, '真改成的那一条进 renamed,被取消的两条不进', F(r).renamed)
+  ok(F(r).cancelled === true, '回执标出这是被取消的一轮')
+
+  const mix = await AR(T.executePlan({
+    plan: PLAN([CH({ id: 'w1', rel: 'a.gd' }), CH({ id: 'n1', kind: 'rename', rel: 'b.gd', to: 'c.gd' })]),
+    apply: async () => ({ ok: true, text: 'x' }),
+    deps: {
+      writeText: () => ({ ok: true }), trash: () => ({ ok: true }),
+      rename: () => { throw new Error('这一条本不该执行') }
+    },
+    isCancelled: () => true
+  }))
+  ok(FA(F(mix).items).length === 2, '循环里就取消 ⇒ 攒着的 rename 也要落账(第 1 批那版少记的正是这类)', FA(F(mix).items).length)
+  ok(S(P(F(mix).items, 1).error) === '已取消', '那条 rename 的落点是「已取消」而不是失败或消失', F(mix).items)
+  ok(FA(F(mix).renamed).length === 0, '一条都没改成', F(mix).renamed)
+
+  // 攒进 trash 队列之后才被取消:那一条也得落账(队列盖不住就会凭空少一条,账本说不出「停在哪」)
+  let checks = 0
+  const tr = await AR(T.executePlan({
+    plan: PLAN([CH({ id: 't1', kind: 'trash', rel: 'x.gd' }), CH({ id: 'n1', kind: 'rename', rel: 'a.gd', to: 'b.gd' })]),
+    deps: {
+      writeText: () => ({ ok: true }), trash: () => ({ ok: true, moved: 1, failed: [] }),
+      rename: () => { throw new Error('不该执行') }
+    },
+    isCancelled: () => ++checks >= 2
+  }))
+  ok(FA(F(tr).items).length === 2, '两条都在账上:队列里攒着的 trash 不许消失', FA(F(tr).items).length)
+  ok(FA(F(tr).failed).filter((f) => S(F(f).error) === '已取消').length === 2, '两条的落点都是「已取消」', F(tr).failed)
+  ok(MR(tr) === 0, '一条都没进回收站', F(tr).moved)
 }
 
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)

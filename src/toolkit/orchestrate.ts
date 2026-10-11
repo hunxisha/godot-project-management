@@ -15,7 +15,7 @@
 //   面向用户的整句风险话**只在本模块生成**一处(`NO_SELECTION_REASON` / `rewriteWarn` / `summaryText`);
 //   插件的 `label`/`reason` 逐条原样沿用,框架不复述、不改写、也不自己判断风险。
 //
-// 红线:纯函数为主。唯一的异步入口 `executePlan` 只调**注入进来的** writeText/trash/apply 三个函数,
+// 红线:纯函数为主。唯一的异步入口 `executePlan` 只调**注入进来的** writeText/trash/rename/apply 四个函数,
 // 不碰 window、不碰 vue、不碰 fs —— 所以 Node harness 里跑的是真判据,不是假加载器(Q33)。
 
 import type {
@@ -32,8 +32,11 @@ import { isInsidePath } from './manifest'
 export const NO_SELECTION_REASON = '没有勾选任何一条变更,已拒绝执行(至少要选中一条)'
 /** plan() 本身没给出可执行清单时的兜底原因 */
 export const EMPTY_PLAN_REASON = '这一步算完没有任何要动的东西,已拒绝执行'
-/** 第 1 批的执行通道只有改写与回收站:rename 的原语还没建,绝不假装能做 */
-export const RENAME_UNSUPPORTED = '重命名的执行通道在第 2 批接入(需要新的宿主原语),本轮不写盘'
+/**
+ * 一批 rename 里「某条的新名正好是另一条的旧名」时,那几条共用的拒绝理由(措辞唯一来源)。
+ * 改名原语看不见这种冲突(那一刻目标还不存在),只有框架拿得全整张表 —— 见 `renameCollisions`。
+ */
+export const RENAME_COLLISION_REASON = '这一批里有几条的新名撞上别的条要改走的名字,那几条一起拒,一条都没执行'
 
 const KINDS = ['rewrite', 'rename', 'trash'] as const
 const RISKS = ['low', 'high'] as const
@@ -74,6 +77,24 @@ export function rewriteWarn(items: readonly PlannedChange[]): string {
 /** 整批的风险句:只有真的存在改写目标时才说备份那段 */
 export function warnText(items: readonly PlannedChange[]): string {
   return items.some((i) => i.kind === 'rewrite') ? rewriteWarn(items) : ''
+}
+
+/**
+ * A-22 那句红字:关掉「同时更新引用」时,预览必须说清会留下几处断链。
+ * 数字来自插件的 `Change.dangling`(它才知道引用点在哪),**整句话只在这里生成**(DEV-7)——
+ * 插件给措辞就会长出第二种说法,而这句话要在 UI 上按危险色画出来,来源必须唯一。
+ * 没有断链就返回空串(UI 不画条),不画「0 处断链」那种废话。
+ */
+export function danglingWarn(items: readonly PlannedChange[]): string {
+  const list = Array.isArray(items) ? items : []
+  let n = 0
+  for (const it of list) {
+    if (!it || it.kind !== 'rename') continue
+    const d = it.dangling
+    if (typeof d === 'number' && Number.isFinite(d) && d > 0) n += Math.floor(d)
+  }
+  if (!n) return ''
+  return `将有 ${n} 处引用断链:这一批只改文件名,不改引用里的路径。要么勾上「同时更新引用」重算,要么自己把这些路径改到新名。`
 }
 
 /**
@@ -218,6 +239,9 @@ export async function buildPlan(opts: {
       risk: risk as PlannedChange['risk'],
       reason: str(c.reason).trim(),
       to: kind === 'rename' ? key(c.to) : undefined,
+      // 断链数只认「非负有限数」:脏值(NaN / 字符串 / 负数)一律当没给,不臆造成 0(0 会让那句红字消失)
+      dangling: kind === 'rename' && typeof c.dangling === 'number' && Number.isFinite(c.dangling) && c.dangling >= 0
+        ? Math.floor(c.dangling) : undefined,
       bytes: typeof c.bytes === 'number' && c.bytes >= 0 ? c.bytes : undefined,
       payload: c.payload,
       outOfScope,
@@ -294,6 +318,26 @@ export function runGate(plan: ChangePlan, ids: readonly unknown[]): { ok: boolea
 }
 
 /**
+ * 批次内撞名预检(§G 纯契约补充第 6 条):某条 rename 的**新名**正好是另一条 rename 的**旧名**。
+ * 改名原语看不见这种冲突 —— 那一刻目标还不存在,`existsSync` 当然是假的;只有框架拿得全整张表。
+ * 两方**一起**返回:只拒后手会让「A→B、B→C」这种平移做成一半停一半,比全不做更坏
+ * (真要做平移得先给每条分配临时名,那是另一个需求,本批不做)。
+ * 改写与回收站不参与:它们的 rel 是「已经存在的文件」,与这种冲突无关。
+ */
+export function renameCollisions(items: readonly PlannedChange[]): Set<string> {
+  const list = (Array.isArray(items) ? items : []).filter((c) => !!c && c.kind === 'rename')
+  const rels = new Set(list.map((c) => c.rel))
+  const bad = new Set<string>()
+  for (const c of list) {
+    const to = typeof c.to === 'string' ? c.to : ''
+    if (!to || !rels.has(to)) continue
+    bad.add(c.id)
+    for (const o of list) if (o.rel === to) bad.add(o.id)
+  }
+  return bad
+}
+
+/**
  * 写盘注入面:返回形态**照宿主原语**(`inspectfs.writeProjectText` 回 `{ok, bytes, truncated, error}`),
  * 判据不许自己发明一个简化版 —— 清单被截断 / 目标是二进制时原语根本不会写,
  * 框架要是把那也算成「改写成功」,回执就在对用户说谎。
@@ -322,6 +366,12 @@ export interface WriteDeps {
   writeText: (rel: string, text: string) => unknown
   /** 正常形态照宿主 `movePathsToTrash`:顶层错只有一条,逐条错在 failed 里。同样允许返回 Promise */
   trash: (rels: string[]) => unknown
+  /**
+   * 正常形态照 §G Task 15 的宿主原语 `renameProjectPath`:
+   * `{ok, from, to, moved?:{from,to}[], error?}` —— `moved` 第一项是主文件,后面每一项是一个跟着搬走的边车。
+   * 逐条调用(不是批量):改名的落账与取消语义要和 rewrite 同构,而它没有 trash 那种「按盘复核」的计数要对账。
+   */
+  rename: (rel: string, to: string) => unknown
 }
 
 /**
@@ -347,11 +397,16 @@ function textOf(change: PlannedChange, outcome?: ApplyOutcome): string | null {
 }
 
 /**
- * 单条失败**不中断其余**(A-8 明写的判据),按 kind 分两路:
- *   · rewrite 逐条写(宿主原语本来就是单文件);
- *   · trash 攒成一批交给 movePathsToTrash —— 它自己就承诺「单个失败不中断」并按盘上实况复核;
- *   · rename 在第 1 批一律拒执行(原语还没建),**不调 apply**:既然不写盘,就别让人先跑一遍副作用。
+ * 单条失败**不中断其余**(A-8 明写的判据),按 kind 分三路:
+ *   · rewrite 逐条写(宿主原语本来就是单文件),在循环里当场做完;
+ *   · rename 攒成队列,**等整趟改写做完之后**才动(§G DEV-23:先写内容、后移文件)——
+ *     反过来先改名再按旧 rel 写,`writeProjectText` 会在项目里**新建一份旧名文件且不落备份**
+ *     (`inspectfs.js:206` 的 `if (exists && …)`),那才是真丢东西;
+ *   · trash 攒成一批交给 movePathsToTrash —— 它自己就承诺「单个失败不中断」并按盘上实况复核,排在最后。
+ * rename **不调插件的 apply**:改名执行的是框架原语,插件在那一步没有副作用要跑。
  * 取消语义:`isCancelled()` 为真 ⇒ 停手,剩余条目标 '已取消'(§F 契约补充),已做的不在这回滚。
+ * ⚠ 队列里的条目同样要落账:被取消时**攒着没执行的那些也得标 '已取消'** ——
+ *   items 是完整清单,凭空少几条就等于账本说不出「这一轮停在哪」(第 1 批那版在这里少记过 trash)。
  */
 export async function executePlan(opts: {
   plan: ChangePlan
@@ -366,9 +421,57 @@ export async function executePlan(opts: {
   const cancelled = () => (typeof opts.isCancelled === 'function' ? opts.isCancelled() === true : false)
 
   const push = (it: ExecutedItem): void => { items.push(it) }
+  /** 队列里没执行的条目要逐条落账成 '已取消' —— items 是完整清单,不许凭空少几条 */
+  const markCancelled = (queue: readonly PlannedChange[]): void => {
+    for (const c of queue) push({ id: c.id, rel: c.rel, kind: c.kind, ok: false, error: '已取消' })
+  }
 
-  // 先按 kind 分道:trash 要攒批,rewrite 逐条。顺序仍按父计划。
+  // 先按 kind 分道:trash 要攒批,rename 要等整趟改写做完(DEV-23),rewrite 逐条。顺序仍按父计划。
   const trashQueue: PlannedChange[] = []
+  const renameQueue: PlannedChange[] = []
+  /** 批次内撞名的那几条:整批一起拒,一条都不碰盘(判据见 `renameCollisions`) */
+  const collided = renameCollisions(opts.plan.changes)
+
+  /**
+   * 第二阶段:把攒下的改名逐条做掉。回报形状照 §G Task 15 的宿主原语,成败判据与写盘那侧同一条
+   * —— **拿不到成功证据就是失败**(漏 return / 回 undefined / 回一个字符串都不算成)。
+   * 边车个数取原语回报的 `moved` 减掉主文件那一条(顺序是原语定死的:主文件在第一位),
+   * 少于一条时按 0 算 —— 不臆造成「有个边车」。
+   */
+  const flushRenames = async (): Promise<void> => {
+    const q = renameQueue.splice(0, renameQueue.length)
+    for (let i = 0; i < q.length; i++) {
+      const c = q[i]
+      if (collided.has(c.id)) {
+        push({ id: c.id, rel: c.rel, kind: c.kind, ok: false, error: RENAME_COLLISION_REASON })
+        continue
+      }
+      if (cancelled()) { markCancelled(q.slice(i)); return }
+      const to = typeof c.to === 'string' ? c.to : ''
+      let raw: unknown
+      try {
+        raw = typeof opts.deps.rename === 'function'
+          ? await opts.deps.rename(c.rel, to)
+          : { ok: false, error: '宿主没有改名原语' }
+      } catch (e) {
+        push({ id: c.id, rel: c.rel, kind: c.kind, ok: false, error: `改名抛异常:${e instanceof Error ? e.message : String(e)}` })
+        continue
+      }
+      const r = (raw || {}) as { ok?: boolean, error?: string, moved?: unknown }
+      const done = r.ok === true && !str(r.error).trim()
+      const movedList = Array.isArray(r.moved) ? r.moved : []
+      push({
+        id: c.id,
+        rel: c.rel,
+        kind: c.kind,
+        ok: done,
+        error: done ? undefined : str(r.error).trim() || '重命名失败',
+        to: done ? to : undefined,
+        sidecars: done ? Math.max(0, movedList.length - 1) : undefined
+      })
+    }
+  }
+
   for (let i = 0; i < opts.plan.changes.length; i++) {
     const c = opts.plan.changes[i]
     if (cancelled()) {
@@ -379,10 +482,7 @@ export async function executePlan(opts: {
       }
       break
     }
-    if (c.kind === 'rename') {
-      push({ id: c.id, rel: c.rel, kind: c.kind, ok: false, error: RENAME_UNSUPPORTED })
-      continue
-    }
+    if (c.kind === 'rename') { renameQueue.push(c); continue }
     if (c.kind === 'trash') { trashQueue.push(c); continue }
 
     let outcome: ApplyOutcome | null | undefined = null
@@ -424,6 +524,10 @@ export async function executePlan(opts: {
     })
   }
 
+  // 第二阶段:改名。整趟改写都落完了才动文件(§G DEV-23「先写内容、后移文件」),
+  // 所以 items 里 rename 的位置排在 rewrite 之后 —— 与 trash 同一个先例(攒批的都在后面落账)。
+  await flushRenames()
+
   // 回收站批量:一次调用,失败项按原语回报逐条落账
   if (trashQueue.length && !cancelled()) {
     const byRel = new Map<string, PlannedChange[]>()
@@ -454,12 +558,18 @@ export async function executePlan(opts: {
       else if (str(r.error)) push({ id: c.id, rel: c.rel, kind: c.kind, ok: false, error: str(r.error).trim() })
       else push({ id: c.id, rel: c.rel, kind: c.kind, ok: r.ok === true, error: r.ok === true ? undefined : '移入回收站失败' })
     }
+  } else if (trashQueue.length) {
+    // 改名那一阶段被取消、或循环里就停了手:攒着的这批 trash 一条都没执行,同样要上账
+    markCancelled(trashQueue)
   }
 
   const written = items.filter((i) => i.kind === 'rewrite' && i.ok).map((i) => i.rel)
   const moved = items.filter((i) => i.kind === 'trash' && i.ok).map((i) => i.rel)
   const failed = items.filter((i) => !i.ok)
   const backups = items.filter((i) => i.ok && str(i.backupRel)).map((i) => ({ rel: i.rel, backupRel: i.backupRel as string }))
+  const renamed = items
+    .filter((i) => i.kind === 'rename' && i.ok)
+    .map((i) => ({ from: i.rel, to: str(i.to), sidecars: typeof i.sidecars === 'number' && i.sidecars > 0 ? i.sidecars : 0 }))
   return {
     toolId,
     projectId: str(opts.projectId),
@@ -467,6 +577,7 @@ export async function executePlan(opts: {
     items,
     written,
     moved,
+    renamed,
     failed,
     backups,
     cancelled: items.some((i) => i.error === '已取消'),
@@ -476,14 +587,28 @@ export async function executePlan(opts: {
 
 /**
  * `summaryText` 真正读的那几个字段。账本里存的是同一份数据的另一副形状(`failed` 已经降成
- * `{rel,error}`),按结构而不是按 `ApplyReceipt` 命名,才能让账本复用这句话而不必假装是完整回执。
+ * `{rel,error}`、`renamed` 存的是 `{from,to,sidecars}`),按结构而不是按 `ApplyReceipt` 命名,
+ * 才能让账本复用这句话而不必假装是完整回执。`renamed` 是**可选**的:第 1 批存下的旧账目里没这个字段,
+ * 那句话照旧要说得出口(不能因为老记录少一个键就在展示层抛异常)。
  */
-export type ReceiptSummary = Pick<ApplyReceipt, 'written' | 'moved' | 'cancelled' | 'ok'> & { failed: readonly unknown[] }
+export type ReceiptSummary = Pick<ApplyReceipt, 'written' | 'moved' | 'cancelled' | 'ok'> & {
+  failed: readonly unknown[]
+  renamed?: readonly { from?: string, to?: string, sidecars?: number }[]
+}
 
 /** 回执那句话(措辞唯一来源):执行朝与展示朝读同一份 items,不许各自再算一遍;账本行文案也走这里(toollog.entrySummaryText) */
 export function summaryText(receipt: ReceiptSummary): string {
   const parts: string[] = []
+  const renamed = Array.isArray(receipt.renamed) ? receipt.renamed : []
+  let sidecars = 0
+  for (const r of renamed) {
+    const n = r && typeof r.sidecars === 'number' && r.sidecars > 0 ? r.sidecars : 0
+    sidecars += n
+  }
   if (receipt.written.length) parts.push(`改写 ${receipt.written.length} 个文件`)
+  // 改名那一档不能并进「改写」:改的是**文件名**不是内容,而两者失败与回滚的语义完全不同(§G G-8:
+  // 一轮纯改名以前会走到「什么都没做成」那句 —— 文件明明搬成功了)
+  if (renamed.length) parts.push(`改名 ${renamed.length} 个文件${sidecars ? `(连带 ${sidecars} 个边车)` : ''}`)
   if (receipt.moved.length) parts.push(`移入回收站 ${receipt.moved.length} 个`)
   if (receipt.failed.length) parts.push(`失败 ${receipt.failed.length} 条`)
   if (!parts.length) return '什么都没做成(没有一条变更执行成功)'

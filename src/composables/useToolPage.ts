@@ -355,7 +355,9 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
       isCancelled: box.isCancelled,
       deps: {
         writeText: (rel: string, text: string) => (typeof s.writeProjectText === 'function' ? s.writeProjectText(pid, rel, text) : { ok: false, error: '宿主没有写盘原语' }),
-        trash: (rels: string[]) => (typeof s.movePathsToTrash === 'function' ? s.movePathsToTrash(pid, rels) : { ok: false, error: '宿主没有回收站原语' })
+        trash: (rels: string[]) => (typeof s.movePathsToTrash === 'function' ? s.movePathsToTrash(pid, rels) : { ok: false, error: '宿主没有回收站原语' }),
+        // §G Task 15 的改名原语。宿主没有它时**逐条**说清楚,而不是让框架拿 undefined 当成功
+        rename: (rel: string, to: string) => (typeof s.renameProjectPath === 'function' ? s.renameProjectPath(pid, rel, to) : { ok: false, error: '宿主没有改名原语' })
       }
     })
     receipt.value = r
@@ -463,7 +465,10 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
       isCancelled: box.isCancelled,
       deps: {
         writeText: (rel: string, text: string) => (typeof s.writeProjectText === 'function' ? s.writeProjectText(pid, rel, text) : { ok: false, error: '宿主没有写盘原语' }),
-        trash: (rels: string[]) => ({ ok: false, error: `回滚不该删文件:${rels.join(',')}` })
+        trash: (rels: string[]) => ({ ok: false, error: `回滚不该删文件:${rels.join(',')}` }),
+        // 还原不该动名字:含 rename 的账目在 `refuseReason` 那一步就被拒了(§G DEV-20),
+        // 走到这里还带改名条目只可能是别处漏下来的 —— 宁可拒绝执行,也不悄悄把名字改回去一半
+        rename: (rel: string, to: string) => ({ ok: false, error: `回滚不该改名:${rel} → ${to}` })
       }
     })
     await recordToLog(built, r)

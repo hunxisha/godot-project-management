@@ -125,8 +125,8 @@ section('1. 账目形状 = §5.5 那一行的字段名(改名要红)')
     plan: PLAN([PC('i1', 'a.gd')]), receipt: RECEIPT({ items: [EX('i1', 'a.gd')], written: ['a.gd'], backups: [{ rel: 'a.gd', backupRel: 'a.gd.gpm-bak-1' }] })
   })
   const keys = Object.keys(F(e)).sort().join(',')
-  ok(keys === 'at,backups,canRollback,cancelled,changes,failed,moved,projectId,toolId,toolName,written',
-    '§5.5 那条账目一共这 11 个键', keys)
+  ok(keys === 'at,backups,canRollback,cancelled,changes,failed,moved,projectId,renamed,toolId,toolName,written',
+    '§5.5 那条账目一共这 12 个键(§G Task 16 加了 renamed:一轮纯改名以前会被说成「什么都没做成」)', keys)
 }
 
 section('2. entryFromRun:身份与时间戳的三个来源')
@@ -538,6 +538,57 @@ section('17. 源码级:这个模块没有删除能力,也不另起措辞')
   ok(!/function\s+summaryText/.test(src), '账本里没有第二份 summaryText 实现')
   // ⚠ 这里不再去产物里找那句话:多入口共享 orchestrate.ts 时 Rollup 会把它拆进共享 chunk,
   //   字面量不在 tktoollog.mjs 里。复用由上面两条源码断言 + 第 16 节那句逐字对照共同钉住。
+}
+
+section('18. renamed 是展示档:说得出改名数,不参与「能不能还原」的判据(§G Task 16 / DEV-20)')
+{
+  const e = T.entryFromRun({
+    toolId: 'rn', toolName: '批量重命名', projectId: 'p1',
+    plan: PLAN([PC('n1', 'a.gd', 'rename', { to: 'b.gd' }), PC('w1', 'main.tscn')]),
+    receipt: RECEIPT({
+      written: ['main.tscn'],
+      renamed: [{ from: 'a.gd', to: 'b.gd', sidecars: 1 }],
+      backups: [{ rel: 'main.tscn', backupRel: 'main.tscn.gpm-bak-1' }],
+      failed: [], ok: true
+    })
+  })
+  ok(FA(F(e).renamed).length === 1, '改名记录进了账本(以前一轮纯改名会被说成「什么都没做成」)', F(e).renamed)
+  ok(P(F(e).renamed, 0).from === 'a.gd' && P(F(e).renamed, 0).to === 'b.gd', 'from/to 原样誊写,不在账本里重算第二份', P(F(e).renamed, 0))
+  ok(P(F(e).renamed, 0).sidecars === 1, '边车数进了账本(那句「连带 M 个边车」要用它)')
+  ok(F(e).canRollback === false, '含 rename 的账目仍判「不可自动还原」(§G DEV-20:反向改名本批不做)')
+  const refused = S(F(T.rollbackPlan(e)).refused)
+  ok(refused.includes('改名'), '拒绝理由说得出「改名」这一半,而不是含糊的失败', refused)
+  const line = S(T.entrySummaryText(e))
+  ok(line.includes('改名 1 个文件(连带 1 个边车)') && line.includes('不可自动还原'), '账本那一行与执行回执共用同一句话(DEV-7)', line)
+
+  const dirty = T.entryFromRun({
+    toolId: 'rn', toolName: '批量重命名', projectId: 'p1',
+    plan: PLAN([PC('w1', 'a.gd')]),
+    receipt: RECEIPT({
+      written: ['a.gd'], backups: [{ rel: 'a.gd', backupRel: 'x' }],
+      renamed: [null, 'x', { from: '', to: 'b.gd' }, { from: 'c.gd', to: 'd.gd', sidecars: -2 }]
+    })
+  })
+  ok(FA(F(dirty).renamed).length === 1, '脏项丢掉但整条记录留着:renamed 不参与判据(判据读 changes)', F(dirty).renamed)
+  ok(P(F(dirty).renamed, 0).sidecars === 0, 'sidecars 是负数 ⇒ 按 0 说,不臆造')
+
+  const oldRow = { at: 5, toolId: 'fmt', toolName: '格式化', projectId: 'p1', changes: [CH_ROW()], backups: [{ rel: 'a.gd', backupRel: 'x' }], written: ['a.gd'], moved: [], failed: [], cancelled: false, canRollback: true }
+  const back = await loadOne(oldRow)
+  ok(FA(F(F(back).entry).renamed).length === 0, '第 1 批存下的旧账目没有 renamed ⇒ 读回来补空数组,不抛', F(back).entry)
+  ok(S(T.entrySummaryText(F(back).entry)).includes('改写 1 个文件'), '旧账目那一行照旧说得出', T.entrySummaryText(F(back).entry))
+  const j = await loadOne(ENTRY(6, { renamed: 'nope' }))
+  ok(FA(F(F(j).entry).renamed).length === 0, 'renamed 不是数组 ⇒ 当没有,不整条丢弃记录', F(j).entry)
+
+  // 往返:存进去再读回来必须还在(单文档方案是整份覆盖写,少一列就等于悄悄丢数据)。
+  // 注意 mkStore 的 putDoc 不落地,所以要把 lastDoc() 那份**真写出去的 payload**再喂回 loadLog 才算往返。
+  const st = mkStore({ doc: [] })
+  const put = await T.appendRun(st.store, e)
+  ok(F(put).ok === true, '含改名的账目能记进去', put)
+  const back3 = await T.loadLog({ getDoc: () => st.lastDoc(), putDoc: () => ({ ok: true }) })
+  const row = P(F(back3).entries, 0)
+  ok(FA(F(row).renamed).length === 1 && P(F(row).renamed, 0).to === 'b.gd',
+    'renamed 存进去再读回来还在(覆盖写与 normOne 两道都不许把它抹掉)', { doc: st.lastDoc(), row })
+  ok(S(T.entrySummaryText(row)).includes('改名 1 个文件'), '读回来的那一行照样说得出改名数', T.entrySummaryText(row))
 }
 
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)

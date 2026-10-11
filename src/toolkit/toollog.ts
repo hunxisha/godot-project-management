@@ -14,7 +14,9 @@
 // 四条判据各有归宿:
 //   · `canRollback` 不由插件说,也不由存储里那个布尔说了算:读盘时按这一轮真做了什么**重算**;
 //   · 回滚承诺只有一句来源 —— `refuseReason()` 返回空串才允许还原,按钮与拒绝理由不可能各说一套;
-//   · rename 与 trash 都算「不可自动回滚」:rename 的反向改引用是第 2 批的事(DEV-11),
+//   · rename 与 trash 都算「不可自动回滚」:第 2 批把改名通道建起来了(§G Task 15),但**反向改名 +
+//     反向改引用没做**(§G DEV-20,用户 2026-10-11 拍板留到单独一次)—— 一键还原只能把写入复原,
+//     做不到把名字改回去再把这些文件里的路径倒回来,给一个「半截还原」的按钮比没有按钮更伤;
 //     trash 的东西在回收站里,框架不去碰它(§1.5:删除一律进回收站,还原是用户自己的动作);
 //   · 读脏数据时**判据字段不合法就整条丢弃**(纯展示字段用兜底值留行)——
 //     「宁可少显示一条历史,也不能拿半截数据给用户按回滚」。
@@ -56,6 +58,13 @@ export interface ToolLogEntry {
   backups: { rel: string, backupRel: string }[]
   written: string[]
   moved: string[]
+  /**
+   * 这一轮真改成的名(§G Task 16)。它是**展示档**:回执那句话要如实说「改名 N 个文件(连带 M 个边车)」,
+   * 而 `canRollback` 的判据读的是 `changes`(见 `refuseReason`),不读这里 ——
+   * 所以脏项按兜底值留下、不整条丢弃:扔掉一条 `trash` 行会把整笔账目从「不可回滚」翻成「可回滚」,
+   * 而扔掉一条 renamed 只会少说一个数,两个方向的破坏面不一样,分档也不能混(同 K12 那条教训)。
+   */
+  renamed: { from: string, to: string, sidecars: number }[]
   failed: { rel: string, error: string }[]
   cancelled: boolean
   /** 框架算出来的「这一轮能不能一键还原」 */
@@ -81,6 +90,26 @@ function str(v: unknown): string { return typeof v === 'string' ? v : '' }
 function msg(e: unknown): string { return e instanceof Error ? e.message : String(e) }
 function strList(v: unknown): string[] {
   return Array.isArray(v) ? v.map((x) => (typeof x === 'string' ? x : String(x))) : []
+}
+
+/**
+ * 改名记录的**展示档**归一:脏项丢掉、不扔整条记录。
+ * 与判据档(`changes` 的 kind / `backups` 是不是数组)分开,是因为两者破坏面不同:
+ * 扔掉一条 trash 行会把整笔账目从「不可回滚」翻成「可回滚」(K12 钉的就是那个方向),
+ * 而扔掉一条 renamed 只让那句话少说一个数 —— 所以它脏了就丢那一项,不许连累整条记录。
+ */
+function normRenamed(v: unknown): { from: string, to: string, sidecars: number }[] {
+  if (!Array.isArray(v)) return []
+  const out: { from: string, to: string, sidecars: number }[] = []
+  for (const x of v) {
+    const o = (x && typeof x === 'object' ? x : {}) as Partial<{ from: string, to: string, sidecars: number }>
+    const from = str(o.from)
+    if (!from) continue
+    const sidecars = typeof o.sidecars === 'number' && Number.isFinite(o.sidecars) && o.sidecars > 0
+      ? Math.floor(o.sidecars) : 0
+    out.push({ from, to: str(o.to), sidecars })
+  }
+  return out
 }
 
 /** 从一条 `PlannedChange` 抽快照 */
@@ -177,6 +206,7 @@ export function entryFromRun(args: {
     backups,
     written: strList(receipt.written),
     moved: strList(receipt.moved),
+    renamed: normRenamed(receipt.renamed),
     failed,
     cancelled: receipt.cancelled === true || failed.some((f) => f.error === CANCELLED_MARK),
     canRollback: false
@@ -243,6 +273,7 @@ function normOne(raw: unknown): Norm {
     backups,
     written,
     moved,
+    renamed: normRenamed(o.renamed),
     failed,
     // 两个来源任一为真就算取消:把「取消」少报比多报危险(用户会以为整轮跑完了)
     cancelled: o.cancelled === true || failed.some((f) => f.error === CANCELLED_MARK),
@@ -383,6 +414,7 @@ export function entrySummaryText(entry: ToolLogEntry): string {
   const base = summaryText({
     written,
     moved,
+    renamed: normRenamed(safe.renamed),
     failed,
     cancelled: safe.cancelled === true,
     ok: failed.length === 0
