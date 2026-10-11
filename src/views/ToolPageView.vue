@@ -168,7 +168,7 @@ const ViewHost = defineComponent({
         <button class="btn primary" type="button" :disabled="page.planning.value || !page.usable.value" @click="onPlan">
           <Icon name="refresh" :size="13" /> {{ page.planning.value ? '计算中' : '算一遍要改什么' }}
         </button>
-        <span class="sum">{{ page.summary.value }}</span>
+        <span class="sum" :class="page.summaryKind.value">{{ page.summary.value }}</span>
         <span v-if="page.progress.value" class="tool-prog">{{ page.progress.value.done }}/{{ page.progress.value.total }}</span>
       </div>
 
@@ -194,10 +194,11 @@ const ViewHost = defineComponent({
           <Icon name="check" :size="13" /> 执行选中的 {{ page.pickedCount.value }} 条
         </button>
         <button v-if="page.running.value" class="btn small" type="button" @click="page.cancel()"><Icon name="x" :size="13" /> 取消</button>
-        <span v-else-if="page.gate.value.ok === false" class="gate">{{ page.gate.value.reason }}</span>
+        <!-- 门那句由页面去重:与摘要或结论逐字相同时不再画第二遍(gateText,不是 gate.reason) -->
+        <span v-else-if="page.gateText.value" class="gate">{{ page.gateText.value }}</span>
       </div>
 
-      <p v-if="page.notice.value" class="notice" :class="page.noticeKind.value">{{ page.notice.value }}</p>
+      <p v-if="page.noticeText.value" class="notice" :class="page.noticeKind.value">{{ page.noticeText.value }}</p>
 
       <!--
         插件自己 `ctx.log` 的话(§G DEV-27)。以前这条线是断的:makeHost 不传 onLog,
@@ -283,6 +284,15 @@ const ViewHost = defineComponent({
 .sum {
   color: var(--text-2);
   font-size: 12px;
+}
+
+/*
+ * 「这一遍什么都没算出来」其实是拒绝,不是中性统计 —— 以前坏色只在 notice 那一行,
+ * 摘要那行带着同一句拒绝话却是中性色(去重后这句话往往只剩摘要这一处,颜色就更要说得清)。
+ */
+.sum.bad {
+  color: var(--danger);
+  font-weight: 600;
 }
 
 .why {

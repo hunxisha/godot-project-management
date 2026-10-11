@@ -109,6 +109,56 @@ function touch(rel: string) {
   if (hit) { hit.size = sizeOf(rel); hit.mtimeMs = Date.now() } else INVENTORY.push({ rel, size: sizeOf(rel), mtimeMs: Date.now(), ext: extOf(rel) })
 }
 
+// ---------- 改名假盘(`inspectfs.js:245-367` 的内存镜像) ----------
+
+/** 真主机 `canonRel` + `resolveRel` 的合成版:反斜杠归一、丢空段与 `.`、`..`/绝对/盘符一律当非法 */
+function canonRel(v: unknown): string {
+  if (typeof v !== 'string' || !v) return ''
+  const norm = v.replace(/\\/g, '/')
+  if (norm.startsWith('/') || /^[a-zA-Z]:/.test(norm)) return ''
+  const stack: string[] = []
+  for (const p of norm.split('/')) {
+    if (!p || p === '.') continue
+    if (p === '..') return ''
+    stack.push(p)
+  }
+  return stack.join('/')
+}
+
+/** 边车尾缀:与真主机同一张表,名字一律「主 rel + 尾缀」重拼(`player.gd.uid`,不是 `player.uid`) */
+const SIDECAR_SUFFIXES = ['.uid', '.import']
+
+function allRels(): string[] {
+  const s = new Set<string>(Object.keys(FILES))
+  for (const t of INVENTORY) s.add(t.rel)
+  for (const r of BINARY) s.add(r)
+  return [...s]
+}
+
+/**
+ * 假盘按 **Windows 语义**认「同一份文件」:大小写不敏感、拼法保留。
+ * ⚠ 这是模仿,不是实测 —— 真宿主在这台机器上的行为仍是 TK-29(§D #17),别把这里跑通当已验。
+ */
+function diskKey(rel: string): string {
+  const all = allRels()
+  if (all.includes(rel)) return rel
+  const l = rel.toLowerCase()
+  return all.find((r) => r.toLowerCase() === l) || ''
+}
+
+/** 搬名字:内容跟着走,清单里的 `rel` / `ext` 跟着改,**mtimeMs 不动** —— 改名是同一份文件的移动,不重刷时间戳(DEV-11 判死「trash + write 拼假改名」靠的就是这条) */
+function renameOnDisk(from: string, to: string) {
+  const k = diskKey(from)
+  if (!k) return
+  if (k in FILES) {
+    FILES[to] = FILES[k]
+    if (k !== to) delete FILES[k]
+  }
+  if (BINARY.has(k)) { BINARY.delete(k); BINARY.add(to) }
+  const hit = INVENTORY.find((t) => t.rel === k)
+  if (hit) { hit.rel = to; hit.ext = extOf(to); hit.size = sizeOf(to) }
+}
+
 // ---------- 假「工具目录」(~/.gpm-tools 的位置) ----------
 //
 // 目录是真的读盘、条目是真的执行;这里给的是同形状的内存版,所以「选文件→预览→执行→回执→账本→还原」
@@ -295,6 +345,37 @@ const PROVIDED: Record<string, any> = {
     FILES[rel] = text
     touch(rel)
     return ok({ ok: true, bytes: text.length, backupRel })
+  },
+  // 改名(含边车)。返回形状与错误串照 `inspectfs.js:292-367`,不是照「页面想要什么」摆(G-14)。
+  // ⚠ 假盘是扁平的内存表,**没有目录** ⇒ `'目录改名不支持'` 与 `'目标目录不存在'` 这两串在这里
+  //    永远不会出现。它们只有真宿主验得到(§12),不许因为这一条没触发就当已覆盖。
+  renameProjectPath: (pid: string, rel: string, to: string, opts?: { sidecar?: boolean }) => {
+    const o = opts || {}
+    const fromRel = canonRel(rel)
+    const toRel = canonRel(to)
+    if (!fromRel || !toRel) return ok({ ok: false, error: '非法路径' })
+    if (fromRel === toRel) return ok({ ok: false, error: '改名前后是同一个名字' })
+    // project.godot 是项目身份:改名等于把这份登记作废(与真宿主同一串)
+    if (fromRel === 'project.godot') return ok({ ok: false, error: '项目主配置文件不改名' })
+    if (!diskKey(fromRel)) return ok({ ok: false, error: '文件不存在' })
+    if (diskKey(toRel) && diskKey(toRel) !== diskKey(fromRel)) return ok({ ok: false, error: '目标已存在' })
+
+    const pairs = [{ from: fromRel, to: toRel }]
+    if (o.sidecar !== false) {
+      for (const suffix of SIDECAR_SUFFIXES) {
+        const s = fromRel + suffix
+        const d = toRel + suffix
+        if (!diskKey(s)) {
+          // 源没有边车可搬,但新名的边车槽位已经躺着别人的东西 ⇒ 照真主机一样在动盘之前拒
+          if (diskKey(d)) return ok({ ok: false, error: '目标已存在' })
+          continue
+        }
+        if (diskKey(d) && diskKey(d) !== diskKey(s)) return ok({ ok: false, error: '目标已存在' })
+        pairs.push({ from: s, to: d })
+      }
+    }
+    for (const p of pairs) renameOnDisk(p.from, p.to)
+    return ok({ ok: true, from: fromRel, to: toRel, moved: pairs.map((p) => ({ ...p })) })
   },
   movePathsToTrash: (pid: string, rels: string[]) => {
     const list = Array.isArray(rels) ? rels : []

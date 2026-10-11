@@ -55,18 +55,26 @@ function key(v: unknown): string {
  * 但换了依据:那边看 `size`/`note`,这边看框架自己判定的 `creates`。
  * 三档不能合成一档:新建文件**不产生备份**(`inspectfs.js:206` 的 `if (exists && ...)`),
  * 对着那一批还说「可随时还原」就是在给用户一条没有退路的承诺。
+ *
+ * ⚠ 反方向同样不许说:一批里**含改名**时,那一半的「可随时还原」也是谎话 —— 账本会整轮拒绝回滚
+ * (`toollog.ts` 的 refuseReason,§G DEV-20 本批不做反向改名)。所以这一档把退路那半句摘掉,
+ * 补的话在 `warnText` 里统一补,别在两处长出两种说法。
  */
 export function rewriteWarn(items: readonly PlannedChange[]): string {
   let creates = false
   let known = false
+  let hasRename = false
   for (const it of items) {
+    if (!it) continue
+    if (it.kind === 'rename') { hasRename = true; continue }
     if (it.kind !== 'rewrite') continue
     if (it.creates) creates = true
     else known = true
   }
+  const undo = hasRename ? '' : ',可随时还原'
   if (!creates) {
     return known
-      ? '改写前会先把原文件复制成「原名.gpm-bak-时间戳」备份,再原子替换,可随时还原。'
+      ? `改写前会先把原文件复制成「原名.gpm-bak-时间戳」备份,再原子替换${undo}。`
       : '这一批里没有改写目标,不涉及备份。'
   }
   return known
@@ -74,9 +82,20 @@ export function rewriteWarn(items: readonly PlannedChange[]): string {
     : '这些文件都不在本次文件清单里:改写会直接新建文件,新建没有备份可还原。'
 }
 
-/** 整批的风险句:只有真的存在改写目标时才说备份那段 */
+/**
+ * 含改名那一轮的回退真相(§G DEV-20:本批不做反向改名与反向改引用,`canRollback` 会整轮拒)。
+ * 备份确实在盘上,但「一键」退不回去 —— 这句话只能由框架说,插件不知道账本的判据。
+ */
+export const RENAME_NO_ROLLBACK = '这一轮含改名:一键还原会被整轮拒绝(改名不做反向回滚),改写文件的备份仍留在盘上,要退回去得手工或用 git。'
+
+/** 整批的风险句:改写那段说备份的真相,含改名那段补回退的真相(两句都在 orchestrate,DEV-7) */
 export function warnText(items: readonly PlannedChange[]): string {
-  return items.some((i) => i.kind === 'rewrite') ? rewriteWarn(items) : ''
+  const list = Array.isArray(items) ? items : []
+  const hasRewrite = list.some((i) => i && i.kind === 'rewrite')
+  const hasRename = list.some((i) => i && i.kind === 'rename')
+  const base = hasRewrite ? rewriteWarn(list) : ''
+  if (!hasRename) return base
+  return base ? `${base} ${RENAME_NO_ROLLBACK}` : RENAME_NO_ROLLBACK
 }
 
 /**

@@ -111,6 +111,7 @@ section('0. 导出面')
 for (const n of ['buildPlan', 'subsetPlan', 'runGate', 'defaultSelectedIds', 'allIds', 'selectionCount',
   'selectionBytes', 'groupPreview', 'planSummary', 'executePlan', 'summaryText', 'rewriteWarn', 'warnText',
   'danglingWarn', 'renameCollisions',
+  'RENAME_NO_ROLLBACK',
   'NO_SELECTION_REASON', 'EMPTY_PLAN_REASON', 'RENAME_COLLISION_REASON']) {
   ok(T[n] !== undefined, `${n} 已在打包产物里导出`)
 }
@@ -319,6 +320,20 @@ section('12. 改写风险句:三档不能合一(备份与新建的区别必须�
   ok(w5.includes('不涉及备份'), '整批没有改写目标 ⇒ 不空谈备份', w5)
   ok(T.warnText(mixedBatch) === T.rewriteWarn(mixedBatch), 'warnText 只负责「有没有 rewrite」这一层分派')
   ok(T.warnText([{ ...knownOne, kind: 'trash' }]) === '', '纯 trash 批不给风险句(风险在别处说)')
+
+  // 含改名的那一轮:备份那半句里的「可随时还原」也是谎话(§G DEV-20,账本对含改名的一轮整轮拒)
+  const renameOne = { id: '9', rel: 'n.gd', to: 'm.gd', kind: 'rename', label: 'l', risk: 'low', reason: 'r', outOfScope: false, creates: false, defaultSelected: true }
+  const withRename = [knownOne, renameOne]
+  const w6 = S(T.rewriteWarn(withRename))
+  ok(w6.includes('gpm-bak') && !w6.includes('可随时还原'), '含改名 ⇒ 备份照说,但退路那半句要摘掉', w6)
+  const w7 = S(T.warnText(withRename))
+  ok(w7.includes('一键还原会被整轮拒绝') && w7.includes('备份仍留在盘上'),
+    'warnText 把回退真相补上,而且说的是「手工或 git」这条真退路', w7)
+  ok(w7.startsWith(w6), '两段是拼接不是替换:备份那段的话没被改写掉', w7)
+  ok(S(T.warnText([renameOne])) === S(T.RENAME_NO_ROLLBACK),
+    '纯改名批也要说一句回退真相(以前整句都不说,用户在不知情的情况下按下执行)', T.warnText([renameOne]))
+  ok(S(T.warnText([knownOne])).includes('可随时还原') && !S(T.warnText([knownOne])).includes('一键还原'),
+    '不含改名的批不许被这句污染(合法形态要绿)')
 }
 
 section('13. buildPlan 的 creates 判据:不知道文件在不在就按最坏说')

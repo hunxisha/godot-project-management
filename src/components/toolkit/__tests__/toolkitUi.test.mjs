@@ -322,15 +322,24 @@ section('10. 工具页:状态门、取消、回滚、账本都接上了')
   ok(/\.notice[.\s]+bad\b[^{]*\{[^}]*var\(--(danger|warn)/.test(pageCode),
     '样式里存在 notice 的坏色一档(只有一种 --ok 色 = 失败冒充成功)', null)
   ok(pageCode.includes('noticeKind'), '那条提示的类由 notice 的级别驱动,不是写死一种颜色')
-  ok((pageCode.match(/page\.notice\.value\s*=/g) || []).length === 0,
+  ok((pageCode.match(/page\.notice\.value\s*=(?!=)/g) || []).length === 0,
     '视图不直接写 notice(回滚那句以前是视图覆盖上去的 ⇒ 永远是绿,而且多一处真源)',
     (pageCode.match(/page\.notice[^\n]*/g) || []).slice(0, 3))
+  // ④ 同一句话不许画三遍(假宿主整页跑撞到的:算完 0 条时摘要 / 门 / 结论三处都是 orchestrate 那一句)。
+  //    去重的那点判断归页面(computed),视图只读去重后的那一份 —— 视图自己比字符串就是第二个真源。
+  ok(pageCode.includes('page.gateText.value') && !pageCode.includes('page.gate.value.reason'),
+    '门那一行读 gateText(去重后的),不读原始 gate.reason', null)
+  ok(pageCode.includes('page.noticeText.value'), '结论那行读 noticeText(同句时只画摘要那一处)')
+  ok(/\.sum[.\s]+bad\b[^{]*\{[^}]*var\(--danger/.test(pageCode),
+    '摘要也有坏色一档(那句这时是唯一的一处,中性色会把拒绝说成统计)', null)
 }
 
 section('10b. notice 只有一个写入口(漏定级要在结构上不可能,而不是靠自觉)')
 {
   const ts = code(read('src/composables/useToolPage.ts') || '')   // 同样扫剥注释后的面:注释里引用旧写法不该打红
-  ok((ts.match(/notice\.value\s*=/g) || []).length === 1,
+  // ⚠ 这一族的正则一律带 `(?!=)`:光写 `=` 会把 `notice.value === x` 这种**比较**数成赋值,
+  //    于是页面里多一个 computed 就把这条打红(本次就是这么中的),而那种红只会引人去绕判据。
+  ok((ts.match(/notice\.value\s*=(?!=)/g) || []).length === 1,
     'useToolPage 里对 notice 的直接赋值恰好一处(在 say 内部);八处语义各自赋值迟早漏一级',
     (ts.match(/[^\n]*notice\.value\s*=[^\n]*/g) || []))
   ok(ts.includes('noticeKind'), '级别与文本同一次设置(noticeKind 在场)')

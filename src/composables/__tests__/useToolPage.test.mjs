@@ -787,6 +787,85 @@ section('15. 插件面的三条话路:ctx.log / ctx.progress / 参数预览 coun
   ok(FA(F(P.receipt.value).renamed).length === 0, '没改成就不进 renamed(回执不替用户高兴)')
 }
 
+// ── 16. ref 型工具的那一次扫描不按后缀筛(假宿主整页跑第一次撞上的那句谎话) ──
+// `treeRels` 是框架判 `creates`(「这一写是新建还是改写」)的唯一依据,而 `creates` 决定卡面上那句备份话。
+// 按 files 字段的后缀筛过之后再交给它,改写面比挑选面广的工具(改名要写 project.godot / .cs / .json)
+// 就会面对一个**盘上明明有**的文件说出「新建,没有备份可还原」。
+// 两头都要有牙:清单筛窄了要红,把挑选面也跟着放宽(第二个错)同样要红。
+{
+  const REF_MAN = { ...MAN, id: 'refdemo', capabilities: ['tree', 'text', 'write', 'ref'] }
+  const wide = (extra) => ({
+    schema: [{ key: 'targets', type: 'files', label: '要改的文件', exts: ['.gd'] }],
+    plan: async (ctx, files) => {
+      const list = FA(files).map((f) => ({ rel: f.rel, kind: 'rewrite', label: 'L', risk: 'low', reason: 'r', payload: { text: 'X' } }))
+      list.push({ rel: 'icon.png', kind: 'rewrite', label: 'L', risk: 'low', reason: 'r', payload: { text: 'Y' } })
+      if (extra) list.push({ rel: 'ghost.cfg', kind: 'rewrite', label: 'L', risk: 'low', reason: 'r', payload: { text: 'Z' } })
+      return list
+    }
+  })
+
+  resetDisk()
+  P = T.useToolPage(toolOf(wide(false), REF_MAN), pid)
+  await P.open()
+  ok(scanned.length === 1 && FA(F(scanned[0]).opts.exts).length === 0,
+    '声明了 ref ⇒ 那一次扫描不按后缀筛(它得知道整个项目里有什么)', F(scanned[0]).opts)
+  ok(relsOf(P.candidates.value) === 'a.gd,sub/b.gd,out.gd',
+    '但挑选面不变宽:候选仍是 .gd(过滤挪进内存,不是把 png 摆给用户勾)', relsOf(P.candidates.value))
+  ok(relsOfArr(P.treeRels.value) === 'a.gd,sub/b.gd,icon.png,out.gd',
+    'treeRels 是全项目清单,与 ctx.refIndex() 那次 scanTree({}) 同一副', relsOfArr(P.treeRels.value))
+  P.picked.value = ['a.gd']
+  await P.makePlan()
+  const cs16 = FA(P.plan.value.changes)
+  ok(F(cs16.find((c) => c.rel === 'icon.png')).creates === false,
+    '盘上有的改写目标不许标成新建(拿筛过的清单判就会误判)', F(cs16.find((c) => c.rel === 'icon.png')))
+  ok(S(P.warn.value).includes('gpm-bak') && S(P.warn.value).indexOf('新建') < 0,
+    '整批都在盘上 ⇒ 那句只说备份,不说新建', P.warn.value)
+
+  resetDisk()
+  P = T.useToolPage(toolOf(wide(true), REF_MAN), pid)
+  await P.open()
+  P.picked.value = ['a.gd']
+  await P.makePlan()
+  const cs16b = FA(P.plan.value.changes)
+  ok(F(cs16b.find((c) => c.rel === 'ghost.cfg')).creates === true,
+    '盘上真没有的那条仍按新建报(保守档不能跟着一起放掉)')
+  ok(S(P.warn.value).includes('清单里有的文件会先复制') && S(P.warn.value).includes('新建没有备份可还原'),
+    '混合批次两句都要说,不许只说一半', P.warn.value)
+}
+
+// ── 17. 同一句拒绝话只画一遍(假宿主整页跑撞到的排版 bug:摘要 / 门 / 结论三处逐字相同) ──
+// 三个渠道各有各的角色,所以修的是「同一句只画第一次出现的那处」,不是砍渠道:
+// 摘要永远画(这种场合它其实是拒绝 ⇒ 带坏色),门与结论与它同句时不重复。
+{
+  const EMPTY = { schema: MOD.schema, plan: async () => [] }
+  resetDisk()
+  P = T.useToolPage(toolOf(EMPTY), pid)
+  await P.open()
+  P.picked.value = ['a.gd']
+  await P.makePlan()
+  ok(S(P.summary.value).length > 0, '算完 0 条时摘要不是空串(它要说这一遍的结果)', P.summary.value)
+  ok(P.summaryKind.value === 'bad', '这一句是拒绝 ⇒ 摘要带坏色(去重后它是唯一那一处)', P.summaryKind.value)
+  ok(S(P.gateText.value) === '', '门那句与摘要逐字相同 ⇒ 不画第二遍', P.gateText.value)
+  ok(S(P.noticeText.value) === '', '结论与摘要逐字相同 ⇒ 不画第三遍', P.noticeText.value)
+  ok(S(P.notice.value) === S(P.summary.value), 'notice 本身仍然写着那句话(去重在显示层,不在唯一写入口)')
+
+  // 合法形态要绿:三处说的是三件事时,一处都不许被吞
+  resetDisk()
+  P = T.useToolPage(toolOf(MOD), pid)
+  await P.open()
+  P.picked.value = ['a.gd']
+  await P.makePlan()
+  ok(P.summaryKind.value === '' && S(P.summary.value).includes('共 2 条'),
+    '有改动 ⇒ 摘要是中性统计,不涂坏色', [P.summaryKind.value, P.summary.value])
+  P.checked.value = []
+  ok(S(P.gateText.value).length > 0 && S(P.gateText.value) !== S(P.summary.value),
+    '门那句与摘要不同 ⇒ 照画(去重不等于把门藏起来)', [P.gateText.value, P.summary.value])
+  P.checked.value = FA(P.plan.value.changes).filter((c) => F(c).defaultSelected).map((c) => c.id)
+  await P.execute()
+  ok(S(P.noticeText.value).length > 0 && S(P.noticeText.value) !== S(P.summary.value),
+    '执行后的结论与摘要不同 ⇒ 那行照画', [P.noticeText.value, P.summary.value])
+}
+
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) {
   console.log('失败项:')

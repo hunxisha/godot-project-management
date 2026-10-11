@@ -329,6 +329,27 @@ section('10. 源码级红线:这一层只吃 ctx,不摸盘也不碰 window')
   ok(code.includes("from './refs'") && code.includes("from './modes'"), '算法两件都在本工具目录里(第 2 批不往框架塞 GDScript 知识)')
 }
 
+// ---------------------------------------------------------------- 11. 措辞红线:这一层不承诺回退
+// §G DEV-20 拍定「本批不做反向改名」,账本对含改名的一轮**整轮拒绝**一键还原(`toollog.refuseReason`)。
+// 工具若在 reason 里写「可一键还原」,就是在动盘之前给用户一条框架随后要收回的路 —— 假宿主整页跑第一次
+// 就是这么撞上的:改写那条的 reason 承诺了还原,而同一轮的还原按钮被拒。回退真相归框架(warnText),插件这边一个字都不许承诺。
+section('11. 插件的 reason / label 里不许出现回退承诺(DEV-20 的措辞半边)')
+{
+  const map = {
+    'player.gd': 'extends Node\n',
+    'a.tscn': EXT_TEXT,
+    'project.godot': 'run/main_scene="res://a.tscn"\n'
+  }
+  const r = await PLAN(['player.gd'], map, { params: { mode: 'affix', prefix: 'x_' } })
+  const words = r.rows.map((c) => S(c.label) + ' ' + S(c.reason)).join(' | ')
+  ok(KIND(r.rows, 'rewrite').length === 1, '这一份产出里确实有改写条(否则下面两条是在验空气)', KIND(r.rows, 'rewrite').map((c) => c.rel))
+  ok(!words.includes('一键还原') && !words.includes('可随时还原'), 'reason 与 label 都不承诺回退', words)
+  ok(/备份/.test(words), '备份这件事照说(改写前真的会复制,那半句是真的)')
+
+  const src = readFileSync(path.resolve(ROOT, 'src', 'tools', 'builtin', 'gdscript-rename', 'index.ts'), 'utf8')
+  ok(!src.includes('一键还原') && !src.includes('可随时还原'), '源码级也钉住:没被这次输入走到的分支同样不许写这句话')
+}
+
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) {
   console.log('失败项:')

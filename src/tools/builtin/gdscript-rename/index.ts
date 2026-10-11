@@ -369,7 +369,7 @@ export async function plan(ctx: PlanCtx, files: unknown, params: unknown): Promi
         risk: 'low',
         label: `更新引用 ${rw.hits} 处`,
         reason: `这个文件里 ${rw.hits} 处指向被改名文件的引用换成新路径(只有引号内文整串等于旧路径才算;"uid=" 与注释一个字不动)。` +
-          ` 改写前会先把原文件复制成备份,可一键还原。`,
+          ` 改写前会先把原文件复制成备份。`,
         payload: { text: rw.text }
       })
     }

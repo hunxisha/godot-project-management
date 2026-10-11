@@ -48,6 +48,7 @@ import {
   summaryText,
   warnText
 } from '../toolkit/orchestrate'
+import { extOf } from '../tools/treeUtils'
 
 /** 宿主的原语面(测试里桩掉 window.services 就能跑,与 useToolkit 同一套做法) */
 function svc(): Partial<Services> {
@@ -216,21 +217,40 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
     await loadTree()
   }
 
-  /** 文件树:候选 = 按 files 字段声明的后缀过滤;`truncated` 要显式带出去(清单不全时不敢说「这些就是全部」) */
+  /**
+   * 文件树:候选 = 按 files 字段声明的后缀筛过;`truncated` 要显式带出去(清单不全时不敢说「这些就是全部」)。
+   *
+   * ⚠ 声明了 `ref` 的工具**那一次扫描不按后缀筛**,筛候选这一步挪到内存里做。
+   * `treeRels` 是框架回答「这个改写目标在不在盘上」的唯一依据(`buildPlan` 用它判 `creates`),
+   * 而 ref 型工具的改写面天生比挑选面广 —— 改名工具要写 `project.godot`、`.cs`、`.json`,那些都不在
+   * `.gd/.tscn/.tres` 里。拿按后缀筛过的清单去判,盘上明明有的文件会被说成
+   * 「新建,没有备份可还原」(假宿主整页跑第一次就撞上这句谎话,而它在真宿主上一样成立)。
+   * 现在这副清单与 `ctx.refIndex()` 自己那次 `scanTree({})` 是同一份,扫描次数不增加。
+   */
   async function loadTree(): Promise<void> {
     const pid = projectIdRef.value
     if (!pid) { candidates.value = []; treeRels.value = []; return }
     const filesField = fields.value.find((f) => f.type === 'files')
-    const exts = filesField && filesField.exts.length ? filesField.exts : undefined
+    const exts = filesField && filesField.exts.length
+      ? filesField.exts.map((e) => String(e).replace(/^\./, '').toLowerCase())
+      : []
+    const m = manifest.value
+    // 与 gpm.ts 的能力门同一个来源(manifest 声明),不留第二套「它有没有 ref」的说法
+    const wide = Array.isArray(m && m.capabilities) && (m as any).capabilities.includes('ref')
     let r: any = { files: [], truncated: false, error: '本工具没声明 tree 能力' }
     try {
       const s = svc()
-      r = typeof s.scanProjectTree === 'function' ? await s.scanProjectTree(pid, exts ? { exts } : {}) : r
+      const opts = exts.length && !wide ? { exts } : {}
+      r = typeof s.scanProjectTree === 'function' ? await s.scanProjectTree(pid, opts) : r
     } catch {
       r = { files: [], truncated: false, error: '读文件树抛异常' }
     }
-    const list = Array.isArray(r && r.files) ? r.files : []
-    treeRels.value = list.map((f: any) => String(f && f.rel || '')).filter(Boolean)
+    const scanned = Array.isArray(r && r.files) ? r.files : []
+    // 内存里筛候选只按 ① 层那一条 `extOf`,不去读宿主的 `ext` 键:两条规则判同一件事就是第二个真源
+    const list = exts.length && wide
+      ? scanned.filter((f: any) => exts.includes(extOf(String(f && f.rel || ''))))
+      : scanned
+    treeRels.value = scanned.map((f: any) => String(f && f.rel || '')).filter(Boolean)
     treeTruncated.value = r && r.truncated === true
     candidates.value = list
       .filter((f: any) => f && typeof f.rel === 'string')
@@ -357,6 +377,23 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
   const logsTail = computed(() => logs.value.slice(-3))
   const logsMore = computed(() => Math.max(0, logs.value.length - 3))
   const gate = computed(() => (plan.value ? runGate(plan.value, checked.value) : { ok: false, reason: '还没有计划' }))
+  /**
+   * 「同一句话在屏上出现三次」的修法(假宿主整页跑撞到的排版 bug:算完 0 条时,摘要、门、结论三处
+   * 都来自 orchestrate 的同一句 `EMPTY_PLAN_REASON`,读起来像页面卡住了重复渲染)。
+   * 三处**各有各的角色**(摘要=这一遍算出什么、门=为什么按不下去、结论=这一轮成了没成),
+   * 所以不是删渠道,而是同一句只画第一次出现的那一处:
+   *   · 摘要永远画,并且在这种「其实是拒绝」的场合带坏色(以前坏色只在 notice 上,摘要那行是中性的);
+   *   · 结论与门那句只要与已经画出来的那句逐字相同,就不再重复。
+   */
+  const summaryKind = computed(() => (plan.value && !plan.value.changes.length ? 'bad' : ''))
+  const noticeText = computed(() => (notice.value === summary.value ? '' : notice.value))
+  const gateText = computed(() => {
+    const g = gate.value
+    if (g.ok === true) return ''
+    const t = S(g.reason)
+    if (!t || t === summary.value || t === noticeText.value) return ''
+    return t
+  })
   const pickedCount = computed(() => (plan.value ? selectionCount(plan.value, checked.value) : 0))
   const pickedBytes = computed(() => (plan.value ? selectionBytes(plan.value, checked.value) : { bytes: 0, unknown: 0 }))
   const canExecute = computed(() => usable.value && !!plan.value && gate.value.ok === true && !running.value)
@@ -552,6 +589,9 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
     receipt,
     notice,
     noticeKind,
+    noticeText,
+    summaryKind,
+    gateText,
     logs,
     logsTail,
     logsMore,
