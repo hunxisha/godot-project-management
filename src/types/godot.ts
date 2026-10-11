@@ -331,6 +331,18 @@ export interface GodotSettings {
   backupRoot?: string
   /** 文档页上次浏览的文档库版本 id(引擎文档浏览功能) */
   docsVersionId?: string
+  /** 工具箱:插件目录(绝对路径)。留空 = 用宿主默认 ~/.gpm-tools;相对路径会被原语拒掉 */
+  toolsRoot?: string
+  /** 工具箱首页形态(Q13=B / Q25):缺省密集列表 */
+  toolViewMode?: 'list' | 'grid'
+  /**
+   * 工具箱:用户对每个工具的开关(Q25 / DEV-6)。
+   * 键 = toolId,**缺键 = 按 manifest.status 定默认**(stable 开、dev 关)。
+   * 作者声明与用户意图分两层:作者后来把 status 改了不许翻掉用户已经按过的开关。
+   */
+  toolEnabled?: Record<string, boolean>
+  /** 工具箱:上次扫描时已经见过的插件目录名(用于「首次装进新插件」时弹权限面,A-12) */
+  toolKnownDirs?: string[]
   /** 默认备份方式:zip 打包 | copy 完整快照 */
   backupMode?: 'zip' | 'copy'
   /** 默认是否包含 .godot 编辑器缓存 */

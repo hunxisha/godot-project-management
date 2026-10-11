@@ -96,7 +96,7 @@ export function checkModuleShape(m: ToolManifest, mod: unknown): { ok: boolean; 
 export function registerTool(
   manifestRaw: unknown,
   mod: unknown,
-  opts: { source: ToolSource, dirName?: string, granted?: readonly ToolCapability[], files?: string[] }
+  opts: { source: ToolSource, dirName?: string, granted?: readonly ToolCapability[], files?: string[], preReject?: string }
 ): RegisteredTool {
   const base: RegisteredTool = {
     manifest: null,
@@ -107,6 +107,11 @@ export function registerTool(
     reason: '',
     missing: [],
     idConflictWith: []
+  }
+  // 读盘阶段就已经失败的条目(目录里没有 manifest.json、JSON 解析不动、入口文件读不出来…)
+  // 由调用方把那句原因交进来:它知道得比这里多,而 manifest.ts 只能报「拿到的是 null」。
+  if (typeof opts.preReject === 'string' && opts.preReject.trim()) {
+    return { ...base, reason: opts.preReject.trim() }
   }
   const r = validateManifest(manifestRaw, Array.isArray(opts.files) ? { files: opts.files } : undefined)
   if (!r.ok) {

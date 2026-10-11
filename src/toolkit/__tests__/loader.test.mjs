@@ -225,6 +225,21 @@ section('10. 内置与用户插件同一条路径(Q23=A 的形状证明)')
   ok(T.registerTool(MAN(), MOD, { source: 'builtin', dirName: 42, granted: ['tree', 'text'] }).dirName === '', '脏 dirName 收口成空串')
 }
 
+section('11. preReject:读盘阶段就失败的条目,原因由调用方给(Task 12 扫描管线要的口子)')
+{
+  const r = T.registerTool(MAN(), MOD, { source: 'user', dirName: 'x', granted: ['tree', 'text'], preReject: 'manifest.json 不是合法 JSON:Unexpected token' })
+  ok(r.state === 'bad-manifest' && S(r.reason) === 'manifest.json 不是合法 JSON:Unexpected token',
+    '原话交出去,不加「manifest 不合格」前缀(那不是 manifest.ts 的错)', r.reason)
+  ok(r.manifest === null && r.module === null, 'preReject 时不认内容,连好 manifest 也不用', [r.manifest, r.module])
+  ok(FA(r.missing).length === 0, '能力门根本不查(环境的错不混进作者的错)')
+  const blank = T.registerTool(MAN(), MOD, { source: 'user', dirName: 'x', granted: ['tree', 'text'], preReject: '   ' })
+  ok(blank.state === 'ok' && blank.reason === '', '空白 preReject 当没传(不因为传了个空串就把好插件拒了)', blank.state)
+  const undef = T.registerTool(MAN(), MOD, { source: 'user', dirName: 'x', granted: ['tree', 'text'], preReject: undefined })
+  ok(undef.state === 'ok', 'undefined 同理')
+  const shape = T.registerTool(MAN(), { nope: 1 }, { source: 'user', dirName: 'x', granted: ['tree', 'text'], preReject: '入口文件太大没读' })
+  ok(S(shape.reason) === '入口文件太大没读', 'preReject 短路掉 bad-module(读都没读,形状无从谈起)', shape.reason)
+}
+
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
 if (failures.length) {
   console.log('失败项:')
