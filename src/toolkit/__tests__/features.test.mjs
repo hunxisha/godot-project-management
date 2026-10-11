@@ -123,7 +123,11 @@ section('6. planFeatures:后装让位(Q22=A)')
 
   const two = T.planFeatures([TOOL('a', { cmds: ['x'] }), TOOL('b', { cmds: ['x'] })], [])
   ok(P(two,0).register === true && P(two,1).register === false, '同一批里两个工具撞词 ⇒ 后一个让位(宿主会两个都存,更乱)', two.map((i) => i.register))
-  ok(P(two,1).why.length > 0, '让位的那个有话说', P(two,1).why)
+  // A-15 那句话写的是「关键词 X 已被 Y 占用」:Y 必须是**那个工具的名字**。
+  // 说成「本批前一个工具」等于把判据的功劳吞掉 —— 用户知道有个对手,但不知道是谁,也就不知道该不该改自己的 cmds。
+  ok(P(two,1).why.includes('工具 a'), '让位那句点名占用者是谁', P(two,1).why)
+  ok(P(two,1).why.includes('x'), '同时点名是哪个词', P(two,1).why)
+  ok(P(two,1).why.indexOf('本批前一个工具') < 0, '不许拿占位说法糊过去(它是内部序号,不是给用户看的话)', P(two,1).why)
 
   const dis = T.planFeatures([TOOL('off', { enabled: false })], [])
   ok(P(dis,0).register === false && P(dis,0).why.includes('禁用'), '禁用 = 不注册(Q25)', dis[0])

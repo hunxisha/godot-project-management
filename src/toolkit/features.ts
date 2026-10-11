@@ -170,7 +170,9 @@ export interface ToolForFeature {
  */
 export function planFeatures(tools: readonly ToolForFeature[], taken: readonly TakenCmd[]): FeaturePlanItem[] {
   const out: FeaturePlanItem[] = []
-  const mine = new Set<string>()
+  // cmd → 这一批里先占上它的那个工具的名字。集合不够:让位那句要**指名道姓**
+  // (A-15 写的是「关键词 X 已被 Y 占用」,Y 说成「本批前一个工具」等于什么也没说)
+  const mine = new Map<string, string>()
   for (const t of Array.isArray(tools) ? tools : []) {
     if (!t || typeof t.id !== 'string' || !t.id) continue
     const code = featureCode(t.id)
@@ -200,14 +202,14 @@ export function planFeatures(tools: readonly ToolForFeature[], taken: readonly T
       out.push(base)
       continue
     }
-    const conflicts = cmdConflicts(cmds, [...(Array.isArray(taken) ? taken : []), ...[...mine].map((c) => ({ cmd: c, owner: '本批前一个工具' }))])
+    const conflicts = cmdConflicts(cmds, [...(Array.isArray(taken) ? taken : []), ...[...mine].map(([c, who]: [string, string]) => ({ cmd: c, owner: `tool:${who}` }))])
     if (conflicts.length) {
       base.conflicts = conflicts
       base.why = conflictText(conflicts)
       out.push(base)
       continue
     }
-    for (const c of cmds) mine.add(c)
+    for (const c of cmds) mine.set(c, typeof t.name === 'string' && t.name ? t.name : t.id)
     base.register = true
     out.push(base)
   }

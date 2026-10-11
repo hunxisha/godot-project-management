@@ -32,7 +32,7 @@ import type { LoadResult } from '../toolkit/toollog'
 import { appendRun, entryFromRun, loadLog, recentFor, rollbackPlan } from '../toolkit/toollog'
 import type { ToolLogEntry } from '../toolkit/toollog'
 import type { Services } from '../types/services'
-import { getDoc, putDoc } from '../services/bridge'
+import { copyText, getDoc, listDocs, notify, openPath, pickPaths, pickSavePath, putDoc, removeDoc } from '../services/bridge'
 import {
   allIds,
   buildPlan,
@@ -48,9 +48,49 @@ import {
   warnText
 } from '../toolkit/orchestrate'
 
-/** 桥接层需要的东西都用 `window.services`,测试里桩掉它(与 useToolkit 同一套做法) */
+/** 宿主的原语面(测试里桩掉 window.services 就能跑,与 useToolkit 同一套做法) */
 function svc(): Partial<Services> {
   return (typeof window !== 'undefined' ? (window as any).services : null) || {}
+}
+
+/** 交给 `buildGpm` 的项目文档前缀(与 `useProjectList` 读列表用的同一个前缀) */
+const PROJECT_PREFIX = 'godot/project/'
+
+/**
+ * 宿主原语在 `window.services` 里(`scanProjectTree` 那一族),但 §5.3 承诺给插件的
+ * **store / 宿主 UI / 项目列表**不在那儿 —— 真宿主的 `services.js` 门面只有项目文件那几个原语,
+ * 文档读写、通知、系统对话框在渲染层唯一的那条路是桥接层 `services/bridge.ts`(它才碰
+ * `window.ztools.db` 与 `showOpenDialog`)。
+ *
+ * 所以这一层必须把两份面**拼起来**交给 gpm:不拼的话插件的 `ctx.store.put()` 永远回 false、
+ * `ctx.notify()` 永远没声音、`ctx.listProjects()` 永远是空数组 —— 而 gpm 的纯函数测试是自己注入
+ * `host.services` 的,照不出这一层漏了,这类缺口能一路绿到真机(Q33 说「只能真机验」的那些除外)。
+ */
+function pluginServices(): GpmHost['services'] {
+  const s: Record<string, unknown> = { ...(svc() as Record<string, unknown>) }
+  s.listProjects = () => listDocs<unknown>(PROJECT_PREFIX)
+  // 插件可能给完整文档 id,也可能只给后缀:补成同一个形状,读不到就回 null 而不是猜一个
+  s.getProject = (id: string) => {
+    const raw = String(id ?? '')
+    return getDoc(raw.startsWith(PROJECT_PREFIX) ? raw : PROJECT_PREFIX + raw)
+  }
+  s.getDoc = (id: string) => getDoc(String(id ?? ''))
+  s.putDoc = (id: string, data: object) => putDoc(String(id ?? ''), data)
+  s.removeDoc = (id: string) => removeDoc(String(id ?? ''))
+  s.notify = (text: string) => notify(String(text ?? ''))
+  s.copyText = (text: string) => copyText(String(text ?? ''))
+  s.shellOpenPath = (p: string) => openPath(String(p ?? ''))
+  s.openDialog = async (opts: unknown) => {
+    const o = (opts ?? {}) as { title?: string, extensions?: string[], defaultPath?: string, directory?: boolean }
+    const paths = await pickPaths(o)
+    return { canceled: paths.length === 0, filePaths: paths }
+  }
+  s.saveDialog = async (opts: unknown) => {
+    const o = (opts ?? {}) as { title?: string, defaultPath?: string, extensions?: string[] }
+    const picked = await pickSavePath(o)
+    return { canceled: picked === '', filePath: picked }
+  }
+  return s as GpmHost['services']
 }
 
 export interface RollbackResult {
@@ -105,7 +145,7 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
   function makeHost(pid: string, box: CancelBox): GpmHost {
     const m = manifest.value
     return {
-      services: svc(),
+      services: pluginServices(),
       toolId: m ? m.id : '',
       toolName: m ? m.name : '',
       projectId: pid,
@@ -288,9 +328,15 @@ export function useToolPage(tool: RegisteredTool, projectIdRef: { readonly value
     const pid = projectIdRef.value
     const s = svc()
     const subset = subsetPlan(plan.value, checked.value)
+    // 插件侧的契约是 `apply(ctx, change)`(§F 的 entry 契约,骨架模板注释也这么写),
+    // 而 orchestrate 的注入缝是 `apply(change, index)` —— 这里得先把 ctx 绑上再交出去。
+    // 直接把模块上的原函数交过去时,插件收到的「ctx」其实是那条 change、「change」是一个数字,
+    // 于是它自己的 `change.payload.text` 当场炸成「reading 'text' of undefined」(DEV-19)。
+    const mod = tool.module as any
+    const applyCtx = typeof mod.apply === 'function' ? ctxFor(pid, box) : null
     const r = await executePlan({
       plan: subset,
-      apply: typeof (tool.module as any).apply === 'function' ? (tool.module as any).apply : undefined,
+      apply: applyCtx ? (change: PlannedChange, index: number) => mod.apply(applyCtx, change, index) : undefined,
       projectId: pid,
       isCancelled: box.isCancelled,
       deps: {

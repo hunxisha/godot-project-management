@@ -76,6 +76,37 @@ export async function pickFile(title: string, extensions: string[], defaultPath?
   return result?.[0]
 }
 
+/** 后缀去点、去空:宿主 filters 要的是 `gd`,不是 `.gd` */
+function filterExts(list: unknown): string[] {
+  return (Array.isArray(list) ? list : []).map((e) => String(e).replace(/^\./, '')).filter(Boolean)
+}
+
+/**
+ * 选多个文件或目录(工具箱 `ctx.openDialog` 用):取消返回空数组。
+ * 与 pickFile 的差别只有 multiSelections —— 插件一次挑若干个是常态,一次只许挑一个会把它逼回去写循环。
+ */
+export async function pickPaths(opts: { title?: string, extensions?: string[], defaultPath?: string, directory?: boolean } = {}): Promise<string[]> {
+  const exts = filterExts(opts.extensions)
+  const result = window.ztools.showOpenDialog({
+    title: opts.title || (opts.directory ? '选择目录' : '选择文件'),
+    defaultPath: opts.defaultPath,
+    ...(exts.length ? { filters: [{ name: exts.join('/'), extensions: exts }] } : {}),
+    properties: [opts.directory ? 'openDirectory' : 'openFile', 'multiSelections']
+  })
+  return Array.isArray(result) ? result : []
+}
+
+/** 选一个保存路径(工具箱 `ctx.saveDialog` 用):取消返回空串 */
+export async function pickSavePath(opts: { title?: string, defaultPath?: string, extensions?: string[] } = {}): Promise<string> {
+  const exts = filterExts(opts.extensions)
+  const picked = window.ztools.showSaveDialog({
+    title: opts.title || '另存为',
+    defaultPath: opts.defaultPath,
+    ...(exts.length ? { filters: [{ name: exts.join('/'), extensions: exts }] } : {})
+  })
+  return typeof picked === 'string' ? picked : ''
+}
+
 export const openPath = (p: string) => window.ztools.shellOpenPath(p)
 export const showInFolder = (p: string) => window.ztools.shellShowItemInFolder(p)
 export const openExternal = (url: string) => window.ztools.shellOpenExternal(url)

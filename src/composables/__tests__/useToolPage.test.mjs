@@ -42,7 +42,10 @@ const AT = (arr, i) => F(FA(arr)[i])
 const relsOf = (list) => FA(list).map((x) => F(x).rel).join(',')
 const relsOfArr = (list) => FA(list).map((x) => S(x)).join(',')
 
-// ── 假宿主:一个库两条路(桥接层走 ztools.db,插件 store 走 services.getDoc)────────
+// ── 假宿主:照着真宿主的门面摆 ────────────────────────────────
+// `services.js:347` 那个对象里**没有** getDoc/putDoc/removeDoc —— 文档读写在渲染层走的是桥接层
+// (`services/bridge.ts` → `window.ztools.db`)。所以这里只给 ztools.db 那一条路,
+// services 那张表一个文档方法都不给:补进夹具就等于把 DEV-18 那个缺口重新藏起来。
 const DB = new Map()
 const TREE = [{ rel: 'a.gd', size: 10 }, { rel: 'sub/b.gd', size: 5 }, { rel: 'icon.png', size: 20 }, { rel: 'out.gd', size: 3 }]
 const SEED = { 'a.gd': 'A1\nA2\n', 'sub/b.gd': 'B1\n', 'icon.png': 'PNG', 'out.gd': 'O\n' }
@@ -92,10 +95,7 @@ global.window = {
       DISK[rel] = text
       return { ok: true, bytes: text.length, truncated: false, skippedBinary: false }
     },
-    movePathsToTrash: async (pid, rels) => { trashed.push(rels); return { ok: true, moved: rels.length, failed: [] } },
-    getDoc: (id) => (DB.has(id) ? { ...DB.get(id) } : null),
-    putDoc: (id, data) => { DB.set(id, { ...(data || {}), _id: id }); return true },
-    removeDoc: (id) => { DB.delete(id); return true }
+    movePathsToTrash: async (pid, rels) => { trashed.push(rels); return { ok: true, moved: rels.length, failed: [] } }
   }
 }
 
@@ -452,6 +452,164 @@ section('11. diff 预览:只裁展示,三种「给不出 diff」各自说清')
   const half = F(await P.loadDiff({ id: 'z', rel: 'big.gd', kind: 'rewrite', payload: { text: 'z' } }))
   ok(half.ready === false && S(half.error).includes('完整正文'), '只拿到部分内容就不画 diff(改了会把半个文件写回去)', half.error)
   ok(F(await P.loadDiff(null)).ready === false, '脏入参不抛')
+}
+
+section('12. 插件面接线:store / 宿主 UI / 项目列表不在 window.services 里,靠桥接层补齐(§5.3 / DEV-18)')
+{
+  // gpm.test.mjs 是自己注入 host.services 来测那层门的,照不出**装配层有没有把东西接上**。
+  // 真宿主的 services 门面(services.js:347)只有项目文件那一族原语,文档读写 / 通知 / 系统对话框
+  // 在渲染层唯一的通路是 services/bridge.ts。夹具照真宿主摆 ⇒ 装配层漏一个就当场红。
+  const noDocs = !('getDoc' in global.window.services) && !('putDoc' in global.window.services) && !('removeDoc' in global.window.services)
+  ok(noDocs, '假宿主与真宿主同形:services 门面没有文档三件套(补进夹具就是把这缺口藏起来)', Object.keys(global.window.services))
+
+  resetDisk()
+  global.window.ztools.db.put({ _id: 'godot/project/p1', id: 'godot/project/p1', name: '演示项目', path: 'E:/mock/demo' })
+  const OPENED = ['C:/x/a.gd', 'C:/x/b.gd']
+  // 两轮各记一份参数:只看「最后一次」的话,取消那一轮的默认标题会把成功那一轮的判据顶掉
+  const openCalls = []
+  const saveCalls = []
+  // 宿主「取消」时给的是 undefined(不是空数组、也不是空串),所以这两支单独摆一次:
+  // 只测成功那一支的话,「把 undefined 原样交出去」这种写法在夹具里是抓不出来的
+  let OPEN_RETURN = OPENED
+  let SAVE_RETURN = 'C:/x/out.json'
+  const opened = []
+  const savedOpen = global.window.ztools.showOpenDialog
+  const savedSave = global.window.ztools.showSaveDialog
+  const savedShell = global.window.ztools.shellOpenPath
+  global.window.ztools.showOpenDialog = (o) => { openCalls.push(o); return OPEN_RETURN }
+  global.window.ztools.showSaveDialog = (o) => { saveCalls.push(o); return SAVE_RETURN }
+  global.window.ztools.shellOpenPath = (p) => { opened.push(p) }
+  const notesBefore = notes.length
+
+  const rec = {}
+  const uiMod = {
+    schema: [{ key: 'targets', type: 'files', label: 'f', exts: ['.gd'] }],
+    plan: async (ctx, files) => {
+      try {
+        rec.storePut = await ctx.store.put('prefs', { n: 1, s: 'x' })
+        rec.storeGet = await ctx.store.get('prefs')
+        rec.rawDoc = global.window.ztools.db.get('gpm/plugin/demo-ui/prefs')
+        rec.removed = await ctx.store.remove('prefs')
+        rec.afterRemove = await ctx.store.get('prefs')
+        rec.staleGet = await ctx.store.get('没有这个键')
+        ctx.notify(`这一轮要看 ${files.length} 个文件`)
+        rec.dialog = await ctx.openDialog({ title: '挑文件', extensions: ['.gd'] })
+        rec.save = await ctx.saveDialog({ title: '存到哪' })
+        OPEN_RETURN = undefined
+        SAVE_RETURN = undefined
+        rec.cancelOpen = await ctx.openDialog({})
+        rec.cancelSave = await ctx.saveDialog({})
+        rec.projects = await ctx.listProjects()
+        rec.one = await ctx.getProject()
+        rec.byId = await ctx.getProject('godot/project/p1')
+        ctx.copyText('给剪贴板')
+        ctx.shellOpenPath('C:/x')
+      } catch (e) {
+        rec.threw = String((e && e.message) || e)
+      }
+      return []
+    }
+  }
+  const uiTool = toolOf(uiMod, { ...MAN, id: 'demo-ui', capabilities: ['tree', 'text', 'store', 'ui'] })
+  P = T.useToolPage(uiTool, pid)
+  await P.open()
+  P.picked.value = ['a.gd']
+  await P.makePlan()
+
+  ok(rec.threw === undefined, '一整套 ctx 调用没有一个抛(插件里一句 notify 不该把整页炸掉)', rec.threw)
+  // store:落进的是 LMDB 那同一个库,键由框架拼前缀,值住在文档的 value 字段里
+  ok(rec.storePut === true, 'store.put 真的写成功了(装配层没接桥接层时它永远回 false)', rec.storePut)
+  ok(F(rec.rawDoc)._id === 'gpm/plugin/demo-ui/prefs', '前缀由框架拼在 id 上(§D #10)', rec.rawDoc)
+  ok(F(F(rec.rawDoc).value).n === 1, '值包在 value 字段里(LMDB 的文档必须是对象)')
+  ok(F(rec.storeGet).n === 1 && F(rec.storeGet).s === 'x', 'store.get 读得回来同一个值', rec.storeGet)
+  ok(rec.removed === true && !DB.has('gpm/plugin/demo-ui/prefs'), 'store.remove 走的是同一条桥接路', [rec.removed, DB.has('gpm/plugin/demo-ui/prefs')])
+  ok(rec.afterRemove === null && rec.staleGet === null, '删掉之后与从没写过的键都读回 null,不是空对象(插件据此判「第一次用」)', [rec.afterRemove, rec.staleGet])
+  // 宿主 UI
+  ok(notes.length === notesBefore + 1 && S(notes[notes.length - 1]).includes('这一轮要看 1 个文件'), 'ctx.notify 到了宿主的 showNotification', notes.slice(notesBefore))
+  ok(F(rec.dialog).canceled === false && FA(F(rec.dialog).paths).join('|') === OPENED.join('|'), 'openDialog 把多选结果交给插件', rec.dialog)
+  // 成功那一轮送出去的第一个参数对象(取消那一轮的参数是空的,别拿它判默认标题)
+  const oa = F(FA(openCalls)[0])
+  const sa = F(FA(saveCalls)[0])
+  ok(FA(oa.properties).join(',') === 'openFile,multiSelections', '多选是真的往宿主那儿要了 multiSelections', oa.properties)
+  // 先取元素再取字段,而且字段也过一遍 FA:少写一层判据时这里会 TypeError 撞停整节(看着像「抓到了」,其实一条统计都没产出)
+  const picked0 = F(FA(F(oa).filters)[0])
+  ok(FA(picked0.extensions).join(',') === 'gd', '后缀交给宿主前去掉了点(.gd ⇒ gd)', F(oa).filters)
+  ok(F(rec.save).canceled === false && S(F(rec.save).path) === 'C:/x/out.json', 'saveDialog 的返回形状对', rec.save)
+  ok(S(sa.title) === '存到哪', '插件给的 title 原样送到宿主', sa)
+  ok(openCalls.length === 2 && saveCalls.length === 2, '成功与取消各真打到宿主一次(取消那一支不是夹具编的)', [openCalls.length, saveCalls.length])
+  ok(S(F(saveCalls[1]).title) === '另存为', '插件没给 title 时才有默认值(默认值不许盖住用户给的那句)', saveCalls[1])
+  ok(F(rec.cancelOpen).canceled === true && FA(F(rec.cancelOpen).paths).length === 0, '取消时是「取消」而不是「选了 0 个文件」的空数组直漏', rec.cancelOpen)
+  ok(F(rec.cancelSave).canceled === true && S(F(rec.cancelSave).path) === '', '保存框取消同一条形状', rec.cancelSave)
+  ok(FA(rec.projects).length === 1 && S(F(FA(rec.projects)[0]).name) === '演示项目', 'listProjects 从 godot/project/ 前缀读得到项目', rec.projects)
+  ok(F(rec.one).name === '演示项目' && F(rec.byId).name === '演示项目', 'getProject 两种写法都认(短 id 补前缀,完整 id 原样)', [rec.one, rec.byId])
+  ok(opened.join(',') === 'C:/x', 'shellOpenPath 走的是桥接层的 openPath', opened)
+
+  global.window.ztools.showOpenDialog = savedOpen
+  global.window.ztools.showSaveDialog = savedSave
+  global.window.ztools.shellOpenPath = savedShell
+
+  // 没声明 ui 的工具:那三个入口按 gpm 的门应该是「不存在」或「只记一行痕」,总之不许打到宿主
+  const notesMid = notes.length
+  const noUi = toolOf({
+    schema: [{ key: 'targets', type: 'files', label: 'f', exts: ['.gd'] }],
+    plan: async (ctx) => {
+      rec.noUiStore = typeof ctx.store
+      rec.noUiDialog = await ctx.openDialog({})
+      return []
+    }
+  }, { ...MAN, id: 'demo-noui', capabilities: ['tree', 'text'] })
+  P = T.useToolPage(noUi, pid)
+  await P.open()
+  P.picked.value = ['a.gd']
+  await P.makePlan()
+  ok(rec.noUiStore === 'undefined', '没声明 store ⇒ ctx.store 不存在(而不是给一个按下去没反应的物件)', rec.noUiStore)
+  ok(F(rec.noUiDialog).canceled === true && FA(F(rec.noUiDialog).paths).length === 0, '没声明 ui ⇒ 对话框直接回「取消」,没去碰宿主', rec.noUiDialog)
+  ok(notes.length === notesMid, '没声明 ui 时一句 notify 都没送到宿主', notes.length - notesMid)
+}
+
+section('13. 插件的 apply 收到的必须是 (ctx, change) —— §F 的 entry 契约(DEV-19)')
+{
+  // 契约写的是 `apply(ctx, change)`,骨架模板的注释也这么教;而 orchestrate 的注入缝是
+  // `apply(change, index)`。这两者之间必须有人绑 ctx —— 交给页面来绑,插件收到的才是契约说的那个东西。
+  // 直接把模块上的原函数交出去时(出事那一版),插件的「ctx」其实是 change、「change」是条数,
+  // 它自己的 `change.payload.text` 当场 TypeError,而这一层以前一条断言都没有。
+  resetDisk()
+  const seenApply = {}
+  const applier = {
+    schema: [{ key: 'targets', type: 'files', label: 'f', exts: ['.gd'] }],
+    plan: async (ctx, files) => FA(files).map((f) => ({
+      rel: F(f).rel, kind: 'rewrite', label: '换一个正文', risk: 'low', reason: 'r', payload: { text: 'NEW-' + F(f).rel }
+    })),
+    apply: async (ctx, change, index) => {
+      seenApply.ctxType = typeof ctx
+      seenApply.readText = typeof F(ctx).readText
+      seenApply.store = typeof F(ctx).store
+      seenApply.cancelled = F(ctx).cancelled
+      seenApply.rel = S(F(change).rel)
+      seenApply.kind = S(F(change).kind)
+      seenApply.text = S(F(F(change).payload).text)
+      seenApply.idIsStable = typeof F(change).id === 'string' && F(change).id.length > 0
+      seenApply.rels = (seenApply.rels || []).concat(S(F(change).rel))
+      seenApply.seq = (seenApply.seq || []).concat(index)
+      return { ok: true }
+    }
+  }
+  P = T.useToolPage(toolOf(applier), pid)
+  await P.open()
+  P.picked.value = ['a.gd', 'sub/b.gd']
+  await P.makePlan()
+  await P.execute()
+
+  ok(seenApply.ctxType === 'object' && seenApply.readText === 'function', '第一个参数真是 ctx(有 ctx.readText 那些能力面)', seenApply)
+  ok(seenApply.store === 'object', 'apply 里的 ctx.store 也在(执行时也要能读自己的设置)', seenApply.store)
+  ok(seenApply.cancelled === false, 'ctx.cancelled 是布尔快照(契约那条:循环里要查它)', seenApply.cancelled)
+  ok(seenApply.rel === 'sub/b.gd' && seenApply.kind === 'rewrite', '第二个参数真是那条 change 本身', [seenApply.rel, seenApply.kind])
+  ok(FA(seenApply.rels).join(',') === 'a.gd,sub/b.gd', '两条各收到自己那一条(不是把同一件事做两遍)', seenApply.rels)
+  ok(FA(seenApply.seq).join(',') === '0,1', '注入缝的第三个参数是这一轮的序号(0 起算),它不该被当成 change', seenApply.seq)
+  ok(seenApply.text === 'NEW-sub/b.gd', 'change.payload 在(插件按 payload.text 决定正文)', seenApply.text)
+  ok(seenApply.idIsStable === true, 'change.id 是框架补过的稳定键(预览与执行认的是同一条)')
+  ok(writes.length === 2 && writes.map((w) => w[1]).join(',') === 'NEW-a.gd,NEW-sub/b.gd', 'apply 只回 {ok} 时框架照 payload.text 写盘(DEV-13 那两条来源)', writes)
+  ok(S(P.notice.value).includes('2') && FA(F(P.receipt.value).failed).length === 0, '回执是成功那一条', P.notice.value)
 }
 
 console.log(`\n${'='.repeat(56)}\nPASS ${pass}  FAIL ${failures.length}`)
