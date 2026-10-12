@@ -10,7 +10,6 @@ import AddonsView from './views/AddonsView.vue'
 import DocsView from './views/DocsView.vue'
 import DocSearchPalette from './components/docs/DocSearchPalette.vue'
 import BackupsView from './views/BackupsView.vue'
-import ToolsView from './views/ToolsView.vue'
 import SettingsView from './views/SettingsView.vue'
 import { notify } from './services/bridge'
 import type { BackupTask, DocsTask, DownloadTask, ExportTask } from './types/godot'
@@ -345,9 +344,6 @@ function gotoCreateBackup(id: string) {
           @navigate="tab = $event"
           @backup-project="gotoCreateBackup"
         />
-        <!-- 工具页:第 0 批的空壳(旧的体检控制台已拆,理由与去向见 docs/toolkit-redesign-plan.md)。
-             空壳不 emit navigate,所以这里不再绑 @navigate。 -->
-        <ToolsView v-else-if="tab === 'tools'" />
         <SettingsView v-else />
       </KeepAlive>
     </main>

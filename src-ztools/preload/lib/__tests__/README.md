@@ -91,16 +91,3 @@ GPM_TEST_TRASH=1 npm run test:preload     # Windows PowerShell: $env:GPM_TEST_TR
 被删对象位于本次运行的临时工作目录内（默认 `os.tmpdir()` 下新建的 `gpm-backup-test-*`），
 不影响仓库内容。
 
-## 性能基准同样默认关闭（GPM_PERF_FILES）
-
-工具页的「1 万文件全量体检 < 10s」验收口径由 `src/tools/__tests__/perf.test.mjs` 复测：
-它在 `os.tmpdir()` 下造指定数目真实文件的 Godot 项目树、把 `window.services` 接到本目录的
-`inspectfs.js` 真实原语、用 CI 同一份 `usetools.mjs` bundle 跑 `runAll()` 并打印毫秒数，
-**跑完自删夹具并核实目录已不存在**。它会写盘上万文件，所以与 `GPM_TEST_TRASH` 同规约——
-默认不跑，也不挂 `npm test` / `test:renderer`，需要时显式开启：
-
-```bash
-node src/composables/__tests__/build-bundle.mjs                                   # 先产 bundle
-GPM_PERF_FILES=10000 node src/tools/__tests__/perf.test.mjs                       # PowerShell: $env:GPM_PERF_FILES=10000; node …
-```
-
