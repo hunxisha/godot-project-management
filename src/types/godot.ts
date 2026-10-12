@@ -593,8 +593,8 @@ export const DOC_PREFIX = {
   asset: 'godot/asset/'
 } as const
 
-// ---------- 工具页（项目体检）原语的返回类型 ----------
-// 见 docs/tools-page-plan.md §5.4。rel 一律是「相对项目根、正斜杠」的路径。
+// ---------- 项目文件原语的返回类型（实现在 src-ztools/preload/lib/inspectfs.js） ----------
+// rel 一律是「相对项目根、正斜杠」的路径。原语去留见 docs/待确认.md #32。
 
 /** scanProjectTree 的单条文件记录 */
 export interface TreeEntry {

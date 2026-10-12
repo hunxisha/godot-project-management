@@ -1,4 +1,7 @@
-// 项目体检用的文件系统原语(见 docs/tools-page-plan.md §5.4)。
+// 项目文件读写的宿主原语（scanProjectTree / readProjectText / writeProjectText / hashPaths 等）。
+//   原出处是「Godot 项目体检」（docs/tools-page-plan.md 已删）；2026-10-13 工具页整域拆除后
+//   渲染层暂无消费者，去留记在 docs/待确认.md #32 —— 但下面这几条设计红线与有没有消费者无关，
+//   复用这些原语时必须照旧遵守。
 //
 // 设计红线:
 //   · 渲染层只拿 rel(相对项目根、正斜杠),绝对路径由这里拼 —— 误删面最小,
@@ -9,7 +12,8 @@
 //     写 / 删漏第二道改的就是**别人家的文件**(资产站 zip 解压正是项目内长链接的主路径)。
 //     遍历(scanProjectTree)不走这两道闸:它只列出 root 下的条目、由 fsutil.walkFiles
 //     自己逐级下钻,既不接收外部 rel 也不写盘,没有可越界的入参。
-//   · 读 / 写 / 删原语都不抛异常,一律返回 { ok:false, error } —— 工具页要在结论里显示原因。
+//   · 读 / 写 / 删原语都不抛异常,一律返回 { ok:false, error } —— 调用方要把原因显示出来,
+//     不许把它转成一次静默的失败。
 const fs = require('node:fs')
 const path = require('node:path')
 const crypto = require('node:crypto')

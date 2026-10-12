@@ -6,7 +6,8 @@
 // 早就说过「靠肉眼穷举 10 种组合不现实」。这里给一个够用就好的宿主,把版面问题从真宿主里剥出来。
 //
 // 它不是测试替身,也不验数据正确性:scanProjectTree 返回的是写死的清单,
-// 任何关于「体检报得对不对」的判断仍然只能在真宿主做(docs/manual-verification.md 那 52 条不变)。
+// 任何关于「读到的文件对不对」的判断仍只能在真宿主做。
+// (原注引用的「体检那 52 条」已随 2026-10-13 工具页拆除作废;仍然待验的是 §7~§9,见 docs/manual-verification.md 顶部。)
 import { createApp } from 'vue'
 import './main.css'
 import App from './App.vue'
