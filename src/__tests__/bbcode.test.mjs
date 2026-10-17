@@ -130,13 +130,44 @@ const gdSrc = 'var box = AABB(Vector3(5, 0, 5)) # 注释\nprint("hi")'
 const gdToks = highlightCode(gdSrc)
 ok(gdToks.map((t) => t.v).join('') === gdSrc, 'GDScript:token 拼接 === 原文(内容永不丢失)')
 const gdKinds = gdToks.filter((t) => t.c).map((t) => `${t.c}:${t.v}`)
-ok(gdKinds.includes('kw:var') && gdKinds.includes('ty:AABB') && gdKinds.includes('ty:Vector3'), 'GDScript:关键字与类型着色', gdKinds.join(','))
+ok(gdKinds.includes('kw:var') && gdKinds.includes('tye:AABB') && gdKinds.includes('tye:Vector3'), 'GDScript:关键字/引擎类型着色', gdKinds.join(','))
+ok(gdKinds.includes('fn:print') && gdKinds.includes('sym:(') && gdKinds.includes('sym:='), 'GDScript:函数调用与运算符着色', gdKinds.join(','))
 ok(gdKinds.includes('com:# 注释') && gdKinds.includes('str:"hi"') && gdToks.some((t) => t.c === 'num'), 'GDScript:注释/字符串/数字着色')
-const csSrc = 'var arr = new Godot.Collections.Array<int>(); // note'
+
+const gdRolesSrc = 'func _ready():\n\tvar hp: int = 3\n\t@export var target: Node2D = $Player/body\n\tif hp > 0 and PI > 0.0:\n\t\treturn target.position\n## 文档'
+const gdRoles = highlightCode(gdRolesSrc)
+ok(gdRoles.map((t) => t.v).join('') === gdRolesSrc, 'GDScript 角色样例:拼接 === 原文')
+const gdRoleKinds = gdRoles.filter((t) => t.c).map((t) => `${t.c}:${t.v}`)
+ok(gdRoleKinds.includes('fn:_ready'), 'GDScript:func 定义名 → fn', gdRoleKinds.join(','))
+ok(gdRoleKinds.includes('tyb:int') && gdRoleKinds.includes('tye:Node2D'), 'GDScript:基础类型与引擎类型分色', gdRoleKinds.join(','))
+ok(gdRoleKinds.includes('kw:@export') && gdRoleKinds.includes('kw:PI'), 'GDScript:@注解与全局常量 → 关键字色', gdRoleKinds.join(','))
+ok(gdRoleKinds.includes('str:$Player/body'), 'GDScript:节点路径整体当字符串', gdRoleKinds.join(','))
+ok(gdRoleKinds.includes('mem:position'), 'GDScript:. 后的成员 → mem', gdRoleKinds.join(','))
+
+const modSrc = 'var m = a % b\nvar u = %Unique'
+const modToks = highlightCode(modSrc)
+ok(modToks.some((t) => t.c === 'sym' && t.v === '%'), 'GDScript:取模运算符不被当成唯一节点名', modToks.map((t) => `${t.c}:${t.v}`).join('|'))
+ok(modToks.some((t) => t.c === 'str' && t.v === '%Unique'), 'GDScript:%Unique 唯一节点名整体当字符串', modToks.map((t) => `${t.c}:${t.v}`).join('|'))
+ok(gdRoleKinds.includes('cf:if') && gdRoleKinds.includes('cf:return') && gdRoleKinds.includes('kw:and'), 'GDScript:控制流与逻辑关键字分开', gdRoleKinds.join(','))
+ok(gdRoleKinds.includes('doc:## 文档'), 'GDScript:## 文档注释 → doc', gdRoleKinds.join(','))
+
+const numSrc = 'var a = 0xFF\nvar b = 0b1010\nvar c = 1_000\nvar d = 1e-3'
+const numToks = highlightCode(numSrc)
+ok(numToks.map((t) => t.v).join('') === numSrc && numToks.filter((t) => t.c === 'num').map((t) => t.v).join('|') === '0xFF|0b1010|1_000|1e-3', 'GDScript:hex/bin/下划线/指数数字', numToks.filter((t) => t.c === 'num').map((t) => t.v).join('|'))
+
+const tripleSrc = 'var s = """line1\nline2"""'
+const tripleToks = highlightCode(tripleSrc)
+ok(tripleToks.some((t) => t.c === 'str' && t.v === '"""line1\nline2"""'), 'GDScript:三引号跨行字符串', tripleToks.map((t) => `${t.c}:${t.v}`).join('|'))
+
+const csSrc = 'var arr = new Godot.Collections.Array<int>(); // note\n/* block */\nstring s = @"c:\\\\temp";\nvoid Foo(Bar b) { }\n/// doc'
 const csToks = highlightCode(csSrc, 'csharp')
 ok(csToks.map((t) => t.v).join('') === csSrc, 'C#:token 拼接 === 原文')
 const csKinds = csToks.filter((t) => t.c).map((t) => `${t.c}:${t.v}`)
-ok(csKinds.includes('kw:new') && csKinds.includes('ty:Array') && csKinds.includes('com:// note'), 'C#:关键字/类型/注释着色', csKinds.join(','))
+ok(csKinds.includes('kw:new') && csKinds.includes('tyb:Array') && csKinds.includes('tyb:int'), 'C#:关键字/类型着色', csKinds.join(','))
+ok(csKinds.includes('com:// note') && csKinds.includes('com:/* block */') && csKinds.includes('doc:/// doc'), 'C#:行/块/文档注释', csKinds.join(','))
+ok(csKinds.includes('str:@"c:\\\\temp"'), 'C#:逐字字符串整体着色', csKinds.join(','))
+ok(csKinds.includes('fn:Foo') && csKinds.includes('tyu:Bar'), 'C#:方法名 → fn、未知大写 → 用户类型', csKinds.join(','))
+
 const txtToks = highlightCode('[section]', 'text')
 ok(txtToks.length === 1 && txtToks[0].c === '' && txtToks[0].v === '[section]', 'lang=text 整段原样不着色')
 

@@ -206,7 +206,57 @@ for (const theme of THEMES) {
   }
 }
 
-section('5. 最差项汇总(供设计参考)')
+// ---------- 5. 代码高亮角色 ----------
+
+section('5. 代码高亮角色(--syn-* 对代码块底色 ≥ 4.5)')
+/** 12 个高亮角色:与 Godot 编辑器默认高亮对齐(见 docs/theme-system.md) */
+const SYN_TOKENS = [
+  '--syn-kw', '--syn-cf', '--syn-tyb', '--syn-tye', '--syn-tyu', '--syn-fn',
+  '--syn-mem', '--syn-str', '--syn-num', '--syn-com', '--syn-doc', '--syn-sym'
+]
+const SYN_MIN = 4.5
+
+for (const mode of MODES) {
+  const t = resolve('steel', mode)
+  const missing = SYN_TOKENS.filter((k) => !t[k])
+  ok(missing.length === 0, `${mode} 定义全部 ${SYN_TOKENS.length} 个高亮角色`, missing.join(', '))
+  const bad = SYN_TOKENS.filter((k) => t[k] && !parseColor(t[k]))
+  ok(bad.length === 0, `${mode} 高亮角色色值可解析`, bad.join(', '))
+}
+
+const synWorst = {}
+for (const theme of THEMES) {
+  for (const mode of MODES) {
+    const key = `${theme}/${mode}`
+    const t = resolved[key]
+    const bg = t['--surface-2']
+    let min = Infinity
+    let minRole = ''
+    for (const k of SYN_TOKENS) {
+      const c = ratio(t[k], bg)
+      if (!synWorst[k] || c < synWorst[k].c) synWorst[k] = { c, key }
+      if (c < min) { min = c; minRole = k }
+    }
+    ok(min >= SYN_MIN, `${key} 12 个高亮角色对代码块底色 ≥ ${SYN_MIN}`, `${minRole}=${min.toFixed(2)}`)
+    console.log(`        ${key.padEnd(16)} 最弱 ${minRole} ${min.toFixed(2)}`)
+  }
+}
+
+for (const [k, w] of Object.entries(synWorst)) {
+  ok(w.c >= SYN_MIN, `${k} 全组合最低对比度 ≥ ${SYN_MIN}`, `${w.c.toFixed(2)} (${w.key})`)
+}
+
+// 高亮角色只随明暗变化,不随色板变化(与语义色同一约定)
+for (const theme of THEMES) {
+  for (const mode of MODES) {
+    const t = resolved[`${theme}/${mode}`]
+    const ref = resolved[`steel/${mode}`]
+    const drifted = SYN_TOKENS.filter((k) => t[k] !== ref[k])
+    ok(drifted.length === 0, `${theme}/${mode} 高亮角色不随色板变化`, drifted.join(', '))
+  }
+}
+
+section('6. 最差项汇总(供设计参考)')
 for (const [name, w] of Object.entries(worst)) {
   console.log(`        ${name.padEnd(16)} 最低 ${w.c.toFixed(2)}  (${w.key})`)
 }

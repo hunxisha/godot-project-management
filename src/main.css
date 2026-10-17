@@ -86,12 +86,21 @@
   --panel-head: var(--surface-2);
   --panel-head: color-mix(in srgb, var(--surface) 60%, var(--bg));
 
-  /* 代码语法着色(亮色):与色板无关,所有色板共用 */
-  --syn-kw: #7c4dbe;
-  --syn-ty: #2e6ca3;
-  --syn-str: #2e8a4f;
-  --syn-num: #b85c1e;
-  --syn-com: #8493a6;
+  /* 代码语法着色(亮色):与色板无关,所有色板共用。
+     12 个角色与 Godot 编辑器默认高亮对齐(暗色直取编辑器值,亮色同色相压暗),
+     每个角色对代码块底色(--surface-2)的对比度 ≥ 4.5:1,由 theme.test.mjs 断言。 */
+  --syn-kw: #6b6b00;
+  --syn-cf: #8a5a1e;
+  --syn-tyb: #0b7a58;
+  --syn-tye: #0f6b85;
+  --syn-tyu: #3a5fb0;
+  --syn-fn: #2a6fa8;
+  --syn-mem: #b02a34;
+  --syn-str: #a32375;
+  --syn-num: #a03d00;
+  --syn-com: #647080;
+  --syn-doc: #5a6f86;
+  --syn-sym: #4f6f8c;
 }
 
 :root[data-mode='light'] {
@@ -111,12 +120,20 @@
   --gold: #eebd62;
   --gold-weak: rgba(238, 189, 98, 0.15);
 
-  /* ---------- 深色:代码语法着色 ---------- */
-  --syn-kw: #b18cf0;
-  --syn-ty: #8ac3ee;
-  --syn-str: #57ab5a;
-  --syn-num: #e3b341;
-  --syn-com: #8493a6;
+  /* ---------- 深色:代码语法着色(直取 Godot 编辑器默认值,
+     仅注释/成员提亮到 4.5:1) ---------- */
+  --syn-kw: #ffffb3;
+  --syn-cf: #ffd9b3;
+  --syn-tyb: #a3ffd4;
+  --syn-tye: #82d4ff;
+  --syn-tyu: #6babed;
+  --syn-fn: #66a3cf;
+  --syn-mem: #ff7b73;
+  --syn-str: #f06dbf;
+  --syn-num: #eb9433;
+  --syn-com: #8b98a8;
+  --syn-doc: #8099b3;
+  --syn-sym: #baddff;
 
   /* ---------- 深色:阴影 ---------- */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28);
@@ -371,6 +388,60 @@ body {
 
 .mono {
   font-family: var(--mono);
+}
+
+/* ================================================================
+   代码高亮角色(唯一来源,组件不再各自定义)
+   角色与 Godot 编辑器默认高亮对齐;色值 12 个 --syn-* 在亮/暗各一套,
+   语义跨明暗稳定。色值表与对比度见 docs/theme-system.md。
+   ================================================================ */
+.tok-kw {
+  color: var(--syn-kw);
+  font-weight: 600;
+}
+
+.tok-cf {
+  color: var(--syn-cf);
+}
+
+.tok-tyb {
+  color: var(--syn-tyb);
+}
+
+.tok-tye {
+  color: var(--syn-tye);
+}
+
+.tok-tyu {
+  color: var(--syn-tyu);
+}
+
+.tok-fn {
+  color: var(--syn-fn);
+}
+
+.tok-mem {
+  color: var(--syn-mem);
+}
+
+.tok-str {
+  color: var(--syn-str);
+}
+
+.tok-num {
+  color: var(--syn-num);
+}
+
+.tok-com {
+  color: var(--syn-com);
+}
+
+.tok-doc {
+  color: var(--syn-doc);
+}
+
+.tok-sym {
+  color: var(--syn-sym);
 }
 
 /* 撑开剩余空间(flex 行内用) */
