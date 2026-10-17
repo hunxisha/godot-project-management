@@ -1,8 +1,10 @@
 // http.js 的 POST 路径回归测试(与 http.test.js 分开,因为注入的假 https 形状不同)。
 //
-// 这条链路只有一个消费者:翻译。它承重的地方是 **err.status** —— translate.js 靠
-// 401/403 决定「暂停,别再烧钱」,而状态码一旦被吞掉,用户看到的就是每次翻页都失败
-// 却不知道为什么。所以这里钉住:状态码、错误体、非 JSON 响应、以及超时。
+// 这条链路只有一个消费者:翻译。它承重的地方有两处:
+//   1. **err.status** —— translate.js 靠 401/403 决定「暂停,别再烧钱」,状态码被吞掉
+//      用户看到的就是每次翻页都失败却不知道为什么;
+//   2. **代理路径的请求体缓冲** —— 隧道是异步建立的,而调用方是同步 write/end 的。
+//      真机上「测试连接」报过 `req.write is not a function`,就是漏了这一步。
 //
 // 用法:
 //   node src-ztools/preload/lib/__tests__/transhttp.test.js
@@ -17,6 +19,10 @@ const LIB = path.resolve(__dirname, '..')
 const sent = []
 /** 下一条响应怎么回 */
 let plan = { statusCode: 200, body: '{}' }
+/** 当前代理设置(store.getDoc 的返回值) */
+let settings = null
+/** CONNECT 调用记录 */
+const connectCalls = []
 
 function makeRes(p) {
   if (p.hang) {
@@ -31,28 +37,61 @@ function makeRes(p) {
   return r
 }
 
+/** 造一个请求句柄:累积 write,在 end 时按 plan 回响应 */
+function makeReq(args, cb) {
+  const req = new EventEmitter()
+  req.opts = typeof args[0] === 'string' ? args[1] : args[0]
+  req.url = typeof args[0] === 'string' ? args[0] : undefined
+  req.body = ''
+  req.destroy = () => { req.destroyed = true }
+  req.setTimeout = (ms, fn) => { req.timeoutMs = ms; req.timeoutFn = fn }
+  req.write = (buf) => { req.body += String(buf) }
+  req.end = () => {
+    req.ended = true
+    sent.push({ url: String(req.url || ''), opts: req.opts, body: req.body })
+    const p = plan
+    if (p.throwSync) throw p.throwSync()
+    setImmediate(() => {
+      if (p.netError) return req.emit('error', new Error(p.netError))
+      if (p.timeout) return req.timeoutFn && req.timeoutFn()
+      cb(makeRes(p))
+    })
+  }
+  return req
+}
+
 const fakeHttps = {
-  request(url, opts, cb) {
+  request(...args) {
+    const cb = args[args.length - 1]
+    return makeReq(args, typeof cb === 'function' ? cb : () => {})
+  }
+}
+
+/** 代理的 CONNECT 请求:end() 后异步回 200 + 一个假 socket */
+const fakeHttp = {
+  request(opts) {
     const req = new EventEmitter()
     req.opts = opts
-    req.url = url
-    req.body = ''
-    req.written = false
     req.destroy = () => { req.destroyed = true }
-    req.setTimeout = (ms, fn) => { req.timeoutMs = ms; req.timeoutFn = fn }
-    req.write = (buf) => { req.body += String(buf) }
     req.end = () => {
-      req.ended = true
-      sent.push({ url: String(url), opts, body: req.body })
-      const p = plan
-      if (p.throwSync) throw p.throwSync()
+      connectCalls.push(opts)
+      const socket = { destroy: () => {} }
       setImmediate(() => {
-        if (p.netError) return req.emit('error', new Error(p.netError))
-        if (p.timeout) return req.timeoutFn && req.timeoutFn()
-        cb(makeRes(p))
+        if (plan.connectError) return req.emit('error', new Error(plan.connectError))
+        req.emit('connect', { statusCode: plan.connectStatus || 200 }, socket)
       })
     }
     return req
+  }
+}
+
+/** TLS:secureConnect 异步触发,模拟真实握手 */
+const fakeTls = {
+  connect() {
+    const sock = new EventEmitter()
+    sock.destroy = () => {}
+    setImmediate(() => sock.emit('secureConnect'))
+    return sock
   }
 }
 
@@ -60,8 +99,10 @@ const origLoad = Module._load
 Module._load = function (request, parent, isMain) {
   const file = (parent && parent.filename) || ''
   if (/http\.js$/.test(file)) {
-    if (request === './store') return { getDoc: () => null }
+    if (request === './store') return { getDoc: () => settings }
     if (request === 'node:https') return fakeHttps
+    if (request === 'node:http') return fakeHttp
+    if (request === 'node:tls') return fakeTls
   }
   return origLoad.apply(this, arguments)
 }
@@ -84,15 +125,17 @@ function section(t) {
 }
 function reset() {
   sent.length = 0
+  connectCalls.length = 0
+  settings = null
 }
-const outcome = (p, ms = 500) =>
+const outcome = (p, ms = 600) =>
   Promise.race([
     p.then((v) => ({ state: 'resolved', value: v }), (e) => ({ state: 'rejected', error: e })),
     new Promise((r) => setTimeout(() => r({ state: 'pending' }), ms))
   ])
 
 async function main() {
-  section('1. 成功路径:方法/头/body 都是 POST')
+  section('1. 直连成功:方法/头/body 都是 POST')
   {
     reset()
     plan = { statusCode: 200, body: '{"ok":true,"value":42}' }
@@ -140,6 +183,28 @@ async function main() {
     plan = { timeout: true }
     const out3 = await outcome(postJson('https://api.test/v1/chat', {}, undefined, { timeoutMs: 50 }))
     ok(out3.state === 'rejected' && /请求超时/.test(out3.error.message), '超时会了结 promise(不悬空)', out3.error.message)
+  }
+
+  section('5. 代理路径:CONNECT 隧道 + 请求体缓冲(真机回归:req.write is not a function)')
+  {
+    reset()
+    settings = { proxy: 'http://127.0.0.1:7897' }
+    plan = { statusCode: 200, body: '{"ok":true,"proxied":true}' }
+    const out = await outcome(postJson('https://api.deepseek.com/chat/completions', { hello: 'world' }))
+    ok(out.state === 'resolved' && out.value.proxied === true, '经代理的 POST 能拿到响应', JSON.stringify(out))
+    ok(connectCalls.length === 1 && connectCalls[0].method === 'CONNECT', '先发一次 CONNECT', String(connectCalls.length))
+    ok(connectCalls[0].path === 'api.deepseek.com:443', 'CONNECT 目标正确', String(connectCalls[0].path))
+    // 请求体是**隧道建立后**补发的:这里断言它没有丢
+    const tunneled = sent.filter((s) => s.opts && s.opts.method === 'POST')
+    ok(tunneled.length === 1 && tunneled[0].body === '{"hello":"world"}',
+      '请求体在隧道就绪后被完整补发(同步 write 不丢)', JSON.stringify(tunneled.map((t) => t.body)))
+
+    // 代理连不上:应把错误交回,而不是永久挂着
+    reset()
+    settings = { proxy: 'http://127.0.0.1:7897' }
+    plan = { connectError: 'ECONNREFUSED' }
+    const out2 = await outcome(postJson('https://api.test/v1/chat', {}))
+    ok(out2.state === 'rejected' && /ECONNREFUSED/.test(out2.error.message), '代理拒绝连接时立即报错', JSON.stringify(out2))
   }
 
   console.log(`\n${'='.repeat(56)}`)

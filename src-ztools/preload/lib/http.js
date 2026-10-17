@@ -133,6 +133,18 @@ function openRequest(method, url, headers, cb) {
   const emitter = new EventEmitter()
   /** @type {GpmRequest} */
   const stub = /** @type {any} */ (emitter)
+  /** @type {GpmRequest | null} 隧道建好后的真实请求 */
+  let real = null
+  /** 隧道建立前暂存的请求体 */
+  /** @type {any[]} */
+  const pendingBody = []
+  let pendingEnd = false
+  // POST 的调用方是**同步** write/end 的:代理路径下等隧道会导致
+  // 「req.write is not a function」(真机上就是这么报的)。所以先收下,隧道好了再转发。
+  stub.write = (chunk) => { if (real) real.write(chunk); else pendingBody.push(chunk) }
+  stub.end = () => { if (real) real.end(); else pendingEnd = true }
+  // 超时由调用方(postJson)自己的定时器兜住,这里不重复实现
+  stub.setTimeout = () => {}
   /** @type {GpmRequest | null} CONNECT 隧道请求 */
   let connectReq = null
   /** @type {GpmSocket | null} 隧道内的 TLS 套接字 */
@@ -200,9 +212,11 @@ function openRequest(method, url, headers, cb) {
         cb
       )
       req.on('error', fail)
-      // 隧道建好后把调用方写在 stub 上的 write/end 转给真实请求
-      stub.write = (chunk) => req.write(chunk)
-      stub.end = () => req.end()
+      // 隧道就绪:把隧道建立前收下的请求体按序补发,再补 end
+      real = req
+      for (const chunk of pendingBody) req.write(chunk)
+      pendingBody.length = 0
+      if (pendingEnd) req.end()
     })
     tlsSock.on('error', fail)
   })
@@ -225,16 +239,21 @@ function postJson(url, payload, headers, opts = {}) {
   const body = Buffer.from(bodyText, 'utf8')
   return new Promise((resolve, reject) => {
     let settled = false
+    /** 超时定时器:代理路径下 stub 没有真实句柄可挂 setTimeout,只能自己兜 */
+    /** @type {any} */
+    let timer = null
     /** @param {Error} err */
     const fail = (err) => {
       if (settled) return
       settled = true
+      if (timer) clearTimeout(timer)
       reject(err)
     }
     /** @param {any} value */
     const done = (value) => {
       if (settled) return
       settled = true
+      if (timer) clearTimeout(timer)
       resolve(value)
     }
     /** @type {GpmRequest} */
@@ -276,12 +295,10 @@ function postJson(url, payload, headers, opts = {}) {
       return fail(new Error('请求失败: ' + (e && e.message)))
     }
     req.on('error', (e) => fail(new Error('网络错误: ' + (e && e.message))))
-    if (typeof req.setTimeout === 'function') {
-      req.setTimeout(timeoutMs, () => {
-        try { req.destroy() } catch (e) { /* ignore */ }
-        fail(new Error(`请求超时(${Math.round(timeoutMs / 1000)}s)`))
-      })
-    }
+    timer = setTimeout(() => {
+      try { req.destroy() } catch (e) { /* ignore */ }
+      fail(new Error(`请求超时(${Math.round(timeoutMs / 1000)}s)`))
+    }, timeoutMs)
     try {
       req.write(body)
       req.end()
