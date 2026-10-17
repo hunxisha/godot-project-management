@@ -187,7 +187,13 @@ async function toggleTranslation(on: boolean) {
     emit('navigate', 'settings')
     return
   }
-  await trSetEnabled(on)
+  try {
+    await trSetEnabled(on)
+  } catch (e: any) {
+    // 保存失败时 setEnabled 已经把开关退回去了;这里只说一句,别让按钮看起来「点了没反应」
+    notify(`切换翻译失败:${e?.message || e}`)
+    return
+  }
   if (on) autoTranslateCards()
 }
 

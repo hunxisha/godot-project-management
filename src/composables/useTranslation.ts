@@ -50,13 +50,20 @@ function tk(key: string): string {
   return `${target.value}::${key}`
 }
 
-/** 某 key 的译文(没有就返回原文) */
+/**
+ * 某 key 的译文(没有就返回原文)。
+ *
+ * 「是否启用」要在**读取时**判:关掉翻译后译文仍在表里(重新打开要秒回),
+ * 但界面必须立刻回原文 —— 以前这里不看开关,于是「点原文没反应」。
+ */
 function textOf(key: string, original: string): string {
+  if (!enabled.value) return original
   return translated[tk(key)] || original
 }
 
-/** 某 key 是否已经有译文 */
+/** 某 key 是否正在显示译文(关闭翻译时一律 false,hover 提示与角标都靠它) */
 function hasText(key: string): boolean {
+  if (!enabled.value) return false
   return !!translated[tk(key)]
 }
 
@@ -128,6 +135,8 @@ function select(items: TransItem[]): TransItem[] {
 
 /** 把一批文案排进队列(已在队列/在途的自动去重) */
 function translate(items: TransItem[], scene: 'short' | 'long' = 'short') {
+  // 关掉翻译就一个请求都不发:显示层已经不看了,翻出来纯属烧额度
+  if (!enabled.value) return
   const todo = select(items)
   if (!todo.length) return
   for (const it of todo) pending.add(it.key)
