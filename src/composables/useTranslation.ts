@@ -91,7 +91,13 @@ function resetFailed() {
 /** 切换启用状态(市场页头部 seg 与设置页总开关共用) */
 async function setEnabled(on: boolean) {
   settings.translateEnabled = on
-  await saveSettings({ translateEnabled: on })
+  try {
+    await saveSettings({ translateEnabled: on })
+  } catch (e) {
+    // 保存失败时把界面状态退回去,避免「看着开了、其实没存」
+    settings.translateEnabled = !on
+    throw e
+  }
   if (on) resetFailed()
 }
 

@@ -32,6 +32,32 @@ export async function listDocs<T>(prefix: string): Promise<(T & { _id: string })
 
 // ---------- 设置 ----------
 
+/**
+ * 拍平成纯数据(递归去掉 Vue 的响应式代理)。
+ *
+ * 为什么必须做:设置里现在有嵌套结构(translateProviders 是对象数组)。
+ * 把响应式代理直接交给宿主 db,某些宿主会在跨边界克隆时失败或丢弃字段 ——
+ * 表现正是「改完设置、关掉页面再打开就没了」。这里在写入前统一拍平,
+ * 读回来的永远是普通对象,比较与序列化都不再受代理影响。
+ * @param value 任意可 JSON 化的值
+ */
+function toPlain<T>(value: T): T {
+  if (value === null || typeof value !== 'object') return value
+  if (Array.isArray(value)) return value.map((v) => toPlain(v)) as unknown as T
+  const out: Record<string, unknown> = {}
+  for (const k of Object.keys(value as Record<string, unknown>)) {
+    out[k] = toPlain((value as Record<string, unknown>)[k])
+  }
+  return out as T
+}
+
+/** 去掉 db 元字段 */
+function stripMeta(doc: AnyDoc | null): Record<string, unknown> {
+  if (!doc) return {}
+  const { _id, _rev, ...data } = doc
+  return data
+}
+
 export async function getSettings(): Promise<GodotSettings> {
   const doc = await getDoc<GodotSettings>('godot/settings')
   if (!doc) return { ...DEFAULT_SETTINGS }
@@ -39,9 +65,30 @@ export async function getSettings(): Promise<GodotSettings> {
   return { ...DEFAULT_SETTINGS, ...data }
 }
 
+/**
+ * 保存设置(浅合并到现有文档)。
+ *
+ * 两点与「静默丢失」有关,缺一不可:
+ *   1. 写前把 patch 里的代理拍平(toPlain)—— 嵌套数组/对象是新增风险;
+ *   2. 写后**按本次 patch 的键回读校验**,对不上就抛错。
+ * 宿主 db 的 put 只回 ok/error,不回「哪些字段被丢了」;不回读的话,
+ * 一次失败就是「关掉设置页再打开,刚填的又没了」,而界面上毫无线索。
+ */
 export async function saveSettings(patch: Partial<GodotSettings>): Promise<GodotSettings> {
   const next = { ...(await getSettings()), ...patch }
-  await putDoc('godot/settings', next)
+  const plain = toPlain(next)
+  const ok = await putDoc('godot/settings', plain)
+  if (!ok) throw new Error('宿主拒绝了这次写入(文档冲突或数据库不可写)')
+
+  const back = stripMeta(await getDoc<GodotSettings>('godot/settings'))
+  // 只校验本次改动的键:宿主可能补默认值,那不该算失败
+  for (const key of Object.keys(patch)) {
+    const want = JSON.stringify((plain as Record<string, unknown>)[key])
+    const got = JSON.stringify(back[key])
+    if (want !== got) {
+      throw new Error(`「${key}」没有写进数据库(写入被宿主丢弃)`)
+    }
+  }
   return next
 }
 

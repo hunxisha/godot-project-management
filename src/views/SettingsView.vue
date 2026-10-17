@@ -14,7 +14,12 @@ const apiKeyInput = ref('')
 const verifying = ref(false)
 
 async function patchNow() {
-  await saveSettings({ ...state })
+  try {
+    await saveSettings({ ...state })
+  } catch (e: any) {
+    // 静默失败是这类 bug 最难查的形态:写不进去就说出来,别等用户关掉页面再发现没了
+    notify(`设置保存失败:${e?.message || e}`)
+  }
 }
 
 async function chooseRoot() {

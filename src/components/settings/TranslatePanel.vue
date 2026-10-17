@@ -5,7 +5,7 @@
 // 加上测试连接与结果回显,塞进那个文件会让它再涨两百行;而设置页只负责锚点导航。
 // 这里直接改 props.state(与 SettingsView 共用同一个 reactive 设置对象),
 // 每次改动 emit('save') 由父组件 patchNow() 落库 —— 不另开一条持久化通路。
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import Icon from '../Icon.vue'
 import { notify } from '../../services/bridge'
 import { TARGET_LANGS } from '../../utils/langDetect'
@@ -128,6 +128,10 @@ async function clearCache() {
 }
 
 onMounted(refreshCache)
+
+// 关掉设置页(切走 tab)时补一次保存:编辑器里最后一个还没 blur 的输入框
+// 不会触发 change,不给这一下,刚填的 Key 就会「看起来填了、其实没存」。
+onBeforeUnmount(() => emit('save'))
 
 /** 类型切换时同步显示名与默认端点(用户没改过显示名才覆盖) */
 function onKindChange(p: TranslateProvider, kind: TranslateProvider['kind']) {

@@ -57,6 +57,7 @@ await build({
         godotversion: path.join(root, 'src', 'utils', 'godotVersion.ts'),
         markettags: path.join(root, 'src', 'utils', 'marketTags.ts'),
         langdetect: path.join(root, 'src', 'utils', 'langDetect.ts'),
+        bridge: path.join(root, 'src', 'services', 'bridge.ts'),
         avatar: path.join(root, 'src', 'utils', 'avatar.ts'),
         bbcode: path.join(root, 'src', 'utils', 'bbcode.ts'),
         godotdocs: path.join(root, 'src', 'utils', 'godotDocs.ts'),
@@ -72,6 +73,6 @@ await build({
   }
 })
 
-for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'format', 'godotversion', 'markettags', 'langdetect', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'vueshim']) {
+for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'format', 'godotversion', 'markettags', 'langdetect', 'bridge', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'vueshim']) {
   console.log(`bundle built: ${path.join(root, OUT_DIR, `${name}.mjs`)}`)
 }
