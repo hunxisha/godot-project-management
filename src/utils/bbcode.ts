@@ -49,6 +49,15 @@ function langAttrOf(rawTag: string): string | undefined {
 }
 
 /**
+ * 剥掉代码块首尾的空行。Godot 的 xml 文档在 [codeblock]/[gdscript] 开标签后
+ * 紧跟一个换行、闭合标签前也有一个换行,原样渲染会在代码块开头多出一行空行。
+ * 只删首尾空行(允许行尾空白/CRLF),内部缩进与空行原样保留。
+ */
+function stripEdgeBlankLines(code: string): string {
+  return code.replace(/^(?:[ \t]*\r?\n)+/, '').replace(/(?:\r?\n[ \t]*)+$/, '')
+}
+
+/**
  * 解析 [codeblocks] 内文为语言分段。认可的语言标签([gdscript]/[csharp],可带
  * skip-lint 等属性)各成一段;一个都没匹配到时整段按单一无语言代码块降级。
  */
@@ -61,9 +70,9 @@ function parseCodeblockSegments(inner: string): BBCodeSegment[] {
   while ((m = re.exec(inner)) !== null) {
     if (!CODEBLOCK_LANGS.has(m[1])) continue
     matched = true
-    segments.push({ lang: m[1], code: m[2] })
+    segments.push({ lang: m[1], code: stripEdgeBlankLines(m[2]) })
   }
-  if (!matched) return [{ lang: '', code: inner }]
+  if (!matched) return [{ lang: '', code: stripEdgeBlankLines(inner) }]
   return segments
 }
 
@@ -126,7 +135,7 @@ export function tokenizeBBCode(src: string, depth = 0): BBToken[] {
         pushText(text.slice(open))
         i = n
       } else if (kind === 'codeblock') {
-        tokens.push({ t: 'codeblock', v: text.slice(close + 1, inner), lang: langAttrOf(rawTag) })
+        tokens.push({ t: 'codeblock', v: stripEdgeBlankLines(text.slice(close + 1, inner)), lang: langAttrOf(rawTag) })
         i = inner + kind.length + 3
       } else {
         tokens.push({ t: 'code', v: text.slice(close + 1, inner) })

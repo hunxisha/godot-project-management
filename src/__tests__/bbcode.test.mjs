@@ -76,8 +76,19 @@ section('代码与链接')
 const code = tokenizeBBCode('[code]x = [b]1[/b][/code]')
 ok(code.length === 1 && code[0].t === 'code' && code[0].v === 'x = [b]1[/b]', 'code 内部不解析')
 const block = tokenizeBBCode('[codeblock]\nif true:\n    print(1)\n[/codeblock]\nafter')
+ok(first(block, 'codeblock')?.v === 'if true:\n    print(1)', 'codeblock 剥掉开头的空行', JSON.stringify(first(block, 'codeblock')?.v))
 ok(first(block, 'codeblock')?.v.includes('\n    print(1)'), 'codeblock 保留换行与缩进')
 ok(types(block) === 'codeblock,text', 'codeblock 后的文本继续解析', types(block))
+ok(
+  first(tokenizeBBCode('[codeblock]\n\n  var a = 1\n\n  var b = 2\n\n[/codeblock]'), 'codeblock')?.v === '  var a = 1\n\n  var b = 2',
+  'codeblock 只剥首尾空行,内部空行与缩进保留',
+  JSON.stringify(first(tokenizeBBCode('[codeblock]\n\n  var a = 1\n\n  var b = 2\n\n[/codeblock]'), 'codeblock')?.v)
+)
+ok(
+  first(tokenizeBBCode('[codeblock]\r\nvar a = 1\r\n[/codeblock]'), 'codeblock')?.v === 'var a = 1',
+  'codeblock 兼容 CRLF',
+  JSON.stringify(first(tokenizeBBCode('[codeblock]\r\nvar a = 1\r\n[/codeblock]'), 'codeblock')?.v)
+)
 
 const u1 = tokenizeBBCode('[url=https://docs.a.b]教程[/url]')
 ok(u1.length === 1 && u1[0].t === 'url' && u1[0].href === 'https://docs.a.b' && u1[0].label === '教程', '[url=] 带标签')
@@ -91,6 +102,11 @@ const CB_SRC = '[codeblocks]\n[gdscript]\nvar array = [1, 2]\nprint(array[0])\n[
 const cbTok = first(tokenizeBBCode(CB_SRC), 'codeblocks')
 ok(cbTok && cbTok.segments.length === 2 && cbTok.segments[0].lang === 'gdscript' && cbTok.segments[1].lang === 'csharp', 'gdscript/csharp 双分段', JSON.stringify(cbTok?.segments?.map((s) => s.lang)))
 ok(cbTok?.segments[1].code.includes('Array<int>();'), '分段内文原样保留([int] 不再被解析为链接)')
+ok(
+  cbTok?.segments[0].code === 'var array = [1, 2]\nprint(array[0])',
+  '分段剥掉开标签后的空行与闭合标签前的空行',
+  JSON.stringify(cbTok?.segments[0].code)
+)
 ok(types(tokenizeBBCode(CB_SRC)) === 'codeblocks,text', '容器后的文本继续解析', types(tokenizeBBCode(CB_SRC)))
 
 const cbSkip = tokenizeBBCode('[codeblocks]\n[gdscript skip-lint]\n# comment\n[/gdscript]\n[/codeblocks]')
@@ -99,6 +115,12 @@ ok(first(cbSkip, 'codeblocks')?.segments[0].lang === 'gdscript', '带 skip-lint 
 const cbNoLang = tokenizeBBCode('[codeblocks]\nplain code here\n[/codeblocks]')
 const cbNoLangTok = first(cbNoLang, 'codeblocks')
 ok(cbNoLangTok?.segments.length === 1 && cbNoLangTok.segments[0].lang === '' && cbNoLangTok.segments[0].code.includes('plain code'), '无语言标签时整段降级为单一代码块')
+ok(cbNoLangTok?.segments[0].code === 'plain code here', '降级分段同样剥掉首尾空行', JSON.stringify(cbNoLangTok?.segments[0].code))
+
+ok(
+  tokenizeBBCode('[codeblocks]\n[gdscript]\n\nvar a = 1\n[/gdscript]\n[/codeblocks]').find((x) => x.t === 'codeblocks')?.segments[0].code === 'var a = 1',
+  '分段开头多个空行一并剥掉'
+)
 
 ok(tokenizeBBCode('a [codeblocks] b').some((x) => x.t === 'text' && x.v.includes('[codeblocks]')), '未闭合容器字面降级')
 ok(bbToPlainText(tokenizeBBCode('[codeblocks][gdscript]x=1[/gdscript][csharp]int x=1;[/csharp][/codeblocks]')) === 'x=1\nint x=1;', '纯文本提取合并全部分段')
@@ -129,6 +151,7 @@ ok(onlineDocsAnchorUrl('4.7.2-stable', 'Node', 'weird', 'x') === onlineDocsUrl('
 section('lang 属性与 skip-lint 变体')
 const ltTok = first(tokenizeBBCode('[codeblock lang=text]\n[section]\nkey=42\n[/codeblock]'), 'codeblock')
 ok(ltTok?.lang === 'text' && ltTok.v.includes('key=42'), 'codeblock lang=text 解析', JSON.stringify(ltTok))
+ok(ltTok?.v === '[section]\nkey=42', 'lang=text 代码块同样剥掉首尾空行', JSON.stringify(ltTok?.v))
 ok(first(tokenizeBBCode('[codeblock]\nx\n[/codeblock]'), 'codeblock')?.lang === undefined, '无 lang 属性为 undefined')
 ok(first(tokenizeBBCode('[code skip-lint][b]bold[/b][/code]'), 'code')?.v === '[b]bold[/b]', '[code skip-lint] 内部原样保留')
 
