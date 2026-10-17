@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 备份管理页:所有项目的备份集中管理 —— 统计、筛选、分组/时间轴、批量操作、恢复入口。
 // 创建备份仍由项目页负责(阶段 3 会在此页加入新建入口)。
-import { computed, nextTick, onActivated, onMounted, ref } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref } from 'vue'
 import Icon from '../components/Icon.vue'
 import EmptyState from '../components/EmptyState.vue'
 import BackupListItem from '../components/BackupListItem.vue'
@@ -68,12 +68,31 @@ onMounted(() => {
   if (props.enterProjectId) emit('consumed')
   // 后台巡检:补全校验结论并确认缺失标记(不阻塞页面)
   patrol()
+  // 行内「⋯」菜单:点外收起
+  document.addEventListener('mousedown', onDocDown, true)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('mousedown', onDocDown, true)
 })
 
 // 备份页不进 KeepAlive,但仍保留 onActivated 以便将来加入缓存
 onActivated(refresh)
 
-// ---------- 备注编辑 ----------
+// ---------- 行内「⋯」菜单(同一时刻只开一个,与项目页同一套模式) ----------
+
+const openMenuId = ref('')
+
+function toggleMenu(id: string) {
+  openMenuId.value = openMenuId.value === id ? '' : id
+}
+
+function onDocDown(e: MouseEvent) {
+  if (!openMenuId.value) return
+  if (!(e.target as HTMLElement)?.closest?.('.row-menu-wrap')) openMenuId.value = ''
+}
+
+// ---------- 展示辅助 ----------
 
 const renameTarget = ref<BackupRecord | null>(null)
 const renameValue = ref('')
@@ -145,6 +164,11 @@ const hasAnyProject = computed(() => projects.value.length > 0)
 const showUncovered = computed(() => status.value === 'uncovered')
 const listEmpty = computed(() => !filtered.value.length)
 
+/** 备份覆盖率(已覆盖项目数 / 项目总数),统计格底部的小进度条用 */
+const coverPct = computed(() =>
+  stats.value.totalProjects ? Math.round((stats.value.coveredProjects / stats.value.totalProjects) * 100) : 0
+)
+
 function clearScope() {
   scopedProjectId.value = ''
   refresh()
@@ -188,28 +212,46 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
       </button>
     </div>
 
-    <!-- 统计:四格面板 -->
+    <!-- 统计总览:四格面板,可点的格子直接切换筛选 -->
     <div class="stat-row panel">
-      <div class="stat-cell">
+      <button
+        class="stat-cell click"
+        :class="{ active: status === 'all' }"
+        title="点击查看全部备份"
+        @click="setStatus('all')"
+      >
         <span class="sc-label"><Icon name="archive" :size="13" /> 备份份数</span>
         <span class="sc-value">{{ stats.count }}</span>
         <span class="sc-sub">zip {{ stats.byMode.zip }} · 快照 {{ stats.byMode.copy }}</span>
-      </div>
+      </button>
       <div class="stat-cell hero-cell">
         <span class="sc-label"><Icon name="hard-drive" :size="13" /> 占用空间</span>
         <span class="sc-value lg">{{ fmtSize(stats.totalSize) }}</span>
         <span class="sc-sub">全部备份文件合计</span>
       </div>
-      <div class="stat-cell" :class="{ alert: stats.missingCount }">
+      <button
+        class="stat-cell"
+        :class="{ click: stats.missingCount > 0, alert: stats.missingCount > 0, active: status === 'missing' }"
+        :title="stats.missingCount ? '点击筛选出这些失效备份' : '全部文件就位'"
+        @click="stats.missingCount > 0 && setStatus('missing')"
+      >
         <span class="sc-label"><Icon name="alert" :size="13" /> 失效备份</span>
         <span class="sc-value">{{ stats.missingCount }}</span>
         <span class="sc-sub">{{ stats.missingCount ? '文件已被外部删除' : '全部文件就位' }}</span>
-      </div>
-      <div class="stat-cell">
+      </button>
+      <button
+        class="stat-cell"
+        :class="{ click: statusCounts.uncovered > 0, active: status === 'uncovered' }"
+        :title="statusCounts.uncovered ? '点击查看尚未备份的项目' : '所有项目都有备份'"
+        @click="statusCounts.uncovered > 0 && setStatus('uncovered')"
+      >
         <span class="sc-label"><Icon name="folder" :size="13" /> 覆盖项目</span>
         <span class="sc-value">{{ stats.coveredProjects }}<span class="sc-of">/{{ stats.totalProjects }}</span></span>
-        <span class="sc-sub">{{ statusCounts.uncovered }} 个项目尚无备份</span>
-      </div>
+        <span class="sc-sub">
+          {{ statusCounts.uncovered ? `${statusCounts.uncovered} 个项目尚无备份` : '全部项目已有备份' }}
+        </span>
+        <span class="cover-bar" :title="`备份覆盖率 ${coverPct}%`"><i :style="{ width: coverPct + '%' }"></i></span>
+      </button>
     </div>
 
     <!-- 工具行:搜索 / 筛选 / 排序 / 视图 -->
@@ -380,6 +422,7 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
       >
         <div class="panel-head g-head" @click="toggleGroup(g.projectId)">
           <Icon :name="isCollapsed(g.projectId) ? 'chevron-right' : 'chevron-down'" :size="13" class="g-chev" />
+          <span class="g-avatar" :class="`g-${gradOf(g.name)}`">{{ g.name.charAt(0).toUpperCase() }}</span>
           <span class="g-name">{{ g.name }}</span>
           <span v-if="g.orphan" class="tag warn"><Icon name="alert" :size="10" /> 项目已移除</span>
           <span class="grow"></span>
@@ -395,12 +438,15 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
             :batch-mode="batchMode"
             :selected="selectedSet.has(r._id)"
             :busy="busyId === r._id"
+            :menu-open="openMenuId === r._id"
             @toggle="toggleSelect(r._id)"
             @restore="askRestore(r)"
             @rename="openRename(r)"
             @verify="doVerify(r)"
             @remove="askRemove(r)"
             @reveal="reveal(r)"
+            @menu="toggleMenu(r._id)"
+            @close-menu="openMenuId = ''"
           />
         </div>
       </section>
@@ -430,6 +476,7 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
             :batch-mode="batchMode"
             :selected="selectedSet.has(r._id)"
             :busy="busyId === r._id"
+            :menu-open="openMenuId === r._id"
             show-project
             @toggle="toggleSelect(r._id)"
             @restore="askRestore(r)"
@@ -437,6 +484,8 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
             @verify="doVerify(r)"
             @remove="askRemove(r)"
             @reveal="reveal(r)"
+            @menu="toggleMenu(r._id)"
+            @close-menu="openMenuId = ''"
           />
         </div>
       </section>
@@ -466,7 +515,7 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
               spellcheck="false"
             />
             <div class="f-hint wrap">
-              留空则清除备注,列表会显示「{{ renameTarget.projectName }} · {{ formatTime(renameTarget.createdAt) }}」。
+              留空则清除备注,列表将以项目名「{{ renameTarget.projectName }}」显示。
             </div>
           </div>
           <div class="modal-foot">
@@ -513,23 +562,61 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
 </template>
 
 <style scoped>
-/* ---------- 统计面板:四格 ---------- */
+/* ---------- 统计面板:四格(可点的格子即筛选入口) ---------- */
 .stat-row {
   display: grid;
   grid-template-columns: 1fr 1.25fr 1fr 1fr;
 }
 
 .stat-cell {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding: 13px 16px;
+  border: none;
   border-right: 1px solid var(--border);
   min-width: 0;
+  text-align: left;
+  font: inherit;
+  background: transparent;
+  border-radius: 0;
 }
 
 .stat-cell:last-child {
   border-right: none;
+}
+
+/* 可点格子:hover 浮起,激活时底部品牌线 + 标签品牌色 */
+button.stat-cell {
+  cursor: default;
+}
+
+button.stat-cell.click {
+  cursor: pointer;
+}
+
+button.stat-cell.click:hover {
+  background: var(--surface-2);
+}
+
+/* 失效格保持弱红底,不被通用 hover 覆盖 */
+button.stat-cell.click.alert:hover {
+  background: var(--danger-weak);
+}
+
+.stat-cell.active {
+  box-shadow: inset 0 -2px 0 var(--brand);
+}
+
+.stat-cell.active .sc-label,
+.stat-cell.active .sc-label .icon {
+  color: var(--brand);
+}
+
+/* 失效备份:有缺失时整格弱红警示(此时点击 = 筛选缺失) */
+.stat-cell.alert {
+  background: var(--danger-weak);
 }
 
 .stat-cell.alert .sc-value {
@@ -538,6 +625,28 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
 
 .stat-cell.alert .sc-label .icon {
   color: var(--danger);
+}
+
+.stat-cell.alert.active {
+  box-shadow: inset 0 -2px 0 var(--danger);
+}
+
+/* 覆盖率小进度条:贴着格子底边 */
+.cover-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--surface-3);
+}
+
+.cover-bar i {
+  display: block;
+  height: 100%;
+  background: var(--brand-grad);
+  border-radius: 0 2px 2px 0;
+  transition: width 0.3s;
 }
 
 .hero-cell {
@@ -726,6 +835,26 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
   flex-shrink: 0;
 }
 
+/* 分组头项目头像:与项目列表同源的渐变小字块 */
+.g-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.g-avatar.g-a { background: var(--grad-a); }
+.g-avatar.g-b { background: var(--grad-b); }
+.g-avatar.g-c { background: var(--grad-c); }
+.g-avatar.g-d { background: var(--grad-d); }
+
 .g-alert {
   color: var(--warn);
   flex-shrink: 0;
@@ -747,12 +876,10 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
   white-space: nowrap;
 }
 
-/* 面板主体:备份条目(自带卡片边框)之间留缝 */
+/* 面板主体:备份条目是 flush 行,行自带内距与分隔线,容器不再留缝 */
 .g-body {
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding: 10px 12px;
 }
 
 /* 未备份项目:整行铺满,行间用 border-top 分隔(同项目列表) */

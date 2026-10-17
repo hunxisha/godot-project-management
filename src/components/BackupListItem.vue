@@ -1,5 +1,7 @@
 <script setup lang="ts">
 // 备份列表条目(分组视图与时间轴视图共用)。
+// 行式布局与项目页同一套语言:状态点 + 两行主体(第一行身份,第二行技术细节)。
+// 行内只留「恢复」主按钮,其余操作收进「⋯」菜单;菜单开合由父级统一管理(同时只开一个)。
 // 纯展示 + 事件上抛,不持有任何状态。
 import { computed } from 'vue'
 import Icon from './Icon.vue'
@@ -15,12 +17,15 @@ const props = withDefaults(defineProps<{
   busy?: boolean
   /** 时间轴视图需要显示项目名 */
   showProject?: boolean
+  /** 本行「⋯」菜单是否展开 */
+  menuOpen?: boolean
 }>(), {
   orphan: false,
   batchMode: false,
   selected: false,
   busy: false,
-  showProject: false
+  showProject: false,
+  menuOpen: false
 })
 
 const emit = defineEmits<{
@@ -30,19 +35,16 @@ const emit = defineEmits<{
   (e: 'verify'): void
   (e: 'remove'): void
   (e: 'reveal'): void
+  /** 「⋯」按钮点击:父级 toggle 菜单 */
+  (e: 'menu'): void
+  /** 菜单项被点击:父级收起菜单后再执行动作 */
+  (e: 'menu-close'): void
 }>()
 
-/** 标题:优先备注名,否则「项目名 · 时间」 */
-const title = computed(() => props.record.label || defaultTitle.value)
-const defaultTitle = computed(
-  () => `${props.record.projectName || '备份'} · ${formatTime(props.record.createdAt)}`
-)
+/** 标题:优先备注名,否则项目名;时间等细节放第二行,不再塞进标题 */
+const title = computed(() => props.record.label || props.record.projectName || '备份')
 
 const modeLabel = computed(() => (props.record.mode === 'zip' ? 'zip' : '快照'))
-
-const sizeText = computed(
-  () => `${fmtSize(props.record.size)} · ${props.record.fileCount ?? 0} 文件`
-)
 
 /** 校验状态:missing 优先,其次 verified / 未校验 */
 const verifyState = computed<'missing' | 'ok' | 'bad' | 'none'>(() => {
@@ -78,19 +80,16 @@ const verifying = computed(() => props.busy)
     <span v-else class="bk-dot" :class="verifyState" :title="verifyText" />
 
     <div class="bk-main">
+      <!-- 第一行:身份(备注/项目名)+ 属性标签 + 校验结论 -->
       <div class="bk-line">
-        <span class="bk-title" :title="title">{{ title }}</span>
+        <span class="bk-title" :title="record.label || record.destPath">{{ title }}</span>
         <span v-if="showProject && record.label" class="bk-proj">{{ record.projectName }}</span>
         <span class="tag">{{ modeLabel }}</span>
         <span v-if="record.level && record.mode === 'zip'" class="tag">L{{ record.level }}</span>
         <span v-if="record.engineVersion" class="tag">{{ record.engineVersion }}</span>
         <span v-if="record.includeCache" class="tag" title="包含 .godot 编辑器缓存">含缓存</span>
-        <span class="bk-meta">{{ sizeText }}</span>
-        <span class="bk-sep">·</span>
-        <span class="bk-meta" :title="formatTime(record.createdAt)">
-          {{ formatRelative(record.createdAt) }}
-        </span>
         <span v-if="orphan" class="tag warn"><Icon name="alert" :size="10" /> 项目已移除</span>
+        <span class="grow"></span>
         <span
           class="bk-verify"
           :class="verifyState"
@@ -101,7 +100,15 @@ const verifying = computed(() => props.busy)
           {{ verifyText }}
         </span>
       </div>
-      <div class="bk-path mono" :title="record.destPath">{{ record.destPath }}</div>
+      <!-- 第二行:技术细节(路径 · 体积 · 文件数 · 相对时间) -->
+      <div class="bk-sub">
+        <span class="bk-path mono" :title="record.destPath">{{ record.destPath }}</span>
+        <span class="bk-meta">{{ fmtSize(record.size) }}</span>
+        <span class="bk-meta">{{ record.fileCount ?? 0 }} 文件</span>
+        <span class="bk-meta" :title="formatTime(record.createdAt)">
+          {{ formatRelative(record.createdAt) }}
+        </span>
+      </div>
     </div>
 
     <div v-if="!batchMode" class="bk-acts">
@@ -113,56 +120,70 @@ const verifying = computed(() => props.busy)
       >
         <Icon name="upload" :size="12" /> 恢复
       </button>
-      <button class="btn small ghost icon-act" title="在文件管理器中定位" :disabled="busy" @click="emit('reveal')">
-        <Icon name="external" :size="13" />
-      </button>
-      <button class="btn small ghost icon-act" title="编辑备注名" :disabled="busy" @click="emit('rename')">
-        <Icon name="pen" :size="13" />
-      </button>
-      <button
-        class="btn small ghost icon-act"
-        :title="record.missing ? '文件已丢失,无法校验' : '校验备份内容是否可用'"
-        :disabled="busy || record.missing"
-        @click="emit('verify')"
-      >
-        <Icon name="shield-check" :size="13" />
-      </button>
-      <button
-        class="btn small danger-text"
-        :disabled="busy"
-        :title="record.missing ? '移除这条失效记录' : '删除备份文件(移入回收站)'"
-        @click="emit('remove')"
-      >
-        {{ record.missing ? '移除记录' : '删除' }}
-      </button>
+      <div class="row-menu-wrap">
+        <button
+          class="btn small icon-act more"
+          :class="{ on: menuOpen }"
+          title="更多操作"
+          @click="emit('menu')"
+        >
+          <Icon name="more" :size="16" :stroke-width="3" />
+        </button>
+        <div v-if="menuOpen" class="row-menu">
+          <button
+            class="menu-item"
+            :disabled="record.missing"
+            :title="record.missing ? '文件已丢失,无法校验' : '校验备份内容是否可用'"
+            @click="emit('verify'); emit('menu-close')"
+          >
+            <Icon name="shield-check" :size="13" /> 校验备份
+          </button>
+          <button class="menu-item" @click="emit('rename'); emit('menu-close')">
+            <Icon name="pen" :size="13" /> 编辑备注
+          </button>
+          <button class="menu-item" @click="emit('reveal'); emit('menu-close')">
+            <Icon name="external" :size="13" /> 定位文件
+          </button>
+          <div class="menu-sep"></div>
+          <button
+            class="menu-item danger"
+            :title="record.missing ? '只移除数据库里的记录' : '删除备份文件(移入回收站)'"
+            @click="emit('remove'); emit('menu-close')"
+          >
+            <Icon name="trash" :size="13" /> {{ record.missing ? '移除记录' : '删除备份' }}
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
+/* flush 行:铺满分组面板,行间细线分隔,hover 整行高亮(同项目列表行语言) */
 .bk-row {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 9px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  transition: border-color 0.15s, box-shadow 0.15s;
+  gap: 12px;
+  padding: 9px 14px;
+  transition: background 0.13s, box-shadow 0.13s;
+}
+
+.bk-row + .bk-row {
+  border-top: 1px solid var(--surface-2);
 }
 
 .bk-row:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-sm);
+  background: var(--surface-2);
 }
 
+/* 批量选中:品牌弱底 + 左侧品牌内嵌条 */
 .bk-row.selected {
-  border-color: var(--brand);
   background: var(--brand-weak);
+  box-shadow: inset 2px 0 0 var(--brand);
 }
 
 .bk-row.missing {
-  opacity: 0.66;
+  opacity: 0.62;
 }
 
 .bk-check {
@@ -194,34 +215,27 @@ const verifying = computed(() => props.busy)
 .bk-line {
   display: flex;
   align-items: center;
-  gap: 7px;
-  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
 }
 
 .bk-title {
   font-size: 13.5px;
   font-weight: 600;
   color: var(--text);
-  max-width: 320px;
+  max-width: 360px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .bk-proj {
   font-size: 11.5px;
   color: var(--text-3);
-}
-
-.bk-meta {
-  font-size: 11.5px;
-  color: var(--text-3);
   white-space: nowrap;
-}
-
-.bk-sep {
-  font-size: 11.5px;
-  color: var(--border-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .bk-verify {
@@ -231,6 +245,7 @@ const verifying = computed(() => props.busy)
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .bk-verify.ok { color: var(--ok); }
@@ -238,12 +253,27 @@ const verifying = computed(() => props.busy)
 .bk-verify.missing { color: var(--danger); }
 .bk-verify.none { color: var(--text-3); }
 
-.bk-path {
+/* 第二行:路径可收缩出省略号,体积/文件数/时间依次靠右 */
+.bk-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-top: 2px;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--text-3);
+  min-width: 0;
+}
+
+.bk-path {
+  flex: 1;
+  min-width: 60px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bk-meta {
+  flex-shrink: 0;
   white-space: nowrap;
 }
 
@@ -254,13 +284,83 @@ const verifying = computed(() => props.busy)
   flex-shrink: 0;
 }
 
-.icon-act {
+/* 「更多」按钮:纯图标,无框无底色,反馈只靠圆点变色(与项目页同款) */
+.icon-act.more,
+.icon-act.more:hover,
+.icon-act.more.on {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.icon-act.more {
   width: 28px;
   padding: 3px 0;
   color: var(--text-2);
 }
 
-.icon-act:hover:not(:disabled) {
+.icon-act.more:hover,
+.icon-act.more.on {
   color: var(--brand);
+}
+
+/* ---------- 行内「更多」菜单 ---------- */
+
+.row-menu-wrap {
+  position: relative;
+  display: flex;
+}
+
+.row-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  min-width: 156px;
+  padding: 5px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lift);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  background: none;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+
+.menu-item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.menu-item.danger {
+  color: var(--danger);
+}
+
+.menu-item.danger:hover {
+  background: var(--danger-weak);
+}
+
+.menu-sep {
+  height: 1px;
+  margin: 5px 6px;
+  background: var(--border);
 }
 </style>

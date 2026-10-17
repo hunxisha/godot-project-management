@@ -83,8 +83,24 @@ const TEXTS: Record<string, string> = {
   'audio/bgm-loop-version-2-final.ogg.import': '[remap]\n\nimporter="ogg_vorbis"\ntype="AudioStreamOggVorbis"\npath="res://.godot/imported/bgm-loop-version-2-final.oggstr"\n'
 }
 
+const DAY = 86_400_000
+const HOUR = 3_600_000
+const startOfToday = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime()
+
+/** 备份页版面夹具:覆盖分组/时间轴、zip/快照、缺失、孤立、已校验/无效/未校验各种形态 */
+const BACKUPS: any[] = [
+  { _id: 'godot/backup/b1', projectId: 'godot/project/p1', projectName: 'Demo 体检项目', mode: 'zip', destPath: 'E:/mock/backups/Demo_发布前.zip', size: 18_934_784, fileCount: 214, createdAt: startOfToday - 3 * HOUR, label: '发布前', level: 6, engineVersion: '4.7.2', verified: true, verifiedAt: Date.now() - HOUR },
+  { _id: 'godot/backup/b2', projectId: 'godot/project/p1', projectName: 'Demo 体检项目', mode: 'copy', destPath: 'E:/mock/backups/Demo_snap_0930', size: 55_842_112, fileCount: 431, createdAt: startOfToday - 2 * DAY, includeCache: true, engineVersion: '4.7.2', verified: false, verifyError: '快照目录缺少 project.godot' },
+  { _id: 'godot/backup/b3', projectId: 'godot/project/p1', projectName: 'Demo 体检项目', mode: 'zip', destPath: 'E:/mock/backups/Demo_2026-10-01.zip', size: 17_204_224, fileCount: 208, createdAt: startOfToday - 16 * DAY, level: 6, engineVersion: '4.7.2' },
+  { _id: 'godot/backup/b4', projectId: 'godot/project/p2', projectName: '平台跳跃 Demo', mode: 'zip', destPath: 'E:/mock/backups/平台跳跃_0.9.zip', size: 8_388_608, fileCount: 96, createdAt: startOfToday - 26 * HOUR, label: '0.9 版', level: 9, engineVersion: '4.7.2', verified: true, verifiedAt: startOfToday - 26 * HOUR },
+  { _id: 'godot/backup/b5', projectId: 'godot/project/p2', projectName: '平台跳跃 Demo', mode: 'zip', destPath: 'E:/mock/backups/平台跳跃_old.zip', size: 7_340_032, fileCount: 88, createdAt: startOfToday - 9 * DAY, missing: true },
+  { _id: 'godot/backup/b6', projectId: 'godot/project/gone', projectName: '已删除的旧项目', mode: 'copy', destPath: 'E:/mock/backups/旧项目_snap', size: 12_582_912, fileCount: 150, createdAt: startOfToday - 20 * DAY, label: '归档' }
+]
+
 const docs = new Map<string, any>([
   [PROJECT._id, { ...PROJECT }],
+  ['godot/project/p2', { _id: 'godot/project/p2', id: 'p2', name: '平台跳跃 Demo', path: 'E:/mock/platformer', versionId: 'godot/version/4.7.2', favorite: true, openCount: 12, lastOpenedAt: Date.now() - 2 * DAY }],
+  ['godot/project/p3', { _id: 'godot/project/p3', id: 'p3', name: '塔防原型', path: 'E:/mock/td-prototype', versionId: 'godot/version/4.7.2', favorite: false, openCount: 1, lastOpenedAt: Date.now() - 30 * DAY }],
   ['godot/settings', { theme: 'steel', mode: 'auto' }],
   ['godot/version/4.7.2', { _id: 'godot/version/4.7.2', name: 'Godot 4.7.2', tag: '4.7.2-stable', exePath: 'E:/mock/godot.exe' }]
 ])
@@ -119,6 +135,51 @@ window.ztools = {
 /** 工具页真正会调到的那几个,给真实形状;其余一律兜底并打日志(兜底不是实现,日志要说得出漏了谁) */
 const PROVIDED: Record<string, any> = {
   currentPlatform: () => ok('windows'),
+  // ---------- 备份页版面夹具 ----------
+  listBackups: () => ok(BACKUPS.map((b) => ({ ...b }))),
+  backupStats: () => {
+    const covered = new Set(BACKUPS.map((b) => b.projectId))
+    let totalSize = 0, missingCount = 0, zip = 0, copy = 0
+    for (const b of BACKUPS) {
+      totalSize += b.size || 0
+      if (b.mode === 'copy') copy++; else zip++
+      if (b.missing) missingCount++
+    }
+    const projects = [...docs.values()].filter((d) => String(d._id).startsWith('godot/project/'))
+    return ok({
+      count: BACKUPS.length,
+      totalSize,
+      missingCount,
+      coveredProjects: projects.filter((p: any) => covered.has(p._id)).length,
+      totalProjects: projects.length,
+      byMode: { zip, copy }
+    })
+  },
+  verifyBackup: (id: string) => {
+    const b = BACKUPS.find((x) => x._id === id)
+    return ok({ ok: true, valid: !b?.missing, error: b?.missing ? '备份文件已不存在' : undefined })
+  },
+  updateBackup: (id: string, patch: any) => {
+    const b = BACKUPS.find((x) => x._id === id)
+    if (!b) return ok({ ok: false, error: '备份记录不存在' })
+    if ('label' in patch) {
+      const next = String(patch.label || '').trim()
+      if (next) b.label = next; else delete b.label
+    }
+    return ok({ ok: true })
+  },
+  deleteBackup: (id: string) => {
+    const i = BACKUPS.findIndex((x) => x._id === id)
+    if (i >= 0) BACKUPS.splice(i, 1)
+    return ok({ ok: true })
+  },
+  deleteBackups: (ids: string[]) => {
+    for (const id of ids) {
+      const i = BACKUPS.findIndex((x) => x._id === id)
+      if (i >= 0) BACKUPS.splice(i, 1)
+    }
+    return ok({ ok: true, removed: ids.length, failed: [] })
+  },
   scanProjectTree: () => ok({ ok: true, files: TREE.map((t) => ({ ...t })), truncated: false }),
   readProjectText: (pid: string, rel: string) =>
     ok({ ok: true, text: TEXTS[rel] ?? '', bytes: (TEXTS[rel] ?? '').length, truncated: false }),
