@@ -137,25 +137,28 @@ defineExpose({ revealCurrent })
 .tool {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 3px 7px;
+  gap: 4px;
+  padding: 2px 8px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text-3);
   font-size: 11px;
   cursor: pointer;
+  transition: color 0.13s, border-color 0.13s;
 }
 
 .tool:hover {
   color: var(--brand);
-  border-color: color-mix(in srgb, var(--brand) 35%, transparent);
+  border-color: var(--brand);
 }
 
+/* 紧凑树行:24px 行高,与列表视图节奏一致 */
 .row {
   display: flex;
   align-items: center;
   gap: 2px;
+  height: 24px;
   min-width: 0;
 }
 
@@ -186,11 +189,11 @@ defineExpose({ revealCurrent })
 .name {
   border: none;
   background: none;
-  padding: 1px 4px;
+  padding: 0 4px;
   font-size: 12px;
   color: var(--text-2);
   cursor: pointer;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -209,10 +212,11 @@ defineExpose({ revealCurrent })
   opacity: 0.85;
 }
 
-/* 当前类:高亮底 + 加粗,一眼可辨 */
+/* 当前类:brand-weak 底 + 左侧 inset 品牌条,与列表视图高亮一致 */
 .row.current {
   background: var(--brand-weak);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
+  box-shadow: inset 2px 0 0 var(--brand);
 }
 
 .row.current .name {

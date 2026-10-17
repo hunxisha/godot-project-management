@@ -13,6 +13,7 @@ import { useBackups } from '../composables/useBackups'
 import { useBackupPageActions } from '../composables/useBackupPageActions'
 import { notify } from '../services/bridge'
 import { fmtSize, formatTime } from '../utils/format'
+import { gradOf } from '../utils/avatar'
 import type { BackupRecord } from '../types/godot'
 
 const props = defineProps<{ enterProjectId?: string | null }>()
@@ -164,7 +165,7 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
 <template>
   <div class="backups view">
     <div class="view-head">
-      <h2><Icon name="archive" :size="16" /> 备份 <span class="count-pill">{{ stats.count }}</span></h2>
+      <h2><Icon name="archive" :size="17" /> 备份 <span class="count-pill">{{ stats.count }}</span></h2>
       <span class="grow"></span>
       <button
         v-if="records.length"
@@ -172,10 +173,10 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
         :title="batchMode ? '退出批量管理' : '勾选多份备份进行批量操作'"
         @click="batchMode ? exitBatch() : enterBatch()"
       >
-        <Icon name="check" :size="12" /> {{ batchMode ? '退出批量' : '批量管理' }}
+        <Icon name="check" :size="13" /> {{ batchMode ? '退出批量' : '批量管理' }}
       </button>
       <button class="btn small primary" title="为某个项目创建一份新备份" @click="openCreate">
-        <Icon name="plus" :size="12" /> 新建备份
+        <Icon name="plus" :size="13" /> 新建备份
       </button>
       <button
         v-if="records.length"
@@ -183,35 +184,35 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
         title="按保留策略清理旧备份"
         @click="pruneOpen = true"
       >
-        <Icon name="trash" :size="12" /> 清理
+        <Icon name="trash" :size="13" /> 清理
       </button>
     </div>
 
-    <!-- 统计头 -->
-    <div class="stat-row card">
+    <!-- 统计:四格面板 -->
+    <div class="stat-row panel">
       <div class="stat-cell">
-        <span class="sc-label">备份份数</span>
+        <span class="sc-label"><Icon name="archive" :size="13" /> 备份份数</span>
         <span class="sc-value">{{ stats.count }}</span>
         <span class="sc-sub">zip {{ stats.byMode.zip }} · 快照 {{ stats.byMode.copy }}</span>
       </div>
       <div class="stat-cell hero-cell">
-        <span class="sc-label">占用空间</span>
+        <span class="sc-label"><Icon name="hard-drive" :size="13" /> 占用空间</span>
         <span class="sc-value lg">{{ fmtSize(stats.totalSize) }}</span>
         <span class="sc-sub">全部备份文件合计</span>
       </div>
       <div class="stat-cell" :class="{ alert: stats.missingCount }">
-        <span class="sc-label">失效备份</span>
+        <span class="sc-label"><Icon name="alert" :size="13" /> 失效备份</span>
         <span class="sc-value">{{ stats.missingCount }}</span>
         <span class="sc-sub">{{ stats.missingCount ? '文件已被外部删除' : '全部文件就位' }}</span>
       </div>
       <div class="stat-cell">
-        <span class="sc-label">覆盖项目</span>
+        <span class="sc-label"><Icon name="folder" :size="13" /> 覆盖项目</span>
         <span class="sc-value">{{ stats.coveredProjects }}<span class="sc-of">/{{ stats.totalProjects }}</span></span>
         <span class="sc-sub">{{ statusCounts.uncovered }} 个项目尚无备份</span>
       </div>
     </div>
 
-    <!-- 工具行 -->
+    <!-- 工具行:搜索 / 筛选 / 排序 / 视图 -->
     <div class="tool-row">
       <div class="search-box">
         <Icon name="search" :size="13" />
@@ -274,24 +275,24 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
 
     <!-- 项目页跳转过来的限定范围 -->
     <div v-if="scopedProjectId" class="scope-bar">
-      <Icon name="filter" :size="12" />
+      <Icon name="filter" :size="13" />
       <span>仅显示:<b>{{ scopedProject?.name || '该项目' }}</b> 的备份</span>
       <button class="btn small ghost" @click="clearScope">显示全部</button>
     </div>
 
     <!-- 批量操作条 -->
     <div v-if="batchMode" class="batch-bar">
-      <Icon name="check" :size="12" />
+      <Icon name="check" :size="13" />
       <span>已选 <b>{{ selected.length }}</b> 份 · {{ fmtSize(selectedSize) }}</span>
       <button class="btn small ghost" @click="toggleSelectAll">
         {{ allSelected ? '取消全选' : '全选当前列表' }}
       </button>
       <span class="grow"></span>
       <button class="btn small" :disabled="!selected.length" @click="doVerifySelected">
-        <Icon name="shield-check" :size="12" /> 批量校验
+        <Icon name="shield-check" :size="13" /> 批量校验
       </button>
       <button class="btn small danger-text" :disabled="!selected.length" @click="askRemoveSelected">
-        <Icon name="trash" :size="12" /> 删除所选
+        <Icon name="trash" :size="13" /> 删除所选
       </button>
     </div>
 
@@ -321,27 +322,30 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
         title="所有项目都已有备份"
         desc="每个项目至少有一份备份,不需要额外处理。"
       />
-      <section v-else class="group card">
-        <div class="group-head static">
-          <Icon name="alert" :size="14" class="gh-icon" />
-          <span class="gh-name">{{ uncovered.length }} 个项目从未备份</span>
+      <section v-else class="group panel">
+        <div class="panel-head g-head static">
+          <Icon name="alert" :size="13" class="g-alert" />
+          <span class="g-name">{{ uncovered.length }} 个项目从未备份</span>
           <span class="grow"></span>
-          <span v-if="backAllProgress" class="gh-meta">{{ backAllProgress }}</span>
-          <span v-else class="gh-meta">建议至少保留一份可回滚的版本</span>
+          <span v-if="backAllProgress" class="g-meta">{{ backAllProgress }}</span>
+          <span v-else class="g-meta">建议至少保留一份可回滚的版本</span>
           <button class="btn small primary" :disabled="backingAll" @click="backupAllUncovered">
             <span v-if="backingAll" class="spin"></span>
             <Icon v-else name="archive" :size="12" />
             {{ backingAll ? '备份中…' : '全部备份' }}
           </button>
         </div>
-        <div class="group-body">
-          <div v-for="p in uncovered" :key="p._id" class="plain-row">
-            <div class="pr-main">
-              <div class="pr-name">
-                {{ p.name }}
+        <div class="g-body flush">
+          <div v-for="p in uncovered" :key="p._id" class="row-item">
+            <div class="avatar" :class="`g-${gradOf(p.name)}`">
+              {{ p.name.charAt(0).toUpperCase() }}
+            </div>
+            <div class="row-main">
+              <div class="row-name">
+                <span class="name">{{ p.name }}</span>
                 <span v-if="p.engineVersion" class="tag">{{ p.engineVersion }}</span>
               </div>
-              <div class="pr-path mono" :title="p.path">{{ p.path }}</div>
+              <div class="row-path mono" :title="p.path">{{ p.path }}</div>
             </div>
             <button class="btn small primary" @click="emit('backup-project', p._id)">
               <Icon name="archive" :size="12" /> 立即备份
@@ -371,18 +375,18 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
         v-for="g in groups"
         v-else
         :key="g.projectId"
-        class="group card"
-        :class="{ orphan: g.orphan }"
+        class="group panel"
+        :class="{ orphan: g.orphan, collapsed: isCollapsed(g.projectId) }"
       >
-        <div class="group-head" @click="toggleGroup(g.projectId)">
-          <Icon :name="isCollapsed(g.projectId) ? 'chevron-right' : 'chevron-down'" :size="13" class="gh-chev" />
-          <span class="gh-name">{{ g.name }}</span>
+        <div class="panel-head g-head" @click="toggleGroup(g.projectId)">
+          <Icon :name="isCollapsed(g.projectId) ? 'chevron-right' : 'chevron-down'" :size="13" class="g-chev" />
+          <span class="g-name">{{ g.name }}</span>
           <span v-if="g.orphan" class="tag warn"><Icon name="alert" :size="10" /> 项目已移除</span>
           <span class="grow"></span>
-          <span class="gh-meta">{{ g.records.length }} 份 · {{ fmtSize(g.totalSize) }}</span>
-          <span class="gh-time">最近 {{ formatTime(g.latestAt) }}</span>
+          <span class="g-meta">{{ g.records.length }} 份 · {{ fmtSize(g.totalSize) }}</span>
+          <span class="g-time">最近 {{ formatTime(g.latestAt) }}</span>
         </div>
-        <div v-show="!isCollapsed(g.projectId)" class="group-body">
+        <div v-show="!isCollapsed(g.projectId)" class="g-body">
           <BackupListItem
             v-for="r in g.records"
             :key="r._id"
@@ -410,14 +414,14 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
         title="没有匹配的备份"
         desc="换个关键词,或切换筛选条件试试。"
       />
-      <section v-for="b in timeline" v-else :key="b.key" class="group card">
-        <div class="group-head static">
-          <Icon name="clock" :size="13" class="gh-icon" />
-          <span class="gh-name">{{ b.label }}</span>
+      <section v-for="b in timeline" v-else :key="b.key" class="group panel">
+        <div class="panel-head g-head static">
+          <Icon name="clock" :size="13" class="g-chev" />
+          <span class="g-name">{{ b.label }}</span>
           <span class="grow"></span>
-          <span class="gh-meta">{{ b.records.length }} 份 · {{ fmtSize(b.records.reduce((s, r) => s + (r.size || 0), 0)) }}</span>
+          <span class="g-meta">{{ b.records.length }} 份 · {{ fmtSize(b.records.reduce((s, r) => s + (r.size || 0), 0)) }}</span>
         </div>
-        <div class="group-body">
+        <div class="g-body">
           <BackupListItem
             v-for="r in b.records"
             :key="r._id"
@@ -509,13 +513,10 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
 </template>
 
 <style scoped>
-/* ---------- 统计头 ---------- */
+/* ---------- 统计面板:四格 ---------- */
 .stat-row {
   display: grid;
   grid-template-columns: 1fr 1.25fr 1fr 1fr;
-  gap: 0;
-  padding: 0;
-  overflow: hidden;
 }
 
 .stat-cell {
@@ -535,11 +536,18 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
   color: var(--danger);
 }
 
+.stat-cell.alert .sc-label .icon {
+  color: var(--danger);
+}
+
 .hero-cell {
   background: var(--brand-weak);
 }
 
 .sc-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-3);
@@ -593,6 +601,7 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
   background: var(--surface);
   box-shadow: var(--shadow-sm);
   color: var(--text-3);
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .search-box:focus-within {
@@ -647,7 +656,7 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
   padding: 4px 8px;
 }
 
-/* ---------- 限定范围 / 批量条 ---------- */
+/* ---------- 限定范围 / 批量条 / 巡检条 ---------- */
 .scope-bar,
 .batch-bar {
   display: flex;
@@ -664,6 +673,10 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
   color: var(--text-2);
 }
 
+.scope-bar .btn {
+  margin-left: auto;
+}
+
 .batch-bar {
   background: var(--brand-weak);
   border: 1px solid var(--brand);
@@ -671,7 +684,6 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
   font-weight: 500;
 }
 
-/* 后台巡检提示 */
 .patrol-bar {
   display: flex;
   align-items: center;
@@ -684,41 +696,42 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
   color: var(--text-3);
 }
 
-/* ---------- 分组 ---------- */
-.group {
-  overflow: hidden;
-}
-
+/* ---------- 分组面板 ---------- */
 .group.orphan {
   border-style: dashed;
 }
 
-.group-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 13px;
-  cursor: pointer;
-  user-select: none;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface-2);
+/* 收起时头部贴住面板底边,不出现双线 */
+.group.collapsed .panel-head {
+  border-bottom: none;
 }
 
-.group-head.static {
+/* 面板头通用(global .panel-head 提供底色/边线/内距) */
+.g-head {
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.13s;
+}
+
+.g-head.static {
   cursor: default;
 }
 
-.group-head:hover:not(.static) {
+.g-head:hover:not(.static) {
   background: var(--surface-3);
 }
 
-.gh-chev,
-.gh-icon {
+.g-chev {
   color: var(--text-3);
   flex-shrink: 0;
 }
 
-.gh-name {
+.g-alert {
+  color: var(--warn);
+  flex-shrink: 0;
+}
+
+.g-name {
   font-size: 13.5px;
   font-weight: 650;
   color: var(--text);
@@ -727,45 +740,79 @@ const DATE_LABEL = computed(() => formatTime(Date.now()))
   white-space: nowrap;
 }
 
-.gh-meta,
-.gh-time {
+.g-meta,
+.g-time {
   font-size: 11.5px;
   color: var(--text-3);
   white-space: nowrap;
 }
 
-.group-body {
+/* 面板主体:备份条目(自带卡片边框)之间留缝 */
+.g-body {
   display: flex;
   flex-direction: column;
   gap: 7px;
   padding: 10px 12px;
 }
 
-/* ---------- 普通行(未备份项目) ---------- */
-.plain-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+/* 未备份项目:整行铺满,行间用 border-top 分隔(同项目列表) */
+.g-body.flush {
+  gap: 0;
+  padding: 0;
 }
 
-.pr-main {
+.row-item {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 11px 16px;
+  transition: background 0.13s, box-shadow 0.13s;
+}
+
+.row-item + .row-item {
+  border-top: 1px solid var(--surface-2);
+}
+
+.row-item:hover {
+  background: var(--surface-2);
+}
+
+.avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-weight: 700;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.avatar.g-a { background: var(--grad-a); }
+.avatar.g-b { background: var(--grad-b); }
+.avatar.g-c { background: var(--grad-c); }
+.avatar.g-d { background: var(--grad-d); }
+
+.row-main {
   flex: 1;
   min-width: 0;
 }
 
-.pr-name {
+.row-name {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13.5px;
-  font-weight: 600;
 }
 
-.pr-path {
-  font-size: 11px;
+.name {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.row-path {
+  font-size: 11.5px;
   color: var(--text-3);
   overflow: hidden;
   text-overflow: ellipsis;

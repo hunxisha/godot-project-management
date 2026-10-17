@@ -7,7 +7,7 @@ import Icon from './Icon.vue'
 import { useTheme, type ThemeDef } from '../composables/useTheme'
 import type { ThemeId, ThemeMode } from '../types/godot'
 
-const props = withDefaults(defineProps<{ inline?: boolean }>(), { inline: false })
+const props = withDefaults(defineProps<{ inline?: boolean; up?: boolean }>(), { inline: false, up: false })
 
 const { theme, mode, resolvedMode, currentTheme, currentMode, themes, modes, setTheme, setMode } = useTheme()
 
@@ -68,7 +68,7 @@ onBeforeUnmount(() => {
       <Icon name="palette" :size="15" />
     </button>
 
-    <div v-show="inline || open" class="ts-panel" :class="{ pop: !inline }">
+    <div v-show="inline || open" class="ts-panel" :class="{ pop: !inline, up: props.up && !inline }">
       <!-- 明暗 -->
       <div class="ts-modes">
         <button
@@ -160,6 +160,24 @@ onBeforeUnmount(() => {
   right: 0;
   z-index: 60;
   animation: ts-pop 0.14s ease;
+}
+
+/* 侧边栏底部场景:向上弹出 */
+.ts-panel.pop.up {
+  top: auto;
+  bottom: calc(100% + 8px);
+  animation-name: ts-pop-up;
+}
+
+@keyframes ts-pop-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* 本地定义关键帧:scoped 样式引用全局 @keyframes 的改名行为依版本而异,不用它 */

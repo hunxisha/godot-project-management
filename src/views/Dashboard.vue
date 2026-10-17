@@ -18,7 +18,7 @@ const defaultVersion = computed(() => versions.value.find((v) => v._id === setti
 const recentProjects = computed(() =>
   [...projects.value]
     .sort((a, b) => (b.lastOpenedAt || b.addedAt) - (a.lastOpenedAt || a.addedAt))
-    .slice(0, 5)
+    .slice(0, 6)
 )
 
 /** 收藏项目(最多展示 8 个,按最近打开排序) */
@@ -33,6 +33,8 @@ const favProjects = computed(() =>
 const hour = new Date().getHours()
 const greeting =
   hour < 5 ? '夜深了' : hour < 12 ? '早上好' : hour < 14 ? '中午好' : hour < 19 ? '下午好' : '晚上好'
+
+const today = new Intl.DateTimeFormat('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' }).format(new Date())
 
 onMounted(async () => {
   projects.value = await listDocs<GodotProject>('godot/project/')
@@ -50,18 +52,38 @@ async function chooseRoot() {
 
 <template>
   <div class="dash view">
-    <!-- 问候横幅 -->
-    <section class="hero">
-      <div class="hero-text">
+    <!-- 问候 + 引擎目录 -->
+    <section class="hero panel">
+      <div class="hero-main">
         <div class="greet">{{ greeting }},开发者</div>
-        <div class="hero-sub">Godot 引擎 · 项目 · 插件,一站式工作台</div>
+        <div class="hero-sub">今天是 {{ today }} —— 引擎、项目与插件的一站式工作台。</div>
+      </div>
+      <div class="hero-side">
+        <button class="stat-chip" title="项目总数,点击管理" @click="emit('navigate', 'projects')">
+          <Icon name="folder" :size="13" />
+          <span class="sc-num">{{ projects.length }}</span>
+          <span class="sc-label">项目</span>
+        </button>
+        <button class="stat-chip" title="已装引擎数,点击管理" @click="emit('navigate', 'versions')">
+          <Icon name="package" :size="13" />
+          <span class="sc-num">{{ versions.length }}</span>
+          <span class="sc-label">引擎</span>
+        </button>
+        <button
+          class="stat-chip"
+          :class="{ unset: !defaultVersion }"
+          :title="defaultVersion ? `默认引擎 ${defaultVersion.name}` : '未设置默认引擎,点击前往设置'"
+          @click="emit('navigate', 'versions')"
+        >
+          <Icon name="play" :size="13" />
+          <span class="sc-text">{{ defaultVersion?.name ?? '未设置' }}</span>
+          <span class="sc-label">默认</span>
+        </button>
       </div>
       <div class="hero-root">
         <button class="root-chip" :class="{ unset: !settings.versionsRoot }" :title="settings.versionsRoot" @click="chooseRoot">
           <Icon name="folder" :size="13" />
-          <span class="mono">{{
-            settings.versionsRoot ?? '未设置引擎目录,点击选择'
-          }}</span>
+          <span class="mono">{{ settings.versionsRoot ?? '设置引擎目录' }}</span>
         </button>
         <button v-if="settings.versionsRoot" class="hero-btn" title="打开引擎目录" @click="showInFolder(settings.versionsRoot!)">
           <Icon name="external" :size="13" />
@@ -69,43 +91,89 @@ async function chooseRoot() {
       </div>
     </section>
 
-    <!-- 统计 -->
-    <section class="stats">
-      <button class="stat" @click="emit('navigate', 'projects')">
-        <span class="s-icon"><Icon name="folder" :size="17" /></span>
-        <span class="s-body">
-          <span class="s-num">{{ projects.length }}</span>
-          <span class="s-label">项目</span>
+    <!-- 快捷操作 -->
+    <section class="quick">
+      <button class="quick-item panel" @click="emit('navigate', 'versions')">
+        <span class="qi-icon qi-a"><Icon name="download" :size="17" /></span>
+        <span class="qi-text">
+          <span class="qi-name">下载引擎</span>
+          <span class="qi-desc">获取官方版本</span>
         </span>
-        <Icon name="chevron-right" :size="14" class="s-arrow" />
+        <Icon name="chevron-right" :size="14" class="qi-arrow" />
       </button>
-      <button class="stat" @click="emit('navigate', 'versions')">
-        <span class="s-icon"><Icon name="package" :size="17" /></span>
-        <span class="s-body">
-          <span class="s-num">{{ versions.length }}</span>
-          <span class="s-label">已装引擎</span>
+      <button class="quick-item panel" @click="emit('create')">
+        <span class="qi-icon qi-b"><Icon name="plus" :size="17" /></span>
+        <span class="qi-text">
+          <span class="qi-name">新建项目</span>
+          <span class="qi-desc">从零创建</span>
         </span>
-        <Icon name="chevron-right" :size="14" class="s-arrow" />
+        <Icon name="chevron-right" :size="14" class="qi-arrow" />
       </button>
-      <button class="stat wide" @click="emit('navigate', 'versions')">
-        <span class="s-icon"><Icon name="play" :size="17" /></span>
-        <span class="s-body">
-          <span class="s-num small">{{ defaultVersion?.name ?? '未设置' }}</span>
-          <span class="s-label">默认引擎</span>
+      <button class="quick-item panel" @click="emit('navigate', 'projects')">
+        <span class="qi-icon qi-c"><Icon name="folder-plus" :size="17" /></span>
+        <span class="qi-text">
+          <span class="qi-name">添加项目</span>
+          <span class="qi-desc">导入已有目录</span>
         </span>
-        <Icon name="chevron-right" :size="14" class="s-arrow" />
+        <Icon name="chevron-right" :size="14" class="qi-arrow" />
+      </button>
+      <button class="quick-item panel" @click="emit('navigate', 'marketplace')">
+        <span class="qi-icon qi-d"><Icon name="puzzle" :size="17" /></span>
+        <span class="qi-text">
+          <span class="qi-name">插件市场</span>
+          <span class="qi-desc">官方资产商店</span>
+        </span>
+        <Icon name="chevron-right" :size="14" class="qi-arrow" />
       </button>
     </section>
 
-    <!-- 收藏项目 -->
-    <section class="card block">
-      <div class="block-head">
-        <h3><Icon name="star" :size="14" class="fav-star" /> 收藏项目</h3>
-        <button class="more" @click="emit('navigate', 'projects')">管理收藏 <Icon name="chevron-right" :size="12" /></button>
+    <!-- 收藏 + 最近 -->
+    <section class="cols">
+      <div class="panel block">
+        <div class="panel-head">
+          <span class="panel-title"><Icon name="star" :size="13" class="fav-star" /> 收藏项目</span>
+          <span class="grow"></span>
+          <button class="more" @click="emit('navigate', 'projects')">管理 <Icon name="chevron-right" :size="11" /></button>
+        </div>
+        <template v-if="favProjects.length">
+          <div
+            v-for="p in favProjects"
+            :key="p._id"
+            class="recent-row"
+            @click="openProjectAction(p)"
+          >
+            <div class="avatar" :class="`g-${gradOf(p.name)}`">{{ p.name.charAt(0).toUpperCase() }}</div>
+            <div class="rr-main">
+              <div class="rr-name">
+                <span>{{ p.name }}</span>
+                <span v-if="p.engineVersion" class="tag">{{ p.engineVersion }}</span>
+              </div>
+              <div class="rr-path mono" :title="p.path">{{ p.path }}</div>
+            </div>
+            <div class="fav-acts">
+              <button class="fav-btn" title="在编辑器中打开" @click.stop="openProjectAction(p, 'editor')">
+                <Icon name="pencil" :size="12" />
+              </button>
+              <button class="fav-btn" title="运行项目" @click.stop="openProjectAction(p, 'run')">
+                <Icon name="play" :size="12" />
+              </button>
+            </div>
+          </div>
+        </template>
+        <div v-else class="fav-empty">
+          <Icon name="star" :size="14" />
+          在「项目」页点亮星标,常用项目会固定在这里,一键打开编辑器或运行
+        </div>
       </div>
-      <template v-if="favProjects.length">
+
+      <div v-if="recentProjects.length" class="panel block">
+        <div class="panel-head">
+          <span class="panel-title"><Icon name="clock" :size="13" /> 最近项目</span>
+          <span class="grow"></span>
+          <button class="more" @click="emit('navigate', 'projects')">全部 <Icon name="chevron-right" :size="11" /></button>
+        </div>
         <div
-          v-for="p in favProjects"
+          v-for="p in recentProjects"
           :key="p._id"
           class="recent-row"
           @click="openProjectAction(p)"
@@ -118,137 +186,132 @@ async function chooseRoot() {
             </div>
             <div class="rr-path mono" :title="p.path">{{ p.path }}</div>
           </div>
-          <div class="fav-acts">
-            <button class="fav-btn" title="在编辑器中打开" @click.stop="openProjectAction(p, 'editor')">
-              <Icon name="pencil" :size="12" />
-            </button>
-            <button class="fav-btn" title="运行项目" @click.stop="openProjectAction(p, 'run')">
-              <Icon name="play" :size="12" />
-            </button>
-          </div>
+          <span class="rr-open"><Icon name="play" :size="12" /> 打开</span>
         </div>
-      </template>
-      <div v-else class="fav-empty">
-        <Icon name="star" :size="14" />
-        在「项目」页点亮星标,常用项目会固定在这里,一键打开编辑器或运行
       </div>
-    </section>
-
-    <!-- 最近项目 -->
-    <section v-if="recentProjects.length" class="card block">
-      <div class="block-head">
-        <h3><Icon name="clock" :size="14" /> 最近项目</h3>
-        <button class="more" @click="emit('navigate', 'projects')">全部项目 <Icon name="chevron-right" :size="12" /></button>
-      </div>
-      <div
-        v-for="p in recentProjects"
-        :key="p._id"
-        class="recent-row"
-        @click="openProjectAction(p)"
-      >
-        <div class="avatar" :class="`g-${gradOf(p.name)}`">{{ p.name.charAt(0).toUpperCase() }}</div>
-        <div class="rr-main">
-          <div class="rr-name">
-            <span>{{ p.name }}</span>
-            <span v-if="p.engineVersion" class="tag">{{ p.engineVersion }}</span>
-          </div>
-          <div class="rr-path mono" :title="p.path">{{ p.path }}</div>
-        </div>
-        <span class="rr-open"><Icon name="play" :size="12" /> 打开</span>
-      </div>
-    </section>
-
-    <!-- 快捷操作 -->
-    <section class="quick">
-      <button class="quick-item card" @click="emit('navigate', 'versions')">
-        <span class="qi-icon qi-a"><Icon name="download" :size="18" /></span>
-        <span class="qi-text">
-          <span class="qi-name">下载引擎</span>
-          <span class="qi-desc">获取官方版本</span>
-        </span>
-      </button>
-      <button class="quick-item card" @click="emit('create')">
-        <span class="qi-icon qi-b"><Icon name="plus" :size="18" /></span>
-        <span class="qi-text">
-          <span class="qi-name">新建项目</span>
-          <span class="qi-desc">从零创建</span>
-        </span>
-      </button>
-      <button class="quick-item card" @click="emit('navigate', 'projects')">
-        <span class="qi-icon qi-c"><Icon name="folder-plus" :size="18" /></span>
-        <span class="qi-text">
-          <span class="qi-name">添加项目</span>
-          <span class="qi-desc">导入已有目录</span>
-        </span>
-      </button>
-      <button class="quick-item card" @click="emit('navigate', 'marketplace')">
-        <span class="qi-icon qi-d"><Icon name="puzzle" :size="18" /></span>
-        <span class="qi-text">
-          <span class="qi-name">插件市场</span>
-          <span class="qi-desc">官方资产商店</span>
-        </span>
-      </button>
     </section>
 
     <!-- 新手引导 -->
-    <section v-if="!versions.length" class="card block guide">
-      <div class="block-head">
-        <h3><Icon name="zap" :size="14" /> 快速上手</h3>
+    <section v-if="!versions.length" class="panel block guide">
+      <div class="panel-head">
+        <span class="panel-title"><Icon name="zap" :size="13" /> 快速上手</span>
       </div>
       <ol class="steps">
-        <li>在「版本」页下载一个 Godot 引擎,或导入本地的 Godot 可执行文件</li>
+        <li>在「引擎」页下载一个 Godot 引擎,或导入本地的 Godot 可执行文件</li>
         <li>将 Godot 项目文件夹拖入 ZTools,快速添加并绑定引擎版本</li>
-        <li>在主输入框输入「gp」,输入项目名回车即可打开项目</li>
+        <li>按 <span class="kbd">Ctrl K</span> 呼出命令面板,输入项目名回车即可打开项目</li>
       </ol>
     </section>
   </div>
 </template>
 
 <style scoped>
-/* ---- 问候横幅 ---- */
+/* ---- 问候区:面板化,品牌色左侧指示条 ---- */
 .hero {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 16px 20px;
-  border-radius: var(--radius-lg);
-  background: var(--brand-grad);
-  color: #fff;
-  box-shadow: var(--shadow);
+  flex-wrap: wrap;
+  gap: 14px 18px;
+  padding: 18px 20px;
+  background:
+    linear-gradient(var(--surface), var(--surface)) padding-box,
+    var(--brand-grad) border-box;
   overflow: hidden;
 }
 
-/* 网格纹理 */
+/* 细网格纹理:Godot 编辑器视口质感 */
 .hero::before {
   content: '';
   position: absolute;
   inset: 0;
   background:
-    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.07) 0 1px, transparent 1px 22px),
-    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.07) 0 1px, transparent 1px 22px);
+    repeating-linear-gradient(0deg, var(--brand-weak) 0 1px, transparent 1px 26px),
+    repeating-linear-gradient(90deg, var(--brand-weak) 0 1px, transparent 1px 26px);
+  opacity: 0.5;
   pointer-events: none;
 }
 
-.hero-text {
+.hero > * {
   position: relative;
+}
+
+.hero-main {
   flex-shrink: 0;
+  min-width: 220px;
 }
 
 .greet {
-  font-size: 17px;
+  font-size: 19px;
   font-weight: 700;
   letter-spacing: 0.01em;
+  color: var(--text);
 }
 
 .hero-sub {
-  margin-top: 2px;
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.78);
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--text-3);
 }
 
+/* 统计胶囊 */
+.hero-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, box-shadow 0.15s;
+  white-space: nowrap;
+}
+
+.stat-chip:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+  box-shadow: var(--shadow-sm);
+}
+
+.stat-chip .icon {
+  color: var(--brand);
+}
+
+.sc-num {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.sc-text {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.stat-chip.unset .sc-text {
+  color: var(--text-3);
+  font-weight: 500;
+}
+
+.sc-label {
+  color: var(--text-3);
+}
+
+/* 引擎目录 */
 .hero-root {
-  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -260,20 +323,22 @@ async function chooseRoot() {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  max-width: 340px;
+  max-width: 320px;
   padding: 5px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-  color: #fff;
+  border: 1px dashed var(--border-strong);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text-2);
   font-size: 12px;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
   white-space: nowrap;
 }
 
 .root-chip:hover {
-  background: rgba(255, 255, 255, 0.24);
+  border-color: var(--brand);
+  color: var(--brand);
+  border-style: solid;
 }
 
 .root-chip span {
@@ -283,8 +348,7 @@ async function chooseRoot() {
 }
 
 .root-chip.unset {
-  font-style: normal;
-  border-style: dashed;
+  color: var(--text-3);
 }
 
 .hero-btn {
@@ -294,118 +358,103 @@ async function chooseRoot() {
   width: 28px;
   height: 28px;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-  color: #fff;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text-2);
   cursor: pointer;
-  transition: background 0.15s;
+  transition: color 0.15s, border-color 0.15s;
   flex-shrink: 0;
 }
 
 .hero-btn:hover {
-  background: rgba(255, 255, 255, 0.24);
+  color: var(--brand);
+  border-color: var(--brand);
 }
 
-/* ---- 统计 ---- */
-.stats {
+/* ---- 快捷操作 ---- */
+.quick {
   display: grid;
-  grid-template-columns: 1fr 1fr 1.5fr;
+  grid-template-columns: repeat(4, 1fr);
   gap: 10px;
 }
 
-.stat {
+.quick-item {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
+  padding: 13px 15px;
   cursor: pointer;
   text-align: left;
   transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
 }
 
-.stat:hover {
+.quick-item:hover {
   border-color: var(--brand);
-  box-shadow: var(--shadow-lift);
+  box-shadow: var(--shadow);
   transform: translateY(-1px);
 }
 
-.s-icon {
+.qi-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
   border-radius: var(--radius-sm);
-  background: var(--brand-weak);
-  color: var(--brand);
   flex-shrink: 0;
 }
 
-.s-body {
+.qi-a { background: var(--brand-weak); color: var(--brand); }
+.qi-b { background: var(--grad-b); color: #fff; }
+.qi-c { background: var(--grad-c); color: #fff; }
+.qi-d { background: var(--grad-d); color: #fff; }
+
+.qi-text {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  flex: 1;
 }
 
-.s-num {
-  font-size: 21px;
-  font-weight: 700;
-  line-height: 1.15;
-  font-variant-numeric: tabular-nums;
+.qi-name {
+  font-size: 13.5px;
+  font-weight: 600;
   color: var(--text);
 }
 
-.s-num.small {
-  font-size: 15px;
-  padding-top: 3px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.s-label {
-  font-size: 11.5px;
+.qi-desc {
+  font-size: 12px;
   color: var(--text-3);
 }
 
-.s-arrow {
-  margin-left: auto;
+.qi-arrow {
   color: var(--text-3);
-  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
 }
 
-.stat:hover .s-arrow {
+.quick-item:hover .qi-arrow {
+  opacity: 1;
   color: var(--brand);
 }
 
-/* ---- 通用块 ---- */
-.block {
-  padding: 4px 6px 6px;
+/* ---- 双列面板 ---- */
+.cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  align-items: start;
 }
 
-.block-head {
-  display: flex;
-  align-items: center;
-  padding: 10px 12px 6px;
+@media (max-width: 1080px) {
+  .cols {
+    grid-template-columns: 1fr;
+  }
 }
 
-.block-head h3 {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-2);
-}
-
-.block-head h3 .icon {
-  color: var(--brand);
+.block :deep(.panel-head) {
+  padding: 8px 12px;
 }
 
 .more {
@@ -419,23 +468,26 @@ async function chooseRoot() {
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 4px;
+  padding: 2px 6px;
+  border-radius: 5px;
 }
 
 .more:hover {
   background: var(--brand-weak);
 }
 
-/* ---- 最近项目行 ---- */
+/* ---- 项目行 ---- */
 .recent-row {
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 7px 10px;
-  border-radius: var(--radius-sm);
+  padding: 7px 12px;
   cursor: pointer;
   transition: background 0.12s;
+}
+
+.recent-row + .recent-row {
+  border-top: 1px solid var(--surface-2);
 }
 
 .recent-row:hover {
@@ -453,7 +505,6 @@ async function chooseRoot() {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  letter-spacing: 0;
 }
 
 .avatar.g-a { background: var(--grad-a); }
@@ -472,6 +523,11 @@ async function chooseRoot() {
   gap: 6px;
   font-size: 13px;
   font-weight: 600;
+}
+
+.rr-name .tag {
+  line-height: 17px;
+  font-size: 10.5px;
 }
 
 .rr-path {
@@ -498,9 +554,9 @@ async function chooseRoot() {
   opacity: 1;
 }
 
-/* ---- 收藏项目区 ---- */
+/* ---- 收藏区 ---- */
 .fav-star {
-  color: var(--warn, #e8a33d);
+  color: var(--gold, #e8a33d);
 }
 
 .fav-acts {
@@ -535,80 +591,40 @@ async function chooseRoot() {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 4px 12px 12px;
-  padding: 10px 12px;
+  margin: 6px 12px 12px;
+  padding: 12px;
   border: 1px dashed var(--border);
   border-radius: var(--radius-sm);
   font-size: 12.5px;
+  line-height: 1.6;
   color: var(--text-3);
 }
 
 .fav-empty .icon {
-  color: var(--warn, #e8a33d);
+  color: var(--gold, #e8a33d);
   flex-shrink: 0;
-}
-
-/* ---- 快捷操作 ---- */
-.quick {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-}
-
-.quick-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 13px 15px;
-  cursor: pointer;
-  text-align: left;
-  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
-}
-
-.quick-item:hover {
-  border-color: var(--brand);
-  box-shadow: var(--shadow-lift);
-  transform: translateY(-1px);
-}
-
-.qi-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  border-radius: var(--radius-sm);
-  flex-shrink: 0;
-}
-
-.qi-a { background: var(--brand-weak); color: var(--brand); }
-.qi-b { background: var(--grad-b); color: #fff; }
-.qi-c { background: var(--grad-c); color: #fff; }
-.qi-d { background: var(--grad-d); color: #fff; }
-
-.qi-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.qi-name {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.qi-desc {
-  font-size: 12px;
-  color: var(--text-3);
 }
 
 /* ---- 引导 ---- */
 .steps {
   margin: 0;
-  padding: 2px 14px 12px 36px;
+  padding: 4px 14px 14px 38px;
   font-size: 13px;
-  line-height: 1.9;
+  line-height: 2;
   color: var(--text-2);
+}
+
+.steps .kbd {
+  margin: 0 2px;
+}
+
+@media (max-width: 920px) {
+  .quick {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .hero-root {
+    margin-left: 0;
+  }
 }
 </style>

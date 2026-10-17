@@ -82,7 +82,7 @@ function confirm() {
 
         <!-- 完整项目/模板:不可装入现有项目,引导另存为新项目 -->
         <template v-if="plan && plan.kind === 'project'">
-          <div class="card ip-warn">
+          <div class="ip-warn">
             <Icon name="alert" :size="14" />
             <span>
               这是<b>完整项目或模板</b>(包内自带 project.godot),不能安装到现有项目目录,
@@ -122,7 +122,7 @@ function confirm() {
             </div>
           </div>
 
-          <div v-if="activeConflicts && activeConflicts.count > 0" class="card ip-warn">
+          <div v-if="activeConflicts && activeConflicts.count > 0" class="ip-warn">
             <Icon name="alert" :size="14" />
             <span>
               与项目现有文件冲突 {{ activeConflicts.count }} 处:{{ activeConflicts.samples.join('、') }}
@@ -275,7 +275,8 @@ function confirm() {
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--danger);
-  border-color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
   background: var(--danger-weak);
 }
 

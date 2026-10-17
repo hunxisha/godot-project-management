@@ -7,7 +7,7 @@ defineProps<{ title: string; desc?: string; icon?: string }>()
 <template>
   <div class="empty">
     <div class="glyph">
-      <Icon :name="icon || 'box'" :size="28" />
+      <Icon :name="icon || 'box'" :size="40" :stroke-width="1.5" />
     </div>
     <div class="title">{{ title }}</div>
     <div v-if="desc" class="desc">{{ desc }}</div>
@@ -21,39 +21,41 @@ defineProps<{ title: string; desc?: string; icon?: string }>()
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 44px 24px;
+  gap: 8px;
+  padding: 56px 24px 50px;
   text-align: center;
 }
 
+/* 大号手绘图标:品牌弱色圆底 */
 .glyph {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 64px;
-  height: 64px;
-  margin-bottom: 6px;
+  width: 76px;
+  height: 76px;
+  margin-bottom: 8px;
   border-radius: 50%;
   background: var(--brand-weak);
   color: var(--brand);
 }
 
 .title {
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 15.5px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
   color: var(--text);
 }
 
 .desc {
-  max-width: 420px;
+  max-width: 430px;
   font-size: 13px;
-  line-height: 1.7;
+  line-height: 1.75;
   color: var(--text-3);
 }
 
 .actions {
   display: flex;
   gap: 10px;
-  margin-top: 10px;
+  margin-top: 12px;
 }
 </style>

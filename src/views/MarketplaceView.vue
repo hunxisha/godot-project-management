@@ -250,60 +250,58 @@ watch(
     </EmptyState>
 
     <template v-else>
-      <!-- 页面标题 -->
+      <!-- 页头:子页切换 + 安装目标 + 搜索 -->
       <div class="view-head">
-        <h2><Icon name="puzzle" :size="16" /> 插件市场</h2>
-        <span class="head-sub">官方 Asset Store</span>
-        <span class="grow"></span>
-        <!-- 插件页子切换:与「已安装」互跳(navigate 复用既有 tab 转发) -->
+        <h2>
+          <Icon name="puzzle" :size="17" /> 插件市场
+          <span class="count-pill" title="当前列表中的资产数">{{ displayAssets.length }}</span>
+        </h2>
         <div class="seg head-seg" role="tablist" aria-label="插件子页">
           <button class="on" aria-current="true">市场</button>
           <button @click="emit('navigate', 'addons')">已安装</button>
         </div>
+        <span class="grow"></span>
+        <label class="target" :title="target?.path ? `安装到 ${target.path}` : '选择要安装插件的项目'">
+          <Icon name="folder" :size="13" />
+          <select v-model="targetId" class="select target-select" @change="onTargetChange">
+            <option v-for="p in sortedProjects" :key="p._id" :value="p._id">{{ p.favorite ? '★ ' : '' }}{{ p.name }}</option>
+          </select>
+        </label>
+        <span v-if="targetGodot" class="tag brand" title="该项目绑定的 Godot 版本">Godot {{ targetGodot }}</span>
+        <div class="search-box">
+          <Icon name="search" :size="13" class="sb-icon" />
+          <input
+            v-model="query"
+            class="input sb-input"
+            placeholder="搜索插件,回车立即搜索…"
+            spellcheck="false"
+            @keyup.enter="onSearchEnter"
+          />
+        </div>
       </div>
 
-      <!-- 工具栏(滚动时吸顶):第一行 安装目标 + 搜索,第二行 浏览模式 -->
-      <div class="toolbar">
-        <div class="tb-row">
-          <label class="tb-target" :title="target?.path ? `安装到 ${target.path}` : '选择要安装插件的项目'">
-            <Icon name="folder" :size="13" />
-            <span class="tb-caption">安装到</span>
-            <select v-model="targetId" class="tb-select" @change="onTargetChange">
-              <option v-for="p in sortedProjects" :key="p._id" :value="p._id">{{ p.favorite ? '★ ' : '' }}{{ p.name }}</option>
-            </select>
-            <span v-if="targetGodot" class="tb-gver" title="该项目绑定的 Godot 版本">Godot {{ targetGodot }}</span>
-          </label>
-          <div class="search-box">
-            <Icon name="search" :size="13" class="sb-icon" />
-            <input
-              v-model="query"
-              class="sb-input"
-              placeholder="搜索插件,回车立即搜索…"
-              spellcheck="false"
-              @keyup.enter="onSearchEnter"
-            />
-          </div>
-          <select v-model="tagFilter" class="sb-ver" title="按标签筛选当前列表">
-            <option value="">全部标签</option>
-            <option v-for="g in MARKET_TAG_GROUPS" :key="g.label" :value="g.label">{{ g.label }}</option>
-          </select>
-        </div>
-        <div class="tb-row">
-          <div class="mode-tabs">
+      <!-- 浏览面板:模式 seg + 标签/兼容筛选在头部,网格与分页在主体 -->
+      <div class="panel browse">
+        <div class="panel-head">
+          <div class="panel-title"><Icon name="globe" :size="13" /> 资产库</div>
+          <div class="seg mode-seg" role="tablist" aria-label="浏览模式">
             <button
               v-for="(m, key) in MODE_META"
               :key="key"
-              class="chip"
               :class="{ on: mode === key }"
               @click="switchMode(key as BrowseMode)"
             >
-              <Icon :name="m.icon" :size="12" />
+              <Icon :name="m.icon" :size="11" />
               {{ m.label }}
-              <span v-if="key === 'favorites' && favorites.length" class="chip-count">{{ favorites.length }}</span>
+              <span v-if="key === 'favorites' && favorites.length" class="seg-count">{{ favorites.length }}</span>
             </button>
           </div>
           <span class="grow"></span>
-          <div class="compat-seg" title="按目标项目的 Godot 版本筛选兼容插件">
+          <select v-model="tagFilter" class="select head-select" title="按标签筛选当前列表">
+            <option value="">全部标签</option>
+            <option v-for="g in MARKET_TAG_GROUPS" :key="g.label" :value="g.label">{{ g.label }}</option>
+          </select>
+          <div class="seg" title="按目标项目的 Godot 版本筛选兼容插件">
             <button :class="{ on: !compatOnly }" @click="compatOnly = false">全部</button>
             <button
               :class="{ on: compatOnly }"
@@ -313,163 +311,167 @@ watch(
             >仅满足版本</button>
           </div>
         </div>
-      </div>
 
-      <!-- 收藏失败诊断:只在失败时出现,便于定位「点了没反应」是写库被拒还是没生效 -->
-      <div v-if="favDiag" class="fav-diag" @click="favDiag = ''">
-        <Icon name="alert" :size="12" />
-        <span>{{ favDiag }}</span>
-        <Icon name="x" :size="11" />
-      </div>
+        <div class="panel-body">
+          <!-- 收藏失败诊断:只在失败时出现,点击可关闭 -->
+          <div v-if="favDiag" class="fav-diag" title="点击关闭诊断信息" @click="favDiag = ''">
+            <Icon name="alert" :size="12" />
+            <span>{{ favDiag }}</span>
+            <Icon name="x" :size="11" />
+          </div>
 
-      <!-- 搜索结果概要(服务端分页,每页 20;多页时提供翻页) -->
-      <div v-if="query.trim() && hasSearched && !searchError && !browsing" class="result-line">
-        <span class="rl-text">
-          “{{ query.trim() }}” 的搜索结果 · {{ displayAssets.length }} 项<template v-if="tagFilter">({{ tagFilter }})</template>
-        </span>
-        <span v-if="searchPages > 1" class="search-pager">
-          <button class="btn small" :disabled="searchPage <= 1 || searching" @click="changeSearchPage(-1)">
-            <Icon name="chevron-left" :size="12" />
-          </button>
-          <span class="search-page-info mono">{{ searchPage }} / {{ searchPages }}</span>
-          <button class="btn small" :disabled="searchPage >= searchPages || searching" @click="changeSearchPage(1)">
-            <Icon name="chevron-right" :size="12" />
-          </button>
-        </span>
-        <span class="grow"></span>
-        <button class="btn small ghost" @click="query = ''"><Icon name="x" :size="11" /> 清除搜索</button>
-      </div>
+          <!-- 搜索结果概要(服务端分页,每页 20;多页时提供翻页) -->
+          <div v-if="query.trim() && hasSearched && !searchError && !browsing" class="result-line">
+            <span class="rl-text">
+              “{{ query.trim() }}” 的搜索结果 · {{ displayAssets.length }} 项<template v-if="tagFilter">({{ tagFilter }})</template>
+            </span>
+            <span v-if="searchPages > 1" class="search-pager">
+              <button class="btn small" :disabled="searchPage <= 1 || searching" title="上一页" @click="changeSearchPage(-1)">
+                <Icon name="chevron-left" :size="12" />
+              </button>
+              <span class="search-page-info mono">{{ searchPage }} / {{ searchPages }}</span>
+              <button class="btn small" :disabled="searchPage >= searchPages || searching" title="下一页" @click="changeSearchPage(1)">
+                <Icon name="chevron-right" :size="12" />
+              </button>
+            </span>
+            <span class="grow"></span>
+            <button class="btn small ghost" @click="query = ''"><Icon name="x" :size="11" /> 清除搜索</button>
+          </div>
 
-      <!-- 结果区(浏览/搜索共用) -->
-      <div v-if="browseError || searchError" class="card error-box">
-        <Icon name="alert" :size="14" />
-        <span>加载失败:{{ browseError || searchError }}</span>
-      </div>
-      <div v-else-if="browsing || searching || (query.trim() && !hasSearched)" class="hint-line">
-        <span class="spin"></span>
-        {{ searching || query.trim() ? '搜索中…' : poolLoading ? `正在从商店聚合「${tagFilter}」标签的插件…` : '加载中…' }}
-      </div>
-      <EmptyState
-        v-else-if="query.trim() && !results.length"
-        icon="search"
-        title="没有找到相关插件"
-        :desc="`没有与「${query.trim()}」匹配的插件,试试其他关键词。`"
-      />
-      <EmptyState
-        v-else-if="mode === 'favorites' && !favorites.length"
-        icon="star"
-        :title="isDesktop ? '桌面版暂不支持收藏' : '还没有收藏'"
-        :desc="isDesktop
-          ? '桌面版还没移植本地收藏(★),这一栏在桌面版会是空的;浏览与安装不受影响,需要收藏请用 ZTools 插件版。'
-          : '在推荐、最近更新或搜索结果中点击 ★ 收藏插件,方便下次快速安装。'"
-      />
-      <EmptyState
-        v-else-if="tagFilter && !displayAssets.length"
-        icon="puzzle"
-        title="该标签下暂无插件"
-        :desc="aggregating ? `已扫描商店全部页面,没有找到「${tagFilter}」标签的插件,可切换其他标签。` : `当前列表中没有「${tagFilter}」标签的插件,可切换其他标签或浏览模式。`"
-      />
-      <div v-if="displayAssets.length" class="asset-grid">
-        <div v-for="a in displayAssets" :key="a.assetId" class="card asset">
-          <button
-            class="fav-btn"
-            :class="{ active: isFav(a.assetId) }"
-            :disabled="isDesktop"
-            :title="isDesktop ? '桌面版暂不支持收藏' : isFav(a.assetId) ? '取消收藏' : '收藏'"
-            @click="toggleFav(a)"
-          ><Icon name="star" :size="14" :stroke-width="isFav(a.assetId) ? 2.4 : 1.7" /></button>
-          <div class="asset-head">
-            <img
-              v-if="a.iconUrl && !brokenIcons.has(a.assetId)"
-              :src="a.iconUrl"
-              class="asset-icon"
-              alt=""
-              @error="onIconError(a.assetId)"
-            />
-            <div v-else class="asset-icon ph"><Icon name="puzzle" :size="22" /></div>
-            <div class="asset-title-box">
-              <span class="asset-title link" :title="`${a.title} · 查看详情`" @click="openDetail(a)">
-                {{ a.title }}
-                <Icon name="external" :size="10" />
-              </span>
-              <span v-if="a.versionString" class="asset-ver" :title="a.versionString">v{{ normVersion(a.versionString) }}</span>
+          <!-- 结果区(浏览/搜索共用) -->
+          <div v-if="browseError || searchError" class="card error-box">
+            <Icon name="alert" :size="14" />
+            <span>加载失败:{{ browseError || searchError }}</span>
+          </div>
+          <div v-else-if="browsing || searching || (query.trim() && !hasSearched)" class="hint-line">
+            <span class="spin"></span>
+            {{ searching || query.trim() ? '搜索中…' : poolLoading ? `正在从商店聚合「${tagFilter}」标签的插件…` : '加载中…' }}
+          </div>
+          <EmptyState
+            v-else-if="query.trim() && !results.length"
+            icon="search"
+            title="没有找到相关插件"
+            :desc="`没有与「${query.trim()}」匹配的插件,试试其他关键词。`"
+          />
+          <EmptyState
+            v-else-if="mode === 'favorites' && !favorites.length"
+            icon="star"
+            :title="isDesktop ? '桌面版暂不支持收藏' : '还没有收藏'"
+            :desc="isDesktop
+              ? '桌面版还没移植本地收藏(★),这一栏在桌面版会是空的;浏览与安装不受影响,需要收藏请用 ZTools 插件版。'
+              : '在推荐、最近更新或搜索结果中点击 ★ 收藏插件,方便下次快速安装。'"
+          />
+          <EmptyState
+            v-else-if="tagFilter && !displayAssets.length"
+            icon="puzzle"
+            title="该标签下暂无插件"
+            :desc="aggregating ? `已扫描商店全部页面,没有找到「${tagFilter}」标签的插件,可切换其他标签。` : `当前列表中没有「${tagFilter}」标签的插件,可切换其他标签或浏览模式。`"
+          />
+
+          <!-- 资产卡片网格 -->
+          <div v-if="displayAssets.length" class="asset-grid">
+            <div v-for="a in displayAssets" :key="a.assetId" class="card asset">
+              <button
+                class="fav-btn"
+                :class="{ active: isFav(a.assetId) }"
+                :disabled="isDesktop"
+                :title="isDesktop ? '桌面版暂不支持收藏' : isFav(a.assetId) ? '取消收藏' : '收藏'"
+                @click="toggleFav(a)"
+              ><Icon name="star" :size="14" :stroke-width="isFav(a.assetId) ? 2.4 : 1.7" /></button>
+              <div class="asset-head">
+                <img
+                  v-if="a.iconUrl && !brokenIcons.has(a.assetId)"
+                  :src="a.iconUrl"
+                  class="asset-icon"
+                  alt=""
+                  @error="onIconError(a.assetId)"
+                />
+                <div v-else class="asset-icon ph"><Icon name="puzzle" :size="22" /></div>
+                <div class="asset-title-box">
+                  <span class="asset-title link" :title="`${a.title} · 查看详情`" @click="openDetail(a)">
+                    {{ a.title }}
+                    <Icon name="external" :size="10" />
+                  </span>
+                  <span v-if="a.versionString" class="asset-ver mono" :title="a.versionString">v{{ normVersion(a.versionString) }}</span>
+                </div>
+              </div>
+              <div class="asset-author" :title="a.author">{{ a.author }}</div>
+              <div class="asset-desc" :title="a.description">{{ a.description }}</div>
+              <div class="asset-tags">
+                <span class="tag">{{ a.category }}</span>
+                <span
+                  v-if="isLikelyAsset(a)"
+                  class="tag brand"
+                  title="根据标签推测为纯素材(模型/精灵等),将安装到项目根而非 addons/,以确认页为准"
+                >素材</span>
+                <span
+                  v-if="godotRange(a)"
+                  class="gver"
+                  :class="{ bad: compatOf(a) === false }"
+                  :title="compatOf(a) === false ? `需要 ${godotRange(a)},当前项目为 Godot ${targetGodot || '未知'}` : `兼容 ${godotRange(a)}`"
+                >{{ godotRange(a) }}<template v-if="compatOf(a) === false"> · 项目 {{ targetGodot || '?' }}</template></span>
+                <span v-if="installedIds.has(a.assetId)" class="tag ok">已安装</span>
+              </div>
+              <div class="install-row">
+                <button
+                  v-if="installing && installing.assetId === a.assetId && previewingId === a.assetId"
+                  class="btn small ghost pick-ver"
+                  title="取消预览下载"
+                  @click="cancelPreviewDownload(a.assetId)"
+                >取消</button>
+                <button
+                  v-if="installing && installing.assetId === a.assetId"
+                  class="btn small asset-install busy"
+                  disabled
+                >
+                  <span class="spin"></span>
+                  {{ installing.stage }} {{ installing.percent.toFixed(0) }}%
+                </button>
+                <button
+                  v-else-if="installedIds.has(a.assetId)"
+                  class="btn small asset-install ok"
+                  disabled
+                >已安装</button>
+                <button
+                  v-else
+                  class="btn small primary asset-install"
+                  :disabled="!!installing"
+                  :title="mode === 'projects' ? '另存为新项目' : target ? `安装最新版到「${target.name}」` : '安装'"
+                  @click="install(a)"
+                ><Icon name="download" :size="12" /> {{ mode === 'projects' ? '另存' : '安装' }}</button>
+                <button
+                  class="btn small ghost pick-ver"
+                  :disabled="!!installing"
+                  :title="`选择版本安装${installedIds.has(a.assetId) ? '(覆盖已装版本)' : ''}`"
+                  @click="openPicker(a)"
+                ><Icon name="chevron-down" :size="12" /></button>
+                <button
+                  class="btn small ghost"
+                  :disabled="!!installing"
+                  title="仅下载 zip 包到本地,不安装"
+                  @click="saveZip(a)"
+                ><Icon name="hard-drive" :size="12" /></button>
+              </div>
             </div>
           </div>
-          <div class="asset-tags">
-            <span class="tag">{{ a.category }}</span>
+
+          <!-- 分页(全部/新品/最近更新;标签筛选时为聚合分页,页码为匹配项页数,+ 表示还有更多) -->
+          <div
+            v-if="(mode === 'all' || mode === 'new' || mode === 'recent') && displayAssets.length && !browsing"
+            class="page-row"
+          >
+            <button class="btn small" :disabled="pageNum <= 1" @click="changePage(-1)"><Icon name="chevron-left" :size="12" /> 上一页</button>
             <span
-              v-if="isLikelyAsset(a)"
-              class="tag brand"
-              title="根据标签推测为纯素材(模型/精灵等),将安装到项目根而非 addons/,以确认页为准"
-            >素材</span>
-            <span
-              v-if="godotRange(a)"
-              class="gver"
-              :class="{ bad: compatOf(a) === false }"
-              :title="compatOf(a) === false ? `需要 ${godotRange(a)},当前项目为 Godot ${targetGodot || '未知'}` : `兼容 ${godotRange(a)}`"
-            >{{ godotRange(a) }}<template v-if="compatOf(a) === false"> · 项目 {{ targetGodot || '?' }}</template></span>
-            <span v-if="installedIds.has(a.assetId)" class="tag ok">已安装</span>
-          </div>
-          <div class="asset-author">{{ a.author }}</div>
-          <div class="asset-desc" :title="a.description">{{ a.description }}</div>
-          <div class="install-row">
+              class="page-info mono"
+              :title="aggregating ? `已聚合 ${matchPool.length} 个「${tagFilter}」插件(共扫描 ${poolFetched} 页)` : ''"
+            >{{ pageNum }} / {{ aggregating ? poolPages + (poolDone ? '' : '+') : pageTotal }}</span>
             <button
-              v-if="installing && installing.assetId === a.assetId && previewingId === a.assetId"
-              class="btn small ghost pick-ver"
-              title="取消预览下载"
-              @click="cancelPreviewDownload(a.assetId)"
-            >取消</button>
-            <button
-              v-if="installing && installing.assetId === a.assetId"
-              class="btn small asset-install busy"
-              disabled
-            >
-              <span class="spin"></span>
-              {{ installing.stage }} {{ installing.percent.toFixed(0) }}%
-            </button>
-            <button
-              v-else-if="installedIds.has(a.assetId)"
-              class="btn small asset-install ok"
-              disabled
-            >已安装</button>
-            <button
-              v-else
-              class="btn small primary asset-install"
-              :disabled="!!installing"
-              :title="mode === 'projects' ? '另存为新项目' : target ? `安装最新版到「${target.name}」` : '安装'"
-              @click="install(a)"
-            ><Icon name="download" :size="12" /> {{ mode === 'projects' ? '另存' : '安装' }}</button>
-            <button
-              class="btn small ghost pick-ver"
-              :disabled="!!installing"
-              :title="`选择版本安装${installedIds.has(a.assetId) ? '(覆盖已装版本)' : ''}`"
-              @click="openPicker(a)"
-            ><Icon name="chevron-down" :size="12" /></button>
-            <button
-              class="btn small ghost"
-              :disabled="!!installing"
-              title="仅下载 zip 包到本地,不安装"
-              @click="saveZip(a)"
-            ><Icon name="hard-drive" :size="12" /></button>
+              class="btn small"
+              :disabled="aggregating ? poolDone && pageNum >= poolPages : pageNum >= pageTotal"
+              @click="changePage(1)"
+            >下一页 <Icon name="chevron-right" :size="12" /></button>
           </div>
         </div>
-      </div>
-
-      <!-- 分页(全部/新品/最近更新;标签筛选时为聚合分页,页码为匹配项页数,+ 表示还有更多) -->
-      <div
-        v-if="(mode === 'all' || mode === 'new' || mode === 'recent') && displayAssets.length && !browsing"
-        class="page-row"
-      >
-        <button class="btn small" :disabled="pageNum <= 1" @click="changePage(-1)"><Icon name="chevron-left" :size="12" /> 上一页</button>
-        <span
-          class="page-info"
-          :title="aggregating ? `已聚合 ${matchPool.length} 个「${tagFilter}」插件(共扫描 ${poolFetched} 页)` : ''"
-        >{{ pageNum }} / {{ aggregating ? poolPages + (poolDone ? '' : '+') : pageTotal }}</span>
-        <button
-          class="btn small"
-          :disabled="aggregating ? poolDone && pageNum >= poolPages : pageNum >= pageTotal"
-          @click="changePage(1)"
-        >下一页 <Icon name="chevron-right" :size="12" /></button>
       </div>
 
       <!-- 版本选择器模态框 -->
@@ -505,127 +507,44 @@ watch(
 </template>
 
 <style scoped>
-.grow {
-  flex: 1;
-}
-
-/* ---------- 页面标题 ---------- */
-.head-sub {
-  font-size: 12px;
-  color: var(--text-3);
-  white-space: nowrap;
-}
-
-/* ---------- 工具栏(吸顶,两行布局) ---------- */
-.toolbar {
-  position: sticky;
-  top: -16px;
-  z-index: 20;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  margin: 0 -18px;
-  padding: 10px 18px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
-}
-
-.tb-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+/* ---------- 页头 ---------- */
+.view-head {
   flex-wrap: wrap;
 }
 
-.tb-target {
+.head-seg {
+  margin-left: 10px;
+}
+
+/* 安装目标 */
+.target {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--text-2);
+  min-width: 0;
+}
+
+.target .icon {
+  color: var(--brand);
   flex-shrink: 0;
 }
 
-.tb-target .icon {
-  color: var(--brand);
-}
-
-.tb-select {
+.target-select {
   max-width: 170px;
-  padding: 3px 10px;
-  font-size: 13px;
+  padding: 3px 8px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--brand);
-  border-color: var(--brand);
-  background: var(--brand-weak);
   box-shadow: none;
 }
 
-/* 安装目标的 Godot 版本 */
-.tb-gver {
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--text-2);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 2px 8px;
-  white-space: nowrap;
-}
-
-/* 兼容筛选 seg(全部 / 仅满足版本) */
-.compat-seg {
-  display: inline-flex;
-  padding: 2px;
-  gap: 2px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface-2);
-}
-
-.compat-seg button {
-  border: none;
-  background: transparent;
-  color: var(--text-3);
-  font-size: 11.5px;
-  font-weight: 600;
-  padding: 3px 10px;
-  border-radius: calc(var(--radius-sm) - 1px);
-  cursor: pointer;
-  transition: color 0.15s, background 0.15s;
-  white-space: nowrap;
-}
-
-.compat-seg button:not(:disabled):hover {
-  color: var(--text);
-}
-
-.compat-seg button.on {
-  background: var(--surface);
-  color: var(--brand);
-  box-shadow: var(--shadow-sm);
-}
-
-.compat-seg button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* ---------- 模式标签 ---------- */
-.mode-tabs {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex-wrap: wrap;
-}
-
-/* ---------- 搜索 ---------- */
+/* 搜索框 */
 .search-box {
   position: relative;
-  flex: 1;
-  min-width: 180px;
-  max-width: 460px;
+  width: 230px;
 }
 
 .sb-icon {
@@ -640,33 +559,55 @@ watch(
 .sb-input {
   width: 100%;
   padding: 5px 10px 5px 28px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
   font-size: 12.5px;
-  outline: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  box-shadow: none;
 }
 
-.sb-input:focus {
-  border-color: var(--brand);
-  box-shadow: 0 0 0 3px var(--brand-weak);
+/* ---------- 浏览面板头 ---------- */
+.browse .panel-head {
+  flex-wrap: wrap;
 }
 
-.sb-input::placeholder {
-  color: var(--text-3);
+/* 六个浏览模式横排较宽,窄窗口下允许换行 */
+.mode-seg {
+  flex-wrap: wrap;
 }
 
-.sb-ver {
-  padding: 5px 6px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text-2);
+/* 模式按钮里的计数(收藏数),复用 chip-count 的视觉 */
+.seg-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--brand-weak);
+  color: var(--brand);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.head-select {
+  padding: 3px 8px;
   font-size: 12px;
   box-shadow: none;
+}
+
+/* ---------- 收藏诊断条(仅失败时渲染) ---------- */
+.fav-diag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--danger-weak);
+  color: var(--danger);
+  font-size: 12px;
+  cursor: pointer;
+  word-break: break-all;
 }
 
 /* ---------- 搜索结果概要 ---------- */
@@ -674,6 +615,8 @@ watch(
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
 }
 
 .rl-text {
@@ -681,7 +624,6 @@ watch(
   color: var(--text-2);
 }
 
-/* 搜索分页(服务端分页,每页 20) */
 .search-pager {
   display: inline-flex;
   align-items: center;
@@ -695,27 +637,14 @@ watch(
   text-align: center;
 }
 
-/* 收藏失败诊断条:仅失败时渲染,点击可关闭 */
-.fav-diag {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 8px 0;
-  padding: 7px 10px;
-  border: 1px solid var(--danger, #d9534f);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--danger, #d9534f) 10%, transparent);
-  color: var(--danger, #d9534f);
-  font-size: 12px;
-  cursor: pointer;
-  word-break: break-all;
-}
-
+/* ---------- 状态行 ---------- */
 .error-box {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
+  border-color: var(--danger);
+  background: var(--danger-weak);
   color: var(--danger);
   font-size: 13px;
 }
@@ -731,10 +660,10 @@ watch(
   color: var(--text-3);
 }
 
-/* ---------- 资产网格 ---------- */
+/* ---------- 资产卡片网格 ---------- */
 .asset-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
   gap: 10px;
 }
 
@@ -742,8 +671,8 @@ watch(
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 14px;
+  gap: 7px;
+  padding: 13px;
   transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
 }
 
@@ -755,8 +684,8 @@ watch(
 
 .fav-btn {
   position: absolute;
-  top: 10px;
-  right: 10px;
+  top: 8px;
+  right: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -764,7 +693,7 @@ watch(
   height: 26px;
   padding: 0;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-3);
   cursor: pointer;
@@ -780,7 +709,7 @@ watch(
   color: var(--gold);
 }
 
-/* 桌面版禁用态:压淡且不抢卡片的光标 —— 它不是「加载中」也不是「坏了」,是这一宿主没有该功能 */
+/* 桌面版禁用态:压淡且不抢卡片光标 —— 不是「加载中」也不是「坏了」,是该宿主没有此功能 */
 .fav-btn:disabled {
   opacity: 0.4;
   cursor: default;
@@ -791,12 +720,12 @@ watch(
   align-items: center;
   gap: 10px;
   min-width: 0;
-  padding-right: 24px;
+  padding-right: 22px;
 }
 
 .asset-icon {
-  width: 44px;
-  height: 44px;
+  width: 42px;
+  height: 42px;
   border-radius: var(--radius-sm);
   object-fit: contain;
   background: var(--surface-2);
@@ -845,21 +774,12 @@ watch(
 .asset-ver {
   font-size: 11px;
   color: var(--text-3);
-  font-family: var(--mono);
   max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.asset-tags {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex-wrap: wrap;
-}
-
-/* 作者与简介分行,层次更清晰 */
 .asset-author {
   font-size: 12px;
   color: var(--text-3);
@@ -879,7 +799,26 @@ watch(
   min-height: 37px;
 }
 
-/* 安装行:安装按钮 + 版本选择按钮 */
+.asset-tags {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+/* Godot 兼容版本范围 */
+.gver {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.gver.bad {
+  color: var(--danger);
+}
+
+/* 安装行:安装按钮 + 版本选择 + 下载 zip */
 .install-row {
   margin-top: auto;
   display: flex;
@@ -895,20 +834,12 @@ watch(
   color: var(--brand);
 }
 
+.asset-install.ok {
+  color: var(--ok);
+}
+
 .pick-ver {
   flex-shrink: 0;
-}
-
-/* Godot 兼容版本范围 */
-.gver {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-3);
-  white-space: nowrap;
-}
-
-.gver.bad {
-  color: var(--danger);
 }
 
 /* ---------- 分页 ---------- */
@@ -917,57 +848,12 @@ watch(
   align-items: center;
   justify-content: center;
   gap: 12px;
+  margin-top: 14px;
 }
 
 .page-info {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--text-3);
-}
-
-/* ---------- 版本选择器模态框 ---------- */
-.modal-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(18, 26, 40, 0.45);
-}
-
-.modal {
-  width: min(520px, calc(100vw - 48px));
-  max-height: calc(100vh - 64px);
-  overflow-y: auto;
-  padding: 18px 20px;
-  box-shadow: var(--shadow-lift);
-}
-
-.modal-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.modal-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 14.5px;
-  font-weight: 700;
-  color: var(--text);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.icon-x {
-  width: 26px;
-  padding: 3px 0;
-  color: var(--text-3);
-  flex-shrink: 0;
 }
 </style>

@@ -20,12 +20,15 @@ type Row = ProjectRow
 const props = defineProps<{
   enterPayload?: string[] | null
   autoCreate?: boolean
+  /** 命令面板「添加已有项目」:进入本页后自动弹出目录选择 */
+  autoAdd?: boolean
   /** 从备份页「立即备份」跳入:直接打开该项目的备份弹窗 */
   autoBackup?: string | null
 }>()
 const emit = defineEmits<{
   (e: 'consumed'): void
   (e: 'create-done'): void
+  (e: 'add-done'): void
   (e: 'backup-consumed'): void
   (e: 'manage-addons', id: string): void
   /** 跳转备份管理页(id 为空表示显示全部) */
@@ -111,10 +114,15 @@ onMounted(async () => {
     selected.value = -1
   }, '过滤项目')
   window.addEventListener('keydown', onKeyDown)
-  // 概览页「新建项目」联动:进入本页时自动打开新建弹窗
+  // 概览页/命令面板「新建项目」联动:进入本页时自动打开新建弹窗
   if (props.autoCreate) {
     openCreate()
     emit('create-done')
+  }
+  // 命令面板「添加项目」联动:进入本页时自动弹出目录选择
+  if (props.autoAdd) {
+    addManually()
+    emit('add-done')
   }
   // 备份页「立即备份」联动:进入本页时自动打开该项目的备份弹窗
   if (props.autoBackup) openBackupFor(props.autoBackup)
@@ -184,9 +192,6 @@ async function addManually() {
     notify(r.error || '添加失败')
   }
 }
-
-// ---------- 新建项目 ----------
-// 表单状态与提交在 useProjectCreate 里(上面已装配)。
 
 // ---------- 项目备份(创建在项目页,查看与管理在备份页) ----------
 
@@ -348,7 +353,7 @@ function onKeyDown(e: KeyboardEvent) {
 <template>
   <div class="projects view">
     <div class="view-head">
-      <h2><Icon name="folder" :size="16" /> 项目 <span class="count-pill">{{ projects.length }}</span></h2>
+      <h2><Icon name="folder" :size="17" /> 项目 <span class="count-pill">{{ projects.length }}</span></h2>
       <div class="seg head-seg">
         <button :class="{ on: !favOnly }" @click="favOnly = false">全部</button>
         <button :class="{ on: favOnly }" :disabled="!favCount" title="只看收藏的项目" @click="favOnly = true">
@@ -362,7 +367,7 @@ function onKeyDown(e: KeyboardEvent) {
         type="search"
         placeholder="过滤项目"
         @input="selected = -1"
-      />
+      >
       <span class="grow"></span>
       <button class="btn small ghost" title="集中管理所有项目的备份" @click="emit('open-backups')">
         <Icon name="archive" :size="13" /> 备份管理
@@ -388,11 +393,11 @@ function onKeyDown(e: KeyboardEvent) {
         title="没有匹配的项目"
         :desc="`没有名称或路径包含「${filter}」的项目`"
       />
-      <div v-else class="list">
+      <div v-else class="list panel">
         <div
           v-for="(p, i) in visible"
           :key="p._id"
-          class="card row-item"
+          class="row-item"
           :class="{ selected: i === selected }"
         >
           <div class="avatar" :class="`g-${gradOf(p.name)}`">
@@ -442,46 +447,22 @@ function onKeyDown(e: KeyboardEvent) {
               <Icon :name="ACTION_ICON[act]" :size="13" />
             </button>
             <span class="act-sep"></span>
-            <button
-              class="btn small ghost icon-act"
-              title="一键导出(headless)"
-              @click="openExport(p)"
-            >
+            <button class="btn small ghost icon-act" title="一键导出(headless)" @click="openExport(p)">
               <Icon name="upload" :size="13" />
             </button>
-            <button
-              class="btn small ghost icon-act"
-              title="管理该项目的插件"
-              @click="emit('manage-addons', p._id)"
-            >
+            <button class="btn small ghost icon-act" title="管理该项目的插件" @click="emit('manage-addons', p._id)">
               <Icon name="puzzle" :size="13" />
             </button>
-            <button
-              class="btn small ghost icon-act"
-              title="为该项目创建备份"
-              @click="openBackupCreate(p._id)"
-            >
+            <button class="btn small ghost icon-act" title="为该项目创建备份" @click="openBackupCreate(p._id)">
               <Icon name="archive" :size="13" />
             </button>
-            <button
-              class="btn small ghost icon-act"
-              title="编辑自定义启动参数"
-              @click="openArgs(p)"
-            >
+            <button class="btn small ghost icon-act" title="编辑自定义启动参数" @click="openArgs(p)">
               <Icon name="zap" :size="13" />
             </button>
-            <button
-              class="btn small ghost icon-act"
-              title="查看该项目的引擎文档(离线类参考)"
-              @click="emit('open-docs', p._id)"
-            >
+            <button class="btn small ghost icon-act" title="查看该项目的引擎文档(离线类参考)" @click="emit('open-docs', p._id)">
               <Icon name="book" :size="13" />
             </button>
-            <button
-              class="btn small ghost icon-act"
-              title="查看并清理 .godot 编辑器缓存"
-              @click="openCache(p)"
-            >
+            <button class="btn small ghost icon-act" title="查看并清理 .godot 编辑器缓存" @click="openCache(p)">
               <Icon name="hard-drive" :size="13" />
             </button>
             <button class="btn small ghost star" :class="{ on: p.favorite }" title="收藏" @click="toggleFavorite(p)">
@@ -723,27 +704,28 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 .list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  overflow: hidden;
 }
 
 .row-item {
   display: flex;
   align-items: center;
   gap: 13px;
-  padding: 11px 14px;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  padding: 11px 16px;
+  transition: background 0.13s, box-shadow 0.13s;
+}
+
+.row-item + .row-item {
+  border-top: 1px solid var(--surface-2);
 }
 
 .row-item:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow);
+  background: var(--surface-2);
 }
 
 .row-item.selected {
-  border-color: var(--brand);
   background: var(--brand-weak);
+  box-shadow: inset 3px 0 0 var(--brand);
 }
 
 .avatar {

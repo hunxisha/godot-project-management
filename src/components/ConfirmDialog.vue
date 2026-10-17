@@ -73,7 +73,11 @@ function onConfirm() {
       <div class="card modal sm" :class="`tone-${tone}`">
         <div class="modal-head">
           <div class="modal-title">
-            <Icon :name="tone === 'info' ? 'sparkle' : 'alert'" :size="15" />
+            <Icon
+              :name="tone === 'info' ? 'sparkle' : 'alert'"
+              :size="15"
+              class="tone-ico"
+            />
             {{ title }}
           </div>
           <span class="grow"></span>
@@ -140,6 +144,19 @@ function onConfirm() {
 </template>
 
 <style scoped>
+/* 标题图标随语义着色:红=危险、金=警告、品牌色=提示 */
+.tone-danger .tone-ico {
+  color: var(--danger);
+}
+
+.tone-warn .tone-ico {
+  color: var(--warn);
+}
+
+.tone-info .tone-ico {
+  color: var(--brand);
+}
+
 .cd-msg {
   margin: 0 0 10px;
   font-size: 13.5px;
@@ -151,7 +168,7 @@ function onConfirm() {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface-2);
-  padding: 8px 10px;
+  padding: 9px 11px;
   margin-bottom: 12px;
   max-height: 168px;
   overflow-y: auto;

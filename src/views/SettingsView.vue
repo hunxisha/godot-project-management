@@ -224,7 +224,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="settings view">
     <div class="view-head">
-      <h2><Icon name="gear" :size="16" /> 设置</h2>
+      <h2><Icon name="gear" :size="17" /> 设置</h2>
     </div>
 
     <div class="settings-layout">
@@ -241,377 +241,344 @@ onBeforeUnmount(() => {
       </nav>
 
       <div ref="flowEl" class="settings-flow">
-      <section :id="'grp-general'" class="settings-group">
-        <h3 class="group-title"><Icon name="grid" :size="13" /> 通用</h3>
-    <div class="card section">
-      <div class="sec-head">
-        <span class="sec-ico"><Icon name="palette" :size="15" /></span>
-        <span class="sec-title">外观主题</span>
-      </div>
-      <div class="sec-body">
-        <ThemeSwitcher inline />
-      </div>
-      <div class="hint">
-        主题由「色板 × 明暗」组合:5 套色板各有浅色与深色两版,共 10 种外观。
-        「跟随宿主」会随 ZTools 的深色模式自动切换;色板与明暗都会记住。
-      </div>
-    </div>
+        <!-- ========== 通用 ========== -->
+        <section id="grp-general" class="settings-group">
+          <h3 class="group-title"><Icon name="grid" :size="13" /> 通用</h3>
 
-    <div class="card section">
-      <div class="sec-head">
-        <span class="sec-ico"><Icon name="play" :size="15" /></span>
-        <span class="sec-title">打开项目的默认动作</span>
-      </div>
-      <div class="sec-body">
-        <div class="seg">
-          <button
-            v-for="a in openActions"
-            :key="a.value"
-            :class="{ on: state.defaultOpenAction === a.value }"
-            @click="state.defaultOpenAction = a.value; patchNow()"
-          >
-            <Icon :name="a.icon" :size="12" /> {{ a.label }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <div class="card section">
-      <div class="sec-head">
-        <span class="sec-ico"><Icon name="trash" :size="15" /></span>
-        <span class="sec-title">删除项目时</span>
-      </div>
-      <div class="sec-body">
-        <div class="seg">
-          <button
-            v-for="m in deleteModes"
-            :key="m.value"
-            :class="{ on: state.deleteProjectFiles === m.value }"
-            @click="state.deleteProjectFiles = m.value; patchNow()"
-          >
-            {{ m.label }}
-          </button>
-        </div>
-      </div>
-      <div class="hint">
-        「每次询问」在删除弹窗中自由勾选;「默认同时删除」弹窗默认勾上删除文件;「仅移除记录」不再提供删除文件选项。Windows 下删除的项目文件夹会移入回收站,可恢复。
-      </div>
-    </div>
-
-    <div class="card section">
-      <div class="sec-head">
-        <span class="sec-ico"><Icon name="puzzle" :size="15" /></span>
-        <span class="sec-title">插件安装</span>
-      </div>
-      <div class="sec-body">
-        <label class="switch-row">
-          <div class="switch-text">
-            <span class="switch-label">自动启用插件</span>
-            <span class="switch-desc">安装插件后自动在 project.godot 中启用</span>
+          <div class="panel">
+            <div class="panel-head">
+              <span class="panel-title"><Icon name="palette" :size="13" /> 外观主题</span>
+            </div>
+            <div class="panel-body">
+              <ThemeSwitcher inline />
+              <div class="hint">
+                主题由「色板 × 明暗」组合:5 套色板各有浅色与深色两版,共 10 种外观。
+                「跟随宿主」会随 ZTools 的深色模式自动切换;色板与明暗都会记住。
+              </div>
+            </div>
           </div>
-          <input v-model="state.autoEnablePlugin" type="checkbox" class="switch" @change="patchNow" />
-        </label>
-      </div>
-    </div>
-      </section>
 
-      <section :id="'grp-engine'" class="settings-group">
-        <h3 class="group-title"><Icon name="globe" :size="13" /> 引擎与网络</h3>
-    <div class="card section">
-      <div class="sec-head">
-        <span class="sec-ico"><Icon name="folder" :size="15" /></span>
-        <span class="sec-title">引擎安装目录</span>
-      </div>
-      <div class="sec-body">
-        <div class="root-row">
-          <span class="mono root-value" :class="{ unset: !state.versionsRoot }">
-            {{ state.versionsRoot ?? '未设置(首次下载版本时选择)' }}
-          </span>
-          <div class="grow"></div>
-          <button class="btn small" @click="chooseRoot">选择目录</button>
-          <button v-if="state.versionsRoot" class="btn small ghost" title="打开目录" @click="openPath(state.versionsRoot!)">
-            <Icon name="external" :size="13" />
-          </button>
-        </div>
-      </div>
-      <div class="hint">通过本插件下载的 Godot 引擎将安装在独立子目录中,互不干扰,卸载即删。</div>
-    </div>
-
-    <div class="card section">
-      <div class="sec-head">
-        <span class="sec-ico"><Icon name="globe" :size="15" /></span>
-        <span class="sec-title">网络代理</span>
-      </div>
-      <div class="sec-body">
-        <input
-          v-model.trim="state.proxy"
-          class="input"
-          placeholder="如 http://127.0.0.1:7890,留空直连"
-          spellcheck="false"
-          @change="patchNow"
-        />
-      </div>
-      <div class="hint">所有网络请求(版本列表、引擎下载、插件市场)将经由该 HTTP 代理发送,保存后立即生效;仅支持 HTTP 代理。</div>
-    </div>
-
-    <div class="card section">
-      <div class="sec-head">
-        <span class="sec-ico"><Icon name="globe" :size="15" /></span>
-        <span class="sec-title">网络诊断</span>
-      </div>
-      <div class="sec-body dt-body">
-        <button class="btn" :disabled="netChecking" @click="runDiagnostics">
-          <span v-if="netChecking" class="spin"></span>
-          <Icon v-else name="globe" :size="13" />
-          {{ netChecking ? '检测中…' : '开始检测' }}
-        </button>
-      </div>
-      <div v-if="netResults.length" class="net-results">
-        <div v-for="r in netResults" :key="r.name" class="net-row" :class="{ bad: !r.ok }">
-          <Icon :name="r.ok ? 'check' : 'alert'" :size="13" />
-          <span class="net-name">{{ r.name }}</span>
-          <span class="net-ms mono">{{ r.ok ? `${r.ms} ms` : '不可达' }}</span>
-          <span v-if="!r.ok" class="net-err">{{ r.error }}</span>
-        </div>
-        <div class="hint">
-          诊断走的是插件的实际网络链路(含代理设置);GitHub 不可达时引擎下载与导出模板会受影响。
-        </div>
-      </div>
-    </div>
-      </section>
-
-      <section :id="'grp-account'" class="settings-group">
-        <h3 class="group-title"><Icon name="key" :size="13" /> 账号</h3>
-    <div class="card section">
-      <div class="sec-head">
-        <span class="sec-ico"><Icon name="key" :size="15" /></span>
-        <span class="sec-title">Asset Store 账号</span>
-        <span v-if="state.storeAccount" class="tag ok">已连接</span>
-      </div>
-      <div class="sec-body">
-        <template v-if="state.storeAccount">
-          <div class="root-row">
-            <span class="account-avatar">{{ state.storeAccount.charAt(0).toUpperCase() }}</span>
-            <span class="account-name">{{ state.storeAccount }}</span>
-            <div class="grow"></div>
-            <button class="btn small danger-text" @click="logoutStore">退出登录</button>
+          <div class="panel">
+            <div class="panel-head">
+              <span class="panel-title"><Icon name="play" :size="13" /> 打开项目的默认动作</span>
+            </div>
+            <div class="panel-body">
+              <div class="seg">
+                <button
+                  v-for="a in openActions"
+                  :key="a.value"
+                  :class="{ on: state.defaultOpenAction === a.value }"
+                  @click="state.defaultOpenAction = a.value; patchNow()"
+                >
+                  <Icon :name="a.icon" :size="12" /> {{ a.label }}
+                </button>
+              </div>
+            </div>
           </div>
-        </template>
-        <template v-else>
-          <div class="root-row">
-            <input
-              v-model="apiKeyInput"
-              class="input"
-              type="password"
-              placeholder="粘贴 Asset Store API Key"
-              spellcheck="false"
-              @keyup.enter="saveApiKey"
-            />
-            <button class="btn small primary" :disabled="verifying || !apiKeyInput.trim()" @click="saveApiKey">
-              <span v-if="verifying" class="spin"></span>
-              {{ verifying ? '验证中…' : '连接' }}
-            </button>
+
+          <div class="panel">
+            <div class="panel-head">
+              <span class="panel-title"><Icon name="trash" :size="13" /> 删除项目时</span>
+            </div>
+            <div class="panel-body">
+              <div class="seg">
+                <button
+                  v-for="m in deleteModes"
+                  :key="m.value"
+                  :class="{ on: state.deleteProjectFiles === m.value }"
+                  @click="state.deleteProjectFiles = m.value; patchNow()"
+                >
+                  {{ m.label }}
+                </button>
+              </div>
+              <div class="hint">
+                「每次询问」在删除弹窗中自由勾选;「默认同时删除」弹窗默认勾上删除文件;「仅移除记录」不再提供删除文件选项。Windows 下删除的项目文件夹会移入回收站,可恢复。
+              </div>
+            </div>
           </div>
-        </template>
-      </div>
-      <div class="hint">
-        在 <span class="link" @click="openStoreSite">store.godotengine.org 的 API 密钥页面</span> 登录并生成 Key 后粘贴到此处;退出登录不会撤销网站上的 Key。
-      </div>
-    </div>
-      </section>
 
-      <section :id="'grp-backup'" class="settings-group">
-        <h3 class="group-title"><Icon name="archive" :size="13" /> 备份</h3>
-    <div class="card section">
-      <div class="sec-head">
-        <span class="sec-ico"><Icon name="archive" :size="15" /></span>
-        <span class="sec-title">备份与恢复</span>
-      </div>
-
-      <div class="bk-field">
-        <span class="f-label">默认备份目录</span>
-        <div class="root-row">
-          <span class="mono root-value" :class="{ unset: !state.backupRoot }">
-            {{ state.backupRoot ?? '未设置(新建备份时选择)' }}
-          </span>
-          <div class="grow"></div>
-          <button class="btn small" @click="chooseBackupRoot">选择目录</button>
-          <button
-            v-if="state.backupRoot"
-            class="btn small ghost"
-            title="打开目录"
-            @click="openPath(state.backupRoot!)"
-          ><Icon name="external" :size="12" /></button>
-        </div>
-      </div>
-
-      <div class="bk-field">
-        <span class="f-label">默认备份方式</span>
-        <div class="seg">
-          <button
-            :class="{ on: (state.backupMode ?? 'zip') === 'zip' }"
-            @click="state.backupMode = 'zip'; patchNow()"
-          >zip 打包</button>
-          <button
-            :class="{ on: state.backupMode === 'copy' }"
-            @click="state.backupMode = 'copy'; patchNow()"
-          >完整快照</button>
-        </div>
-        <div class="hint">新建备份时预选该方式,仍可在对话框里临时切换。</div>
-      </div>
-
-      <div class="bk-field">
-        <span class="f-label">zip 压缩级别</span>
-        <div class="seg">
-          <button
-            v-for="lv in ([{ v: 1, t: '快速' }, { v: 6, t: '标准' }, { v: 9, t: '最大' }] as const)"
-            :key="lv.v"
-            :class="{ on: (state.backupLevel ?? 6) === lv.v }"
-            :disabled="(state.backupMode ?? 'zip') === 'copy'"
-            @click="state.backupLevel = lv.v; patchNow()"
-          >{{ lv.t }}</button>
-        </div>
-        <div class="hint">
-          {{ (state.backupMode ?? 'zip') === 'copy'
-            ? '当前默认方式为完整快照,压缩级别不生效。'
-            : '快速=最快但体积最大;最大=体积最小但耗时最长。仅对 zip 打包生效。' }}
-        </div>
-      </div>
-
-      <div class="bk-field">
-        <label class="switch-row">
-          <div class="switch-text">
-            <span class="switch-label">默认包含 .godot 编辑器缓存</span>
-            <span class="switch-desc">默认排除:缓存可再生成,排除后备份更小更快</span>
+          <div class="panel">
+            <div class="panel-head">
+              <span class="panel-title"><Icon name="puzzle" :size="13" /> 插件安装</span>
+            </div>
+            <div class="panel-body">
+              <label class="switch-row">
+                <div class="switch-text">
+                  <span class="switch-label">自动启用插件</span>
+                  <span class="switch-desc">安装插件后自动在 project.godot 中启用</span>
+                </div>
+                <input v-model="state.autoEnablePlugin" type="checkbox" class="switch" @change="patchNow" />
+              </label>
+            </div>
           </div>
-          <input v-model="state.backupIncludeCache" type="checkbox" class="switch" @change="patchNow" />
-        </label>
-      </div>
+        </section>
 
-      <div class="bk-field">
-        <span class="f-label">默认排除目录</span>
-        <label class="chk-row">
-          <input
-            type="checkbox"
-            class="chk"
-            :checked="hasExclude('.git')"
-            @change="toggleExclude('.git', ($event.target as HTMLInputElement).checked)"
-          />
-          <span><code>.git</code></span>
-        </label>
-        <label class="chk-row">
-          <input
-            type="checkbox"
-            class="chk"
-            :checked="hasExclude('build')"
-            @change="toggleExclude('build', ($event.target as HTMLInputElement).checked)"
-          />
-          <span><code>build/</code> 与 <code>export/</code> 产物目录</span>
-        </label>
-        <div class="hint">
-          默认不排除任何内容,保证备份保真。排除项按目录名匹配,会记入备份记录,也可在新建备份时单独调整。
-        </div>
-      </div>
-    </div>
-      </section>
+        <!-- ========== 引擎与网络 ========== -->
+        <section id="grp-engine" class="settings-group">
+          <h3 class="group-title"><Icon name="globe" :size="13" /> 引擎与网络</h3>
 
-      <section :id="'grp-data'" class="settings-group">
-        <h3 class="group-title"><Icon name="hard-drive" :size="13" /> 数据</h3>
-    <div class="card section">
-      <div class="sec-head">
-        <span class="sec-ico"><Icon name="hard-drive" :size="15" /></span>
-        <span class="sec-title">数据迁移</span>
-      </div>
-      <div class="sec-body dt-body">
-        <button class="btn" :disabled="dtBusy" @click="exportData">
-          <Icon name="upload" :size="13" /> 导出数据
-        </button>
-        <button class="btn" :disabled="dtBusy" @click="importData">
-          <Icon name="download" :size="13" /> 导入数据
-        </button>
-      </div>
-      <div class="hint">
-        导出内容:设置、项目清单、市场收藏、文档收藏与浏览历史(打包为一个 JSON 文件)。导入时:项目只登记本机路径存在的条目;
-        收藏按 assetId 合并不覆盖已有;文档收藏与历史并集合并;设置只补本机缺失的键(安装目录、代理这类机器本地配置不会被导入值覆盖)。
-      </div>
-    </div>
+          <div class="panel">
+            <div class="panel-head">
+              <span class="panel-title"><Icon name="folder" :size="13" /> 引擎安装目录</span>
+            </div>
+            <div class="panel-body">
+              <div class="root-row">
+                <span class="mono root-value" :class="{ unset: !state.versionsRoot }">
+                  {{ state.versionsRoot ?? '未设置(首次下载版本时选择)' }}
+                </span>
+                <button class="btn small" @click="chooseRoot">选择目录</button>
+                <button v-if="state.versionsRoot" class="btn small ghost" title="打开目录" @click="openPath(state.versionsRoot!)">
+                  <Icon name="external" :size="13" />
+                </button>
+              </div>
+              <div class="hint">通过本插件下载的 Godot 引擎将安装在独立子目录中,互不干扰,卸载即删。</div>
+            </div>
+          </div>
 
-    <div class="card section">
-      <div class="sec-head">
-        <span class="sec-ico"><Icon name="book" :size="15" /></span>
-        <span class="sec-title">文档库缓存</span>
-      </div>
-      <div class="sec-body dt-body">
-        <button
-          class="btn"
-          :disabled="!docsCache || !docsCache.libraries.length"
-          @click="cleanDocsCache()"
-        >
-          <Icon name="trash" :size="13" /> 清理全部
-        </button>
-        <span v-if="docsCache && docsCache.error" class="dt-size">{{ docsCache.error }}</span>
-        <span v-else-if="docsCache" class="dt-size">共 {{ fmtSize(docsCache.sizeBytes) }}</span>
-      </div>
-      <div v-if="docsCache && docsCache.libraries.length" class="docs-cache-list">
-        <div v-for="l in docsCache.libraries" :key="l.versionId" class="dc-row">
-          <span class="dc-tag mono">{{ l.tag }}</span>
-          <span class="dc-meta">{{ l.classes }} 类 · {{ fmtSize(l.sizeBytes) }}</span>
-          <span class="grow"></span>
-          <button class="mini-link" @click="cleanDocsCache([l.versionId])">删除</button>
-        </div>
-      </div>
-      <div class="hint">
-        文档库是从已装引擎导出的离线类参考,可随时在「文档」页重新生成,删除不影响插件其它数据。
-      </div>
-    </div>
-      </section>
+          <div class="panel">
+            <div class="panel-head">
+              <span class="panel-title"><Icon name="globe" :size="13" /> 网络代理</span>
+            </div>
+            <div class="panel-body">
+              <input
+                v-model.trim="state.proxy"
+                class="input"
+                placeholder="如 http://127.0.0.1:7890,留空直连"
+                spellcheck="false"
+                @change="patchNow"
+              />
+              <div class="hint">所有网络请求(版本列表、引擎下载、插件市场)将经由该 HTTP 代理发送,保存后立即生效;仅支持 HTTP 代理。</div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <span class="panel-title"><Icon name="activity" :size="13" /> 网络诊断</span>
+            </div>
+            <div class="panel-body">
+              <div class="dt-body">
+                <button class="btn" :disabled="netChecking" @click="runDiagnostics">
+                  <span v-if="netChecking" class="spin"></span>
+                  <Icon v-else name="activity" :size="13" />
+                  {{ netChecking ? '检测中…' : '开始检测' }}
+                </button>
+              </div>
+              <div v-if="netResults.length" class="net-results">
+                <div v-for="r in netResults" :key="r.name" class="net-row" :class="{ bad: !r.ok }">
+                  <Icon :name="r.ok ? 'check' : 'alert'" :size="13" />
+                  <span class="net-name">{{ r.name }}</span>
+                  <span class="net-ms mono">{{ r.ok ? `${r.ms} ms` : '不可达' }}</span>
+                  <span v-if="!r.ok" class="net-err">{{ r.error }}</span>
+                </div>
+                <div class="hint">
+                  诊断走的是插件的实际网络链路(含代理设置);GitHub 不可达时引擎下载与导出模板会受影响。
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ========== 账号 ========== -->
+        <section id="grp-account" class="settings-group">
+          <h3 class="group-title"><Icon name="key" :size="13" /> 账号</h3>
+
+          <div class="panel">
+            <div class="panel-head">
+              <span class="panel-title"><Icon name="key" :size="13" /> Asset Store 账号</span>
+              <span v-if="state.storeAccount" class="tag ok"><Icon name="check" :size="10" /> 已连接</span>
+            </div>
+            <div class="panel-body">
+              <template v-if="state.storeAccount">
+                <div class="root-row">
+                  <span class="account-avatar">{{ state.storeAccount.charAt(0).toUpperCase() }}</span>
+                  <span class="account-name">{{ state.storeAccount }}</span>
+                  <div class="grow"></div>
+                  <button class="btn small danger-text" @click="logoutStore">退出登录</button>
+                </div>
+              </template>
+              <template v-else>
+                <div class="root-row">
+                  <input
+                    v-model="apiKeyInput"
+                    class="input"
+                    type="password"
+                    placeholder="粘贴 Asset Store API Key"
+                    spellcheck="false"
+                    @keyup.enter="saveApiKey"
+                  />
+                  <button class="btn small primary" :disabled="verifying || !apiKeyInput.trim()" @click="saveApiKey">
+                    <span v-if="verifying" class="spin"></span>
+                    {{ verifying ? '验证中…' : '连接' }}
+                  </button>
+                </div>
+              </template>
+              <div class="hint">
+                在 <span class="link" @click="openStoreSite">store.godotengine.org 的 API 密钥页面</span> 登录并生成 Key 后粘贴到此处;退出登录不会撤销网站上的 Key。
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ========== 备份 ========== -->
+        <section id="grp-backup" class="settings-group">
+          <h3 class="group-title"><Icon name="archive" :size="13" /> 备份</h3>
+
+          <div class="panel">
+            <div class="panel-head">
+              <span class="panel-title"><Icon name="archive" :size="13" /> 备份与恢复</span>
+            </div>
+            <div class="panel-body">
+              <div class="bk-field">
+                <span class="f-label">默认备份目录</span>
+                <div class="root-row">
+                  <span class="mono root-value" :class="{ unset: !state.backupRoot }">
+                    {{ state.backupRoot ?? '未设置(新建备份时选择)' }}
+                  </span>
+                  <button class="btn small" @click="chooseBackupRoot">选择目录</button>
+                  <button
+                    v-if="state.backupRoot"
+                    class="btn small ghost"
+                    title="打开目录"
+                    @click="openPath(state.backupRoot!)"
+                  ><Icon name="external" :size="12" /></button>
+                </div>
+              </div>
+
+              <div class="bk-field">
+                <span class="f-label">默认备份方式</span>
+                <div class="seg">
+                  <button
+                    :class="{ on: (state.backupMode ?? 'zip') === 'zip' }"
+                    @click="state.backupMode = 'zip'; patchNow()"
+                  >zip 打包</button>
+                  <button
+                    :class="{ on: state.backupMode === 'copy' }"
+                    @click="state.backupMode = 'copy'; patchNow()"
+                  >完整快照</button>
+                </div>
+                <div class="hint">新建备份时预选该方式,仍可在对话框里临时切换。</div>
+              </div>
+
+              <div class="bk-field">
+                <span class="f-label">zip 压缩级别</span>
+                <div class="seg">
+                  <button
+                    v-for="lv in ([{ v: 1, t: '快速' }, { v: 6, t: '标准' }, { v: 9, t: '最大' }] as const)"
+                    :key="lv.v"
+                    :class="{ on: (state.backupLevel ?? 6) === lv.v }"
+                    :disabled="(state.backupMode ?? 'zip') === 'copy'"
+                    @click="state.backupLevel = lv.v; patchNow()"
+                  >{{ lv.t }}</button>
+                </div>
+                <div class="hint">
+                  {{ (state.backupMode ?? 'zip') === 'copy'
+                    ? '当前默认方式为完整快照,压缩级别不生效。'
+                    : '快速=最快但体积最大;最大=体积最小但耗时最长。仅对 zip 打包生效。' }}
+                </div>
+              </div>
+
+              <div class="bk-field">
+                <label class="switch-row">
+                  <div class="switch-text">
+                    <span class="switch-label">默认包含 .godot 编辑器缓存</span>
+                    <span class="switch-desc">默认排除:缓存可再生成,排除后备份更小更快</span>
+                  </div>
+                  <input v-model="state.backupIncludeCache" type="checkbox" class="switch" @change="patchNow" />
+                </label>
+              </div>
+
+              <div class="bk-field">
+                <span class="f-label">默认排除目录</span>
+                <label class="chk-row">
+                  <input
+                    type="checkbox"
+                    class="chk"
+                    :checked="hasExclude('.git')"
+                    @change="toggleExclude('.git', ($event.target as HTMLInputElement).checked)"
+                  />
+                  <span><code>.git</code></span>
+                </label>
+                <label class="chk-row">
+                  <input
+                    type="checkbox"
+                    class="chk"
+                    :checked="hasExclude('build')"
+                    @change="toggleExclude('build', ($event.target as HTMLInputElement).checked)"
+                  />
+                  <span><code>build/</code> 与 <code>export/</code> 产物目录</span>
+                </label>
+                <div class="hint">
+                  默认不排除任何内容,保证备份保真。排除项按目录名匹配,会记入备份记录,也可在新建备份时单独调整。
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ========== 数据 ========== -->
+        <section id="grp-data" class="settings-group">
+          <h3 class="group-title"><Icon name="hard-drive" :size="13" /> 数据</h3>
+
+          <div class="panel">
+            <div class="panel-head">
+              <span class="panel-title"><Icon name="hard-drive" :size="13" /> 数据迁移</span>
+            </div>
+            <div class="panel-body">
+              <div class="dt-body">
+                <button class="btn" :disabled="dtBusy" @click="exportData">
+                  <Icon name="upload" :size="13" /> 导出数据
+                </button>
+                <button class="btn" :disabled="dtBusy" @click="importData">
+                  <Icon name="download" :size="13" /> 导入数据
+                </button>
+              </div>
+              <div class="hint">
+                导出内容:设置、项目清单、市场收藏、文档收藏与浏览历史(打包为一个 JSON 文件)。导入时:项目只登记本机路径存在的条目;
+                收藏按 assetId 合并不覆盖已有;文档收藏与历史并集合并;设置只补本机缺失的键(安装目录、代理这类机器本地配置不会被导入值覆盖)。
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <span class="panel-title"><Icon name="book" :size="13" /> 文档库缓存</span>
+            </div>
+            <div class="panel-body">
+              <div class="dt-body">
+                <button
+                  class="btn"
+                  :disabled="!docsCache || !docsCache.libraries.length"
+                  @click="cleanDocsCache()"
+                >
+                  <Icon name="trash" :size="13" /> 清理全部
+                </button>
+                <span v-if="docsCache && docsCache.error" class="dt-size">{{ docsCache.error }}</span>
+                <span v-else-if="docsCache" class="dt-size">共 {{ fmtSize(docsCache.sizeBytes) }}</span>
+              </div>
+              <div v-if="docsCache && docsCache.libraries.length" class="docs-cache-list">
+                <div v-for="l in docsCache.libraries" :key="l.versionId" class="dc-row">
+                  <span class="dc-tag mono">{{ l.tag }}</span>
+                  <span class="dc-meta">{{ l.classes }} 类 · {{ fmtSize(l.sizeBytes) }}</span>
+                  <span class="grow"></span>
+                  <button class="mini-link" @click="cleanDocsCache([l.versionId])">删除</button>
+                </div>
+              </div>
+              <div class="hint">
+                文档库是从已装引擎导出的离线类参考,可随时在「文档」页重新生成,删除不影响插件其它数据。
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.grow {
-  flex: 1;
-}
-
 .settings {
   max-width: 880px;
   margin: 0 auto;
   width: 100%;
-}
-
-.section {
-  padding: 15px 18px;
-}
-
-.sec-head {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-bottom: 12px;
-}
-
-.sec-ico {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
-  background: var(--brand-weak);
-  color: var(--brand);
-  flex-shrink: 0;
-}
-
-.sec-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.sec-body {
-  min-height: 32px;
 }
 
 .root-row {
@@ -644,7 +611,7 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 
-/* 备份设置:同一切区内多个子项 */
+/* 备份设置:同一面板内多个子项 */
 .bk-field {
   margin-bottom: 16px;
 }
@@ -680,6 +647,7 @@ onBeforeUnmount(() => {
   font-size: 11.5px;
 }
 
+/* 面板体内说明文字 */
 .hint {
   margin-top: 10px;
   font-size: 12px;
@@ -746,7 +714,7 @@ onBeforeUnmount(() => {
   margin-left: auto;
 }
 
-/* 数据迁移 / 文档库缓存 / 网络诊断 */
+/* 按钮排 */
 .dt-body {
   display: flex;
   gap: 8px;
@@ -798,6 +766,7 @@ onBeforeUnmount(() => {
   background: var(--surface-2);
 }
 
+/* 网络诊断结果 */
 .net-results {
   margin-top: 10px;
   display: flex;
@@ -856,8 +825,8 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
   padding: 4px;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface-2);
+  border-radius: var(--radius);
+  background: var(--chrome);
 }
 
 .settings-nav button {
@@ -868,7 +837,7 @@ onBeforeUnmount(() => {
   border: none;
   border-radius: 7px;
   background: transparent;
-  color: var(--text-2);
+  color: var(--chrome-text);
   font-size: 12px;
   font-weight: 500;
   text-align: left;
@@ -914,6 +883,10 @@ onBeforeUnmount(() => {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-3);
+}
+
+.group-title .icon {
+  color: var(--brand);
 }
 
 @media (max-width: 860px) {

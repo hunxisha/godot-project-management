@@ -167,13 +167,14 @@ async function removeHistory(id: string) {
           </div>
           <div v-if="templateHint" class="ed-hint">{{ templateHint }}</div>
 
-          <!-- 导出进行中:输出尾行 + 取消 -->
+          <!-- 导出进行中:进度条 + 输出尾行 + 取消 -->
           <div v-if="task" class="ed-running">
             <div class="ed-run-head">
               <span class="spin"></span>
               <span class="grow">正在导出「{{ task.presetName }}」…</span>
               <button class="btn small danger-text" @click="ex.cancel(task.id)">取消</button>
             </div>
+            <div class="bar indet"><div class="fill active"></div></div>
             <pre v-if="task.log" class="ed-log mono">{{ task.log }}</pre>
           </div>
         </template>
@@ -331,6 +332,11 @@ async function removeHistory(id: string) {
   align-items: center;
   gap: 8px;
   font-size: 12.5px;
+}
+
+/* headless 导出无百分比:不确定进度条 */
+.ed-running .bar {
+  margin-top: 8px;
 }
 
 .ed-log {

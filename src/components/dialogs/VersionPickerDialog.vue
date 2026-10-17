@@ -92,7 +92,7 @@ function pick(r: ReleaseRow) {
 
         <div v-if="loading" class="hint-line"><span class="spin"></span> 加载版本列表…</div>
 
-        <div v-else-if="error" class="card vp-error">
+        <div v-else-if="error" class="vp-error">
           <Icon name="alert" :size="14" />
           <span>加载失败:{{ error }}</span>
         </div>
@@ -149,7 +149,8 @@ function pick(r: ReleaseRow) {
   padding: 10px 12px;
   font-size: 12.5px;
   color: var(--danger);
-  border-color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
   background: var(--danger-weak);
 }
 

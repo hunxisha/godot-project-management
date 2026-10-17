@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { notify, openExternal } from '../services/bridge'
+import { notify, openExternal, openPath } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import VersionPickerDialog from '../components/dialogs/VersionPickerDialog.vue'
@@ -155,6 +155,12 @@ function openStore(a: AddonInfo) {
   if (!a.storeUrl) return
   openExternal(a.storeUrl)
 }
+
+/** 在文件管理器中打开该条目所在目录(素材装在项目根,插件在 addons/ 下) */
+function openAddonDir(a: AddonInfo) {
+  if (!target.value) return
+  openPath(a.kind === 'asset' ? target.value.path : `${target.value.path}/addons/${a.dirName}`)
+}
 </script>
 
 <template>
@@ -169,152 +175,169 @@ function openStore(a: AddonInfo) {
     </EmptyState>
 
     <template v-else>
-      <!-- 工具栏(吸顶):项目切换 + 检查更新 + 去市场 -->
-      <div class="toolbar">
-        <label class="tb-target" :title="target?.path ? `项目目录 ${target.path}` : '选择要管理的项目'">
-          <Icon name="folder" :size="13" />
-          <span class="tb-caption">管理项目</span>
-          <select v-model="targetId" class="tb-select" @change="onTargetChange">
-            <option v-for="p in projects" :key="p._id" :value="p._id">{{ p.name }}</option>
-          </select>
-        </label>
-        <span class="grow"></span>
-        <button
-          v-if="addons.some((a) => a.fromMarket)"
-          class="btn small"
-          :disabled="checking || !!updating"
-          @click="checkUpdates"
-        >
-          <span v-if="checking" class="spin"></span>
-          <Icon v-else name="refresh" :size="12" />
-          {{ checking ? '检查中…' : '检查更新' }}
-        </button>
-        <button
-          class="btn small"
-          :disabled="scan.scanning.value || !!checking"
-          :title="projects.length > 1 ? '跨项目扫描所有已装内容的新版本' : '扫描本项目的已装内容'"
-          @click="startScan"
-        >
-          <span v-if="scan.scanning.value" class="spin"></span>
-          <Icon v-else name="search" :size="12" />
-          {{ scan.scanning.value ? `扫描中 ${scan.progress.value}` : '全库巡检' }}
-        </button>
-        <button class="btn small primary" @click="emit('navigate', 'marketplace')">
-          <Icon name="puzzle" :size="12" /> 去市场找插件
-        </button>
-      </div>
-
-      <!-- 标题行 -->
+      <!-- 页头:子页切换 + 项目选择 -->
       <div class="view-head">
-        <h2><Icon name="check" :size="16" /> 已安装插件与素材 <span class="count-pill">{{ addons.length }}</span></h2>
-        <span v-if="addons.length" class="head-stat">插件 {{ pluginRows.length }} · 已启用 {{ enabledCount }} · 素材 {{ assetRows.length }}</span>
-        <span class="grow"></span>
-        <!-- 插件页子切换:与「市场」互跳 -->
+        <h2><Icon name="check" :size="17" /> 已安装插件 <span class="count-pill" title="该项目已装内容总数">{{ addons.length }}</span></h2>
         <div class="seg head-seg" role="tablist" aria-label="插件子页">
           <button @click="emit('navigate', 'marketplace')">市场</button>
           <button class="on" aria-current="true">已安装</button>
         </div>
+        <span v-if="addons.length" class="head-stat">插件 {{ pluginRows.length }} · 已启用 {{ enabledCount }} · 素材 {{ assetRows.length }}</span>
+        <span class="grow"></span>
+        <label class="target" :title="target?.path ? `项目目录 ${target.path}` : '选择要管理的项目'">
+          <Icon name="folder" :size="13" />
+          <select v-model="targetId" class="select target-select" @change="onTargetChange">
+            <option v-for="p in projects" :key="p._id" :value="p._id">{{ p.name }}</option>
+          </select>
+        </label>
       </div>
 
-      <EmptyState
-        v-if="!addons.length"
-        icon="puzzle"
-        title="该项目还没有插件"
-        desc="从插件市场搜索并安装,安装后会自动写入项目 addons/ 目录。"
-      >
-        <button class="btn primary" @click="emit('navigate', 'marketplace')"><Icon name="puzzle" :size="14" /> 浏览插件市场</button>
-      </EmptyState>
-
-      <template v-else>
-        <!-- 批量操作栏(有选中时出现) -->
-        <div v-if="checked.length" class="batch-bar card">
-          <span class="bb-count">已选 <b>{{ checked.length }}</b> / {{ addons.length }}</span>
-          <button class="btn small ghost" @click="toggleAll">{{ allChecked ? '取消全选' : '全选' }}</button>
+      <!-- 内容面板:头部为列表级操作,主体为按 插件/素材 分区的行列表 -->
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-title"><Icon name="puzzle" :size="13" /> 已装内容</div>
           <span class="grow"></span>
-          <button class="btn small ghost" :disabled="!hasDisabledSel" title="启用所选插件" @click="batchToggle(true)">批量启用</button>
-          <button class="btn small ghost" :disabled="!hasEnabledSel" title="禁用所选插件" @click="batchToggle(false)">批量禁用</button>
-          <button class="btn small" title="复制所选插件到其他项目" @click="openCopy">
-            <Icon name="copy" :size="12" /> 复制到项目
+          <button
+            v-if="addons.some((a) => a.fromMarket)"
+            class="btn small"
+            :disabled="checking || !!updating"
+            title="检查本项目已装插件的新版本"
+            @click="checkUpdates"
+          >
+            <span v-if="checking" class="spin"></span>
+            <Icon v-else name="refresh" :size="12" />
+            {{ checking ? '检查中…' : '检查更新' }}
           </button>
-          <button class="btn small danger-text" :class="{ confirming: confirmingBatch }" @click="batchUninstall">
-            {{ confirmingBatch ? `确认卸载 ${checked.length} 个?` : '批量卸载' }}
+          <button
+            class="btn small"
+            :disabled="scan.scanning.value || !!checking"
+            :title="projects.length > 1 ? '跨项目扫描所有已装内容的新版本' : '扫描本项目的已装内容'"
+            @click="startScan"
+          >
+            <span v-if="scan.scanning.value" class="spin"></span>
+            <Icon v-else name="search" :size="12" />
+            {{ scan.scanning.value ? `扫描中 ${scan.progress.value}` : '全库巡检' }}
+          </button>
+          <button class="btn small primary" @click="emit('navigate', 'marketplace')">
+            <Icon name="puzzle" :size="12" /> 去市场找插件
           </button>
         </div>
 
-        <div class="addon-list">
-          <template v-for="a in addons" :key="a.assetId || a.dirName">
-            <div v-if="a === firstPlugin || a === firstAsset" class="sec-head">
-              <Icon :name="a.kind === 'asset' ? 'box' : 'puzzle'" :size="12" />
-              {{ a.kind === 'asset' ? '素材' : '插件' }}
-              <span>{{ a.kind === 'asset' ? assetRows.length : pluginRows.length }}</span>
-            </div>
-            <div class="card addon" :class="{ picked: checked.includes(a.dirName) }">
-              <input
-                type="checkbox"
-                class="chk ad-chk"
-                :checked="checked.includes(a.dirName)"
-                :title="checked.includes(a.dirName) ? '取消选择' : '选择'"
-                @change="toggleCheck(a.dirName)"
-              />
-              <div class="ad-ico" :class="{ off: a.kind !== 'asset' && !a.enabled }"><Icon name="puzzle" :size="17" /></div>
-              <div class="addon-main">
-                <div class="addon-name">
-                  <span
-                    class="name"
-                    :class="{ link: !!a.storeUrl }"
-                    :title="a.storeUrl ? `${a.name} · 在资产库中查看` : a.name"
-                    @click="openStore(a)"
-                  >{{ a.name }}</span>
-                  <Icon v-if="a.storeUrl" name="external" :size="10" class="name-ext" />
-                  <span v-if="a.version" class="tag">v{{ a.version }}</span>
-                  <span v-if="a.kind === 'asset'" class="tag brand" title="纯素材:安装到项目根,无启用概念">素材</span>
-                  <span v-else class="state" :class="a.enabled ? 'ok' : 'idle'">
-                    <span class="dot"></span>{{ a.enabled ? '已启用' : '未启用' }}
-                  </span>
-                  <span v-if="a.fromMarket" class="tag brand">市场</span>
-                  <span v-else class="tag" title="手动放置或未通过市场安装">未知来源</span>
-                  <span v-if="updateInfo[a.dirName]" class="tag warn">可更新到 v{{ updateInfo[a.dirName].latest }}</span>
-                </div>
-                <div v-if="a.kind === 'asset'" class="addon-meta mono" :title="assetPathsTitle(a)">
-                  res://{{ assetTops(a).join('、') }} · {{ (a.assetPaths || []).length }} 个文件
-                </div>
-                <div v-else class="addon-meta mono" :title="`addons/${a.dirName}`">addons/{{ a.dirName }}</div>
-                <!-- 更新进度 -->
-                <div v-if="updating && a.assetId === updating.assetId" class="upd">
-                  <span class="spin"></span>
-                  <span class="upd-stage">{{ updating.stage }} {{ updating.percent.toFixed(0) }}%</span>
-                  <span class="bar"><span class="fill" :style="{ width: updating.percent + '%' }"></span></span>
-                </div>
-              </div>
-              <div class="addon-actions">
-                <button
-                  v-if="a.fromMarket && updateInfo[a.dirName]"
-                  class="btn small primary"
-                  :disabled="!!updating"
-                  @click="update(a)"
-                ><Icon name="download" :size="12" /> 更新</button>
-                <button
-                  v-if="a.assetId"
-                  class="btn small ghost"
-                  :disabled="!!updating"
-                  title="从历史版本中替换当前插件"
-                  @click="openVersions(a)"
-                ><Icon name="package" :size="12" /> 版本</button>
-                <button v-if="a.hasCfg" class="btn small ghost" @click="toggleEnabled(a)">
-                  {{ a.enabled ? '禁用' : '启用' }}
-                </button>
-                <button
-                  class="btn small danger-text"
-                  :class="{ confirming: confirmingDir === a.dirName }"
-                  @click="uninstall(a)"
-                >
-                  {{ confirmingDir === a.dirName ? '确认卸载?' : '卸载' }}
-                </button>
-              </div>
-            </div>
-          </template>
+        <div v-if="!addons.length" class="panel-body">
+          <EmptyState
+            icon="puzzle"
+            title="该项目还没有插件"
+            desc="从插件市场搜索并安装,安装后会自动写入项目 addons/ 目录。"
+          >
+            <button class="btn primary" @click="emit('navigate', 'marketplace')"><Icon name="puzzle" :size="14" /> 浏览插件市场</button>
+          </EmptyState>
         </div>
-      </template>
+
+        <template v-else>
+          <!-- 批量操作栏(有选中时出现) -->
+          <div v-if="checked.length" class="batch-bar">
+            <span class="bb-count">已选 <b>{{ checked.length }}</b> / {{ addons.length }}</span>
+            <button class="btn small ghost" @click="toggleAll">{{ allChecked ? '取消全选' : '全选' }}</button>
+            <span class="grow"></span>
+            <button class="btn small ghost" :disabled="!hasDisabledSel" title="启用所选插件" @click="batchToggle(true)">批量启用</button>
+            <button class="btn small ghost" :disabled="!hasEnabledSel" title="禁用所选插件" @click="batchToggle(false)">批量禁用</button>
+            <button class="btn small" title="复制所选插件到其他项目" @click="openCopy">
+              <Icon name="copy" :size="12" /> 复制到项目
+            </button>
+            <button class="btn small danger-text" :class="{ confirming: confirmingBatch }" @click="batchUninstall">
+              {{ confirmingBatch ? `确认卸载 ${checked.length} 个?` : '批量卸载' }}
+            </button>
+          </div>
+
+          <div class="addon-list">
+            <template v-for="a in addons" :key="a.assetId || a.dirName">
+              <div v-if="a === firstPlugin || a === firstAsset" class="sec-head">
+                <Icon :name="a.kind === 'asset' ? 'box' : 'puzzle'" :size="12" />
+                {{ a.kind === 'asset' ? '素材' : '插件' }}
+                <span class="count-pill">{{ a.kind === 'asset' ? assetRows.length : pluginRows.length }}</span>
+              </div>
+              <div class="addon-row" :class="{ picked: checked.includes(a.dirName) }">
+                <input
+                  type="checkbox"
+                  class="chk"
+                  :checked="checked.includes(a.dirName)"
+                  :title="checked.includes(a.dirName) ? '取消选择' : '选择'"
+                  @change="toggleCheck(a.dirName)"
+                />
+                <div class="ad-ico" :class="{ off: a.kind !== 'asset' && !a.enabled }">
+                  <Icon :name="a.kind === 'asset' ? 'box' : 'puzzle'" :size="17" />
+                </div>
+                <div class="row-main">
+                  <div class="row-name">
+                    <span
+                      class="name"
+                      :class="{ link: !!a.storeUrl }"
+                      :title="a.storeUrl ? `${a.name} · 在资产库中查看` : a.name"
+                      @click="openStore(a)"
+                    >{{ a.name }}</span>
+                    <Icon v-if="a.storeUrl" name="external" :size="10" class="name-ext" />
+                    <span v-if="a.version" class="tag">v{{ a.version }}</span>
+                    <span v-if="a.kind === 'asset'" class="tag brand" title="纯素材:安装到项目根,无启用概念">素材</span>
+                    <span v-if="a.fromMarket" class="tag brand">市场</span>
+                    <span v-else class="tag" title="手动放置或未通过市场安装">未知来源</span>
+                    <span v-if="updateInfo[a.dirName]" class="tag warn">可更新到 v{{ updateInfo[a.dirName].latest }}</span>
+                  </div>
+                  <div class="row-meta">
+                    <span v-if="a.author" class="meta-author">{{ a.author }}</span>
+                    <span
+                      v-if="a.kind === 'asset'"
+                      class="meta-path mono"
+                      :title="assetPathsTitle(a)"
+                    >res://{{ assetTops(a).join('、') }} · {{ (a.assetPaths || []).length }} 个文件</span>
+                    <span v-else class="meta-path mono" :title="`addons/${a.dirName}`">addons/{{ a.dirName }}</span>
+                  </div>
+                  <!-- 更新进度 -->
+                  <div v-if="updating && a.assetId === updating.assetId" class="upd">
+                    <span class="spin"></span>
+                    <span class="upd-stage">{{ updating.stage }} {{ updating.percent.toFixed(0) }}%</span>
+                    <span class="bar"><span class="fill" :style="{ width: updating.percent + '%' }"></span></span>
+                  </div>
+                </div>
+                <div class="row-actions">
+                  <input
+                    v-if="a.hasCfg"
+                    type="checkbox"
+                    class="switch"
+                    :checked="a.enabled"
+                    :title="a.enabled ? '已启用,点击禁用' : '未启用,点击启用'"
+                    @change="toggleEnabled(a)"
+                  />
+                  <button
+                    v-if="a.fromMarket && updateInfo[a.dirName]"
+                    class="btn small primary"
+                    :disabled="!!updating"
+                    @click="update(a)"
+                  ><Icon name="download" :size="12" /> 更新</button>
+                  <button
+                    v-if="a.assetId"
+                    class="btn small ghost"
+                    :disabled="!!updating"
+                    title="从历史版本中替换当前插件"
+                    @click="openVersions(a)"
+                  ><Icon name="package" :size="12" /> 版本</button>
+                  <button
+                    class="btn small ghost icon-act"
+                    title="在文件管理器中打开所在目录"
+                    @click="openAddonDir(a)"
+                  ><Icon name="folder" :size="13" /></button>
+                  <button
+                    class="btn small danger-text"
+                    :class="{ confirming: confirmingDir === a.dirName }"
+                    @click="uninstall(a)"
+                  >
+                    {{ confirmingDir === a.dirName ? '确认卸载?' : '卸载' }}
+                  </button>
+                </div>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
 
       <!-- 复制插件到其他项目模态框 -->
       <Teleport to="body">
@@ -370,126 +393,115 @@ function openStore(a: AddonInfo) {
           </div>
         </div>
       </Teleport>
-    </template>
 
-    <!-- 全库巡检结果模态框 -->
-    <Teleport to="body">
-      <div v-if="showScan" class="modal-mask" @click.self="showScan = false">
-        <div class="card modal">
-          <div class="modal-head">
-            <div class="modal-title"><Icon name="search" :size="15" /> 全库更新巡检</div>
-            <span class="grow"></span>
-            <button type="button" class="btn small ghost icon-x" title="关闭" @click="showScan = false">
-              <Icon name="x" :size="14" />
-            </button>
-          </div>
-
-          <p v-if="scan.scanning.value" class="copy-tip">
-            <span class="spin"></span> 正在扫描 {{ scan.progress.value }} 个项目…
-          </p>
-
-          <template v-else>
-            <p v-if="!scan.rows.value.length" class="copy-tip">
-              {{ scan.blocked.value || (scan.scanned.value ? '所有项目的已装内容都是最新版本。' : '尚无扫描结果。') }}
-            </p>
-            <div v-else class="copy-list">
-              <div v-for="r in scan.rows.value" :key="`${r.projectId}/${r.dirName}`" class="copy-item scan-row">
-                <Icon :name="r.kind === 'asset' ? 'box' : 'puzzle'" :size="14" />
-                <span class="ci-main">
-                  <span class="ci-name">{{ r.name }} <span class="tag warn">v{{ r.latest }}</span></span>
-                  <span class="ci-path mono" :title="r.projectName">{{ r.projectName }} · 当前 {{ r.current || '未知' }}</span>
-                </span>
-                <button class="btn small" @click="gotoScanRow(r.projectId)">去管理</button>
-              </div>
+      <!-- 全库巡检结果模态框 -->
+      <Teleport to="body">
+        <div v-if="showScan" class="modal-mask" @click.self="showScan = false">
+          <div class="card modal lg">
+            <div class="modal-head">
+              <div class="modal-title"><Icon name="search" :size="15" /> 全库更新巡检</div>
+              <span class="grow"></span>
+              <button type="button" class="btn small ghost icon-x" title="关闭" @click="showScan = false">
+                <Icon name="x" :size="14" />
+              </button>
             </div>
-          </template>
 
-          <div class="modal-foot">
-            <span class="grow"></span>
-            <button class="btn ghost" @click="showScan = false">关闭</button>
-            <button class="btn primary" :disabled="scan.scanning.value || !projects.length" @click="startScan">
-              <span v-if="scan.scanning.value" class="spin"></span>
-              {{ scan.scanning.value ? `扫描中 ${scan.progress.value}` : '重新扫描' }}
-            </button>
+            <p v-if="scan.scanning.value" class="copy-tip">
+              <span class="spin"></span> 正在扫描 {{ scan.progress.value }} 个项目…
+            </p>
+
+            <template v-else>
+              <p v-if="!scan.rows.value.length" class="copy-tip">
+                {{ scan.blocked.value || (scan.scanned.value ? '所有项目的已装内容都是最新版本。' : '尚无扫描结果。') }}
+              </p>
+              <div v-else class="copy-list">
+                <div v-for="r in scan.rows.value" :key="`${r.projectId}/${r.dirName}`" class="copy-item scan-row">
+                  <Icon :name="r.kind === 'asset' ? 'box' : 'puzzle'" :size="14" />
+                  <span class="ci-main">
+                    <span class="ci-name">{{ r.name }} <span class="tag warn">v{{ r.latest }}</span></span>
+                    <span class="ci-path mono" :title="r.projectName">{{ r.projectName }} · 当前 {{ r.current || '未知' }}</span>
+                  </span>
+                  <button class="btn small" @click="gotoScanRow(r.projectId)">去管理</button>
+                </div>
+              </div>
+            </template>
+
+            <div class="modal-foot">
+              <span class="grow"></span>
+              <button class="btn ghost" @click="showScan = false">关闭</button>
+              <button class="btn primary" :disabled="scan.scanning.value || !projects.length" @click="startScan">
+                <span v-if="scan.scanning.value" class="spin"></span>
+                {{ scan.scanning.value ? `扫描中 ${scan.progress.value}` : '重新扫描' }}
+              </button>
+            </div>
           </div>
         </div>
-      </div>
-    </Teleport>
+      </Teleport>
 
-    <VersionPickerDialog
-      :open="!!versionTarget"
-      :asset-id="versionTarget?.assetId || ''"
-      :title="versionTarget?.name || ''"
-      :current-version="versionTarget?.version"
-      action="switch"
-      @pick="installVersion"
-      @close="versionTarget = null"
-    />
+      <VersionPickerDialog
+        :open="!!versionTarget"
+        :asset-id="versionTarget?.assetId || ''"
+        :title="versionTarget?.name || ''"
+        :current-version="versionTarget?.version"
+        action="switch"
+        @pick="installVersion"
+        @close="versionTarget = null"
+      />
+    </template>
   </div>
 </template>
 
 <style scoped>
-.grow {
-  flex: 1;
-}
-
-/* ---------- 工具栏(吸顶) ---------- */
-.toolbar {
-  position: sticky;
-  top: -16px;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  gap: 10px;
+/* ---------- 页头 ---------- */
+.view-head {
   flex-wrap: wrap;
-  margin: 0 -18px;
-  padding: 10px 18px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
 }
 
-.tb-target {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-2);
-  min-width: 0;
+.head-seg {
+  margin-left: 10px;
 }
 
-.tb-target .icon {
-  color: var(--brand);
-  flex-shrink: 0;
-}
-
-.tb-select {
-  max-width: 170px;
-  padding: 3px 10px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--brand);
-  border-color: var(--brand);
-  background: var(--brand-weak);
-  box-shadow: none;
-}
-
-/* ---------- 标题行 ---------- */
 .head-stat {
   font-size: 12px;
   color: var(--text-3);
   white-space: nowrap;
 }
 
-/* ---------- 批量操作栏 ---------- */
+/* 管理项目 */
+.target {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+  min-width: 0;
+}
+
+.target .icon {
+  color: var(--brand);
+  flex-shrink: 0;
+}
+
+.target-select {
+  max-width: 170px;
+  padding: 3px 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--brand);
+  box-shadow: none;
+}
+
+/* ---------- 批量操作栏(有选中时出现) ---------- */
 .batch-bar {
   display: flex;
   align-items: center;
   gap: 7px;
   flex-wrap: wrap;
-  padding: 8px 14px;
-  margin-bottom: 8px;
-  border-color: var(--brand);
+  margin: 10px 14px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--brand);
+  border-radius: var(--radius-sm);
   background: var(--brand-weak);
   animation: pop-in 0.16s ease;
 }
@@ -516,61 +528,50 @@ function openStore(a: AddonInfo) {
   font-size: 13.5px;
 }
 
-/* ---------- 插件卡列表 ---------- */
-.addon-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-/* 分区表头:插件 / 素材 */
+/* ---------- 行列表(插件 / 素材分区) ---------- */
 .sec-head {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 8px;
+  padding: 10px 16px 5px;
   font-size: 11.5px;
-  font-weight: 650;
-  letter-spacing: 0.4px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--text-3);
 }
 
-.sec-head span {
-  font-weight: 500;
+.sec-head .icon {
+  color: var(--brand);
 }
 
-.addon {
+.addon-row {
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 11px 14px;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  padding: 10px 16px;
+  transition: background 0.13s, box-shadow 0.13s;
 }
 
-.addon:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-sm);
+.addon-row + .addon-row {
+  border-top: 1px solid var(--surface-2);
 }
 
-.addon.picked {
-  border-color: var(--brand);
+.addon-row:hover {
+  background: var(--surface-2);
+}
+
+.addon-row.picked {
   background: var(--brand-weak);
-}
-
-.ad-chk {
-  width: 15px;
-  height: 15px;
-  accent-color: var(--brand);
-  cursor: pointer;
-  flex-shrink: 0;
+  box-shadow: inset 3px 0 0 var(--brand);
 }
 
 .ad-ico {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   border-radius: var(--radius-sm);
   background: var(--brand-weak);
   color: var(--brand);
@@ -582,12 +583,12 @@ function openStore(a: AddonInfo) {
   color: var(--text-3);
 }
 
-.addon-main {
+.row-main {
   flex: 1;
   min-width: 0;
 }
 
-.addon-name {
+.row-name {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -616,35 +617,26 @@ function openStore(a: AddonInfo) {
   margin-left: -3px;
 }
 
-/* 启用状态:彩色圆点 + 文字 */
-.state {
-  display: inline-flex;
+.row-meta {
+  display: flex;
   align-items: center;
-  gap: 5px;
-  font-size: 11.5px;
-  font-weight: 500;
-}
-
-.state .dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-  flex-shrink: 0;
-}
-
-.state.ok {
-  color: var(--ok);
-}
-
-.state.idle {
-  color: var(--text-3);
-}
-
-.addon-meta {
-  font-size: 11.5px;
-  color: var(--text-3);
+  gap: 8px;
   margin-top: 2px;
+  min-width: 0;
+}
+
+.meta-author {
+  font-size: 11.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.meta-path {
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* 更新进度行 */
@@ -652,7 +644,7 @@ function openStore(a: AddonInfo) {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 7px;
+  margin-top: 6px;
 }
 
 .upd .spin {
@@ -670,11 +662,22 @@ function openStore(a: AddonInfo) {
   max-width: 260px;
 }
 
-.addon-actions {
+/* 行操作:启停开关 + 更新/版本/目录/卸载 */
+.row-actions {
   display: flex;
   align-items: center;
   gap: 5px;
   flex-shrink: 0;
+}
+
+.row-actions .switch {
+  margin-right: 5px;
+}
+
+.icon-act {
+  width: 28px;
+  padding: 3px 0;
+  color: var(--text-2);
 }
 
 /* 卸载二次确认态 */
@@ -684,48 +687,7 @@ function openStore(a: AddonInfo) {
   color: #fff;
 }
 
-/* ---------- 复制到项目模态框 ---------- */
-.modal-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(18, 26, 40, 0.45);
-}
-
-.modal {
-  width: min(480px, calc(100vw - 48px));
-  max-height: calc(100vh - 64px);
-  overflow-y: auto;
-  padding: 18px 20px;
-  box-shadow: var(--shadow-lift);
-  animation: pop-in 0.16s ease;
-}
-
-.modal-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.modal-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 14.5px;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.icon-x {
-  width: 26px;
-  padding: 3px 0;
-  color: var(--text-3);
-}
-
+/* ---------- 复制到项目 / 全库巡检模态框 ---------- */
 .copy-tip {
   margin: 0 0 10px;
   font-size: 13px;
@@ -770,6 +732,15 @@ function openStore(a: AddonInfo) {
   height: 14px;
   accent-color: var(--brand);
   flex-shrink: 0;
+}
+
+/* 巡检结果行不是可点选项 */
+.scan-row {
+  cursor: default;
+}
+
+.scan-row:hover {
+  border-color: var(--border);
 }
 
 .ci-ico {
@@ -818,14 +789,5 @@ function openStore(a: AddonInfo) {
   font-size: 11.5px;
   line-height: 1.6;
   color: var(--text-3);
-}
-
-.modal-foot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-top: 12px;
-  margin-top: 12px;
-  border-top: 1px solid var(--border);
 }
 </style>

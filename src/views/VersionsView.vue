@@ -345,159 +345,290 @@ function progressOf(t: DownloadTask): number {
   if (!t.totalSize) return 0
   return Math.min(100, (t.received / t.totalSize) * 100)
 }
+
+// ---------- 纯 UI:头部「已安装 / 官方下载」分区切换,不承载业务逻辑 ----------
+const tab = ref<'installed' | 'market'>('installed')
 </script>
 
 <template>
   <div class="versions view">
-    <!-- 下载任务 -->
-    <div v-for="t in tasks" :key="t.id" class="card task">
-      <div class="task-head">
-        <span class="task-ico"><Icon name="package" :size="15" /></span>
-        <span class="task-name">{{ t.tag }}</span>
-        <span class="tag">{{ t.variant === 'mono' ? 'C#' : '标准' }}</span>
-        <span v-if="t.kind === 'templates'" class="tag brand">导出模板</span>
-        <span class="grow"></span>
-        <span class="task-status" :class="t.status">
-          <span v-if="['queued', 'downloading', 'extracting', 'verifying'].includes(t.status)" class="spin"></span>
-          {{ statusText[t.status] }}
-        </span>
-        <button
-          v-if="t.status !== 'error' && t.status !== 'canceled' && t.status !== 'done'"
-          class="btn small danger-text"
-          @click="cancelTask(t)"
-        >取消</button>
-      </div>
-      <div v-if="t.status === 'downloading'" class="task-bar">
-        <div class="bar" :class="{ indet: !t.totalSize }"><div class="fill active" :style="{ width: progressOf(t) + '%' }"></div></div>
-        <span class="task-meta">{{ progressText(t) }} · {{ formatSize(t.received) }}{{ t.totalSize ? '/' + formatSize(t.totalSize) : '' }} · {{ formatSpeed(t.speed) }}</span>
-      </div>
-      <div v-else-if="t.status === 'error'" class="task-error">
-        <Icon name="alert" :size="13" />
-        <span class="grow">{{ t.error }}</span>
-        <button class="btn small" @click="retryTask(t)">重试</button>
-        <button class="btn small ghost" @click="dismissTask(t)">关闭</button>
-      </div>
-      <div v-else-if="t.status !== 'done'" class="task-meta plain">{{ statusText[t.status] }}…</div>
-    </div>
-
-    <!-- 已安装 -->
+    <!-- 页头:标题 + 分区切换 + 动作 -->
     <div class="view-head">
-      <h2><Icon name="package" :size="16" /> 已安装 <span class="count-pill">{{ installed.length }}</span></h2>
+      <h2><Icon name="package" :size="17" /> 引擎 <span class="count-pill">{{ installed.length }}</span></h2>
+      <div class="seg head-seg">
+        <button :class="{ on: tab === 'installed' }" @click="tab = 'installed'">已安装</button>
+        <button :class="{ on: tab === 'market' }" @click="tab = 'market'">官方下载</button>
+      </div>
       <span class="grow"></span>
-      <button class="btn small" :disabled="importing" @click="importLocal">
-        <Icon name="upload" :size="13" /> {{ importing ? '导入中…' : '导入本地引擎' }}
+      <button
+        class="btn small ghost"
+        :disabled="importing"
+        title="选择本地已有的 Godot 可执行文件登记为引擎(不复制文件)"
+        @click="importLocal"
+      >
+        <span v-if="importing" class="spin"></span>
+        <Icon v-else name="upload" :size="13" />
+        {{ importing ? '导入中…' : '导入本地引擎' }}
+      </button>
+      <button
+        class="btn small"
+        :disabled="releasesLoading"
+        title="重新拉取官方版本列表(强制刷新缓存)"
+        @click="loadReleases(true)"
+      >
+        <span v-if="releasesLoading" class="spin"></span>
+        <Icon v-else name="refresh" :size="13" />
+        刷新官方列表
       </button>
     </div>
 
-    <div v-if="installed.length" class="installed">
-      <div v-for="v in installed" :key="v._id" class="card ver">
-        <div class="v-ico" :class="{ default: settings.defaultVersionId === v._id }">
-          <Icon name="gear" :size="18" />
+    <!-- 下载任务:页内详细视图(底部状态栏任务中心之外的完整进度) -->
+    <div v-if="tasks.length" class="panel">
+      <div class="panel-head">
+        <span class="panel-title"><Icon name="terminal" :size="13" /> 下载任务</span>
+        <span class="grow"></span>
+        <span class="root-note">底部状态栏的任务中心同步显示进度</span>
+      </div>
+      <div v-for="t in tasks" :key="t.id" class="task-row">
+        <div class="t-head">
+          <span class="t-name mono">{{ t.tag }}</span>
+          <span class="tag mono">{{ t.variant === 'mono' ? 'C#' : '标准' }}</span>
+          <span v-if="t.kind === 'templates'" class="tag brand">导出模板</span>
+          <span class="grow"></span>
+          <span class="t-status" :class="t.status">
+            <span v-if="['queued', 'downloading', 'extracting', 'verifying'].includes(t.status)" class="spin"></span>
+            {{ statusText[t.status] }}
+          </span>
+          <button
+            v-if="t.status !== 'error' && t.status !== 'canceled' && t.status !== 'done'"
+            class="btn small danger-text"
+            @click="cancelTask(t)"
+          >取消</button>
         </div>
-        <div class="ver-main">
-          <div class="ver-name-row">
-            <span class="ver-name">{{ v.name }}</span>
-            <span class="tag">{{ v.variant === 'mono' ? 'C#' : '标准' }}</span>
-            <span v-if="settings.defaultVersionId === v._id" class="tag brand">默认</span>
-            <span v-if="v.verified === false" class="tag warn">未通过校验</span>
-            <span v-if="!v.managed" class="tag">导入</span>
-            <span v-if="tplStatuses[v._id]?.installed" class="tag ok" :title="`导出模板已就绪:${tplStatuses[v._id]?.path}`">模板已装</span>
-          </div>
-          <div class="ver-path mono" :title="v.exePath">{{ v.exePath }}</div>
-          <div class="ver-meta">
-            <span v-if="v.size">{{ formatSize(v.size) }} · </span>
-            <span>安装于 {{ formatDate(v.installedAt) }}</span>
-          </div>
+        <div v-if="t.status === 'downloading'" class="t-bar">
+          <div class="bar" :class="{ indet: !t.totalSize }"><div class="fill active" :style="{ width: progressOf(t) + '%' }"></div></div>
+          <span class="t-meta">{{ progressText(t) }} · {{ formatSize(t.received) }}{{ t.totalSize ? '/' + formatSize(t.totalSize) : '' }} · {{ formatSpeed(t.speed) }}</span>
         </div>
-        <div class="ver-actions">
-          <button v-if="settings.defaultVersionId !== v._id" class="btn small ghost" @click="setDefault(v)">设为默认</button>
-          <button
-            v-if="!tplStatuses[v._id]?.installed"
-            class="btn small ghost"
-            :disabled="!!tplTaskFor(v._id)"
-            :title="tplTaskFor(v._id) ? '导出模板下载中' : '下载并安装该版本的导出模板(约 1GB),导出游戏必需'"
-            @click="installTemplates(v)"
-          ><Icon name="download" :size="13" /> {{ tplTaskFor(v._id) ? '模板任务中' : '获取模板' }}</button>
-          <button
-            class="btn small ghost"
-            :disabled="!!tplTaskFor(v._id)"
-            title="从本地 .tpz 安装(自编译/第三方模板);不发起下载"
-            @click="startLocalImport(v)"
-          ><Icon name="upload" :size="13" /> 导入本地模板</button>
-          <button
-            v-if="isWindows()"
-            class="btn small ghost"
-            :disabled="!!tplTaskFor(v._id)"
-            title="挑选要保留的功能后自行编译导出模板（需要本机 MSVC 工具链与 Godot 源码）"
-            @click="tplWizardFor = v._id"
-          >自编译模板</button>
-          <button
-            v-if="tplStatuses[v._id]?.installed"
-            class="btn small ghost"
-            :title="`卸载导出模板(${tplStatuses[v._id]?.versionDir})`"
-            @click="askUninstallTemplates(v)"
-          >{{ confirmingTplId === v._id ? '确认卸载?' : '卸载模板' }}</button>
-          <button
-            v-if="tplStatuses[v._id]?.installed"
-            class="btn small ghost"
-            :title="`打开导出模板所在目录:${tplStatuses[v._id]?.path}`"
-            @click="openPath(tplStatuses[v._id].path)"
-          ><Icon name="folder" :size="13" /> 模板目录</button>
-          <button
-            class="btn small ghost"
-            title="模板库:列存档 / 切换生效 / 删除 / 收编(同版本串引擎共享存档)"
-            @click="toggleLib(v)"
-          ><Icon name="archive" :size="13" /> 模板库</button>
-          <button class="btn small ghost" title="打开所在目录" @click="showInFolder(v.exePath)">
-            <Icon name="folder" :size="13" /> 目录
-          </button>
-          <button class="btn small danger-text" @click="askDelete(v)">
-            {{ confirmingId === v._id ? '确认删除?' : '删除' }}
-          </button>
+        <div v-else-if="t.status === 'error'" class="t-err">
+          <Icon name="alert" :size="13" />
+          <span class="grow">{{ t.error }}</span>
+          <button class="btn small" @click="retryTask(t)">重试</button>
+          <button class="btn small ghost" @click="dismissTask(t)">关闭</button>
         </div>
-        <!-- 本地导入的确认行:选完 .tpz 后在这里改目标目录名(默认就是状态查询给的那个),
-             确认才入队;编辑器按版本串查找模板,目录名必须与它的 --version 输出一致 -->
-        <div v-if="localImport && localImport.versionId === v._id" class="tpl-import">
-          <span class="tpl-import-label">模板目录名</span>
-          <input
-            v-model="localImport.dirName"
-            class="select tpl-import-input"
-            title="编辑器按版本串在 export_templates/ 下查找,须与引擎 --version 输出一致(如 4.3.stable)"
-            @keyup.enter="confirmLocalImport"
-          >
-          <button class="btn small" @click="confirmLocalImport">开始导入</button>
-          <button class="btn small ghost" @click="cancelLocalImport">取消</button>
-          <span class="tpl-import-hint">只允许字母数字、点、下划线、连字符</span>
-        </div>
-        <!-- 模板库下拉:列存档 + 切换/删除/收编;切换 = 宿主两次 move,重启编辑器后生效 -->
-        <div v-if="libFor === v._id" class="tpl-import tpl-lib">
-          <div class="tpl-lib-head">
-            <span class="tpl-import-label">模板库存档(同版本串引擎共享)</span>
-            <button
-              v-if="tplStatuses[v._id]?.installed && !libPacks.some((p) => p.active)"
-              class="btn small ghost"
-              title="把当前生效目录登记为存档(不搬文件,首次被换出时才进存档槽)"
-              @click="actAdopt(v)"
-            >收编当前</button>
-          </div>
-          <p v-if="libErr" class="tpl-lib-note bad-line">{{ libErr }}</p>
-          <div v-for="p in libPacks" :key="p.packId" class="tpl-lib-row">
-            <span class="tag">{{ p.source === 'selfbuild' ? '自编译' : '收编' }}</span>
-            <span v-if="p.active" class="tag ok">生效中</span>
-            <span class="tpl-lib-note">{{ Math.round(p.bytes / 1048576) }} MB · {{ p.packId }}</span>
-            <button class="btn small ghost" :disabled="libBusy || p.active" @click="actActivate(v, p)">切换</button>
-            <button class="btn small ghost" @click="actDelete(v, p)">{{ confirmingPackId === p.packId ? '确认删除?' : '删除' }}</button>
-          </div>
-          <p v-if="!libPacks.length && !libErr" class="tpl-lib-note">暂无存档:自编译导入会自动存档,或点「收编当前」把生效目录登记入库。</p>
-        </div>
+        <div v-else-if="t.status !== 'done'" class="t-meta plain">{{ statusText[t.status] }}…</div>
       </div>
     </div>
-    <EmptyState
-      v-else
-      icon="package"
-      title="尚未安装 Godot 引擎"
-      desc="从下方「可用版本」下载官方引擎,或点击「导入本地引擎」使用已有的 Godot 可执行文件。"
-    />
+
+    <!-- 已安装 -->
+    <template v-if="tab === 'installed'">
+      <div v-if="installed.length" class="panel">
+        <div class="panel-head">
+          <span class="panel-title"><Icon name="gear" :size="13" /> 已安装引擎</span>
+          <span class="grow"></span>
+          <span
+            v-if="settings.versionsRoot"
+            class="root-note mono"
+            :title="`引擎安装根目录:${settings.versionsRoot}`"
+          ><Icon name="hard-drive" :size="12" /> {{ settings.versionsRoot }}</span>
+        </div>
+        <div v-for="v in installed" :key="v._id" class="ver-item">
+          <div class="row">
+            <div class="v-ico" :class="{ default: settings.defaultVersionId === v._id }">
+              <Icon name="gear" :size="18" />
+              <span v-if="settings.defaultVersionId === v._id" class="pin"><Icon name="star" :size="9" :stroke-width="2.4" /></span>
+            </div>
+            <div class="row-main">
+              <div class="row-name">
+                <span class="name mono">{{ v.name }}</span>
+                <span class="tag mono">{{ v.variant === 'mono' ? 'C#' : '标准' }}</span>
+                <span v-if="settings.defaultVersionId === v._id" class="tag brand">默认</span>
+                <span v-if="!v.managed" class="tag" title="本地导入登记的引擎,删除仅移除记录">导入</span>
+                <span v-if="v.verified === false" class="tag warn" title="--version 校验未通过,可能无法正常启动">未通过校验</span>
+                <span
+                  v-if="tplStatuses[v._id]?.installed"
+                  class="tag ok"
+                  :title="`导出模板已就绪:${tplStatuses[v._id]?.path}`"
+                >模板已装</span>
+              </div>
+              <div class="row-path mono" :title="v.exePath">{{ v.exePath }}</div>
+              <div class="row-meta">
+                <span v-if="v.size">{{ formatSize(v.size) }} · </span>
+                <span>安装于 {{ formatDate(v.installedAt) }}</span>
+              </div>
+            </div>
+            <div class="row-actions">
+              <button
+                v-if="settings.defaultVersionId !== v._id"
+                class="btn small ghost"
+                title="设为默认引擎:新建项目默认使用它"
+                @click="setDefault(v)"
+              ><Icon name="star" :size="12" /> 设为默认</button>
+              <span class="act-sep"></span>
+              <button
+                v-if="!tplStatuses[v._id]?.installed"
+                class="btn small ghost"
+                :disabled="!!tplTaskFor(v._id)"
+                :title="tplTaskFor(v._id) ? '导出模板下载中' : '下载并安装该版本的导出模板(约 1GB),导出游戏必需'"
+                @click="installTemplates(v)"
+              ><Icon name="download" :size="13" /> {{ tplTaskFor(v._id) ? '模板任务中' : '获取模板' }}</button>
+              <button
+                class="btn small ghost icon-act"
+                :disabled="!!tplTaskFor(v._id)"
+                title="从本地 .tpz 安装(自编译/第三方模板);不发起下载"
+                @click="startLocalImport(v)"
+              ><Icon name="upload" :size="13" /></button>
+              <button
+                v-if="isWindows()"
+                class="btn small ghost"
+                :disabled="!!tplTaskFor(v._id)"
+                title="挑选要保留的功能后自行编译导出模板(需要本机 MSVC 工具链与 Godot 源码)"
+                @click="tplWizardFor = v._id"
+              ><Icon name="terminal" :size="13" /> 自编译模板</button>
+              <template v-if="tplStatuses[v._id]?.installed">
+                <button
+                  class="btn small ghost"
+                  :class="{ 'danger-text': confirmingTplId === v._id }"
+                  :title="`卸载导出模板(${tplStatuses[v._id]?.versionDir})`"
+                  @click="askUninstallTemplates(v)"
+                >{{ confirmingTplId === v._id ? '确认卸载?' : '卸载模板' }}</button>
+                <button
+                  class="btn small ghost icon-act"
+                  :title="`打开导出模板所在目录:${tplStatuses[v._id]?.path}`"
+                  @click="openPath(tplStatuses[v._id].path)"
+                ><Icon name="external" :size="13" /></button>
+              </template>
+              <button
+                class="btn small ghost icon-act"
+                title="模板库:列存档 / 切换生效 / 删除 / 收编(同版本串引擎共享存档)"
+                @click="toggleLib(v)"
+              ><Icon name="archive" :size="13" /></button>
+              <span class="act-sep"></span>
+              <button class="btn small ghost icon-act" title="打开所在目录" @click="showInFolder(v.exePath)">
+                <Icon name="folder" :size="13" />
+              </button>
+              <button class="btn small danger-text" @click="askDelete(v)">
+                {{ confirmingId === v._id ? '确认删除?' : '删除' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- 本地导入的确认行:选完 .tpz 后在这里改目标目录名(默认就是状态查询给的那个),
+               确认才入队;编辑器按版本串查找模板,目录名必须与它的 --version 输出一致 -->
+          <div v-if="localImport && localImport.versionId === v._id" class="sub-row">
+            <span class="sub-label">模板目录名</span>
+            <input
+              v-model="localImport.dirName"
+              class="input mono sub-input"
+              title="编辑器按版本串在 export_templates/ 下查找,须与引擎 --version 输出一致(如 4.3.stable)"
+              @keyup.enter="confirmLocalImport"
+            >
+            <button class="btn small" @click="confirmLocalImport">开始导入</button>
+            <button class="btn small ghost" @click="cancelLocalImport">取消</button>
+            <span class="sub-hint">只允许字母数字、点、下划线、连字符</span>
+          </div>
+          <!-- 模板库下拉:列存档 + 切换/删除/收编;切换 = 宿主两次 move,重启编辑器后生效 -->
+          <div v-if="libFor === v._id" class="sub-row lib">
+            <div class="lib-head">
+              <span class="sub-label">模板库存档(同版本串引擎共享)</span>
+              <span class="grow"></span>
+              <button
+                v-if="tplStatuses[v._id]?.installed && !libPacks.some((p) => p.active)"
+                class="btn small ghost"
+                title="把当前生效目录登记为存档(不搬文件,首次被换出时才进存档槽)"
+                @click="actAdopt(v)"
+              >收编当前</button>
+            </div>
+            <p v-if="libErr" class="lib-note bad">{{ libErr }}</p>
+            <div v-for="p in libPacks" :key="p.packId" class="lib-row">
+              <span class="tag mono">{{ p.source === 'selfbuild' ? '自编译' : '收编' }}</span>
+              <span v-if="p.active" class="tag ok">生效中</span>
+              <span class="lib-note">{{ Math.round(p.bytes / 1048576) }} MB · {{ p.packId }}</span>
+              <span class="grow"></span>
+              <button class="btn small ghost" :disabled="libBusy || p.active" @click="actActivate(v, p)">切换</button>
+              <button
+                class="btn small ghost"
+                :class="{ 'danger-text': confirmingPackId === p.packId }"
+                @click="actDelete(v, p)"
+              >{{ confirmingPackId === p.packId ? '确认删除?' : '删除' }}</button>
+            </div>
+            <p v-if="!libPacks.length && !libErr" class="lib-note">暂无存档:自编译导入会自动存档,或点「收编当前」把生效目录登记入库。</p>
+          </div>
+        </div>
+      </div>
+      <EmptyState
+        v-else
+        icon="package"
+        title="尚未安装 Godot 引擎"
+        desc="从「官方下载」获取官方引擎,或导入本地 Godot 可执行文件;安装完成后即可在项目中绑定使用。"
+      >
+        <button class="btn primary" @click="tab = 'market'"><Icon name="download" :size="14" /> 前往官方下载</button>
+        <button class="btn" :disabled="importing" @click="importLocal">
+          <Icon name="upload" :size="14" /> {{ importing ? '导入中…' : '导入本地引擎' }}
+        </button>
+      </EmptyState>
+    </template>
+
+    <!-- 官方下载 -->
+    <template v-else>
+      <div class="panel">
+        <div class="panel-head filters-head">
+          <span class="panel-title"><Icon name="globe" :size="13" /> 官方版本</span>
+          <span class="grow"></span>
+          <select v-model="majorFilter" class="select" title="按大版本筛选">
+            <option value="all">全部大版本</option>
+            <option v-for="m in majorOptions" :key="m" :value="m">{{ m }}.x</option>
+          </select>
+          <label class="check" title="隐藏 beta / rc 等预发布版">
+            <input v-model="stableOnly" type="checkbox" />
+            <span>仅稳定版</span>
+          </label>
+          <div class="seg">
+            <button :class="{ on: variant === 'standard' }" title="标准版(内置 GDScript)" @click="variant = 'standard'">标准</button>
+            <button :class="{ on: variant === 'mono' }" title="C# 版(需 .NET,支持 C# 项目)" @click="variant = 'mono'">C#</button>
+          </div>
+        </div>
+
+        <div v-if="releasesError" class="state-box err">
+          <Icon name="alert" :size="14" />
+          <span class="grow">获取版本列表失败:{{ releasesError }}</span>
+          <button class="btn small" @click="loadReleases(true)">重试</button>
+        </div>
+        <div v-else-if="releasesLoading" class="state-box">
+          <span class="spin"></span> 正在获取版本列表…
+        </div>
+        <template v-else>
+          <div v-for="r in visibleReleases" :key="r.tag" class="row">
+            <span class="rel-dot" :class="{ pre: r.prerelease }" :title="r.prerelease ? '预发布' : '稳定版'"></span>
+            <div class="rel-main">
+              <span class="name mono">{{ r.name }}</span>
+              <span class="rel-tag mono">{{ r.tag }}</span>
+              <span v-if="r.prerelease" class="tag warn" title="预发布(beta / rc),不建议生产环境使用">预发布</span>
+            </div>
+            <span class="rel-date">{{ formatDate(r.publishedAt) }}</span>
+            <span v-if="assetFor(r) && assetFor(r)!.size" class="rel-size mono">{{ formatSize(assetFor(r)!.size) }}</span>
+            <a
+              class="btn small ghost icon-act"
+              :href="`https://github.com/godotengine/godot/releases/tag/${r.tag}`"
+              target="_blank"
+              rel="noopener"
+              title="在 GitHub 查看发布说明"
+            ><Icon name="external" :size="13" /></a>
+            <button
+              v-if="isInstalled(r)"
+              class="btn small ghost ok-btn"
+              disabled
+            ><Icon name="check" :size="12" /> 已安装</button>
+            <div v-else-if="isDownloading(r)" class="rel-progress" :title="statusText[taskFor(r)!.status]">
+              <div class="bar" :class="{ indet: !taskFor(r)!.totalSize }"><div class="fill active" :style="{ width: progressOf(taskFor(r)!) + '%' }"></div></div>
+              <span class="rel-pct">{{ progressText(taskFor(r)!) }}</span>
+            </div>
+            <button v-else-if="!assetFor(r)" class="btn small" disabled title="该版本无此变体">无此变体</button>
+            <button v-else class="btn small primary" @click="download(r)"><Icon name="download" :size="12" /> 下载</button>
+          </div>
+          <div v-if="!visibleReleases.length" class="state-box plain">没有匹配的版本</div>
+        </template>
+      </div>
+    </template>
 
     <TemplateBuildWizard
       :open="!!tplWizardFor"
@@ -506,186 +637,38 @@ function progressOf(t: DownloadTask): number {
       @close="tplWizardFor = ''"
       @imported="(msg) => { notify(msg); void refreshTplStatuses() }"
     />
-
-    <!-- 可用版本 -->
-    <div class="view-head filter-head">
-      <h2><Icon name="download" :size="16" /> 可用版本</h2>
-      <span class="grow"></span>
-      <select v-model="majorFilter" class="select" title="按大版本筛选">
-        <option value="all">全部大版本</option>
-        <option v-for="m in majorOptions" :key="m" :value="m">{{ m }}.x</option>
-      </select>
-      <label class="check">
-        <input v-model="stableOnly" type="checkbox" />
-        <span>仅稳定版</span>
-      </label>
-      <div class="seg">
-        <button :class="{ on: variant === 'standard' }" @click="variant = 'standard'">标准</button>
-        <button :class="{ on: variant === 'mono' }" @click="variant = 'mono'">C#</button>
-      </div>
-      <button class="btn small" :disabled="releasesLoading" @click="loadReleases(true)">
-        <span v-if="releasesLoading" class="spin"></span>
-        <Icon v-else name="refresh" :size="13" /> 刷新
-      </button>
-    </div>
-
-    <div v-if="releasesError" class="card error-box">
-      <Icon name="alert" :size="14" />
-      <span class="grow">获取版本列表失败:{{ releasesError }}</span>
-      <button class="btn small" @click="loadReleases(true)">重试</button>
-    </div>
-    <div v-else-if="releasesLoading" class="loading">
-      <span class="spin"></span> 正在获取版本列表…
-    </div>
-    <div v-else class="rel-list">
-      <div v-for="r in visibleReleases" :key="r.tag" class="card rel">
-        <span class="rel-dot" :class="{ pre: r.prerelease }" :title="r.prerelease ? '预发布' : '稳定版'"></span>
-        <div class="rel-main">
-          <span class="rel-name">{{ r.name }}</span>
-          <span v-if="r.prerelease" class="tag warn">预发布</span>
-        </div>
-        <span class="rel-date">{{ formatDate(r.publishedAt) }}</span>
-        <span v-if="assetFor(r) && assetFor(r)!.size" class="rel-size mono">{{ formatSize(assetFor(r)!.size) }}</span>
-        <button
-          v-if="isInstalled(r)"
-          class="btn small ghost installed-btn"
-          disabled
-        ><Icon name="check" :size="12" /> 已安装</button>
-        <div v-else-if="isDownloading(r)" class="rel-progress" :title="statusText[taskFor(r)!.status]">
-          <div class="bar" :class="{ indet: !taskFor(r)!.totalSize }"><div class="fill active" :style="{ width: progressOf(taskFor(r)!) + '%' }"></div></div>
-          <span class="rel-pct">{{ progressText(taskFor(r)!) }}</span>
-        </div>
-        <button v-else-if="!assetFor(r)" class="btn small" disabled title="该版本无此变体">无此变体</button>
-        <button v-else class="btn small primary" @click="download(r)"><Icon name="download" :size="12" /> 下载</button>
-      </div>
-      <div v-if="!visibleReleases.length" class="loading plain">没有匹配的版本</div>
-    </div>
   </div>
 </template>
 
 <style scoped>
-.grow {
-  flex: 1;
+.head-seg {
+  margin-left: 10px;
 }
 
-.filter-head {
-  margin-top: 4px;
-  flex-wrap: wrap;
-}
-
-.filter-head .select {
-  padding: 3px 8px;
-  font-size: 12px;
-  box-shadow: none;
-}
-
-/* ---------- 任务卡 ---------- */
-.task {
-  padding: 11px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  border-color: var(--brand);
-  box-shadow: var(--shadow);
-}
-
-.task-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.task-ico {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: var(--radius-sm);
-  background: var(--brand-weak);
-  color: var(--brand);
-  flex-shrink: 0;
-}
-
-.task-name {
-  font-weight: 600;
-  font-family: var(--mono);
-  font-size: 13px;
-}
-
-.task-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-3);
-}
-
-.task-status.downloading,
-.task-status.extracting,
-.task-status.verifying,
-.task-status.queued {
-  color: var(--brand);
-}
-
-.task-status.done {
-  color: var(--ok);
-}
-
-.task-status.error {
-  color: var(--danger);
-}
-
-.task-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.task-bar .bar {
-  flex: 1;
-}
-
-.task-meta {
-  font-size: 12px;
-  color: var(--text-3);
-  white-space: nowrap;
-}
-
-.task-meta.plain {
-  color: var(--brand);
-}
-
-.task-error {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--danger);
-}
-
-/* ---------- 已安装 ---------- */
-.installed {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.ver {
+/* ---------- 通用行:已安装行内线 / 官方版本行 ---------- */
+.row {
   display: flex;
   align-items: center;
   gap: 13px;
-  padding: 11px 14px;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  padding: 11px 16px;
+  transition: background 0.13s, box-shadow 0.13s;
 }
 
-.ver:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow);
+.row + .row {
+  border-top: 1px solid var(--surface-2);
+}
+
+.row:hover {
+  background: var(--surface-2);
+}
+
+/* ---------- 已安装项:横排行 + 条件下挂行 ---------- */
+.ver-item + .ver-item {
+  border-top: 1px solid var(--surface-2);
 }
 
 .v-ico {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -702,23 +685,40 @@ function progressOf(t: DownloadTask): number {
   color: var(--brand);
 }
 
-.ver-main {
+/* 默认引擎的金星角标(与项目列表的收藏角标同语言) */
+.pin {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--gold);
+  color: #fff;
+  border: 1.5px solid var(--surface);
+}
+
+.row-main {
   flex: 1;
   min-width: 0;
 }
 
-.ver-name-row {
+.row-name {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.ver-name {
+.name {
   font-weight: 700;
   font-size: 13.5px;
+  white-space: nowrap;
 }
 
-.ver-path {
+.row-path {
   margin-top: 2px;
   font-size: 11.5px;
   color: var(--text-3);
@@ -727,114 +727,205 @@ function progressOf(t: DownloadTask): number {
   white-space: nowrap;
 }
 
-.ver-meta {
+.row-meta {
+  margin-top: 1px;
   font-size: 12px;
   color: var(--text-3);
 }
 
-.ver-actions {
+.row-actions {
   display: flex;
   align-items: center;
   gap: 5px;
   flex-shrink: 0;
 }
 
-/* 本地导入确认行:横排在版本卡底部,窄卡换行 */
-.tpl-import {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  border-top: 1px dashed var(--border);
-  padding-top: 8px;
-  margin-top: 8px;
+.icon-act {
+  width: 28px;
+  padding: 3px 0;
+  color: var(--text-2);
 }
 
-/* 模板库下拉:容器纵排(头行 + 存档行),其余沿用 .tpl-import 的虚线分隔 */
-.tpl-lib {
+.icon-act:hover:not(:disabled) {
+  color: var(--brand);
+}
+
+a.icon-act {
+  text-decoration: none;
+}
+
+.act-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 3px;
+}
+
+/* ---------- 下挂行:本地导入确认 / 模板库 ---------- */
+.sub-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  /* 左边距 = 行内边距 16 + 图标 40 + 间距 13,与主行文字对齐 */
+  padding: 9px 16px 12px 69px;
+  border-top: 1px dashed var(--border);
+  background: var(--surface-2);
+}
+
+.sub-row.lib {
   flex-direction: column;
   align-items: stretch;
+  flex-wrap: nowrap;
+  gap: 7px;
 }
 
-.tpl-lib-head {
+.sub-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.sub-input {
+  width: 150px;
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: 12.5px;
+}
+
+.sub-hint {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.lib-head {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.tpl-lib-row {
+.lib-row {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-.tpl-lib-note {
+.lib-note {
   margin: 0;
   font-size: 11.5px;
   color: var(--text-3);
 }
 
-.tpl-import-label {
+.lib-note.bad {
+  color: var(--danger);
+}
+
+/* ---------- 面板头辅助 ---------- */
+.filters-head {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.filters-head .select {
+  padding: 3px 8px;
   font-size: 12px;
-  color: var(--text-2);
-  white-space: nowrap;
+  box-shadow: none;
 }
 
-.tpl-import-input {
-  width: 140px;
-  min-width: 0;
-  font-size: 12.5px;
+.filters-head .check {
+  font-size: 12px;
 }
 
-.tpl-import-hint {
+.root-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 38%;
   font-size: 11.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- 下载任务行 ---------- */
+.task-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 16px;
+}
+
+.task-row + .task-row {
+  border-top: 1px solid var(--surface-2);
+}
+
+.t-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.t-name {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.t-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--text-3);
 }
 
-/* ---------- 可用版本 ---------- */
-.error-box {
+.t-status.queued,
+.t-status.downloading,
+.t-status.extracting,
+.t-status.verifying {
+  color: var(--brand);
+}
+
+.t-status.done {
+  color: var(--ok);
+}
+
+.t-status.error {
+  color: var(--danger);
+}
+
+.t-bar {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 14px;
-  color: var(--danger);
-  font-size: 13px;
 }
 
-.loading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 26px 0;
+.t-bar .bar {
+  flex: 1;
+}
+
+.t-meta {
+  font-size: 12px;
   color: var(--text-3);
-  font-size: 13px;
+  white-space: nowrap;
 }
 
-.loading.plain {
-  padding: 18px 0;
+.t-meta.plain {
+  color: var(--brand);
 }
 
-.rel-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.rel {
+.t-err {
   display: flex;
   align-items: center;
-  gap: 11px;
-  padding: 8px 14px;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--danger);
 }
 
-.rel:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-sm);
-}
-
+/* ---------- 官方版本行 ---------- */
 .rel-dot {
   width: 7px;
   height: 7px;
@@ -856,9 +947,10 @@ function progressOf(t: DownloadTask): number {
   min-width: 0;
 }
 
-.rel-name {
-  font-weight: 600;
-  font-size: 13px;
+.rel-tag {
+  font-size: 11.5px;
+  color: var(--text-3);
+  white-space: nowrap;
 }
 
 .rel-date,
@@ -869,7 +961,7 @@ function progressOf(t: DownloadTask): number {
 }
 
 .rel-size {
-  min-width: 52px;
+  min-width: 56px;
   text-align: right;
 }
 
@@ -891,7 +983,28 @@ function progressOf(t: DownloadTask): number {
   white-space: nowrap;
 }
 
-.installed-btn {
+.ok-btn {
   color: var(--ok);
+}
+
+/* ---------- 状态框:加载 / 出错 / 无匹配 ---------- */
+.state-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 26px 16px;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.state-box.plain {
+  padding: 18px 16px;
+}
+
+.state-box.err {
+  justify-content: flex-start;
+  padding: 12px 16px;
+  color: var(--danger);
 }
 </style>

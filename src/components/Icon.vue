@@ -63,6 +63,14 @@ const ICONS: Record<string, string> = {
   list: 'M8.5 6.5h11M8.5 12h11M8.5 17.5h11M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01',
   // ⇄ 双向箭头:版本对比「交换两侧」专用
   swap: 'M4 8.5h16M17 5.5l3 3-3 3M20 15.5H4M7 12.5l-3 3 3 3',
+  // 双左箭头:侧边栏收起/展开
+  'chevrons-left': 'M11.5 5.5L5.5 12l6 6.5M18.5 5.5L12.5 12l6 6.5',
+  // 终端提示符:任务中心/状态栏
+  terminal: 'M3.5 4.5h17v15h-17zM7 9.5l3.5 3.5L7 16.5M12.5 16.5H17',
+  // 收件箱:任务中心抽屉
+  inbox: 'M3.5 13h5l1.2 2.5h4.6L15.5 13h5M3.5 13L6 5.5h12L20.5 13v5h-17z',
+  // 雷达/活动:状态栏就绪态
+  activity: 'M3.5 12h4l2.5-6 4 12 2.5-6h4',
 }
 
 const props = defineProps<{ name: string; size?: number; strokeWidth?: number }>()

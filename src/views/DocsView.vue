@@ -1,5 +1,7 @@
-<!-- 文档页:引擎类参考浏览。无可用文档库时引导生成;有库时左列表右详情。
-     生成任务进度在本页以卡片展示(全局任务栏由 App 负责)。 -->
+<!-- 文档页:引擎类参考浏览(Workbench 2.0)。
+     无可用库时引导生成;有库时左类导航 + 右详情的 IDE 双栏(占满视口高,内部各自滚动);
+     库管理(全部版本生成/删除/导入/差异对比/项目扫描)收进「库管理」面板,由 view-head 切换。
+     生成任务进度在本页行内展示(全局任务栏由 App 负责)。 -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from '../components/Icon.vue'
@@ -344,129 +346,235 @@ const PHASE_TEXT: Record<string, string> = {
 </script>
 
 <template>
-  <div class="docs-view">
-    <!-- 无可用库:引导生成 -->
-    <div v-if="!readyVersions.length" class="bootstrap">
-      <div class="boot-head">
-        <Icon name="book" :size="26" />
-        <h2>引擎文档库</h2>
-        <p>从已安装的 Godot 引擎一键导出离线类参考(--dump-extension-api-with-docs),与引擎版本逐字节对应;自动套用官方简体中文翻译,未翻译条目保留英文。</p>
-      </div>
-      <div class="ver-cards">
-        <div v-for="v in versions" :key="v._id" class="ver-card">
-          <div class="vc-main">
-            <span class="vc-name">{{ v.name }}</span>
-            <span class="vc-sub mono">{{ v.tag }}</span>
-          </div>
-          <span class="vc-status" :class="{ ready: statuses[v._id]?.status === 'ready' }">{{ statusText(v._id) }}</span>
-          <span v-if="coverageText(v._id)" class="vc-coverage" :title="`官方翻译未覆盖的条目保留英文原文`">{{ coverageText(v._id) }}</span>
-          <button
-            v-if="!activeTaskByVersion[v._id]"
-            class="btn small"
-            @click="onGenerate(v._id)"
-          >
-            <Icon name="download" :size="12" /> 生成
-          </button>
-          <span v-else class="vc-progress">
-            <span class="bar"><span class="fill" :style="{ width: activeTaskByVersion[v._id].total ? `${Math.min(100, (activeTaskByVersion[v._id].done / activeTaskByVersion[v._id].total) * 100)}%` : '30%' }"></span></span>
-            <span class="pct">{{ PHASE_TEXT[activeTaskByVersion[v._id].status] || activeTaskByVersion[v._id].status }}</span>
+  <div class="docs view" :class="{ ide: readyVersions.length && !managing }">
+    <!-- 顶部:标题 + 当前库 tag + 切换 + 重新生成/删除 + 库管理入口 -->
+    <div class="view-head">
+      <h2><Icon name="book" :size="17" /> 文档 <span v-if="readyVersions.length" class="count-pill">{{ readyVersions.length }}</span></h2>
+
+      <template v-if="readyVersions.length && !managing">
+        <span class="tag brand mono head-lib-tag" :title="`当前文档库 · ${statusText(currentVersionId)}`">{{ currentStatus?.tag ?? '' }}</span>
+        <select
+          class="select head-ver"
+          :value="currentVersionId"
+          title="切换文档库"
+          @change="selectVersion(($event.target as HTMLSelectElement).value)"
+        >
+          <option v-for="v in readyVersions" :key="v._id" :value="v._id">{{ v.name }}</option>
+        </select>
+        <!-- 当前库在途任务:进度条代替操作按钮 -->
+        <span v-if="activeTaskByVersion[currentVersionId]" class="head-task" title="正在重新生成当前文档库">
+          <span class="bar" :class="{ indet: !activeTaskByVersion[currentVersionId].total }">
+            <span class="fill" :style="{ width: activeTaskByVersion[currentVersionId].total ? `${Math.min(100, (activeTaskByVersion[currentVersionId].done / activeTaskByVersion[currentVersionId].total) * 100)}%` : '30%' }"></span>
           </span>
-        </div>
-        <div v-if="!versions.length" class="boot-empty">
-          <p>还没有已安装的引擎 —— 到「版本」页安装一个 Godot,或导入现成的 API 文件:</p>
-          <button class="btn small" @click="onImport">
-            <Icon name="upload" :size="12" /> 导入 extension_api.json
+          <span class="head-task-text">{{ PHASE_TEXT[activeTaskByVersion[currentVersionId].status] || activeTaskByVersion[currentVersionId].status }}</span>
+        </span>
+        <span v-else class="head-acts">
+          <button class="btn small ghost" title="重新生成当前文档库(强制刷新翻译在「库管理」中勾选)" @click="onRegenerate(currentVersionId, forceTpl)">
+            <Icon name="refresh" :size="13" /> 重新生成
           </button>
+          <button class="btn small danger-text" title="删除当前文档库" @click="removeLibrary(currentVersionId)">
+            <Icon name="trash" :size="13" /> 删除
+          </button>
+        </span>
+      </template>
+
+      <span class="grow"></span>
+      <button
+        class="btn small ghost head-manage"
+        :class="{ on: managing }"
+        :title="managing ? '收起管理面板,回到类参考浏览' : '管理文档库(生成 / 删除 / 导入 / 差异对比 / 项目扫描)'"
+        @click="managing = !managing; if (managing) refreshProjects()"
+      >
+        <Icon name="gear" :size="13" /> {{ managing ? '返回浏览' : '库管理' }}
+      </button>
+    </div>
+
+    <!-- 库管理面板:全部版本的生成/删除 + 导入/差异对比 + 项目扫描 -->
+    <div v-if="managing" class="panel manage-panel">
+      <div class="panel-head">
+        <span class="panel-title"><Icon name="gear" :size="13" /> 文档库管理</span>
+        <span class="grow"></span>
+        <button
+          class="btn small ghost"
+          :disabled="readyVersions.length < 2"
+          :title="readyVersions.length < 2 ? '至少需要两个已生成的文档库' : '对比两个版本的 API 差异(升级前评估)'"
+          @click="diffOpen = true"
+        >
+          <Icon name="layers" :size="12" /> 版本差异对比
+        </button>
+        <button class="btn small ghost" title="从 extension_api.json 导入建库(无引擎可用时的兜底)" @click="onImport">
+          <Icon name="upload" :size="12" /> 导入 API 文件
+        </button>
+      </div>
+
+      <div v-if="versions.length" class="rows">
+        <div v-for="v in versions" :key="v._id" class="row">
+          <div class="row-main">
+            <div class="row-name">
+              <span class="vname">{{ v.name }}</span>
+              <span class="vtag mono">{{ v.tag }}</span>
+            </div>
+            <div class="row-meta">
+              <span class="tag" :class="statuses[v._id]?.status === 'ready' ? 'ok' : activeTaskByVersion[v._id] ? 'warn' : ''">{{ statusText(v._id) }}</span>
+              <span v-if="coverageText(v._id)" class="cov" title="官方翻译未覆盖的条目保留英文原文">{{ coverageText(v._id) }}</span>
+            </div>
+          </div>
+          <span class="grow"></span>
+          <div v-if="activeTaskByVersion[v._id]" class="row-task">
+            <span class="bar" :class="{ indet: !activeTaskByVersion[v._id].total }">
+              <span class="fill" :style="{ width: activeTaskByVersion[v._id].total ? `${Math.min(100, (activeTaskByVersion[v._id].done / activeTaskByVersion[v._id].total) * 100)}%` : '30%' }"></span>
+            </span>
+            <span class="task-text">{{ PHASE_TEXT[activeTaskByVersion[v._id].status] || activeTaskByVersion[v._id].status }}{{ activeTaskByVersion[v._id].total ? ` ${activeTaskByVersion[v._id].done}/${activeTaskByVersion[v._id].total}` : '' }}</span>
+            <button class="btn small ghost icon-btn" title="取消任务" @click="cancelTask(activeTaskByVersion[v._id].id)"><Icon name="x" :size="12" /></button>
+          </div>
+          <template v-else>
+            <button
+              class="btn small ghost icon-btn"
+              :title="statuses[v._id]?.status === 'ready' ? '重新生成文档库' : '生成文档库'"
+              @click="onRegenerate(v._id, forceTpl)"
+            >
+              <Icon :name="statuses[v._id]?.status === 'ready' ? 'refresh' : 'download'" :size="13" />
+            </button>
+            <button
+              v-if="statuses[v._id]?.status === 'ready'"
+              class="btn small danger-text icon-btn"
+              title="删除文档库"
+              @click="removeLibrary(v._id)"
+            >
+              <Icon name="trash" :size="13" />
+            </button>
+          </template>
         </div>
       </div>
-      <div v-if="versions.length" class="boot-foot">
-        <button class="btn small ghost" @click="onImport">
-          <Icon name="upload" :size="12" /> 导入 API 文件建库
-        </button>
-        <span class="boot-hint">在任意机器执行 <code>godot --headless --dump-extension-api-with-docs</code> 得到该 JSON</span>
+      <div v-else class="boot-none">
+        <div class="glyph"><Icon name="box" :size="26" /></div>
+        <p>还没有已安装的引擎 —— 到「版本」页安装一个 Godot,或导入现成的 API 文件。</p>
+        <button class="btn" @click="onImport"><Icon name="upload" :size="13" /> 导入 extension_api.json</button>
+        <p class="hint">在任意机器执行 <code class="mono">godot --headless --dump-extension-api-with-docs</code> 得到该 JSON</p>
+      </div>
+
+      <!-- 引擎列表之外的在途任务(项目脚本扫描等) -->
+      <div v-if="Object.values(activeTaskByVersion).some((t) => !versions.some((v) => v._id === t.versionId))" class="tasks">
+        <div class="list-group">进行中的任务</div>
+        <div
+          v-for="t in Object.values(activeTaskByVersion).filter((t) => !versions.some((v) => v._id === t.versionId))"
+          :key="t.id"
+          class="row task-row"
+        >
+          <Icon name="terminal" :size="13" class="task-ico" />
+          <span class="task-name mono">{{ t.versionName || t.tag }}</span>
+          <span class="grow"></span>
+          <span class="bar" :class="{ indet: !t.total }">
+            <span class="fill" :style="{ width: t.total ? `${Math.min(100, (t.done / t.total) * 100)}%` : '30%' }"></span>
+          </span>
+          <span class="task-text">{{ PHASE_TEXT[t.status] || t.status }}{{ t.total ? ` ${t.done}/${t.total}` : '' }}</span>
+          <button class="btn small ghost icon-btn" title="取消任务" @click="cancelTask(t.id)"><Icon name="x" :size="12" /></button>
+        </div>
+      </div>
+
+      <div class="panel-body extra">
+        <label class="force-row">
+          <input v-model="forceTpl" type="checkbox" class="switch">
+          <span>重新生成时强制刷新中文翻译<span class="row-hint">忽略本地 po 缓存,重新下载约 10MB 官方翻译</span></span>
+        </label>
+        <!-- 项目脚本扫描:把项目里带 class_name 的 .gd 解析成同类文档 -->
+        <div v-if="projects.length" class="scan-row">
+          <select v-model="scanProjectId" class="select scan-select" title="选择要扫描的项目">
+            <option v-for="p in projects" :key="p._id" :value="p._id">{{ p.name }}</option>
+          </select>
+          <button class="btn small" title="扫描项目脚本(带 class_name 的 .gd)生成文档库" @click="onScanProject">
+            <Icon name="pen" :size="12" /> 扫描项目脚本
+          </button>
+        </div>
       </div>
     </div>
 
-    <!-- 双栏浏览 -->
+    <!-- 无可用库:引导生成 -->
+    <div v-else-if="!readyVersions.length" class="panel boot-panel">
+      <div class="panel-head">
+        <span class="panel-title"><Icon name="book" :size="13" /> 生成文档库</span>
+        <span class="grow"></span>
+        <button class="btn small ghost" title="从 extension_api.json 导入建库(无引擎可用时的兜底)" @click="onImport">
+          <Icon name="upload" :size="12" /> 导入 API 文件
+        </button>
+      </div>
+      <p class="boot-desc">
+        从已安装的 Godot 引擎一键导出离线类参考(--dump-extension-api-with-docs),与引擎版本逐字节对应;自动套用官方简体中文翻译,未翻译条目保留英文。
+      </p>
+
+      <div v-if="versions.length" class="rows">
+        <div v-for="v in versions" :key="v._id" class="row">
+          <div class="row-main">
+            <div class="row-name">
+              <span class="vname">{{ v.name }}</span>
+              <span class="vtag mono">{{ v.tag }}</span>
+            </div>
+            <div class="row-meta">
+              <span class="tag" :class="statuses[v._id]?.status === 'ready' ? 'ok' : activeTaskByVersion[v._id] ? 'warn' : ''">{{ statusText(v._id) }}</span>
+              <span v-if="coverageText(v._id)" class="cov" title="官方翻译未覆盖的条目保留英文原文">{{ coverageText(v._id) }}</span>
+            </div>
+          </div>
+          <span class="grow"></span>
+          <button v-if="!activeTaskByVersion[v._id]" class="btn small primary" @click="onGenerate(v._id)">
+            <Icon name="download" :size="12" /> 生成
+          </button>
+          <div v-else class="row-task">
+            <span class="bar" :class="{ indet: !activeTaskByVersion[v._id].total }">
+              <span class="fill" :style="{ width: activeTaskByVersion[v._id].total ? `${Math.min(100, (activeTaskByVersion[v._id].done / activeTaskByVersion[v._id].total) * 100)}%` : '30%' }"></span>
+            </span>
+            <span class="task-text">{{ PHASE_TEXT[activeTaskByVersion[v._id].status] || activeTaskByVersion[v._id].status }}{{ activeTaskByVersion[v._id].total ? ` ${activeTaskByVersion[v._id].done}/${activeTaskByVersion[v._id].total}` : '' }}</span>
+            <button class="btn small ghost icon-btn" title="取消生成" @click="cancelTask(activeTaskByVersion[v._id].id)"><Icon name="x" :size="12" /></button>
+          </div>
+        </div>
+      </div>
+      <div v-else class="boot-none">
+        <div class="glyph"><Icon name="box" :size="26" /></div>
+        <p>还没有已安装的引擎 —— 到「版本」页安装一个 Godot,或导入现成的 API 文件。</p>
+        <button class="btn" @click="onImport"><Icon name="upload" :size="13" /> 导入 extension_api.json</button>
+        <p class="hint">在任意机器执行 <code class="mono">godot --headless --dump-extension-api-with-docs</code> 得到该 JSON</p>
+      </div>
+
+      <!-- 引擎列表之外的在途任务(项目脚本扫描等) -->
+      <div v-if="versions.length && Object.values(activeTaskByVersion).some((t) => !versions.some((v) => v._id === t.versionId))" class="tasks">
+        <div class="list-group">进行中的任务</div>
+        <div
+          v-for="t in Object.values(activeTaskByVersion).filter((t) => !versions.some((v) => v._id === t.versionId))"
+          :key="t.id"
+          class="row task-row"
+        >
+          <Icon name="terminal" :size="13" class="task-ico" />
+          <span class="task-name mono">{{ t.versionName || t.tag }}</span>
+          <span class="grow"></span>
+          <span class="bar" :class="{ indet: !t.total }">
+            <span class="fill" :style="{ width: t.total ? `${Math.min(100, (t.done / t.total) * 100)}%` : '30%' }"></span>
+          </span>
+          <span class="task-text">{{ PHASE_TEXT[t.status] || t.status }}{{ t.total ? ` ${t.done}/${t.total}` : '' }}</span>
+          <button class="btn small ghost icon-btn" title="取消任务" @click="cancelTask(t.id)"><Icon name="x" :size="12" /></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 类参考浏览:左类导航 + 右详情 -->
     <div v-else class="layout" :class="{ narrow: !showList }">
-      <aside class="sidebar">
+      <aside class="side panel">
         <div class="side-top">
-          <select
-            class="ver-select"
-            :value="currentVersionId"
-            @change="selectVersion(($event.target as HTMLSelectElement).value)"
-          >
-            <option v-for="v in readyVersions" :key="v._id" :value="v._id">{{ v.name }}</option>
-          </select>
-          <button class="icon-btn" :title="managing ? '收起库管理' : '管理文档库(生成/删除/导入/对比)'" @click="managing = !managing; if (managing) refreshProjects()">
-            <Icon name="gear" :size="14" />
-          </button>
-        </div>
-
-        <div v-if="managing" class="manage">
-          <div v-for="v in versions" :key="v._id" class="mg-row">
-            <span class="mg-name mono">{{ v.tag }}</span>
-            <span class="mg-status">{{ statusText(v._id) }}</span>
-            <span class="grow"></span>
-            <button v-if="statuses[v._id]?.status === 'ready' && !activeTaskByVersion[v._id]" class="mini-btn" title="删除文档库" @click="removeLibrary(v._id)">
-              <Icon name="trash" :size="12" />
+          <div class="filter-box">
+            <Icon name="search" :size="13" class="filter-ico" />
+            <input v-model="filter" class="filter-input" placeholder="过滤类名或成员…" spellcheck="false">
+          </div>
+          <div class="seg side-seg">
+            <button :class="{ on: !showTree }" title="按名称浏览全部类" @click="navView = 'list'">
+              <Icon name="list" :size="11" /> 列表
             </button>
-            <button v-if="!activeTaskByVersion[v._id]" class="mini-btn" title="生成/重新生成" @click="onGenerate(v._id, forceTpl)">
-              <Icon name="refresh" :size="12" />
+            <button
+              :class="{ on: showTree }"
+              :disabled="!!filter.trim()"
+              :title="filter.trim() ? '过滤中只能看列表,清空过滤词后可用继承树' : '按继承层级浏览全部类'"
+              @click="navView = 'tree'"
+            >
+              <Icon name="git-branch" :size="11" /> 继承树
             </button>
           </div>
-          <label class="force-row">
-            <input v-model="forceTpl" type="checkbox" class="switch">
-            <span>重新生成时强制刷新中文翻译(忽略本地 po 缓存,重新下载约 10MB)</span>
-          </label>
-          <button class="btn small ghost import-btn" @click="onImport">
-            <Icon name="upload" :size="12" /> 导入 API 文件建库
-          </button>
-          <button
-            class="btn small ghost import-btn"
-            :disabled="readyVersions.length < 2"
-            :title="readyVersions.length < 2 ? '至少需要两个已生成的文档库' : '对比两个版本的 API 差异(升级前评估)'"
-            @click="diffOpen = true"
-          >
-            <Icon name="layers" :size="12" /> 版本差异对比
-          </button>
-          <!-- 项目脚本扫描:把项目里带 class_name 的 .gd 解析成同类文档 -->
-          <div v-if="projects.length" class="scan-row">
-            <select v-model="scanProjectId" class="scan-select">
-              <option v-for="p in projects" :key="p._id" :value="p._id">{{ p.name }}</option>
-            </select>
-            <button class="btn small ghost" title="扫描项目脚本(带 class_name 的 .gd)生成文档库" @click="onScanProject">
-              <Icon name="pen" :size="12" /> 扫描项目脚本
-            </button>
-          </div>
-          <div v-for="t in Object.values(activeTaskByVersion)" :key="t.id" class="mg-row">
-            <span class="mg-name mono">{{ t.tag }}</span>
-            <span class="mg-status">{{ PHASE_TEXT[t.status] || t.status }} {{ t.total ? `${t.done}/${t.total}` : '' }}</span>
-            <span class="grow"></span>
-            <button class="mini-btn" title="取消" @click="cancelTask(t.id)">
-              <Icon name="x" :size="12" />
-            </button>
-          </div>
-        </div>
-
-        <div class="filter-row">
-          <Icon name="search" :size="13" />
-          <input v-model="filter" class="filter-input" placeholder="过滤类名…" spellcheck="false">
-        </div>
-
-        <div class="view-tabs">
-          <button class="view-tab" :class="{ on: !showTree }" @click="navView = 'list'">
-            <Icon name="list" :size="11" /> 列表
-          </button>
-          <button
-            class="view-tab"
-            :class="{ on: showTree }"
-            :disabled="!!filter.trim()"
-            :title="filter.trim() ? '过滤中只能看列表,清空过滤词后用继承树' : '按继承层级浏览全部类'"
-            @click="navView = 'tree'"
-          >
-            <Icon name="git-branch" :size="11" /> 继承树
-          </button>
         </div>
 
         <div class="class-list">
@@ -486,7 +594,7 @@ const PHASE_TEXT: Record<string, string> = {
           <button
             v-for="h in historyItems"
             :key="`his-${h.name}`"
-            class="cls-item dim"
+            class="cls-item"
             :class="{ active: h.name === selected }"
             @click="openClass(h.name)"
           >
@@ -515,7 +623,7 @@ const PHASE_TEXT: Record<string, string> = {
               @click="openClass(c.name)"
             >
               <span class="cls-name mono">{{ c.name }}</span>
-              <span v-if="memberMatchNames.has(c.name)" class="cls-member-hit" title="成员名匹配">成员</span>
+              <span v-if="memberMatchNames.has(c.name)" class="hit" title="成员名匹配">成员</span>
               <span v-else-if="c.inherits" class="cls-inherits mono">{{ c.inherits }}</span>
             </button>
             <div v-if="!filtered.length" class="list-empty">没有匹配「{{ filter }}」的类</div>
@@ -524,36 +632,25 @@ const PHASE_TEXT: Record<string, string> = {
       </aside>
 
       <section class="detail">
-        <!-- 返回条常驻:按钮上直接印 Alt+←,让快捷键一眼可见;无来路时禁用并说明原因。
+        <!-- 返回条:按钮上直接印 Alt+←,让快捷键一眼可见;无来路时禁用并说明原因。
              窄窗额外给「类列表」入口(宽窗左侧列表常驻,不需要) -->
         <div class="detail-bar">
-          <button v-if="isNarrow" class="btn-back" @click="showList = true">
+          <button v-if="isNarrow" class="btn small ghost" @click="showList = true">
             <Icon name="chevron-left" :size="13" /> 类列表
           </button>
           <button
-            class="btn-back"
+            class="btn small ghost btn-back"
             :disabled="!canGoBack"
             :title="canGoBack ? '返回上一个类' : '点击描述里的链接跳转后会记录来路,即可返回'"
             @click="goBack"
           >
-            <Icon name="chevron-left" :size="13" />
-            返回<span v-if="prevClassName" class="prev-name mono">{{ prevClassName }}</span>
+            <Icon name="chevron-left" :size="13" /> 返回
+            <span v-if="prevClassName" class="prev-name mono">{{ prevClassName }}</span>
             <span class="kbd">Alt+←</span>
           </button>
-          <span class="grow"></span>
-          <!-- 详情页快速切库:保持当前类名,缺失由 classMissing 提示兜底 -->
-          <select
-            v-if="readyVersions.length > 1"
-            class="detail-ver mono"
-            :value="currentVersionId"
-            :title="`当前文档库:${currentStatus?.tag ?? ''}`"
-            @change="selectVersion(($event.target as HTMLSelectElement).value)"
-          >
-            <option v-for="v in readyVersions" :key="v._id" :value="v._id">{{ v.tag }}</option>
-          </select>
         </div>
         <div v-if="classMissing" class="missing-lib">
-          <Icon name="alert" :size="16" />
+          <Icon name="alert" :size="15" />
           <span>「{{ selected }}」不在当前文档库({{ currentStatus?.tag }})中 —— 可能属于其他引擎版本。</span>
         </div>
         <DocClassPanel
@@ -567,9 +664,9 @@ const PHASE_TEXT: Record<string, string> = {
           @anchor-done="anchor = null"
         />
         <div v-else class="detail-empty">
-          <Icon name="book" :size="24" />
-          <p>从左侧选择一个类</p>
-          <p class="hint">Ctrl+K 可在任意页面搜索类与方法</p>
+          <div class="glyph"><Icon name="book" :size="26" /></div>
+          <p>从左侧选择一个类开始浏览</p>
+          <p class="hint"><span class="kbd">Ctrl+K</span> 可在任意页面搜索类与方法</p>
         </div>
       </section>
     </div>
@@ -586,259 +683,285 @@ const PHASE_TEXT: Record<string, string> = {
 </template>
 
 <style scoped>
-.docs-view {
+/* 根:类参考模式占满视口高(双栏内部各自滚动);引导/管理面板自然流式 */
+.docs.view.ide {
   height: 100%;
 }
 
-/* ---------- 引导生成 ---------- */
-.bootstrap {
-  max-width: 620px;
-  margin: 0 auto;
-  padding: 48px 20px;
+.docs.view.ide .view-head {
+  flex-shrink: 0;
 }
 
-.boot-head {
-  text-align: center;
-  color: var(--text-2);
+/* ---------- 顶部 view-head ---------- */
+.head-lib-tag {
+  flex-shrink: 0;
 }
 
-.boot-head h2 {
-  margin: 10px 0 6px;
-  font-size: 17px;
-  color: var(--text);
+.head-ver {
+  max-width: 176px;
+  padding: 3px 8px;
+  font-size: 12px;
+  border-radius: 6px;
+  box-shadow: none;
 }
 
-.boot-head p {
-  margin: 0;
-  font-size: 12.5px;
-  color: var(--text-3);
+.head-acts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.ver-cards {
-  margin-top: 22px;
-  display: flex;
-  flex-direction: column;
+.head-task {
+  display: inline-flex;
+  align-items: center;
   gap: 8px;
 }
 
-.ver-card {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 11px 14px;
-  border: 1px solid var(--border);
-  border-radius: 11px;
-  background: var(--surface);
+.head-task .bar {
+  width: 96px;
 }
 
-.vc-main {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.vc-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.vc-sub {
-  font-size: 11px;
-  color: var(--text-3);
-}
-
-.vc-status {
-  margin-left: auto;
+.head-task-text {
   font-size: 11.5px;
-  color: var(--text-3);
-}
-
-.vc-status.ready {
-  color: var(--success, #4caf7d);
-}
-
-.vc-progress {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.bar {
-  width: 110px;
-  height: 5px;
-  border-radius: 999px;
-  background: var(--surface-2);
-  overflow: hidden;
-}
-
-.fill {
-  display: block;
-  height: 100%;
-  background: var(--brand);
-  border-radius: 999px;
-  transition: width 0.3s;
-}
-
-.pct {
-  font-size: 11px;
   color: var(--brand);
   white-space: nowrap;
 }
 
-.boot-empty {
-  padding: 18px;
+.head-manage.on {
+  color: var(--brand);
+  border-color: var(--brand);
+  background: var(--brand-weak);
+}
+
+/* ---------- 引导 / 管理面板共用行 ---------- */
+.boot-desc {
+  margin: 12px 14px 2px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--text-3);
+}
+
+.rows {
+  margin-top: 6px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  transition: background 0.13s;
+}
+
+.row + .row {
+  border-top: 1px solid var(--surface-2);
+}
+
+.row:hover {
+  background: var(--surface-2);
+}
+
+.row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.row-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.vname {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vtag {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.row-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cov {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.row-task {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.row-task .bar {
+  width: 118px;
+}
+
+.task-text {
+  font-size: 11.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* 引擎列表之外的在途任务(项目脚本扫描等) */
+.tasks {
+  padding: 2px 0 4px;
+}
+
+.tasks .list-group {
+  padding: 10px 14px 4px;
+}
+
+.task-row .bar {
+  width: 118px;
+  flex-shrink: 0;
+}
+
+.task-name {
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-ico {
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+/* 无引擎可用的空态 */
+.boot-none {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 34px 24px;
   text-align: center;
   font-size: 12.5px;
   color: var(--text-3);
-  border: 1px dashed var(--border);
-  border-radius: 11px;
 }
 
-.boot-empty p {
-  margin: 0 0 10px;
-}
-
-.boot-foot {
-  margin-top: 16px;
+.boot-none .glyph {
   display: flex;
   align-items: center;
-  gap: 9px;
-  flex-wrap: wrap;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 4px;
+  border-radius: 50%;
+  background: var(--brand-weak);
+  color: var(--brand);
 }
 
-.boot-hint {
+.boot-none .hint {
   font-size: 11.5px;
-  color: var(--text-3);
 }
 
-.boot-hint code {
+.boot-none code {
   padding: 1px 5px;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--surface-2);
-  font-family: var(--mono);
+  font-size: 11px;
 }
 
-.import-btn {
-  margin: 2px 0 6px;
+/* 管理面板底部:强刷翻译 + 项目扫描 */
+.extra {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+
+.force-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.force-row .switch {
+  margin-top: 1px;
+  flex-shrink: 0;
 }
 
 .scan-row {
   display: flex;
   align-items: center;
-  gap: 5px;
-  margin: 2px 0 6px;
+  gap: 8px;
+  margin-top: 11px;
 }
 
 .scan-select {
   flex: 1;
   min-width: 0;
-  padding: 4px 6px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 11.5px;
 }
 
-/* ---------- 双栏 ---------- */
+/* ---------- 类参考浏览(IDE 双栏) ---------- */
 .layout {
+  flex: 1;
+  min-height: 0;
   display: grid;
-  grid-template-columns: 252px 1fr;
-  height: 100%;
+  grid-template-columns: 264px minmax(0, 1fr);
+  gap: 14px;
 }
 
-.sidebar {
-  border-right: 1px solid var(--border);
+.side {
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  background: var(--surface);
 }
 
 .side-top {
   display: flex;
-  gap: 6px;
-  padding: 10px 10px 6px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 10px 9px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-head);
+  flex-shrink: 0;
 }
 
-.ver-select {
-  flex: 1;
-  min-width: 0;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface-2);
-  color: var(--text);
-  font-size: 12.5px;
-}
-
-.icon-btn {
-  display: inline-flex;
+.filter-box {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  width: 28px;
+  gap: 7px;
   height: 28px;
-  border: 1px solid var(--border);
+  padding: 0 9px;
+  border: 1px solid var(--border-strong);
   border-radius: 7px;
   background: var(--surface);
   color: var(--text-3);
-  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
-.icon-btn.on {
-  color: var(--brand);
+.filter-box:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-weak);
 }
 
-.manage {
-  padding: 4px 10px 8px;
-  border-bottom: 1px solid var(--border);
-}
-
-.mg-row {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 0;
-  font-size: 11.5px;
-}
-
-.mg-name {
-  color: var(--text-2);
-}
-
-.mg-status {
-  color: var(--text-3);
-}
-
-.mini-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface);
-  color: var(--text-3);
-  cursor: pointer;
-}
-
-.mini-btn:hover {
-  color: var(--danger, #e05252);
-}
-
-.filter-row {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 8px 10px;
-  padding: 6px 9px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface-2);
-  color: var(--text-3);
+.filter-ico {
+  flex-shrink: 0;
 }
 
 .filter-input {
@@ -851,62 +974,46 @@ const PHASE_TEXT: Record<string, string> = {
   font-size: 12.5px;
 }
 
-.view-tabs {
-  display: flex;
-  gap: 3px;
-  margin: 0 10px 6px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
-}
-
-.view-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 9px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: none;
+.filter-input::placeholder {
   color: var(--text-3);
-  font-size: 11.5px;
-  cursor: pointer;
 }
 
-.view-tab:hover:not(:disabled) {
-  color: var(--text);
-  background: var(--surface-2);
+.side-seg {
+  width: 100%;
 }
 
-.view-tab.on {
-  color: var(--brand);
-  background: var(--brand-weak);
-  border-color: color-mix(in srgb, var(--brand) 22%, transparent);
-  font-weight: 600;
+.side-seg button {
+  flex: 1;
+  justify-content: center;
 }
 
 /* 过滤中树视图不可用:置灰而不是「点了没反应」,原因写在 title 里 */
-.view-tab:disabled {
+.side-seg button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
 
 .class-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 0 6px 12px;
+  padding: 2px 6px 12px;
 }
 
 .list-group {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   padding: 10px 8px 4px;
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--text-3);
 }
 
 .list-group .cnt {
   font-weight: 500;
-  color: var(--text-3);
   opacity: 0.8;
 }
 
@@ -915,20 +1022,24 @@ const PHASE_TEXT: Record<string, string> = {
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 5px 8px;
+  height: 24px;
+  padding: 0 8px;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   background: none;
   cursor: pointer;
   text-align: left;
+  transition: background 0.13s;
 }
 
 .cls-item:hover {
   background: var(--surface-2);
 }
 
+/* 当前类:brand-weak 底 + 左侧 inset 品牌条 */
 .cls-item.active {
-  background: color-mix(in srgb, var(--brand) 13%, transparent);
+  background: var(--brand-weak);
+  box-shadow: inset 2px 0 0 var(--brand);
 }
 
 .cls-item.active .cls-name {
@@ -936,12 +1047,18 @@ const PHASE_TEXT: Record<string, string> = {
   font-weight: 600;
 }
 
-.cls-item.dim .cls-name {
-  color: var(--text-3);
+.cls-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .fav-ico {
-  color: var(--warning, #e8a33d);
+  color: var(--gold);
   flex-shrink: 0;
 }
 
@@ -950,43 +1067,77 @@ const PHASE_TEXT: Record<string, string> = {
   flex-shrink: 0;
 }
 
-.cls-name {
-  font-size: 12.5px;
-  color: var(--text-2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* 成员名命中角标(「哪个类有 tween_interval」) */
+.hit {
+  flex-shrink: 0;
+  padding: 0 5px;
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 15px;
+  color: var(--brand);
+  background: var(--brand-weak);
+  border-radius: 5px;
 }
 
 .cls-inherits {
-  margin-left: auto;
-  font-size: 10.5px;
-  color: var(--text-3);
-  opacity: 0.7;
   flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-3);
+  opacity: 0.75;
 }
 
 .list-empty {
-  padding: 14px 10px;
+  padding: 16px 10px;
   font-size: 12px;
   color: var(--text-3);
   text-align: center;
 }
 
-/* ---------- 详情 ---------- */
+/* ---------- 详情区 ---------- */
 .detail {
   min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  gap: 10px;
 }
 
+.detail-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.prev-name {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--brand);
+}
+
+.btn-back .kbd {
+  margin-left: 2px;
+}
+
+/* DocClassPanel 根节点撑满剩余高度,内部滚动 */
 .detail :deep(.panel) {
   flex: 1;
+  min-height: 0;
 }
 
-.btn-back {
-  display: none;
+.missing-lib {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+  border-radius: var(--radius);
+  background: var(--warn-weak);
+  color: var(--warn);
+  font-size: 12.5px;
+  flex-shrink: 0;
 }
 
 .detail-empty {
@@ -1000,117 +1151,23 @@ const PHASE_TEXT: Record<string, string> = {
   font-size: 13px;
 }
 
-.detail-empty .hint {
-  font-size: 11.5px;
-  opacity: 0.8;
+.detail-empty .glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 6px;
+  border-radius: 50%;
+  background: var(--brand-weak);
+  color: var(--brand);
 }
 
-.btn-back {
+.detail-empty .hint {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 5px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text-2);
-  font-size: 12px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.btn-back:hover {
-  color: var(--brand);
-  border-color: color-mix(in srgb, var(--brand) 35%, transparent);
-}
-
-.btn-back:disabled {
-  opacity: 0.5;
-  cursor: default;
-  color: var(--text-3);
-  border-color: var(--border);
-}
-
-/* 返回条:有来路(或窄窗)时常驻,宽窄窗都要看得见 */
-.detail-bar {
-  display: flex;
-  align-items: center;
   gap: 6px;
-  padding: 10px 18px 0;
-  flex-shrink: 0;
-}
-
-.prev-name {
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--brand);
-}
-
-.kbd {
-  margin-left: 3px;
-  padding: 1px 5px;
-  font-size: 10px;
-  color: var(--text-3);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--surface-2);
-}
-
-.detail-ver {
-  padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--text-2);
   font-size: 11.5px;
-  max-width: 160px;
-}
-
-.missing-lib {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 10px 18px 0;
-  padding: 8px 12px;
-  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
-  border-radius: 8px;
-  background: var(--warn-weak);
-  color: var(--warn);
-  font-size: 12.5px;
-}
-
-.vc-coverage {
-  font-size: 10.5px;
-  color: var(--text-3);
-  white-space: nowrap;
-}
-
-.cls-member-hit {
-  margin-left: auto;
-  padding: 0 5px;
-  font-size: 9.5px;
-  font-weight: 600;
-  color: var(--brand);
-  border: 1px solid color-mix(in srgb, var(--brand) 35%, transparent);
-  border-radius: 5px;
-  flex-shrink: 0;
-}
-
-.force-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 6px 2px 8px;
-  font-size: 11px;
-  color: var(--text-3);
-  cursor: pointer;
-}
-
-.force-row .switch {
-  margin-top: 1px;
-  flex-shrink: 0;
 }
 
 /* 窄窗:列表与详情二选一 */
@@ -1119,11 +1176,21 @@ const PHASE_TEXT: Record<string, string> = {
     grid-template-columns: 1fr;
   }
 
-  .layout.narrow .sidebar {
+  .layout.narrow .side {
     display: none;
   }
 
   .layout:not(.narrow) .detail {
+    display: none;
+  }
+}
+
+/* 再窄:收紧 view-head,隐藏次要操作 */
+@media (max-width: 760px) {
+  .head-lib-tag,
+  .head-ver,
+  .head-task,
+  .head-acts {
     display: none;
   }
 }

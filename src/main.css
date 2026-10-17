@@ -1,5 +1,5 @@
 /* ================================================================
-   Godot 项目管理 · 引擎工作台设计系统
+   Godot 工坊 · Workbench 2.0 设计系统
    ----------------------------------------------------------------
    主题由两个属性组合而成,由 useTheme() 同时写入 <html>:
      data-theme = 色板  steel | graphite | forest | violet | amber
@@ -8,7 +8,13 @@
    分工(避免 10 份完整令牌表的重复):
      · :root                                结构令牌 + 浅色语义色/阴影 + 默认色板(钢蓝·浅色)
      · :root[data-mode='dark']              深色语义色/阴影 + color-scheme
-     · :root[data-theme='X'][data-mode='Y'] 该色板该明暗下的 14 个色彩令牌
+     · :root[data-theme='X'][data-mode='Y']  该色板该明暗下的 14 个色彩令牌
+
+   Workbench 2.0 在色板之上引入「编辑器铬层」(chrome):
+     · --chrome   侧边栏/状态栏的背景,明暗两态都比内容面更深一档
+     · --chrome-2 铬层悬停态
+     · --panel-*  面板(dock)语言:头部条 + 主体的两段式结构
+   铬层令牌由既有色令牌推导(color-mix),所有色板自动获得,无需每板重复。
 
    刻意**不随色板变化**的两组:
      · 语义色(danger / ok / warn / gold) —— 红就是危险、绿就是成功,换色板不该改变含义;
@@ -19,9 +25,9 @@
 :root {
   /* ---------- 结构令牌(与主题无关) ---------- */
   --mono: 'Cascadia Mono', Consolas, 'Courier New', monospace;
-  --radius-lg: 14px;
-  --radius: 10px;
-  --radius-sm: 7px;
+  --radius-lg: 12px;
+  --radius: 9px;
+  --radius-sm: 6px;
 
   /* ---------- 浅色:语义色 ---------- */
   --danger: #d5494a;
@@ -40,9 +46,10 @@
   --grad-d: linear-gradient(135deg, #e8a95c, #d07a2e);
 
   /* ---------- 浅色:阴影 ---------- */
-  --shadow-sm: 0 1px 2px rgba(23, 37, 56, 0.06);
-  --shadow: 0 1px 2px rgba(23, 37, 56, 0.05), 0 4px 14px rgba(23, 37, 56, 0.06);
-  --shadow-lift: 0 2px 6px rgba(23, 37, 56, 0.09), 0 12px 28px rgba(23, 37, 56, 0.1);
+  --shadow-sm: 0 1px 2px rgba(23, 37, 56, 0.07);
+  --shadow: 0 1px 2px rgba(23, 37, 56, 0.05), 0 4px 14px rgba(23, 37, 56, 0.07);
+  --shadow-lift: 0 2px 6px rgba(23, 37, 56, 0.1), 0 12px 28px rgba(23, 37, 56, 0.12);
+  --shadow-overlay: 0 8px 20px rgba(15, 23, 42, 0.16), 0 24px 60px rgba(15, 23, 42, 0.22);
 
   /* ---------- 默认色板 · 钢蓝(steel)· 浅色 ---------- */
   --brand: #478cbf;
@@ -51,7 +58,7 @@
   --brand-weak: rgba(71, 140, 191, 0.13);
   --brand-grad: linear-gradient(135deg, #57a1d4 0%, #35719f 100%);
 
-  --bg: #edf1f6;
+  --bg: #e9eef4;
   --surface: #ffffff;
   --surface-2: #f3f6fa;
   --surface-3: #e9eef5;
@@ -62,6 +69,22 @@
   --text: #20293a;
   --text-2: #4d5c6e;
   --text-3: #8493a6;
+
+  /* ---------- 编辑器铬层(由色令牌推导;fallback 给不支持 color-mix 的旧 webview) ---------- */
+  --chrome: var(--surface-2);
+  --chrome-2: var(--surface-3);
+  --chrome-border: var(--border);
+  --chrome-text: var(--text-2);
+  --chrome-text-2: var(--text-3);
+  --chrome: color-mix(in srgb, var(--surface) 55%, var(--bg));
+  --chrome-2: color-mix(in srgb, var(--surface) 30%, var(--bg));
+  --chrome-border: color-mix(in srgb, var(--border) 80%, var(--bg));
+  --chrome-text: color-mix(in srgb, var(--text-2) 90%, var(--bg));
+  --chrome-text-2: color-mix(in srgb, var(--text-3) 85%, var(--bg));
+
+  /* ---------- 面板(dock)语言 ---------- */
+  --panel-head: var(--surface-2);
+  --panel-head: color-mix(in srgb, var(--surface) 60%, var(--bg));
 
   /* 代码语法着色(亮色):与色板无关,所有色板共用 */
   --syn-kw: #7c4dbe;
@@ -96,9 +119,10 @@
   --syn-com: #8493a6;
 
   /* ---------- 深色:阴影 ---------- */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
-  --shadow: 0 1px 3px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.25);
-  --shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.35), 0 12px 28px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.28);
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.32), 0 4px 14px rgba(0, 0, 0, 0.28);
+  --shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.38), 0 12px 28px rgba(0, 0, 0, 0.44);
+  --shadow-overlay: 0 8px 20px rgba(0, 0, 0, 0.4), 0 24px 60px rgba(0, 0, 0, 0.55);
 }
 
 /* ================================================================
@@ -113,12 +137,12 @@
   --brand-weak: rgba(108, 176, 227, 0.14);
   --brand-grad: linear-gradient(135deg, #4e97cc 0%, #2f5f8a 100%);
 
-  --bg: #12161d;
-  --surface: #1b212b;
-  --surface-2: #222a37;
-  --surface-3: #2a3444;
+  --bg: #11151c;
+  --surface: #1a2029;
+  --surface-2: #212936;
+  --surface-3: #293341;
 
-  --border: #2c3646;
+  --border: #2b3543;
   --border-strong: #3d4a5e;
 
   --text: #e7edf5;
@@ -290,7 +314,9 @@
   --text-3: #8b7f6e;
 }
 
-/* ---------- 基础 ---------- */
+/* ================================================================
+   基础
+   ================================================================ */
 
 * {
   box-sizing: border-box;
@@ -316,9 +342,13 @@ body {
   height: 100%;
 }
 
+::selection {
+  background: var(--brand-weak);
+}
+
 ::-webkit-scrollbar {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-thumb {
@@ -352,15 +382,15 @@ body {
 .view {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px 18px 28px;
+  gap: 14px;
+  padding: 18px 22px 30px;
   animation: view-in 0.18s ease-out;
 }
 
 @keyframes view-in {
   from {
     opacity: 0;
-    transform: translateY(5px);
+    transform: translateY(4px);
   }
   to {
     opacity: 1;
@@ -368,7 +398,9 @@ body {
   }
 }
 
-/* ---------- 基础控件 ---------- */
+/* ================================================================
+   基础控件
+   ================================================================ */
 
 button {
   font: inherit;
@@ -382,7 +414,7 @@ button {
   gap: 6px;
   padding: 6px 14px;
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: 7px;
   background: var(--surface);
   color: var(--text);
   line-height: 20px;
@@ -451,7 +483,7 @@ button {
   padding: 3px 11px;
   font-size: 12px;
   line-height: 18px;
-  border-radius: 7px;
+  border-radius: 6px;
 }
 
 .btn.icon-btn {
@@ -464,7 +496,7 @@ button {
 .select {
   padding: 6px 10px;
   border: 1px solid var(--border-strong);
-  border-radius: 8px;
+  border-radius: 7px;
   background: var(--surface);
   color: var(--text);
   font: inherit;
@@ -531,13 +563,73 @@ input[type='checkbox'].switch:checked::after {
   left: 18px;
 }
 
-/* ---------- 通用块 ---------- */
+/* 键位提示小胶囊(命令面板/快捷键说明) */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  padding: 1px 6px;
+  border: 1px solid var(--chrome-border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--chrome);
+  color: var(--chrome-text-2);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+/* ================================================================
+   表面:卡片与面板(dock)
+   ================================================================ */
 
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
+}
+
+/* 面板:编辑器 dock 语言。头部是小写字距标题条,主体承载内容 */
+.panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-head);
+  flex-shrink: 0;
+}
+
+.panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-2);
+  text-transform: uppercase;
+}
+
+.panel-title .icon {
+  color: var(--brand);
+}
+
+.panel-body {
+  padding: 12px 14px;
 }
 
 .tag {
@@ -574,7 +666,7 @@ input[type='checkbox'].switch:checked::after {
   color: var(--ok);
 }
 
-/* 视图标题行 */
+/* 视图标题行:标题 + 说明 + 动作 */
 .view-head {
   display: flex;
   align-items: center;
@@ -587,16 +679,24 @@ input[type='checkbox'].switch:checked::after {
 
 .view-head h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   color: var(--text);
+  letter-spacing: 0.01em;
 }
 
 .view-head h2 .icon {
   color: var(--brand);
+}
+
+/* 标题旁的说明文字(重设计的视图头部使用) */
+.view-sub {
+  font-size: 12.5px;
+  color: var(--text-3);
+  line-height: 1.5;
 }
 
 .count-pill {
@@ -619,7 +719,7 @@ input[type='checkbox'].switch:checked::after {
   gap: 2px;
   padding: 2px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 8px;
   background: var(--surface-2);
 }
 
@@ -629,7 +729,7 @@ input[type='checkbox'].switch:checked::after {
   gap: 5px;
   padding: 3px 12px;
   border: none;
-  border-radius: 7px;
+  border-radius: 6px;
   background: transparent;
   color: var(--text-2);
   font-size: 12px;
@@ -781,7 +881,9 @@ input[type='checkbox'].switch:checked::after {
   }
 }
 
-/* ---------- 模态框外壳(全局共用:确认弹窗、新建备份、恢复向导) ---------- */
+/* ================================================================
+   模态框外壳(全局共用:确认弹窗、新建备份、恢复向导)
+   ================================================================ */
 
 .modal-mask {
   position: fixed;
@@ -790,7 +892,8 @@ input[type='checkbox'].switch:checked::after {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(18, 26, 40, 0.45);
+  background: rgba(10, 16, 26, 0.5);
+  backdrop-filter: blur(2px);
 }
 
 .modal {
@@ -798,7 +901,7 @@ input[type='checkbox'].switch:checked::after {
   max-height: calc(100vh - 64px);
   overflow-y: auto;
   padding: 18px 20px;
-  box-shadow: var(--shadow-lift);
+  box-shadow: var(--shadow-overlay);
   animation: pop-in 0.16s ease;
 }
 
@@ -919,16 +1022,11 @@ input[type='checkbox'].switch:checked::after {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .view,
-  .fill.active::after,
-  .bar.indet .fill,
-  .spin,
-  .modal,
-  /* 工具页重设计新增的过渡:行 hover 的底色、左栏选中态、摘要带按钮 */
-  .tools .row,
-  .tools .all,
-  .tools .band .v {
-    animation: none;
-    transition: none;
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
