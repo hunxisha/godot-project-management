@@ -488,7 +488,7 @@ function onKeyDown(e: KeyboardEvent) {
                 title="更多操作"
                 @click="toggleMenu(p._id)"
               >
-                <Icon name="more" :size="13" />
+                <Icon name="more" :size="16" :stroke-width="3" />
               </button>
               <div v-if="openMenuId === p._id" class="row-menu">
                 <button class="menu-item" @click="menuAction(p._id, () => openExport(p))">
