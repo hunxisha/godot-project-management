@@ -1,10 +1,12 @@
 <script setup lang="ts">
 // 资产详情对话框:展示商店详情接口的媒体画廊/简介/标签/许可/评分,
+// 外加「详细介绍」(body_html)与「更新日志」(各版本 changes_html),
 // 帮助在安装前判断「装不装」。数据由 services.getAssetDetail 现取。
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import Icon from '../Icon.vue'
-import { normVersion } from '../../utils/format'
+import { formatRelative, normVersion } from '../../utils/format'
 import { IS_DESKTOP } from '../../services/desktop'
+import { openExternal } from '../../services/bridge'
 import type { AssetDetail } from '../../types/godot'
 
 const props = defineProps<{
@@ -21,6 +23,14 @@ const loading = ref(false)
 const error = ref('')
 /** 画廊当前展示的大图 */
 const active = ref('')
+/** 更新日志默认只展开最近几个版本,防止长列表把弹窗顶穿 */
+const showAllReleases = ref(false)
+
+/** 更新日志列表(preload 已按发布时间倒序) */
+const releaseList = computed(() => detail.value?.releases ?? [])
+const shownReleases = computed(() =>
+  showAllReleases.value ? releaseList.value : releaseList.value.slice(0, 5)
+)
 
 async function load() {
   if (!props.assetId) return
@@ -28,6 +38,7 @@ async function load() {
   error.value = ''
   detail.value = null
   active.value = ''
+  showAllReleases.value = false
   try {
     detail.value = await window.services.getAssetDetail(props.assetId)
     if (!detail.value) {
@@ -55,6 +66,17 @@ watch(
 
 function openStore() {
   if (detail.value?.storeUrl) window.ztools.shellOpenExternal(detail.value.storeUrl)
+}
+
+/** v-html 富文本里的链接统一改走系统浏览器(webview 内导航会把插件界面顶掉) */
+function onHtmlClick(e: MouseEvent) {
+  const a = (e.target as HTMLElement)?.closest?.('a')
+  if (!a) return
+  const href = a.getAttribute('href') || ''
+  if (href) {
+    e.preventDefault()
+    openExternal(href)
+  }
 }
 </script>
 
@@ -109,6 +131,35 @@ function openStore() {
 
           <p class="d-desc">{{ detail.description || '暂无简介' }}</p>
 
+          <!-- 商店详情页完整介绍(富文本) -->
+          <section v-if="detail.bodyHtml" class="d-sec">
+            <div class="d-sec-label">详细介绍</div>
+            <div class="rich" @click="onHtmlClick" v-html="detail.bodyHtml"></div>
+          </section>
+
+          <!-- 各版本变更日志 -->
+          <section v-if="releaseList.length" class="d-sec">
+            <div class="d-sec-label">更新日志</div>
+            <div class="rel-list">
+              <div v-for="r in shownReleases" :key="r.version + r.created" class="rel">
+                <div class="rel-head">
+                  <span v-if="r.version" class="tag brand">v{{ normVersion(r.version) }}</span>
+                  <span v-if="!r.stable" class="tag warn" title="测试/预览版">测试版</span>
+                  <span class="rel-date">{{ formatRelative(new Date(r.created).getTime() || 0, '—') }}</span>
+                </div>
+                <div v-if="r.changesHtml" class="rich" @click="onHtmlClick" v-html="r.changesHtml"></div>
+                <div v-else class="rel-empty">该版本未填写变更说明</div>
+              </div>
+              <button
+                v-if="releaseList.length > 5 && !showAllReleases"
+                class="rel-more"
+                @click="showAllReleases = true"
+              >
+                显示全部 {{ releaseList.length }} 个版本
+              </button>
+            </div>
+          </section>
+
           <div class="d-foot">
             <button class="btn ghost" @click="openStore">
               <Icon name="external" :size="12" /> 在商店中打开
@@ -125,6 +176,148 @@ function openStore() {
 <style scoped>
 .grow {
   flex: 1;
+}
+
+/* ---------- 分节(详细介绍 / 更新日志) ---------- */
+
+.d-sec {
+  margin: 12px 0 2px;
+}
+
+.d-sec-label {
+  margin-bottom: 7px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/* 商店 HTML 富文本排版(链接点击由 onHtmlClick 委派走系统浏览器) */
+.rich {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text);
+  overflow-wrap: break-word;
+}
+
+.rich :deep(h1),
+.rich :deep(h2),
+.rich :deep(h3),
+.rich :deep(h4) {
+  margin: 10px 0 4px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.rich :deep(h1:first-child),
+.rich :deep(h2:first-child),
+.rich :deep(h3:first-child) {
+  margin-top: 0;
+}
+
+.rich :deep(p) {
+  margin: 5px 0;
+}
+
+.rich :deep(ul),
+.rich :deep(ol) {
+  margin: 5px 0;
+  padding-left: 20px;
+}
+
+.rich :deep(a) {
+  color: var(--brand);
+  text-decoration: none;
+}
+
+.rich :deep(a:hover) {
+  text-decoration: underline;
+}
+
+.rich :deep(code) {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-3);
+}
+
+.rich :deep(pre) {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  overflow-x: auto;
+}
+
+.rich :deep(pre code) {
+  padding: 0;
+  background: none;
+}
+
+.rich :deep(img) {
+  max-width: 100%;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.rich :deep(blockquote) {
+  margin: 6px 0;
+  padding: 2px 12px;
+  border-left: 3px solid var(--brand);
+  color: var(--text-2);
+}
+
+/* ---------- 更新日志列表 ---------- */
+
+.rel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rel {
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.rel-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 4px;
+}
+
+.rel-date {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.rel-empty {
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+.rel-more {
+  align-self: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  background: none;
+  padding: 4px 16px;
+  font-size: 12px;
+  color: var(--brand);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.rel-more:hover {
+  border-color: var(--brand);
+  background: var(--brand-weak);
 }
 
 .hint-line {

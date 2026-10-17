@@ -280,6 +280,10 @@ export interface AssetDetail {
   versionString: string
   downloadUrl: string
   description: string
+  /** 商店详情页完整介绍(store API body_html 渲染好的 HTML),空串表示未填写 */
+  bodyHtml?: string
+  /** 各版本变更日志(按发布时间倒序;changesHtml 为空串表示该版本未填写) */
+  releases?: { version: string, created: string, stable: boolean, changesHtml: string }[]
   tags: string[]
   media: string[]
   videoId: string

@@ -235,6 +235,18 @@ async function getAssetDetail(assetId, version) {
     versionString: rel.version || '',
     downloadUrl: rel.download_url || '',
     description: detail.description,
+    // 详情页完整介绍(HTML,含图文);与列表卡片的简述(description)是两个字段
+    bodyHtml: detail.body_html || '',
+    // 各版本变更日志(HTML),按发布时间倒序,弹窗的「更新日志」区用
+    releases: asArray(releases)
+      .slice()
+      .sort((a, b) => String(b.created).localeCompare(String(a.created)))
+      .map((r) => ({
+        version: r.version || '',
+        created: r.created || '',
+        stable: !!r.stable,
+        changesHtml: r.changes_html || ''
+      })),
     tags: asArray(detail.tags).map((t) => t.display_name),
     media: asArray(detail.media),
     videoId: detail.video_id || '',
