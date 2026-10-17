@@ -7,7 +7,11 @@ import Icon from './Icon.vue'
 import { useTheme, type ThemeDef } from '../composables/useTheme'
 import type { ThemeId, ThemeMode } from '../types/godot'
 
-const props = withDefaults(defineProps<{ inline?: boolean; up?: boolean }>(), { inline: false, up: false })
+// place 决定浮层弹出方向(仅非 inline 形态生效):
+//   · 'down'(默认) 按钮正下方,右对齐 —— 用于顶栏/内容区场景
+//   · 'side'       按钮右侧、底边对齐 —— 用于侧边栏底部:按钮贴着视口左缘,
+//                  向下/向左展开都会被视口裁掉,只有向内容区方向有整块空间
+const props = withDefaults(defineProps<{ inline?: boolean; place?: 'down' | 'side' }>(), { inline: false, place: 'down' })
 
 const { theme, mode, resolvedMode, currentTheme, currentMode, themes, modes, setTheme, setMode } = useTheme()
 
@@ -68,7 +72,7 @@ onBeforeUnmount(() => {
       <Icon name="palette" :size="15" />
     </button>
 
-    <div v-show="inline || open" class="ts-panel" :class="{ pop: !inline, up: props.up && !inline }">
+    <div v-show="inline || open" class="ts-panel" :class="{ pop: !inline, side: props.place === 'side' && !inline }">
       <!-- 明暗 -->
       <div class="ts-modes">
         <button
@@ -159,20 +163,25 @@ onBeforeUnmount(() => {
   top: calc(100% + 8px);
   right: 0;
   z-index: 60;
+  /* 小窗口兜底:面板超高时内部滚动,不向视口外溢出 */
+  max-height: min(440px, calc(100vh - 48px));
+  overflow-y: auto;
   animation: ts-pop 0.14s ease;
 }
 
-/* 侧边栏底部场景:向上弹出 */
-.ts-panel.pop.up {
+/* 侧边栏底部场景:向右展开,底边与按钮对齐 */
+.ts-panel.pop.side {
   top: auto;
-  bottom: calc(100% + 8px);
-  animation-name: ts-pop-up;
+  bottom: 0;
+  left: calc(100% + 10px);
+  right: auto;
+  animation-name: ts-pop-side;
 }
 
-@keyframes ts-pop-up {
+@keyframes ts-pop-side {
   from {
     opacity: 0;
-    transform: translateY(6px) scale(0.98);
+    transform: translateX(-6px) scale(0.98);
   }
   to {
     opacity: 1;

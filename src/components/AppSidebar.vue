@@ -133,7 +133,7 @@ function pick(t: NavItem) {
       <button class="foot-btn" :title="collapsed ? '展开侧边栏' : '收起侧边栏'" @click="toggleCollapse">
         <Icon name="chevrons-left" :size="15" :style="collapsed ? 'transform:rotate(180deg)' : ''" />
       </button>
-      <ThemeSwitcher up />
+      <ThemeSwitcher place="side" />
       <button
         class="foot-btn"
         :class="{ active: modelValue === 'settings' }"
