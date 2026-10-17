@@ -379,29 +379,31 @@ const PHASE_TEXT: Record<string, string> = {
       </template>
 
       <span class="grow"></span>
+      <!-- 版本差异对比:常驻 view-head(删除/库管理之间),两处模式都能直达 -->
+      <button
+        v-if="versions.length"
+        class="btn small ghost"
+        :disabled="readyVersions.length < 2"
+        :title="readyVersions.length < 2 ? '至少需要两个已生成的文档库' : '对比两个版本的 API 差异(升级前评估)'"
+        @click="diffOpen = true"
+      >
+        <Icon name="layers" :size="13" /> 版本差异对比
+      </button>
       <button
         class="btn small ghost head-manage"
         :class="{ on: managing }"
-        :title="managing ? '收起管理面板,回到类参考浏览' : '管理文档库(生成 / 删除 / 导入 / 差异对比 / 项目扫描)'"
+        :title="managing ? '收起管理面板,回到类参考浏览' : '管理文档库(生成 / 删除 / 导入 / 项目扫描)'"
         @click="managing = !managing; if (managing) refreshProjects()"
       >
         <Icon name="gear" :size="13" /> {{ managing ? '返回浏览' : '库管理' }}
       </button>
     </div>
 
-    <!-- 库管理面板:全部版本的生成/删除 + 导入/差异对比 + 项目扫描 -->
+    <!-- 库管理面板:全部版本的生成/删除 + 导入 + 项目扫描(差异对比入口在 view-head) -->
     <div v-if="managing" class="panel manage-panel">
       <div class="panel-head">
         <span class="panel-title"><Icon name="gear" :size="13" /> 文档库管理</span>
         <span class="grow"></span>
-        <button
-          class="btn small ghost"
-          :disabled="readyVersions.length < 2"
-          :title="readyVersions.length < 2 ? '至少需要两个已生成的文档库' : '对比两个版本的 API 差异(升级前评估)'"
-          @click="diffOpen = true"
-        >
-          <Icon name="layers" :size="12" /> 版本差异对比
-        </button>
         <button class="btn small ghost" title="从 extension_api.json 导入建库(无引擎可用时的兜底)" @click="onImport">
           <Icon name="upload" :size="12" /> 导入 API 文件
         </button>
