@@ -12,9 +12,11 @@ import { useMarketSearch } from '../composables/useMarketSearch'
 import { useMarketBrowse, MODE_META, type BrowseMode } from '../composables/useMarketBrowse'
 import { useMarketInstall } from '../composables/useMarketInstall'
 import { useMarketFavorites } from '../composables/useMarketFavorites'
+import { useTranslation } from '../composables/useTranslation'
 import { compatOf as assetCompat, godotRange, projectGodotVersion } from '../utils/godotVersion'
 import { MARKET_TAG_GROUPS, isLikelyAsset } from '../utils/marketTags'
 import { normVersion } from '../utils/format'
+import { langLabel } from '../utils/langDetect'
 import type { AddonInfo, GodotProject, GodotVersion, MarketAsset } from '../types/godot'
 
 // 被 App 的 KeepAlive 缓存:切走再切回不重新加载浏览数据(直到插件重启)
@@ -100,6 +102,13 @@ const {
   hydrate: hydrateVersions
 })
 
+// 列表变了(翻页/换模式/搜索)就翻译新一页;旧页的在途请求不取消,结果直接进缓存。
+// 必须放在 useMarketBrowse 之后:displayAssets 是它的 computed,提前求值会撞 TDZ。
+watch(
+  () => displayAssets.value.map((a) => a.assetId).join(','),
+  () => autoTranslateCards()
+)
+
 const {
   installing,
   installedIds,
@@ -140,6 +149,62 @@ const { isFav, toggleFav, favDiag } = useMarketFavorites({
  */
 const isDesktop = IS_DESKTOP
 
+// ---------- 文案翻译 ----------
+// 译文表在模块级单例里(useTranslation),本页被 KeepAlive 常驻,切页回来不重翻。
+// 卡片只送 description:标题是专有名词、作者是用户名、分类标签有固定中文映射表
+// (utils/marketTags.ts),这三样翻掉反而更难认。
+const {
+  settings: trSettings,
+  enabled: trEnabled,
+  busy: trBusy,
+  failedCount: trFailedCount,
+  lastError: trLastError,
+  textOf: trText,
+  hasText: trHasText,
+  translate: trTranslate,
+  setEnabled: trSetEnabled,
+  ensureSettings: trEnsure,
+  resetFailed: trResetFailed
+} = useTranslation()
+
+/** 卡片译文的稳定键(语言维度由 useTranslation 自己拼进键空间) */
+function cardKey(a: MarketAsset): string {
+  return `card:${a.assetId}`
+}
+
+/** 头部 seg 上显示的「译文」按钮文案(跟着目标语言走) */
+const trTargetLabel = computed(() => langLabel(trSettings.translateTarget || 'zh-CN'))
+
+/** 卡片上显示的描述:有译文用译文,否则原文 */
+function cardDesc(a: MarketAsset): string {
+  return trText(cardKey(a), a.description || '')
+}
+
+/** 打开翻译:没有任何服务商时把用户送到设置页,而不是让开关看起来生效了 */
+async function toggleTranslation(on: boolean) {
+  if (on && !(trSettings.translateProviders || []).length) {
+    notify('请先在设置里添加翻译服务商')
+    emit('navigate', 'settings')
+    return
+  }
+  await trSetEnabled(on)
+  if (on) autoTranslateCards()
+}
+
+/** 把当前页的卡片描述排进翻译队列(命中缓存时不发请求) */
+function autoTranslateCards() {
+  if (!trEnabled.value) return
+  if (trSettings.translateCardAuto === false) return
+  const items = displayAssets.value
+    .filter((a) => a.description)
+    .map((a) => ({ key: cardKey(a), text: a.description as string, assetId: a.assetId, kind: 'desc' as const }))
+  if (items.length) trTranslate(items, 'short')
+}
+
+// 列表变了(翻页/换模式/搜索)就翻译新一页;旧页的在途请求不取消,结果直接进缓存。
+// 这个 watch 必须放在 useMarketBrowse 之后 —— displayAssets 是那里的 computed,
+// 在它初始化前求值会撞 TDZ(RefError: Cannot access before initialization)。
+
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
 })
@@ -164,6 +229,8 @@ onMounted(() => {
   loadBrowse()
   // 星标状态派生自 favorites,任意浏览模式下都要先把它读出来(否则推荐/全部模式的星标会是空的)
   reloadFavorites()
+  // 翻译设置要先读回来:开关状态决定要不要自动翻译首屏
+  trEnsure().then(() => autoTranslateCards())
   window.addEventListener('keydown', onKeydown)
 })
 
@@ -178,6 +245,8 @@ onActivated(() => {
   reloadAddons()
   // 本页在别处(如插件页卸载)被改动过收藏时,重新进入也保持一致
   reloadFavorites()
+  // 从设置页配好服务商回来:设置是共享单例,这里补一次首屏翻译
+  trEnsure().then(() => autoTranslateCards())
 })
 
 function onKeydown(e: KeyboardEvent) {
@@ -278,6 +347,19 @@ watch(
             @keyup.enter="onSearchEnter"
           />
         </div>
+        <!-- 译文 / 原文:与设置页的「启用翻译」是同一个字段,改哪边都一致 -->
+        <div class="seg tr-seg" role="tablist" :aria-label="`显示译文或原文(目标语言 ${trTargetLabel})`">
+          <button
+            :class="{ on: trEnabled }"
+            :title="trEnabled ? `当前显示${trTargetLabel}译文` : `切换为${trTargetLabel}译文`"
+            @click="toggleTranslation(true)"
+          ><Icon name="sparkle" :size="11" /> {{ trTargetLabel }}</button>
+          <button
+            :class="{ on: !trEnabled }"
+            :title="!trEnabled ? '当前显示原文' : '切回英文原文'"
+            @click="toggleTranslation(false)"
+          ><Icon name="book" :size="11" /> 原文</button>
+        </div>
       </div>
 
       <!-- 浏览面板:模式 seg + 标签/兼容筛选在头部,网格与分页在主体 -->
@@ -368,6 +450,20 @@ watch(
             :desc="aggregating ? `已扫描商店全部页面,没有找到「${tagFilter}」标签的插件,可切换其他标签。` : `当前列表中没有「${tagFilter}」标签的插件,可切换其他标签或浏览模式。`"
           />
 
+          <!-- 翻译状态:在途时一行提示;有失败条目时给出重试入口(不逐张卡片弹通知) -->
+          <div v-if="trEnabled && trBusy" class="tr-line">
+            <span class="spin"></span> 翻译中…
+          </div>
+          <div
+            v-else-if="trEnabled && trFailedCount"
+            class="tr-line bad"
+            :title="trLastError || '点击重试这几条'"
+            @click="trResetFailed(); autoTranslateCards()"
+          >
+            <Icon name="alert" :size="12" />
+            {{ trFailedCount }} 条未翻译 · 点击重试
+          </div>
+
           <!-- 资产卡片网格 -->
           <div v-if="displayAssets.length" class="asset-grid">
             <div v-for="a in displayAssets" :key="a.assetId" class="card asset" :title="`${a.title} · 查看详情`" @click="openDetail(a)">
@@ -396,7 +492,11 @@ watch(
                 </div>
               </div>
               <div class="asset-author" :title="a.author">{{ a.author }}</div>
-              <div class="asset-desc" :title="a.description">{{ a.description }}</div>
+              <div
+                class="asset-desc"
+                :class="{ translated: trHasText(cardKey(a)) }"
+                :title="trHasText(cardKey(a)) ? `原文:${a.description || ''}` : (a.description || '')"
+              >{{ cardDesc(a) }}</div>
               <div class="asset-tags">
                 <span class="tag">{{ a.category }}</span>
                 <span
@@ -592,6 +692,42 @@ watch(
   padding: 3px 8px;
   font-size: 12px;
   box-shadow: none;
+}
+
+/* ---------- 翻译状态 ---------- */
+.tr-seg {
+  flex-shrink: 0;
+}
+
+.tr-seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.tr-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 9px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.tr-line.bad {
+  color: var(--danger);
+  cursor: pointer;
+  width: fit-content;
+}
+
+.tr-line.bad:hover {
+  text-decoration: underline;
+}
+
+/* 译文衬在卡片里:略微提亮,让「这行是翻出来的」看得出来 */
+.asset-desc.translated {
+  color: var(--text);
 }
 
 /* ---------- 收藏诊断条(仅失败时渲染) ---------- */

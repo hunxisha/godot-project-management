@@ -216,7 +216,7 @@ async function listProjectAssets(page = 1) {
  * 同时带出详情弹层所需的扩展字段(媒体/许可/评分等;缺失时为空,渲染层需容忍)。
  * @param {string} assetId
  * @param {string} [version]
- * @returns {Promise<{assetId: string, title: string, author: string, versionString: string, downloadUrl: string, description: string, tags: string[], media: string[], videoId: string, licenseType: string, licenseUrl: string, reviewsScore: number, storeUrl: string, lastUpdated: string}>}
+ * @returns {Promise<import('../../../src/types/godot').AssetDetail>}
  */
 async function getAssetDetail(assetId, version) {
   const [pub, slug] = splitAssetId(assetId)

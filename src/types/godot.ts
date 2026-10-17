@@ -353,6 +353,37 @@ export interface GodotSettings {
   theme?: ThemeId
   /** 明暗模式:auto 跟随宿主 */
   themeMode?: ThemeMode
+
+  // ---------- 市场文案翻译 ----------
+  /** 是否启用翻译(总开关;市场页头部的「中文 / 原文」与它是同一个字段) */
+  translateEnabled?: boolean
+  /** 目标语言 BCP-47,默认 zh-CN */
+  translateTarget?: string
+  /** 列表卡片是否自动翻译(关掉后只在详情页翻译,省额度) */
+  translateCardAuto?: boolean
+  /** 翻译服务商列表(设置页增删) */
+  translateProviders?: TranslateProvider[]
+  /** 默认服务商 id;留空则按场景自动挑(短文本优先传统 MT,长文本优先 AI) */
+  translateActiveId?: string
+  /** 追加的不译词(内置词表之外;AI 走提示词白名单,DeepL 走 <x> 标签保护) */
+  translateGlossary?: string[]
+}
+
+/** 翻译服务商(设置页里的一行) */
+export interface TranslateProvider {
+  /** 稳定 id,新建时生成;缓存键与「默认服务商」都用它 */
+  id: string
+  kind: 'openai' | 'deepl' | 'google'
+  /** 显示名,空则由类型名兜底 */
+  label?: string
+  /** OpenAI 兼容端点根地址(如 https://api.deepseek.com/v1),其它类型留空用官方地址 */
+  baseUrl?: string
+  /** API Key(OpenAI 兼容的本地推理可留空) */
+  apiKey?: string
+  /** 模型名(仅 openai 类型) */
+  model?: string
+  /** DeepL 套餐:free / pro(决定免费端点还是付费端点) */
+  plan?: 'free' | 'pro'
 }
 
 /** 项目备份记录 */
@@ -436,7 +467,11 @@ export interface BackupTask {
 export const DEFAULT_SETTINGS: GodotSettings = {
   defaultOpenAction: 'editor',
   autoEnablePlugin: true,
-  deleteProjectFiles: 'ask'
+  deleteProjectFiles: 'ask',
+  // 翻译默认关闭:没配服务商就联网翻译是不可接受的默认行为,也让「是否启用」这个开关有实际含义
+  translateEnabled: false,
+  translateTarget: 'zh-CN',
+  translateCardAuto: true
 }
 
 /** 引擎下载资产(官方 CDN 直链) */

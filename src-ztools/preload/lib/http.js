@@ -110,6 +110,188 @@ function httpsGet(url, headers, cb) {
 }
 
 /**
+ * 发一个不自动 end 的请求(GET/POST 共用):无代理直连;配置了代理时走 CONNECT 隧道。
+ *
+ * 为什么不复用 httpsGet:那条路径被 http.test.js 逐分支钉住(CONNECT 隧道、取消、
+ * 重定向、断点续传),把 GET 改成走 https.request 等于让那 400 行回归测试失去对象。
+ * 这里只补 POST 需要的另一半,GET 保持原样。
+ * @param {'GET' | 'POST'} method
+ * @param {string} url
+ * @param {Record<string, string>} headers
+ * @param {(res: GpmIncoming) => void} cb
+ * @returns {GpmRequest} 与 httpsGet 同形的句柄(.on('error') / .destroy() / write / end)
+ */
+function openRequest(method, url, headers, cb) {
+  const proxy = currentProxy()
+  if (!proxy) {
+    return https.request(url, { method, headers: { ...UA, ...headers } }, cb)
+  }
+
+  // 与 httpsGet 同形:一个 EventEmitter 冒充请求句柄,隧道建好后转给真实请求。
+  // emitter 与 stub 指向同一个对象:listenerCount 这类 EventEmitter 成员走 emitter,
+  // write/end 的签名走 stub(GpmRequest)—— 这样回调参数才有上下文类型。
+  const emitter = new EventEmitter()
+  /** @type {GpmRequest} */
+  const stub = /** @type {any} */ (emitter)
+  /** @type {GpmRequest | null} CONNECT 隧道请求 */
+  let connectReq = null
+  /** @type {GpmSocket | null} 隧道内的 TLS 套接字 */
+  let tlsSock = null
+  /** @param {Error} err */
+  const fail = (err) => {
+    if (!emitter.listenerCount('error')) return
+    emitter.emit('error', err)
+  }
+  stub.destroy = () => {
+    try { connectReq && connectReq.destroy() } catch (e) { /* ignore */ }
+    try { tlsSock && tlsSock.destroy() } catch (e) { /* ignore */ }
+  }
+
+  let pu
+  try {
+    pu = new URL(proxy)
+    if (pu.protocol !== 'http:') throw new Error('仅支持 HTTP 代理')
+  } catch (e) {
+    process.nextTick(() => fail(new Error('代理地址无效(' + proxy + '):' + (e && e.message))))
+    return stub
+  }
+
+  let u
+  try {
+    u = new URL(url)
+  } catch (e) {
+    process.nextTick(() => fail(new Error('URL 无效: ' + url)))
+    return stub
+  }
+
+  const target = `${u.hostname}:${u.port || 443}`
+  const proxyPort = Number(pu.port) || 80
+  /** @type {Record<string, string>} */
+  const connectHeaders = { Host: target }
+  if (pu.username) {
+    connectHeaders['Proxy-Authorization'] =
+      'Basic ' + Buffer.from(`${decodeURIComponent(pu.username)}:${decodeURIComponent(pu.password || '')}`).toString('base64')
+  }
+
+  connectReq = http.request({
+    host: pu.hostname,
+    port: proxyPort,
+    method: 'CONNECT',
+    path: target,
+    headers: connectHeaders
+  })
+
+  connectReq.on('connect', (res, socket) => {
+    if (res.statusCode !== 200) {
+      socket.destroy()
+      return fail(new Error(`代理连接失败 HTTP ${res.statusCode}`))
+    }
+    tlsSock = tls.connect({ socket, servername: u.hostname })
+    tlsSock.on('secureConnect', () => {
+      const req = https.request(
+        {
+          host: u.hostname,
+          port: u.port || 443,
+          path: u.pathname + u.search,
+          method,
+          headers: { ...UA, ...headers, Host: u.hostname },
+          createConnection: () => tlsSock
+        },
+        cb
+      )
+      req.on('error', fail)
+      // 隧道建好后把调用方写在 stub 上的 write/end 转给真实请求
+      stub.write = (chunk) => req.write(chunk)
+      stub.end = () => req.end()
+    })
+    tlsSock.on('error', fail)
+  })
+  connectReq.on('error', fail)
+  connectReq.end()
+  return stub
+}
+
+/**
+ * POST JSON,返回解析后的响应体。非 2xx 抛错并带上 err.status(调用方据此区分 401/403)。
+ * @param {string} url
+ * @param {any} payload 会被 JSON.stringify
+ * @param {Record<string, string>} [headers]
+ * @param {{ timeoutMs?: number }} [opts]
+ * @returns {Promise<any>}
+ */
+function postJson(url, payload, headers, opts = {}) {
+  const timeoutMs = opts.timeoutMs || 20000
+  const bodyText = JSON.stringify(payload == null ? {} : payload)
+  const body = Buffer.from(bodyText, 'utf8')
+  return new Promise((resolve, reject) => {
+    let settled = false
+    /** @param {Error} err */
+    const fail = (err) => {
+      if (settled) return
+      settled = true
+      reject(err)
+    }
+    /** @param {any} value */
+    const done = (value) => {
+      if (settled) return
+      settled = true
+      resolve(value)
+    }
+    /** @type {GpmRequest} */
+    let req
+    try {
+      req = openRequest('POST', url, {
+        'Content-Type': 'application/json',
+        'Content-Length': String(body.length),
+        ...(headers || {})
+      }, (res) => {
+        /** @type {any[]} */
+        const chunks = []
+        res.on('data', (c) => chunks.push(c))
+        res.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8')
+          // 先看状态码再解析:429/502 的响应体经常是纯文本,解析失败不该把
+          // 状态码吃掉 —— 上层要按 401/403 决定「别再烧钱」。
+          let json = null
+          let parseError = null
+          try {
+            json = text ? JSON.parse(text) : null
+          } catch (e) {
+            parseError = e
+          }
+          if (res.statusCode >= 400) {
+            const err = new Error(`HTTP ${res.statusCode}: ${text.slice(0, 200)}`)
+            // @ts-ignore 错误对象上加状态码,调用方要据此判 401/403
+            err.status = res.statusCode
+            // @ts-ignore 原始响应体也带上:报错文案里能看出是配额还是密钥
+            err.body = json
+            return fail(err)
+          }
+          if (parseError) return fail(new Error('响应解析失败: ' + parseError.message))
+          done(json)
+        })
+        res.on('error', (e) => fail(new Error('响应读取失败: ' + e.message)))
+      })
+    } catch (e) {
+      return fail(new Error('请求失败: ' + (e && e.message)))
+    }
+    req.on('error', (e) => fail(new Error('网络错误: ' + (e && e.message))))
+    if (typeof req.setTimeout === 'function') {
+      req.setTimeout(timeoutMs, () => {
+        try { req.destroy() } catch (e) { /* ignore */ }
+        fail(new Error(`请求超时(${Math.round(timeoutMs / 1000)}s)`))
+      })
+    }
+    try {
+      req.write(body)
+      req.end()
+    } catch (e) {
+      fail(new Error('请求发送失败: ' + (e && e.message)))
+    }
+  })
+}
+
+/**
  * GET 文本(HTML 等),自动跟随重定向
  * @param {string} url
  * @param {Record<string, string>} [headers]
@@ -303,4 +485,4 @@ function downloadResumable(url, destPath, opts = {}) {
   }
 }
 
-module.exports = { getText, getJson, downloadFile, downloadResumable }
+module.exports = { getText, getJson, postJson, openRequest, downloadFile, downloadResumable }

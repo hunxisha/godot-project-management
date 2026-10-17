@@ -42,11 +42,15 @@ interface GpmIncoming {
   pipe(dest: any): any
 }
 
-/** HTTP 请求句柄(用到 on / end / destroy) */
+/** HTTP 请求句柄(用到 on / end / destroy;POST 还要 write 与 timeout) */
 interface GpmRequest {
   on(ev: string, fn: (...a: any[]) => void): unknown
   end(): void
   destroy(): void
+  /** 写入请求体(翻译的 POST 用;GET 路径从不调用) */
+  write(data: any): void
+  /** 超时回调(翻译请求 20s 必须了结,否则界面永远停在「翻译中」) */
+  setTimeout(ms: number, fn: () => void): void
 }
 
 /** stat 结果(只声明被用到的字段) */
@@ -203,6 +207,12 @@ declare module 'node:https' {
   export function get(url: string, cb: (res: GpmIncoming) => void): GpmRequest
   export function get(opts: any, cb: (res: GpmIncoming) => void): GpmRequest
   export function request(opts: any, cb?: (res: GpmIncoming) => void): GpmRequest
+  /** POST 直连:与 node 的 https.request(url, opts, cb) 同形 */
+  export function request(
+    url: string,
+    opts: any,
+    cb: (res: GpmIncoming) => void
+  ): GpmRequest
 }
 
 declare module 'node:tls' {

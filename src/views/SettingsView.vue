@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getSettings, notify, openPath, pickDirectory, pickFile, saveSettings } from '../services/bridge'
 import Icon from '../components/Icon.vue'
 import ThemeSwitcher from '../components/ThemeSwitcher.vue'
+import TranslatePanel from '../components/settings/TranslatePanel.vue'
 import { fmtSize } from '../utils/format'
 import { DEFAULT_SETTINGS, type DocsCacheInfo, type GodotSettings, type NetworkCheckResult, type OpenAction } from '../types/godot'
 
@@ -185,6 +186,7 @@ const groups = [
   { id: 'general', label: '通用', icon: 'grid' },
   { id: 'engine', label: '引擎与网络', icon: 'globe' },
   { id: 'account', label: '账号', icon: 'key' },
+  { id: 'translate', label: '翻译', icon: 'sparkle' },
   { id: 'backup', label: '备份', icon: 'archive' },
   { id: 'data', label: '数据', icon: 'hard-drive' }
 ] as const
@@ -417,6 +419,12 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
+        </section>
+
+        <!-- ========== 翻译 ========== -->
+        <section id="grp-translate" class="settings-group">
+          <h3 class="group-title"><Icon name="sparkle" :size="13" /> 翻译</h3>
+          <TranslatePanel :state="state" @save="patchNow" />
         </section>
 
         <!-- ========== 备份 ========== -->

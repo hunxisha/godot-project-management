@@ -101,7 +101,15 @@ const docs = new Map<string, any>([
   [PROJECT._id, { ...PROJECT }],
   ['godot/project/p2', { _id: 'godot/project/p2', id: 'p2', name: '平台跳跃 Demo', path: 'E:/mock/platformer', versionId: 'godot/version/4.7.2', favorite: true, openCount: 12, lastOpenedAt: Date.now() - 2 * DAY }],
   ['godot/project/p3', { _id: 'godot/project/p3', id: 'p3', name: '塔防原型', path: 'E:/mock/td-prototype', versionId: 'godot/version/4.7.2', favorite: false, openCount: 1, lastOpenedAt: Date.now() - 30 * DAY }],
-  ['godot/settings', { theme: 'steel', mode: 'auto' }],
+  ['godot/settings', {
+    theme: 'steel',
+    mode: 'auto',
+    // 翻译默认关闭;手测版面时先打开,并塞一个假服务商,不然市场卡片永远是英文原文
+    translateEnabled: true,
+    translateTarget: 'zh-CN',
+    translateProviders: [{ id: 'mock-openai', kind: 'openai', label: 'Mock AI', baseUrl: 'https://example.test/v1', model: 'mock-model' }],
+    translateActiveId: 'mock-openai'
+  }],
   ['godot/version/4.7.2', { _id: 'godot/version/4.7.2', name: 'Godot 4.7.2', tag: '4.7.2-stable', exePath: 'E:/mock/godot.exe' }]
 ])
 
@@ -188,7 +196,21 @@ const PROVIDED: Record<string, any> = {
   hashPaths: (pid: string, rels: string[]) =>
     ok({ hashes: rels.map((rel) => ({ rel, sha256: 'a'.repeat(64) })), failed: [] }),
   getProjectCacheInfo: () => ok({ ok: true, bytes: 6_294_016, stale: 2, entries: 4 }),
-  cleanProjectCache: () => ok({ ok: true, removed: 0, failed: [] })
+  cleanProjectCache: () => ok({ ok: true, removed: 0, failed: [] }),
+  // ---------- 翻译(回显式假译文:能看出「替换有没有发生」,不验质量) ----------
+  // 富文本用 >…< 之间插「【译】」的方式伪造,标签结构原样留着,和真链路同一形状。
+  translateParts: (payload: any) => {
+    const items = (payload?.items || []).map((i: any) => ({
+      key: i.key,
+      text: i.kind === 'html' || i.kind === 'changes'
+        ? String(i.text).replace(/>([^<>]{2,})</g, '>【译】$1<')
+        : `【译】${i.text}`
+    }))
+    return ok({ ok: items.length > 0, items, failed: [], fromCache: 0 })
+  },
+  testTranslateProvider: () => ok({ ok: true, ms: 42, sample: '你好,世界' }),
+  translateCacheInfo: () => ok({ count: 3, sizeBytes: 4096, entries: 12 }),
+  translateCacheClear: () => ok({ ok: true, removed: 3 })
 }
 
 window.services = new Proxy(PROVIDED, {

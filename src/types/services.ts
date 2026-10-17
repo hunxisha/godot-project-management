@@ -505,6 +505,33 @@ export interface Services {
   docsCacheInfo(): DocsCacheInfo
   /** 清理文档库缓存(versionIds 省略时清全部;收藏/历史不受影响) */
   docsCleanCache(versionIds?: string[]): { ok: boolean, removed?: number, error?: string }
+  /** 批量翻译市场文案。缓存命中/服务商选择/失败回落全在 preload,渲染层只递原文与 key。
+   *  kind='html' 时 text 是整段 HTML,回来的是保住标签结构的译文 HTML */
+  translateParts(payload: {
+    target?: string
+    scene?: 'short' | 'long'
+    items: { key: string, text: string, assetId?: string, kind?: 'desc' | 'html' | 'changes' }[]
+  }): Promise<{
+    ok: boolean
+    items: { key: string, text: string }[]
+    failed: string[]
+    error?: string
+    paused?: boolean
+    noProvider?: boolean
+    fromCache?: number
+  }>
+  /** 测试翻译服务商连接(设置页「测试连接」;不写缓存、不改暂停状态) */
+  testTranslateProvider(cfg: {
+    kind: 'openai' | 'deepl' | 'google'
+    baseUrl?: string
+    apiKey?: string
+    model?: string
+    plan?: 'free' | 'pro' | string
+  }): Promise<{ ok: boolean, ms?: number, sample?: string, error?: string, status?: number }>
+  /** 译文缓存统计(设置页显示条数与体积) */
+  translateCacheInfo(): { count: number, sizeBytes: number, entries: number }
+  /** 清空译文缓存 */
+  translateCacheClear(): { ok: boolean, removed: number }
 }
 
 /**

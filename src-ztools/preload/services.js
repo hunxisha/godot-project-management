@@ -24,6 +24,7 @@ const tpllib = require('./lib/tpllib')
 const tplfeatures = require('./lib/tplfeatures')
 const tplprobe = require('./lib/tplprobe')
 const tplprofile = require('./lib/tplprofile')
+const translate = require('./lib/translate')
 
 /**
  * 门面实现:仍以同步的 Services 接口为唯一权威做编译期校验。
@@ -332,7 +333,16 @@ const servicesImpl = {
   /** 文档库缓存统计(设置页清理用) */
   docsCacheInfo: () => docs.docsCacheInfo(),
   /** 清理文档库缓存(versionIds 省略时清全部;收藏/历史不受影响) */
-  docsCleanCache: (versionIds) => docs.docsCleanCache(versionIds)
+  docsCleanCache: (versionIds) => docs.docsCleanCache(versionIds),
+  /** ---------- 市场文案翻译 ---------- */
+  /** 批量翻译(缓存/服务商选择/失败策略都在 preload,渲染层只递原文与 key) */
+  translateParts: (payload) => translate.translateParts(payload),
+  /** 测试翻译服务商连接(设置页「测试连接」用;不写任何缓存) */
+  testTranslateProvider: (cfg) => translate.testTranslateProvider(cfg),
+  /** 译文缓存统计(条数/体积) */
+  translateCacheInfo: () => translate.translateCacheInfo(),
+  /** 清空译文缓存 */
+  translateCacheClear: () => translate.translateCacheClear()
 }
 
 window.services = /** @type {any} */ (servicesImpl)

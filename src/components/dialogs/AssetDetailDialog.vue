@@ -7,6 +7,7 @@ import Icon from '../Icon.vue'
 import { formatRelative, normVersion } from '../../utils/format'
 import { IS_DESKTOP } from '../../services/desktop'
 import { openExternal } from '../../services/bridge'
+import { useTranslation } from '../../composables/useTranslation'
 import type { AssetDetail } from '../../types/godot'
 
 const props = defineProps<{
@@ -25,6 +26,67 @@ const error = ref('')
 const active = ref('')
 /** 更新日志默认只展开最近几个版本,防止长列表把弹窗顶穿 */
 const showAllReleases = ref(false)
+
+// ---------- 翻译 ----------
+// 只翻三处:简介、详细介绍(富文本)、各版本更新日志(富文本)。
+// 标题/作者/许可/标签不翻 —— 标题是专有名词,作者是用户名,标签有固定映射表。
+const {
+  settings: trSettings,
+  enabled: trEnabled,
+  failedCount: trFailedCount,
+  lastError: trLastError,
+  textOf: trText,
+  hasText: trHasText,
+  translate: trTranslate,
+  ensureSettings: trEnsure
+} = useTranslation()
+
+/** 用户临时切到原文(只影响本次弹窗,不写设置) */
+const showOriginal = ref(false)
+
+/** 是否正在显示译文 */
+const trOn = computed(() => trEnabled.value && !showOriginal.value)
+
+function keyDesc() { return `desc:${props.assetId}` }
+function keyBody() { return `html:${props.assetId}` }
+function keyChanges(r: { version: string, created: string }) { return `chg:${props.assetId}:${r.version}@${r.created}` }
+
+/** 简介(译/原) */
+const descText = computed(() => {
+  const src = detail.value?.description || ''
+  if (!trOn.value) return src
+  return trText(keyDesc(), src)
+})
+
+/** 详细介绍 HTML(译/原) */
+const bodyHtml = computed(() => {
+  const src = detail.value?.bodyHtml || ''
+  if (!trOn.value) return src
+  return trText(keyBody(), src)
+})
+
+/** 某版本的更新日志 HTML(译/原) */
+function changesHtmlOf(r: { version: string, created: string, changesHtml: string }): string {
+  if (!trOn.value) return r.changesHtml
+  return trText(keyChanges(r), r.changesHtml)
+}
+
+/** 打开详情后把三处文案排进翻译队列(scene=long → 优先走 AI,它能保住 HTML 结构) */
+async function translateDetail() {
+  await trEnsure()
+  if (!trEnabled.value || !detail.value) return
+  const items: { key: string, text: string, assetId: string, kind: 'desc' | 'html' | 'changes' }[] = []
+  if (detail.value.description) {
+    items.push({ key: keyDesc(), text: detail.value.description, assetId: props.assetId, kind: 'desc' })
+  }
+  if (detail.value.bodyHtml) {
+    items.push({ key: keyBody(), text: detail.value.bodyHtml, assetId: props.assetId, kind: 'html' })
+  }
+  for (const r of shownReleases.value) {
+    if (r.changesHtml) items.push({ key: keyChanges(r), text: r.changesHtml, assetId: props.assetId, kind: 'changes' })
+  }
+  if (items.length) trTranslate(items, 'long')
+}
 
 /** 更新日志列表(preload 已按发布时间倒序) */
 const releaseList = computed(() => detail.value?.releases ?? [])
@@ -60,9 +122,17 @@ async function load() {
 watch(
   () => [props.open, props.assetId],
   () => {
-    if (props.open) load()
+    if (!props.open) return
+    // 每开一次都从译文开始:上一次手动切的「原文」不该带到另一个资产
+    showOriginal.value = false
+    load().then(() => translateDetail())
   }
 )
+
+// 点「显示全部 N 个版本」后,把新露出来的日志补翻掉(没展开的不翻,省额度)
+watch(shownReleases, () => {
+  if (props.open) translateDetail()
+})
 
 function openStore() {
   if (detail.value?.storeUrl) window.ztools.shellOpenExternal(detail.value.storeUrl)
@@ -87,6 +157,10 @@ function onHtmlClick(e: MouseEvent) {
         <div class="modal-head">
           <div class="modal-title"><Icon name="package" :size="15" /> {{ detail?.title || '资产详情' }}</div>
           <span class="grow"></span>
+          <div v-if="trEnabled && detail" class="seg d-tr-seg" role="tablist" aria-label="显示译文或原文">
+            <button :class="{ on: !showOriginal }" title="显示机器翻译" @click="showOriginal = false">译文</button>
+            <button :class="{ on: showOriginal }" title="显示商店原文" @click="showOriginal = true">原文</button>
+          </div>
           <button type="button" class="btn small ghost icon-x" title="关闭" @click="emit('close')">
             <Icon name="x" :size="14" />
           </button>
@@ -129,12 +203,15 @@ function onHtmlClick(e: MouseEvent) {
             <span v-for="t in detail.tags" :key="t" class="tag">{{ t }}</span>
           </div>
 
-          <p class="d-desc">{{ detail.description || '暂无简介' }}</p>
+          <p class="d-desc">
+            {{ descText || '暂无简介' }}
+            <span v-if="trOn && trHasText(keyDesc())" class="d-tr-badge" title="由翻译服务生成,切换上方「原文」可对照">机器翻译</span>
+          </p>
 
-          <!-- 商店详情页完整介绍(富文本) -->
+          <!-- 商店详情页完整介绍(富文本):有译文时用译文 HTML,标签结构由 preload 保住 -->
           <section v-if="detail.bodyHtml" class="d-sec">
             <div class="d-sec-label">详细介绍</div>
-            <div class="rich" @click="onHtmlClick" v-html="detail.bodyHtml"></div>
+            <div class="rich" @click="onHtmlClick" v-html="bodyHtml"></div>
           </section>
 
           <!-- 各版本变更日志 -->
@@ -147,7 +224,7 @@ function onHtmlClick(e: MouseEvent) {
                   <span v-if="!r.stable" class="tag warn" title="测试/预览版">测试版</span>
                   <span class="rel-date">{{ formatRelative(new Date(r.created).getTime() || 0, '—') }}</span>
                 </div>
-                <div v-if="r.changesHtml" class="rich" @click="onHtmlClick" v-html="r.changesHtml"></div>
+                <div v-if="r.changesHtml" class="rich" @click="onHtmlClick" v-html="changesHtmlOf(r)"></div>
                 <div v-else class="rel-empty">该版本未填写变更说明</div>
               </div>
               <button
@@ -159,6 +236,11 @@ function onHtmlClick(e: MouseEvent) {
               </button>
             </div>
           </section>
+
+          <div v-if="trEnabled && trFailedCount" class="d-tr-note" :title="trLastError">
+            <Icon name="alert" :size="11" />
+            <span>{{ trFailedCount }} 处内容未翻译{{ trLastError ? `(${trLastError})` : '' }},已显示原文。</span>
+          </div>
 
           <div class="d-foot">
             <button class="btn ghost" @click="openStore">
@@ -176,6 +258,40 @@ function onHtmlClick(e: MouseEvent) {
 <style scoped>
 .grow {
   flex: 1;
+}
+
+/* ---------- 译文 / 原文切换 ---------- */
+.d-tr-seg {
+  flex-shrink: 0;
+  margin-right: 4px;
+}
+
+.d-tr-seg button {
+  font-size: 11.5px;
+  padding: 3px 9px;
+}
+
+/* 「机器翻译」小标:让它和商店原文能分开看 */
+.d-tr-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--brand-weak);
+  color: var(--brand);
+  font-size: 10px;
+  font-weight: 700;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.d-tr-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 11.5px;
+  color: var(--text-3);
 }
 
 /* ---------- 分节(详细介绍 / 更新日志) ---------- */
