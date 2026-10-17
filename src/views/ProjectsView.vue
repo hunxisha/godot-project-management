@@ -482,7 +482,12 @@ function onKeyDown(e: KeyboardEvent) {
               <Icon name="star" :size="13" :stroke-width="p.favorite ? 2.4 : 1.7" />
             </button>
             <div class="row-menu-wrap">
-              <button class="btn small ghost icon-act" title="更多操作" @click="toggleMenu(p._id)">
+              <button
+                class="btn small icon-act more"
+                :class="{ on: openMenuId === p._id }"
+                title="更多操作"
+                @click="toggleMenu(p._id)"
+              >
                 <Icon name="more" :size="13" />
               </button>
               <div v-if="openMenuId === p._id" class="row-menu">
@@ -894,6 +899,23 @@ function onKeyDown(e: KeyboardEvent) {
 
 .icon-act:hover {
   color: var(--brand);
+}
+
+/* 「更多」按钮:不用 ghost(透明样式在行里几乎隐形),常显边框让用户找得到;
+   菜单展开时保持品牌高亮,一眼看出哪一行的菜单开着 */
+.icon-act.more {
+  color: var(--text-2);
+}
+
+.icon-act.more:hover {
+  color: var(--brand);
+  border-color: var(--brand);
+}
+
+.icon-act.more.on {
+  color: var(--brand);
+  border-color: var(--brand);
+  background: var(--brand-weak);
 }
 
 /* ---------- 行内「更多」菜单 ---------- */
