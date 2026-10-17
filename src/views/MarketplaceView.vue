@@ -370,13 +370,13 @@ watch(
 
           <!-- 资产卡片网格 -->
           <div v-if="displayAssets.length" class="asset-grid">
-            <div v-for="a in displayAssets" :key="a.assetId" class="card asset">
+            <div v-for="a in displayAssets" :key="a.assetId" class="card asset" :title="`${a.title} · 查看详情`" @click="openDetail(a)">
               <button
                 class="fav-btn"
                 :class="{ active: isFav(a.assetId) }"
                 :disabled="isDesktop"
                 :title="isDesktop ? '桌面版暂不支持收藏' : isFav(a.assetId) ? '取消收藏' : '收藏'"
-                @click="toggleFav(a)"
+                @click.stop="toggleFav(a)"
               ><Icon name="star" :size="14" :stroke-width="isFav(a.assetId) ? 2.4 : 1.7" /></button>
               <div class="asset-head">
                 <img
@@ -388,7 +388,7 @@ watch(
                 />
                 <div v-else class="asset-icon ph"><Icon name="puzzle" :size="22" /></div>
                 <div class="asset-title-box">
-                  <span class="asset-title link" :title="`${a.title} · 查看详情`" @click="openDetail(a)">
+                  <span class="asset-title" :title="a.title">
                     {{ a.title }}
                     <Icon name="external" :size="10" />
                   </span>
@@ -417,7 +417,7 @@ watch(
                   v-if="installing && installing.assetId === a.assetId && previewingId === a.assetId"
                   class="btn small ghost pick-ver"
                   title="取消预览下载"
-                  @click="cancelPreviewDownload(a.assetId)"
+                  @click.stop="cancelPreviewDownload(a.assetId)"
                 >取消</button>
                 <button
                   v-if="installing && installing.assetId === a.assetId"
@@ -437,19 +437,19 @@ watch(
                   class="btn small primary asset-install"
                   :disabled="!!installing"
                   :title="mode === 'projects' ? '另存为新项目' : target ? `安装最新版到「${target.name}」` : '安装'"
-                  @click="install(a)"
+                  @click.stop="install(a)"
                 ><Icon name="download" :size="12" /> {{ mode === 'projects' ? '另存' : '安装' }}</button>
                 <button
                   class="btn small ghost pick-ver"
                   :disabled="!!installing"
                   :title="`选择版本安装${installedIds.has(a.assetId) ? '(覆盖已装版本)' : ''}`"
-                  @click="openPicker(a)"
+                  @click.stop="openPicker(a)"
                 ><Icon name="chevron-down" :size="12" /></button>
                 <button
                   class="btn small ghost"
                   :disabled="!!installing"
                   title="仅下载 zip 包到本地,不安装"
-                  @click="saveZip(a)"
+                  @click.stop="saveZip(a)"
                 ><Icon name="hard-drive" :size="12" /></button>
               </div>
             </div>
@@ -673,6 +673,8 @@ watch(
   flex-direction: column;
   gap: 7px;
   padding: 13px;
+  /* 整卡即详情入口(内部按钮已 @click.stop 隔离) */
+  cursor: pointer;
   transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
 }
 
