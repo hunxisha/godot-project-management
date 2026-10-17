@@ -61,6 +61,8 @@ const ICONS: Record<string, string> = {
   'chevron-up': 'M5.5 14.5L12 8l6.5 6.5',
   // 项目符号列表:文档页左栏「列表」视图(与「树」视图并列切换)
   list: 'M8.5 6.5h11M8.5 12h11M8.5 17.5h11M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01',
+  // ⇄ 双向箭头:版本对比「交换两侧」专用
+  swap: 'M4 8.5h16M17 5.5l3 3-3 3M20 15.5H4M7 12.5l-3 3 3 3',
 }
 
 const props = defineProps<{ name: string; size?: number; strokeWidth?: number }>()

@@ -125,7 +125,7 @@ function classChangeCount(g: DocClassDiff): number {
             <select v-model="versionA" class="ver" @change="run">
               <option v-for="l in readyLibs" :key="l.versionId" :value="l.versionId">{{ l.tag }}</option>
             </select>
-            <button class="swap" title="交换两侧" @click="swap"><Icon name="refresh" :size="13" /></button>
+            <button class="swap" title="交换两侧" @click="swap"><Icon name="swap" :size="13" /></button>
             <select v-model="versionB" class="ver" @change="run">
               <option v-for="l in readyLibs" :key="l.versionId" :value="l.versionId">{{ l.tag }}</option>
             </select>
