@@ -901,20 +901,24 @@ function onKeyDown(e: KeyboardEvent) {
   color: var(--brand);
 }
 
-/* 「更多」按钮:不用 ghost(透明样式在行里几乎隐形),常显边框让用户找得到;
-   菜单展开时保持品牌高亮,一眼看出哪一行的菜单开着 */
+/* 「更多」按钮:无边框纯图标(图标已放大加粗,自身就够醒目);
+   hover 浅底、展开态品牌浅蓝底高亮,一眼看出哪一行的菜单开着 */
 .icon-act.more {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
   color: var(--text-2);
 }
 
 .icon-act.more:hover {
   color: var(--brand);
-  border-color: var(--brand);
+  border-color: transparent;
+  background: var(--surface-2);
 }
 
 .icon-act.more.on {
   color: var(--brand);
-  border-color: var(--brand);
+  border-color: transparent;
   background: var(--brand-weak);
 }
 
