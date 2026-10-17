@@ -901,25 +901,22 @@ function onKeyDown(e: KeyboardEvent) {
   color: var(--brand);
 }
 
-/* 「更多」按钮:无边框纯图标(图标已放大加粗,自身就够醒目);
-   hover 浅底、展开态品牌浅蓝底高亮,一眼看出哪一行的菜单开着 */
-.icon-act.more {
+/* 「更多」按钮:纯图标,无框无底色,反馈只靠圆点变色 */
+.icon-act.more,
+.icon-act.more:hover,
+.icon-act.more.on {
   border-color: transparent;
   background: transparent;
   box-shadow: none;
+}
+
+.icon-act.more {
   color: var(--text-2);
 }
 
-.icon-act.more:hover {
-  color: var(--brand);
-  border-color: transparent;
-  background: var(--surface-2);
-}
-
+.icon-act.more:hover,
 .icon-act.more.on {
   color: var(--brand);
-  border-color: transparent;
-  background: var(--brand-weak);
 }
 
 /* ---------- 行内「更多」菜单 ---------- */
