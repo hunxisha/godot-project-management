@@ -12,7 +12,11 @@ const props = defineProps<{
   /** 预选的基准库(A) */
   initialA?: string
 }>()
-const emit = defineEmits<{ (e: 'close'): void }>()
+const emit = defineEmits<{
+  (e: 'close'): void
+  /** 跳转到文档:新增/变化的类在目标库(B)打开,移除的类在基准库(A)打开;anchor 为成员级锚点 */
+  (e: 'open-doc', t: { className: string, versionId: string, anchor?: string }): void
+}>()
 
 const versionA = ref('')
 const versionB = ref('')
@@ -67,14 +71,24 @@ async function toggleClass(name: string) {
   detail.value = { ...detail.value, [name]: r.ok && r.diff ? r.diff : null }
 }
 
-/** 成员差异按组渲染:统一结构,便于复用一段模板 */
+/** 成员差异按组渲染:统一结构,便于复用一段模板;anchor 为文档页成员锚点前缀 */
 const GROUPS = [
-  { key: 'methods', label: '方法' },
-  { key: 'members', label: '成员' },
-  { key: 'signals', label: '信号' },
-  { key: 'constants', label: '常量' },
-  { key: 'enums', label: '枚举' }
+  { key: 'methods', label: '方法', anchor: 'method' },
+  { key: 'members', label: '成员', anchor: 'member' },
+  { key: 'signals', label: '信号', anchor: 'signal' },
+  { key: 'constants', label: '常量', anchor: 'constant' },
+  { key: 'enums', label: '枚举', anchor: 'enum' }
 ] as const
+
+/** 类级跳转:在指定库中打开该类的文档 */
+function openClassDoc(name: string, versionId: string) {
+  emit('open-doc', { className: name, versionId })
+}
+
+/** 成员级跳转:带上锚点直接定位到文档中的该成员 */
+function openMemberDoc(cls: string, versionId: string, anchorPrefix: string, member: string) {
+  emit('open-doc', { className: cls, versionId, anchor: `${anchorPrefix}-${member}` })
+}
 
 function groupHasChanges(g: DocClassDiff, key: string): boolean {
   const grp = (g as unknown as Record<string, { added: string[], removed: string[], changed: unknown[] }>)[key]
@@ -140,8 +154,12 @@ function classChangeCount(g: DocClassDiff): number {
                   :key="n"
                   class="name-chip"
                   :class="grp === 'addedClasses' ? 'add' : 'rm'"
-                  @click="toggleClass(n)"
-                >{{ n }}</button>
+                  :title="`在文档中打开(${tagOf(grp === 'addedClasses' ? versionB : versionA)})`"
+                  @click="openClassDoc(n, grp === 'addedClasses' ? versionB : versionA)"
+                >
+                  <Icon name="book" :size="10" class="chip-ico" />
+                  {{ n }}
+                </button>
                 <span v-if="!(summary[grp] ?? []).length" class="none">无</span>
               </div>
             </div>
@@ -155,11 +173,18 @@ function classChangeCount(g: DocClassDiff): number {
               </button>
               <template v-if="showGroup.changed">
                 <div v-for="c in (summary.changedClasses ?? [])" :key="c.name" class="cls-row">
-                  <button class="cls-head" @click="toggleClass(c.name)">
-                    <Icon :name="c.name in detail ? 'chevron-down' : 'chevron-right'" :size="11" />
-                    <span class="mono cls-name">{{ c.name }}</span>
-                    <span class="cnt">{{ c.changes }} 处</span>
-                  </button>
+                  <div class="cls-head">
+                    <button class="cls-toggle" @click="toggleClass(c.name)">
+                      <Icon :name="c.name in detail ? 'chevron-down' : 'chevron-right'" :size="11" />
+                      <span class="mono cls-name">{{ c.name }}</span>
+                      <span class="cnt">{{ c.changes }} 处</span>
+                    </button>
+                    <button
+                      class="jump-btn"
+                      :title="`在文档中打开(${tagOf(versionB)})`"
+                      @click="openClassDoc(c.name, versionB)"
+                    ><Icon name="book" :size="12" /></button>
+                  </div>
                   <div v-if="c.name in detail" class="cls-body">
                     <div v-if="!detail[c.name]" class="none">读取失败</div>
                     <template v-else>
@@ -171,24 +196,30 @@ function classChangeCount(g: DocClassDiff): number {
                       <div v-for="g in GROUPS" :key="g.key" class="sub">
                         <template v-if="groupHasChanges(detail[c.name]!, g.key)">
                           <div class="sub-head">{{ g.label }}</div>
-                          <div
+                          <button
                             v-for="n in (detail[c.name] as any)[g.key].added"
                             :key="`a-${g.key}-${n}`"
                             class="line add"
-                          >+ {{ n }}</div>
-                          <div
+                            :title="`在文档中查看(${tagOf(versionB)})`"
+                            @click="openMemberDoc(c.name, versionB, g.anchor, n)"
+                          >+ {{ n }}</button>
+                          <button
                             v-for="n in (detail[c.name] as any)[g.key].removed"
                             :key="`r-${g.key}-${n}`"
                             class="line rm"
-                          >− {{ n }}</div>
-                          <div
+                            :title="`在文档中查看(${tagOf(versionA)})`"
+                            @click="openMemberDoc(c.name, versionA, g.anchor, n)"
+                          >− {{ n }}</button>
+                          <button
                             v-for="ch in (detail[c.name] as any)[g.key].changed"
                             :key="`c-${g.key}-${ch.name}`"
                             class="line chg"
+                            :title="`在文档中查看(${tagOf(versionB)})`"
+                            @click="openMemberDoc(c.name, versionB, g.anchor, ch.name)"
                           >
                             ~ {{ ch.name }}
                             <span class="mono from">{{ ch.from }}</span> → <span class="mono to">{{ ch.to }}</span>
-                          </div>
+                          </button>
                         </template>
                       </div>
                       <div v-if="classChangeCount(detail[c.name]!) === 0" class="none">无成员级变化(仅结构调整)</div>
@@ -365,6 +396,9 @@ function classChangeCount(g: DocClassDiff): number {
 }
 
 .name-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 2px 8px;
   border-radius: 6px;
   border: 1px solid var(--border);
@@ -372,6 +406,16 @@ function classChangeCount(g: DocClassDiff): number {
   font-size: 11.5px;
   font-family: var(--mono);
   cursor: pointer;
+}
+
+.name-chip:hover {
+  background: var(--surface-2);
+  border-color: color-mix(in srgb, var(--brand) 30%, transparent);
+}
+
+.chip-ico {
+  opacity: 0.55;
+  flex-shrink: 0;
 }
 
 .name-chip.add { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
@@ -387,13 +431,40 @@ function classChangeCount(g: DocClassDiff): number {
 .cls-head {
   display: flex;
   align-items: center;
+}
+
+.cls-toggle {
+  display: flex;
+  align-items: center;
   gap: 5px;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   border: none;
   background: none;
   padding: 6px 9px;
   cursor: pointer;
   text-align: left;
+}
+
+.jump-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.jump-btn:hover {
+  color: var(--brand);
+  border-color: color-mix(in srgb, var(--brand) 35%, transparent);
+  background: color-mix(in srgb, var(--brand) 8%, transparent);
 }
 
 .cls-name {
@@ -424,10 +495,21 @@ function classChangeCount(g: DocClassDiff): number {
 }
 
 .line {
+  display: block;
+  width: 100%;
+  border: none;
+  background: none;
+  cursor: pointer;
+  text-align: left;
   font-size: 11.5px;
   font-family: var(--mono);
-  padding: 1px 0;
+  padding: 1px 3px;
+  border-radius: 5px;
   word-break: break-all;
+}
+
+.line:hover {
+  background: var(--surface-2);
 }
 
 .line.add { color: var(--ok); }

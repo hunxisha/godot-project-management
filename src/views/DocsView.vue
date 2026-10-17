@@ -314,6 +314,17 @@ function statusText(id: string): string {
   return '生成中…'
 }
 
+/**
+ * 差异对比 → 文档跳转:关弹窗,切到该类所在的库(新增/变化 → 目标库,移除 → 基准库)
+ * 再打开类文档;带成员锚点时直接定位到对应成员。
+ * 先 gotoClass 后 selectVersion:两个同步更新合并成一次面板重挂载,避免中间态闪烁。
+ */
+function onDiffOpenDoc(t: { className: string, versionId: string, anchor?: string }) {
+  diffOpen.value = false
+  gotoClass(t.className, t.anchor ?? null)
+  if (t.versionId && t.versionId !== currentVersionId.value) selectVersion(t.versionId)
+}
+
 /** 翻译覆盖率(中文库才有意义):命中/可翻译总数 */
 function coverageText(id: string): string {
   const s = statuses.value[id]
@@ -569,6 +580,7 @@ const PHASE_TEXT: Record<string, string> = {
       :libraries="diffLibs"
       :initial-a="currentVersionId"
       @close="diffOpen = false"
+      @open-doc="onDiffOpenDoc"
     />
   </div>
 </template>
