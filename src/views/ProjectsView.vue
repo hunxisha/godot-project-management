@@ -126,11 +126,14 @@ onMounted(async () => {
   }
   // 备份页「立即备份」联动:进入本页时自动打开该项目的备份弹窗
   if (props.autoBackup) openBackupFor(props.autoBackup)
+  // 「更多」菜单点外收起
+  document.addEventListener('mousedown', onDocDown, true)
 })
 
 onBeforeUnmount(() => {
   window.ztools.removeSubInput()
   window.removeEventListener('keydown', onKeyDown)
+  document.removeEventListener('mousedown', onDocDown, true)
 })
 
 // ---------- 拖拽 / 添加 ----------
@@ -305,10 +308,37 @@ async function cleanCache() {
   }
 }
 
+// ---------- 行内「更多」菜单 ----------
+// 行内常驻只留「打开 + 打开方式 + 收藏」,其余低频操作(导出/插件/备份/文档/参数/缓存/删除)
+// 收进「⋯」下拉,避免一行 11 个控件把卡片挤满。
+
+/** 当前展开「更多」菜单的项目 id(同一时间只允许一行展开) */
+const openMenuId = ref('')
+
+function toggleMenu(id: string) {
+  openMenuId.value = openMenuId.value === id ? '' : id
+}
+
+/** 菜单项动作:先收菜单再执行,免得弹窗叠在菜单上面看着像卡死 */
+function menuAction(id: string, fn: () => void) {
+  openMenuId.value = ''
+  fn()
+}
+
+/** 点到菜单容器外时收起(捕获阶段,先于按钮 click 跑) */
+function onDocDown(e: MouseEvent) {
+  if (!openMenuId.value) return
+  if (!(e.target as HTMLElement)?.closest?.('.row-menu-wrap')) openMenuId.value = ''
+}
+
 // ---------- 键盘导航(插件页获得焦点时生效) ----------
 
 function onKeyDown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
+    if (openMenuId.value) {
+      openMenuId.value = ''
+      return
+    }
     if (showCreate.value) {
       showCreate.value = false
       return
@@ -334,6 +364,8 @@ function onKeyDown(e: KeyboardEvent) {
   }
   // 备份对话框自行处理 Escape;这里只阻止列表键盘导航
   if (showCreate.value || showDelete.value || showBackupCreate.value || showExport.value || showArgs.value || showCache.value) return
+  // 「更多」菜单展开时,方向键/回车不再挪动列表选中
+  if (openMenuId.value) return
   if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(e.key)) return
   const tag = (e.target as HTMLElement)?.tagName
   if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
@@ -446,29 +478,38 @@ function onKeyDown(e: KeyboardEvent) {
             >
               <Icon :name="ACTION_ICON[act]" :size="13" />
             </button>
-            <span class="act-sep"></span>
-            <button class="btn small ghost icon-act" title="一键导出(headless)" @click="openExport(p)">
-              <Icon name="upload" :size="13" />
-            </button>
-            <button class="btn small ghost icon-act" title="管理该项目的插件" @click="emit('manage-addons', p._id)">
-              <Icon name="puzzle" :size="13" />
-            </button>
-            <button class="btn small ghost icon-act" title="为该项目创建备份" @click="openBackupCreate(p._id)">
-              <Icon name="archive" :size="13" />
-            </button>
-            <button class="btn small ghost icon-act" title="编辑自定义启动参数" @click="openArgs(p)">
-              <Icon name="zap" :size="13" />
-            </button>
-            <button class="btn small ghost icon-act" title="查看该项目的引擎文档(离线类参考)" @click="emit('open-docs', p._id)">
-              <Icon name="book" :size="13" />
-            </button>
-            <button class="btn small ghost icon-act" title="查看并清理 .godot 编辑器缓存" @click="openCache(p)">
-              <Icon name="hard-drive" :size="13" />
-            </button>
             <button class="btn small ghost star" :class="{ on: p.favorite }" title="收藏" @click="toggleFavorite(p)">
               <Icon name="star" :size="13" :stroke-width="p.favorite ? 2.4 : 1.7" />
             </button>
-            <button class="btn small danger-text" @click="askDelete(p)">删除</button>
+            <div class="row-menu-wrap">
+              <button class="btn small ghost icon-act" title="更多操作" @click="toggleMenu(p._id)">
+                <Icon name="more" :size="13" />
+              </button>
+              <div v-if="openMenuId === p._id" class="row-menu">
+                <button class="menu-item" @click="menuAction(p._id, () => openExport(p))">
+                  <Icon name="upload" :size="13" /> 一键导出
+                </button>
+                <button class="menu-item" @click="menuAction(p._id, () => emit('manage-addons', p._id))">
+                  <Icon name="puzzle" :size="13" /> 管理插件
+                </button>
+                <button class="menu-item" @click="menuAction(p._id, () => openBackupCreate(p._id))">
+                  <Icon name="archive" :size="13" /> 创建备份
+                </button>
+                <button class="menu-item" @click="menuAction(p._id, () => emit('open-docs', p._id))">
+                  <Icon name="book" :size="13" /> 引擎文档
+                </button>
+                <button class="menu-item" @click="menuAction(p._id, () => openArgs(p))">
+                  <Icon name="zap" :size="13" /> 启动参数
+                </button>
+                <button class="menu-item" @click="menuAction(p._id, () => openCache(p))">
+                  <Icon name="hard-drive" :size="13" /> 清理缓存
+                </button>
+                <div class="menu-sep"></div>
+                <button class="menu-item danger" @click="menuAction(p._id, () => askDelete(p))">
+                  <Icon name="trash" :size="13" /> 删除项目…
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -703,8 +744,20 @@ function onKeyDown(e: KeyboardEvent) {
   font-size: 12px;
 }
 
+/* 面板默认 overflow:hidden 会裁掉行内「更多」下拉,这里放开,
+   圆角改由首末行自行收口(见 .row-item:first/:last-child) */
 .list {
-  overflow: hidden;
+  overflow: visible;
+}
+
+.row-item:first-child {
+  border-top-left-radius: var(--radius);
+  border-top-right-radius: var(--radius);
+}
+
+.row-item:last-child {
+  border-bottom-left-radius: var(--radius);
+  border-bottom-right-radius: var(--radius);
 }
 
 .row-item {
@@ -843,11 +896,59 @@ function onKeyDown(e: KeyboardEvent) {
   color: var(--brand);
 }
 
-.act-sep {
-  width: 1px;
-  height: 18px;
+/* ---------- 行内「更多」菜单 ---------- */
+
+.row-menu-wrap {
+  position: relative;
+  display: flex;
+}
+
+.row-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  min-width: 168px;
+  padding: 5px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lift);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  background: none;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+
+.menu-item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.menu-item.danger {
+  color: var(--danger);
+}
+
+.menu-item.danger:hover {
+  background: var(--danger-weak);
+}
+
+.menu-sep {
+  height: 1px;
+  margin: 5px 6px;
   background: var(--border);
-  margin: 0 3px;
 }
 
 .star {

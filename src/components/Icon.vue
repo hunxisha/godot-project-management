@@ -71,6 +71,8 @@ const ICONS: Record<string, string> = {
   inbox: 'M3.5 13h5l1.2 2.5h4.6L15.5 13h5M3.5 13L6 5.5h12L20.5 13v5h-17z',
   // 雷达/活动:状态栏就绪态
   activity: 'M3.5 12h4l2.5-6 4 12 2.5-6h4',
+  // 横排三点:行内「更多操作」菜单
+  more: 'M5.5 12h.01M12 12h.01M18.5 12h.01',
 }
 
 const props = defineProps<{ name: string; size?: number; strokeWidth?: number }>()
