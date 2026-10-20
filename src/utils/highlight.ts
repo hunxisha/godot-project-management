@@ -336,6 +336,20 @@ function lex(code: string, p: LangProfile): HLToken[] {
 }
 
 /**
+ * 单个类型名 → 着色角色。文档签名与代码块共用这张表,避免两处各维护一份。
+ * 基础类型 tyb、引擎类 tye、其余大写标识符 tyu;小写且不认识的返回空串(原样)。
+ */
+export function typeRole(id: string): string {
+  if (!id) return ''
+  if (id === 'void' || GD_BASE_TYPES.has(id) || CS_BASE_TYPES.has(id)) return 'tyb'
+  if (GLOBAL_CONSTANTS.has(id)) return 'kw'
+  if (ENGINE_TYPES.has(id)) return 'tye'
+  const first = id[0]
+  if (first && first !== first.toLowerCase()) return 'tyu'
+  return ''
+}
+
+/**
  * 代码语法着色。lang='gdscript'/空 → GDScript 规则;'csharp' → C# 规则;
  * 其他语言(如 lang=text)整段原样。
  */

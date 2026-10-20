@@ -4,9 +4,21 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import Icon from '../Icon.vue'
 import BBRich from './BBRich.vue'
+import DocSig from './DocSig.vue'
 import { useDocs } from '../../composables/useDocs'
 import { copyText, notify, openExternal, showInFolder } from '../../services/bridge'
 import { onlineDocsUrl } from '../../utils/godotDocs'
+import {
+  constantTokens,
+  enumHeaderTokens,
+  enumValueTokens,
+  memberTokens,
+  methodText,
+  methodTokens,
+  operatorTokens,
+  paramListText,
+  signalTokens
+} from '../../utils/docSig'
 import type { DocClassDetail, DocClassExtras } from '../../types/godot'
 
 const props = defineProps<{
@@ -44,7 +56,7 @@ const hasEnumSection = computed(() => plainConstants.value.length > 0 || (detail
 
 // ---------- 本页目录(右侧粘性栏) ----------
 
-interface TocItem { anchor: string, label: string }
+interface TocItem { anchor: string, label: string, kind: string }
 interface TocGroup { key: string, label: string, items: TocItem[] }
 
 const toc = computed<TocGroup[]>(() => {
@@ -52,16 +64,16 @@ const toc = computed<TocGroup[]>(() => {
   if (!d) return []
   const g: TocGroup[] = []
   const add = (key: string, label: string, items: TocItem[]) => { if (items.length) g.push({ key, label, items }) }
-  add('tutorials', '教程', (extras.value?.tutorials ?? []).map((t, i) => ({ anchor: `tut-${i}`, label: t.title })))
-  add('signals', '信号', d.signals.map((s) => ({ anchor: `signal-${s.name}`, label: s.name })))
-  add('members', '成员', d.members.map((x) => ({ anchor: `member-${x.name}`, label: x.name })))
-  add('methods', '方法', d.methods.map((m) => ({ anchor: methodAnchor(m), label: m.name })))
+  add('tutorials', '教程', (extras.value?.tutorials ?? []).map((t, i) => ({ anchor: `tut-${i}`, label: t.title, kind: 'tut' })))
+  add('signals', '信号', d.signals.map((s) => ({ anchor: `signal-${s.name}`, label: s.name, kind: 'signal' })))
+  add('members', '成员', d.members.map((x) => ({ anchor: `member-${x.name}`, label: x.name, kind: 'member' })))
+  add('methods', '方法', d.methods.map((m) => ({ anchor: methodAnchor(m), label: m.name, kind: 'method' })))
   add('enums', '枚举与常量', [
-    ...d.enums.map((e) => ({ anchor: `enum-${e.name}`, label: e.name })),
-    ...plainConstants.value.map((c) => ({ anchor: `constant-${c.name}`, label: c.name }))
+    ...d.enums.map((e) => ({ anchor: `enum-${e.name}`, label: e.name, kind: 'enum' })),
+    ...plainConstants.value.map((c) => ({ anchor: `constant-${c.name}`, label: c.name, kind: 'constant' }))
   ])
-  add('notices', '通知', notifications.value.map((c) => ({ anchor: `constant-${c.name}`, label: c.name })))
-  add('ops', '运算符', d.operators.map((op, i) => ({ anchor: `operator-${i}`, label: op.name || `#${i + 1}` })))
+  add('notices', '通知', notifications.value.map((c) => ({ anchor: `constant-${c.name}`, label: c.name, kind: 'constant' })))
+  add('ops', '运算符', d.operators.map((op, i) => ({ anchor: `operator-${i}`, label: op.name || `#${i + 1}`, kind: 'operator' })))
   return g
 })
 
@@ -191,12 +203,6 @@ function onlineDocsAnchorSafe(kind: string, symbol: string): string {
 function openOnline() {
   openExternal(onlineDocsUrl(currentTag.value, props.className))
 }
-
-/** 方法签名展示:name(a: Type = default, ...) -> Ret */
-function signature(m: { name: string, returnType: string, params: { name: string, type: string, defaultValue?: string }[] }): string {
-  const args = m.params.map((p) => `${p.name}: ${p.type}${p.defaultValue !== undefined ? ` = ${p.defaultValue}` : ''}`).join(', ')
-  return `${m.name}(${args}) -> ${m.returnType}`
-}
 </script>
 
 <template>
@@ -280,8 +286,8 @@ function signature(m: { name: string, returnType: string, params: { name: string
           :class="{ flash: flash === `signal-${s.name}` }"
         >
           <div class="sig mono">
-            <span class="kw">signal</span> {{ s.name }}<span v-if="s.params.length">({{ s.params.map((p) => `${p.name}: ${p.type}`).join(', ') }})</span><span v-else>()</span>
-            <button class="sig-act" title="复制签名与文档链接" @click="copySignature(`signal ${detail.name}.${s.name}(${s.params.map((p) => `${p.name}: ${p.type}`).join(', ')})`, 'signal', s.name)">
+            <DocSig :tokens="signalTokens(s)" />
+            <button class="sig-act" title="复制签名与文档链接" @click="copySignature(`signal ${detail.name}.${s.name}(${paramListText(s.params, false)})`, 'signal', s.name)">
               <Icon name="copy" :size="11" />
             </button>
           </div>
@@ -299,8 +305,7 @@ function signature(m: { name: string, returnType: string, params: { name: string
           :class="{ flash: flash === `member-${mb.name}` }"
         >
           <div class="sig mono">
-            <span class="type">{{ mb.type }}</span> <span class="name">{{ mb.name }}</span>
-            <span v-if="mb.defaultValue !== undefined" class="default">= {{ mb.defaultValue }}</span>
+            <DocSig :tokens="memberTokens(mb)" />
             <span v-if="!mb.setter" class="badge dim">只读</span>
             <button class="sig-act" title="复制签名与文档链接" @click="copySignature(`${mb.type} ${detail.name}.${mb.name}`, 'member', mb.name)">
               <Icon name="copy" :size="11" />
@@ -320,9 +325,9 @@ function signature(m: { name: string, returnType: string, params: { name: string
           :class="{ flash: flash === methodAnchor(m) || flash === `method-${m.name}` }"
         >
           <div class="sig mono">
-            <span v-for="q in m.qualifiers" :key="q" class="kw">{{ q }}</span>
-            <span class="name">{{ signature(m) }}</span>
-            <button class="sig-act" title="复制签名与文档链接" @click="copySignature(`${detail.name}.${signature(m)}`, 'method', m.name)">
+            <span v-for="q in m.qualifiers" :key="q" class="tok-kw sig-qual">{{ q }}</span>
+            <DocSig :tokens="methodTokens(m)" />
+            <button class="sig-act" title="复制签名与文档链接" @click="copySignature(`${detail.name}.${methodText(m)}`, 'method', m.name)">
               <Icon name="copy" :size="11" />
             </button>
           </div>
@@ -340,11 +345,11 @@ function signature(m: { name: string, returnType: string, params: { name: string
           :class="{ flash: flash === `enum-${e.name}` }"
         >
           <div class="sig mono">
-            <span v-if="e.bitfield" class="kw bitfield">flags</span>
-            <span class="kw">enum</span> <span class="name">{{ e.name }}</span>
+            <span v-if="e.bitfield" class="bitfield">flags</span>
+            <DocSig :tokens="enumHeaderTokens(e)" />
           </div>
           <div v-for="v in e.values" :key="v.name" class="enum-row mono">
-            <span class="name">{{ v.name }}</span> <span class="default">= {{ v.value }}</span>
+            <DocSig :tokens="enumValueTokens(v)" />
             <div v-if="v.description" class="item-desc"><BBRich :text="v.description" @ref="onRef" @url="openExternal" /></div>
           </div>
         </div>
@@ -356,7 +361,7 @@ function signature(m: { name: string, returnType: string, params: { name: string
           :class="{ flash: flash === `constant-${c.name}` }"
         >
           <div class="sig mono">
-            <span class="kw">const</span> <span class="name">{{ c.name }}</span> <span class="default">= {{ c.value }}</span>
+            <DocSig :tokens="constantTokens(c)" />
           </div>
           <div v-if="c.description" class="item-desc"><BBRich :text="c.description" @ref="onRef" @url="openExternal" /></div>
         </div>
@@ -372,7 +377,7 @@ function signature(m: { name: string, returnType: string, params: { name: string
           :class="{ flash: flash === `constant-${c.name}` }"
         >
           <div class="sig mono">
-            <span class="kw">const</span> <span class="name">{{ c.name }}</span> <span class="default">= {{ c.value }}</span>
+            <DocSig :tokens="constantTokens(c)" />
           </div>
           <div v-if="c.description" class="item-desc"><BBRich :text="c.description" @ref="onRef" @url="openExternal" /></div>
         </div>
@@ -382,7 +387,7 @@ function signature(m: { name: string, returnType: string, params: { name: string
         <h3 data-toc-sec="ops">运算符 <span class="count">{{ detail.operators.length }}</span></h3>
         <div v-for="(op, i) in detail.operators" :key="i" class="item" :data-doc-id="`doc-operator-${i}`">
           <div class="sig mono">
-            <span class="name">{{ op.name || 'op' }}({{ op.params.map((p) => `${p.name}: ${p.type}`).join(', ') }}) -> {{ op.returnType }}</span>
+            <DocSig :tokens="operatorTokens(op)" />
           </div>
           <div v-if="op.description" class="item-desc"><BBRich :text="op.description" @ref="onRef" @url="openExternal" /></div>
         </div>
@@ -404,6 +409,7 @@ function signature(m: { name: string, returnType: string, params: { name: string
                 :key="it.anchor"
                 type="button"
                 class="toc-item"
+                :class="'k-' + it.kind"
                 :title="it.label"
                 @click="scrollToAnchor(it.anchor)"
               >{{ it.label }}</button>
@@ -555,6 +561,23 @@ function signature(m: { name: string, returnType: string, params: { name: string
   gap: 6px;
 }
 
+/* 分节色条:和签名、目录用同一套角色色,扫到「方法 / 成员」时知道这一节是什么 */
+.sec h3[data-toc-sec]::before {
+  content: '';
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--sec-c, var(--brand));
+  flex-shrink: 0;
+}
+
+.sec h3[data-toc-sec='signals'] { --sec-c: var(--syn-cf); }
+.sec h3[data-toc-sec='members'] { --sec-c: var(--syn-mem); }
+.sec h3[data-toc-sec='methods'] { --sec-c: var(--syn-fn); }
+.sec h3[data-toc-sec='enums'] { --sec-c: var(--syn-tyu); }
+.sec h3[data-toc-sec='notices'] { --sec-c: var(--syn-num); }
+.sec h3[data-toc-sec='ops'] { --sec-c: var(--syn-fn); }
+
 .tut-row {
   display: flex;
   align-items: center;
@@ -635,28 +658,17 @@ function signature(m: { name: string, returnType: string, params: { name: string
   word-break: break-all;
 }
 
-.sig .kw {
-  color: var(--text-3);
+/* 限定词(static/const/virtual)比正文小一号,颜色走 .tok-kw */
+.sig-qual {
   margin-right: 5px;
   font-size: 11px;
 }
 
-.sig .kw.bitfield {
+.sig .bitfield {
   color: var(--warning, #e8a33d);
-}
-
-.sig .type {
-  color: var(--brand);
-}
-
-.sig .name {
-  color: var(--text);
+  margin-right: 5px;
+  font-size: 11px;
   font-weight: 600;
-}
-
-.sig .default {
-  color: var(--text-3);
-  margin-left: 5px;
 }
 
 .item:hover .sig-act {
@@ -815,6 +827,13 @@ function signature(m: { name: string, returnType: string, params: { name: string
   color: var(--text-2);
   cursor: pointer;
 }
+
+.toc-item.k-method,
+.toc-item.k-operator { color: var(--syn-fn); }
+.toc-item.k-member { color: var(--syn-mem); }
+.toc-item.k-signal { color: var(--syn-cf); }
+.toc-item.k-enum { color: var(--syn-tyu); }
+.toc-item.k-constant { color: var(--syn-num); }
 
 .toc-item:hover {
   color: var(--brand);
