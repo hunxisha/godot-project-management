@@ -13,6 +13,9 @@ export type ThemeId = 'steel' | 'graphite' | 'forest' | 'violet' | 'amber'
 /** 明暗模式:auto = 跟随宿主/系统 */
 export type ThemeMode = 'auto' | 'light' | 'dark'
 
+/** 代码配色方案 id(与 main.css 的 [data-code='X'] 一一对应;godot 为默认值,不写规则) */
+export type CodeThemeId = 'godot' | 'soft' | 'vivid' | 'paper' | 'warm'
+
 /** 已安装的 Godot 引擎版本 */
 export interface GodotVersion {
   id: string
@@ -353,6 +356,8 @@ export interface GodotSettings {
   theme?: ThemeId
   /** 明暗模式:auto 跟随宿主 */
   themeMode?: ThemeMode
+  /** 代码语法配色方案(文档签名 / 代码块共用),未选则用默认 godot */
+  codeTheme?: CodeThemeId
 
   // ---------- 市场文案翻译 ----------
   /** 是否启用翻译(总开关;市场页头部的「中文 / 原文」与它是同一个字段) */

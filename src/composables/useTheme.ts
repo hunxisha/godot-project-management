@@ -1,11 +1,12 @@
-// 主题系统:色板(data-theme)× 明暗(data-mode),由本模块统一写入 <html>。
+// 主题系统:色板(data-theme)× 明暗(data-mode)× 代码配色(data-code),由本模块统一写入 <html>。
 //
-// 单例:模块级 ref 保存当前选择,侧边栏的快捷切换器与设置页共用同一份状态,
+// 三个维度相互正交:色板管界面色彩,明暗管亮/暗,代码配色只换 12 个语法角色(--syn-*)。
+// 单例:模块级 ref 保存当前选择,侧边栏的快捷切换器、文档页的配色按钮与设置页共用同一份状态,
 // 无需引入状态管理库。useTheme() 不注册任何生命周期钩子,因此也可以在 main.ts 里
 // 挂载前调用一次(提前应用主题,避免首帧闪一下默认色)。
 import { computed, ref } from 'vue'
 import { getSettings, saveSettings } from '../services/bridge'
-import type { ThemeId, ThemeMode } from '../types/godot'
+import type { CodeThemeId, ThemeId, ThemeMode } from '../types/godot'
 
 export interface ThemeDef {
   id: ThemeId
@@ -62,8 +63,29 @@ export const MODES: { id: ThemeMode, name: string, icon: string }[] = [
   { id: 'dark', name: '深色', icon: 'moon' }
 ]
 
+export interface CodeThemeDef {
+  id: CodeThemeId
+  name: string
+  desc: string
+}
+
+/**
+ * 代码配色方案清单(顺序即展示顺序)。
+ * 色值不在这里 —— 它们是 main.css 里 `[data-code='X'][data-mode='Y']` 的 12 个
+ * --syn-*,浮层预览也直接吃同一份变量,避免「预览一套、实际另一套」。
+ * 'godot' 走 :root 的默认值,所以没有对应的 CSS 规则块。
+ */
+export const CODE_THEMES: CodeThemeDef[] = [
+  { id: 'godot', name: '编辑器', desc: '默认。对齐 Godot 编辑器自带高亮,暖黄关键字' },
+  { id: 'soft', name: '柔和', desc: '低饱和青绿调,盯久了不刺眼' },
+  { id: 'vivid', name: '鲜明', desc: '高饱和撞色,找符号最快' },
+  { id: 'paper', name: '纸墨', desc: '近单色墨阶,只留一处冷蓝强调' },
+  { id: 'warm', name: '暖褐', desc: '暖棕主调,与浅色暖色板同调' }
+]
+
 const theme = ref<ThemeId>('steel')
 const mode = ref<ThemeMode>('auto')
+const codeTheme = ref<CodeThemeId>('godot')
 /** auto 模式下解析出的实际明暗(驱动菜单里的当前项高亮) */
 const resolvedMode = ref<'light' | 'dark'>('light')
 
@@ -87,9 +109,10 @@ function apply() {
     ? (hostPrefersDark() ? 'dark' : 'light')
     : mode.value
   const el = document.documentElement
-  // 两个属性总是同时写入:main.css 不依赖「属性缺失」做隐式回退
+  // 三个属性总是同时写入:main.css 不依赖「属性缺失」做隐式回退
   el.dataset.theme = theme.value
   el.dataset.mode = resolvedMode.value
+  el.dataset.code = codeTheme.value
 }
 
 export function useTheme() {
@@ -101,6 +124,7 @@ export function useTheme() {
       .then((s) => {
         if (s.theme && THEMES.some((t) => t.id === s.theme)) theme.value = s.theme
         if (s.themeMode) mode.value = s.themeMode
+        if (s.codeTheme && CODE_THEMES.some((c) => c.id === s.codeTheme)) codeTheme.value = s.codeTheme
         apply()
       })
       .catch(() => { /* 读设置失败时用默认值 */ })
@@ -130,6 +154,12 @@ export function useTheme() {
     saveSettings({ themeMode: next }).catch(() => { /* 同上 */ })
   }
 
+  function setCodeTheme(next: CodeThemeId) {
+    codeTheme.value = next
+    apply()
+    saveSettings({ codeTheme: next }).catch(() => { /* 同上 */ })
+  }
+
   /** 快捷按钮:在 跟随宿主 → 浅色 → 深色 之间循环 */
   function cycleMode() {
     const order: ThemeMode[] = ['auto', 'light', 'dark']
@@ -138,17 +168,22 @@ export function useTheme() {
 
   const currentTheme = computed(() => THEMES.find((t) => t.id === theme.value) || THEMES[0])
   const currentMode = computed(() => MODES.find((m) => m.id === mode.value) || MODES[0])
+  const currentCodeTheme = computed(() => CODE_THEMES.find((c) => c.id === codeTheme.value) || CODE_THEMES[0])
 
   return {
     theme,
     mode,
+    codeTheme,
     resolvedMode,
     currentTheme,
     currentMode,
+    currentCodeTheme,
     themes: THEMES,
     modes: MODES,
+    codeThemes: CODE_THEMES,
     setTheme,
     setMode,
+    setCodeTheme,
     cycleMode
   }
 }

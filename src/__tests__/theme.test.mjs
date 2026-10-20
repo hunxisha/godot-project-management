@@ -39,10 +39,10 @@ const css = readFileSync(CSS_PATH, 'utf-8')
 // 先剥掉注释:注释里也含「:」(如 `浅色:语义色`),会让按 ; 切分后的前缀解析错位
 const cssNoComments = css.replace(/\/\*[\s\S]*?\*\//g, '')
 
-/** 取出所有 :root… 规则块 */
+/** 取出所有 :root… 规则块(含只写属性选择器的代码配色块,如 [data-code='soft'][data-mode='light']) */
 function parseBlocks(source) {
   const blocks = []
-  const re = /(:root(?:\[[^\]]+\])*)\s*\{([^}]*)\}/g
+  const re = /(:root(?:\[[^\]]+\])*|(?:\[[^\]]+\])+)\s*\{([^}]*)\}/g
   let m
   while ((m = re.exec(source)) !== null) {
     const selector = m[1]
@@ -73,6 +73,16 @@ function resolve(theme, mode) {
   const out = {}
   const hits = blocks
     .filter((b) => b.attrs.every(([k, v]) => (k === 'data-theme' ? v === theme : k === 'data-mode' ? v === mode : false)))
+    .sort((a, b) => specificity(a) - specificity(b) || a.index - b.index)
+  for (const b of hits) Object.assign(out, b.tokens)
+  return out
+}
+
+/** 代码配色:方案 × 明暗;'godot' 没有独立规则块,取 :root 默认值 */
+function resolveCode(code, mode) {
+  const out = code === 'godot' ? resolve('steel', mode) : {}
+  const hits = blocks
+    .filter((b) => b.attrs.every(([k, v]) => (k === 'data-code' ? v === code : k === 'data-mode' ? v === mode : false)))
     .sort((a, b) => specificity(a) - specificity(b) || a.index - b.index)
   for (const b of hits) Object.assign(out, b.tokens)
   return out
@@ -256,7 +266,70 @@ for (const theme of THEMES) {
   }
 }
 
-section('6. 最差项汇总(供设计参考)')
+// ---------- 6. 代码配色方案(data-code) ----------
+
+section('6. 代码配色方案([data-code] × [data-mode])')
+
+/** 方案清单以 useTheme.ts 为唯一来源;main.css 必须逐一对得上 */
+const USE_THEME_SRC = readFileSync(path.resolve(__dirname, '../composables/useTheme.ts'), 'utf-8')
+const CODE_THEMES_BLOCK = /export const CODE_THEMES[^=]*=\s*\[([\s\S]*?)\n\]/.exec(USE_THEME_SRC)
+ok(!!CODE_THEMES_BLOCK, 'useTheme.ts 里能定位 CODE_THEMES 数组')
+const CODE_THEME_IDS = [...(CODE_THEMES_BLOCK?.[1] || '').matchAll(/id:\s*'([a-z]+)'/g)].map((m) => m[1])
+const codeBlockIds = [...new Set(blocks.filter((b) => b.attrs.some(([k]) => k === 'data-code')).map((b) => b.attrs.find(([k]) => k === 'data-code')[1]))]
+
+ok(CODE_THEME_IDS.length >= 5, `useTheme.ts 声明 ${CODE_THEME_IDS.length} 套代码配色`, CODE_THEME_IDS.join(', '))
+ok(CODE_THEME_IDS.includes('godot'), '默认方案 godot 在清单中')
+for (const id of CODE_THEME_IDS) {
+  ok(codeBlockIds.includes(id), `main.css 有 [data-code='${id}'] 的规则块(浮层预览要能按方案取色)`)
+}
+for (const id of codeBlockIds) {
+  ok(CODE_THEME_IDS.includes(id), `main.css 的 ${id} 在 useTheme.ts 清单中(无孤儿方案)`)
+}
+
+// godot 是默认方案,必须与 :root 的既有值逐值一致 —— 否则文档页一进一出会被换色
+for (const mode of MODES) {
+  const rootVals = resolve('steel', mode)
+  const codeVals = resolveCode('godot', mode)
+  const drift = SYN_TOKENS.filter((k) => codeVals[k] !== rootVals[k])
+  ok(drift.length === 0, `godot/${mode} 与 :root 默认值一致(默认外观零回归)`, drift.map((k) => `${k}: ${codeVals[k]} ≠ ${rootVals[k]}`).join('; '))
+}
+
+const codeWorst = {}
+for (const id of CODE_THEME_IDS) {
+  for (const mode of MODES) {
+    const t = resolveCode(id, mode)
+    const label = `${id}/${mode}`
+    const missing = SYN_TOKENS.filter((k) => !t[k])
+    ok(missing.length === 0, `${label} 定义全部 ${SYN_TOKENS.length} 个高亮角色`, missing.join(', '))
+    const bad = SYN_TOKENS.filter((k) => t[k] && !parseColor(t[k]))
+    ok(bad.length === 0, `${label} 色值可解析`, bad.join(', '))
+
+    // 同一方案同一明暗下,12 个角色必须互不相同(否则等于没区分)
+    const vals = SYN_TOKENS.map((k) => t[k]).filter(Boolean)
+    ok(new Set(vals).size === vals.length, `${label} 12 个角色互不相同`, `${new Set(vals).size}/${vals.length}`)
+
+    // 对 5 套色板 × 该明暗的代码块底色都要达标
+    let min = Infinity
+    let minRole = ''
+    let minKey = ''
+    for (const theme of THEMES) {
+      const bg = resolved[`${theme}/${mode}`]['--surface-2']
+      for (const k of SYN_TOKENS) {
+        const c = ratio(t[k], bg)
+        if (!codeWorst[id] || c < codeWorst[id].c) codeWorst[id] = { c, key: `${label} @${theme}` }
+        if (c < min) { min = c; minRole = k; minKey = theme }
+      }
+    }
+    ok(min >= SYN_MIN, `${label} 对全部色板代码块底色 ≥ ${SYN_MIN}`, `${minRole}=${min.toFixed(2)} @${minKey}`)
+    console.log(`        ${label.padEnd(16)} 最弱 ${minRole} ${min.toFixed(2)}  (@${minKey})`)
+  }
+}
+
+for (const [id, w] of Object.entries(codeWorst)) {
+  ok(w.c >= SYN_MIN, `${id} 全色板最低对比度 ≥ ${SYN_MIN}`, `${w.c.toFixed(2)} (${w.key})`)
+}
+
+section('7. 最差项汇总(供设计参考)')
 for (const [name, w] of Object.entries(worst)) {
   console.log(`        ${name.padEnd(16)} 最低 ${w.c.toFixed(2)}  (${w.key})`)
 }

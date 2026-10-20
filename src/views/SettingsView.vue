@@ -3,6 +3,7 @@ import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getSettings, notify, openPath, pickDirectory, pickFile, saveSettings } from '../services/bridge'
 import Icon from '../components/Icon.vue'
 import ThemeSwitcher from '../components/ThemeSwitcher.vue'
+import CodeThemeSwitcher from '../components/CodeThemeSwitcher.vue'
 import TranslatePanel from '../components/settings/TranslatePanel.vue'
 import { fmtSize } from '../utils/format'
 import { DEFAULT_SETTINGS, type DocsCacheInfo, type GodotSettings, type NetworkCheckResult, type OpenAction } from '../types/godot'
@@ -261,6 +262,20 @@ onBeforeUnmount(() => {
               <div class="hint">
                 主题由「色板 × 明暗」组合:5 套色板各有浅色与深色两版,共 10 种外观。
                 「跟随宿主」会随 ZTools 的深色模式自动切换;色板与明暗都会记住。
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <span class="panel-title"><Icon name="terminal" :size="13" /> 代码配色</span>
+              <span class="grow"></span>
+            </div>
+            <div class="panel-body">
+              <CodeThemeSwitcher inline />
+              <div class="hint">
+                只改 12 类语法角色的颜色,不动界面色板与明暗。每套方案都有浅色、深色两版,
+                跟随上方的明暗设置;文档里的方法签名与代码块共用同一套。
               </div>
             </div>
           </div>

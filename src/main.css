@@ -86,9 +86,10 @@
   --panel-head: var(--surface-2);
   --panel-head: color-mix(in srgb, var(--surface) 60%, var(--bg));
 
-  /* 代码语法着色(亮色):与色板无关,所有色板共用。
+  /* 代码语法着色(亮色):默认方案(godot),与色板无关、所有色板共用。
      12 个角色与 Godot 编辑器默认高亮对齐(暗色直取编辑器值,亮色同色相压暗),
-     每个角色对代码块底色(--surface-2)的对比度 ≥ 4.5:1,由 theme.test.mjs 断言。 */
+     每个角色对代码块底色(--surface-2)的对比度 ≥ 4.5:1,由 theme.test.mjs 断言。
+     其它方案见下方「代码配色方案」,由 data-code 切换。 */
   --syn-kw: #6b6b00;
   --syn-cf: #8a5a1e;
   --syn-tyb: #0b7a58;
@@ -140,6 +141,175 @@
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.32), 0 4px 14px rgba(0, 0, 0, 0.28);
   --shadow-lift: 0 2px 6px rgba(0, 0, 0, 0.38), 0 12px 28px rgba(0, 0, 0, 0.44);
   --shadow-overlay: 0 8px 20px rgba(0, 0, 0, 0.4), 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+
+/* ================================================================
+   代码配色方案(第 3 个外观维度)
+   ----------------------------------------------------------------
+   data-code 与 data-theme 正交:色板管界面,代码配色只换 12 个 --syn-*,
+   所以任意「色板 × 明暗 × 代码配色」组合都成立。
+
+   选择器刻意不写真 :root——同一份规则同时服务于 <html> 和浮层里的
+   色样块(<span data-code="x" data-mode="y">),预览与真实效果不会跑偏。
+   默认方案 godot 也显式写一份(值取自上面 :root),否则浮层里的「编辑器」样张
+   在选了别的方案时会继承到当前方案的颜色,看到的是假预览。
+
+   每个角色的对比度(对 --surface-2 ≥ 4.5)与「12 角色互不同色」由
+   theme.test.mjs 断言,改色值请一并跑 npm run test:theme。
+   ================================================================ */
+
+/* ---------- 编辑器 godot:默认方案,与 :root 逐值一致 ---------- */
+[data-code='godot'][data-mode='light'] {
+  --syn-kw: #6b6b00;
+  --syn-cf: #8a5a1e;
+  --syn-tyb: #0b7a58;
+  --syn-tye: #0f6b85;
+  --syn-tyu: #3a5fb0;
+  --syn-fn: #2a6fa8;
+  --syn-mem: #b02a34;
+  --syn-str: #a32375;
+  --syn-num: #a03d00;
+  --syn-com: #647080;
+  --syn-doc: #5a6f86;
+  --syn-sym: #4f6f8c;
+}
+
+[data-code='godot'][data-mode='dark'] {
+  --syn-kw: #ffffb3;
+  --syn-cf: #ffd9b3;
+  --syn-tyb: #a3ffd4;
+  --syn-tye: #82d4ff;
+  --syn-tyu: #6babed;
+  --syn-fn: #66a3cf;
+  --syn-mem: #ff7b73;
+  --syn-str: #f06dbf;
+  --syn-num: #eb9433;
+  --syn-com: #8b98a8;
+  --syn-doc: #8099b3;
+  --syn-sym: #baddff;
+}
+/* ---------- 柔和 soft:低饱和,长时间阅读不刺眼 ---------- */
+[data-code='soft'][data-mode='light'] {
+  --syn-kw: #1b5a56;
+  --syn-cf: #2b5e80;
+  --syn-tyb: #2f6d4e;
+  --syn-tye: #2f697f;
+  --syn-tyu: #6450b4;
+  --syn-fn: #25656f;
+  --syn-mem: #a03e52;
+  --syn-str: #326a37;
+  --syn-num: #8d5225;
+  --syn-com: #606f7b;
+  --syn-doc: #5f6f7e;
+  --syn-sym: #576b82;
+}
+
+[data-code='soft'][data-mode='dark'] {
+  --syn-kw: #8bd2c9;
+  --syn-cf: #97c3d8;
+  --syn-tyb: #7dc29b;
+  --syn-tye: #7dbacc;
+  --syn-tyu: #b6ade1;
+  --syn-fn: #6ec0c9;
+  --syn-mem: #e09ca7;
+  --syn-str: #7bbe80;
+  --syn-num: #d6a376;
+  --syn-com: #8b99a4;
+  --syn-doc: #8b99a7;
+  --syn-sym: #90a0b2;
+}
+
+/* ---------- 鲜明 vivid:高饱和,扫读最快 ---------- */
+[data-code='vivid'][data-mode='light'] {
+  --syn-kw: #791eb6;
+  --syn-cf: #a31f72;
+  --syn-tyb: #1a6d57;
+  --syn-tye: #166a88;
+  --syn-tyu: #5a47d9;
+  --syn-fn: #195aba;
+  --syn-mem: #b82130;
+  --syn-str: #1d6d38;
+  --syn-num: #92500e;
+  --syn-com: #656f7b;
+  --syn-doc: #636e7e;
+  --syn-sym: #59698a;
+}
+
+[data-code='vivid'][data-mode='dark'] {
+  --syn-kw: #e4b5f8;
+  --syn-cf: #f2a3d0;
+  --syn-tyb: #2acb95;
+  --syn-tye: #14c0eb;
+  --syn-tyu: #b4aaf3;
+  --syn-fn: #7db9f5;
+  --syn-mem: #f2949b;
+  --syn-str: #2fc85d;
+  --syn-num: #f3961b;
+  --syn-com: #8e99a9;
+  --syn-doc: #8d99ad;
+  --syn-sym: #8f9ebd;
+}
+
+/* ---------- 纸墨 paper:近单色,只留一处冷强调与暖棕 ---------- */
+[data-code='paper'][data-mode='light'] {
+  --syn-kw: #283443;
+  --syn-cf: #36424e;
+  --syn-tyb: #3c545d;
+  --syn-tye: #2f6686;
+  --syn-tyu: #4e5785;
+  --syn-fn: #2a3a52;
+  --syn-mem: #9f4450;
+  --syn-str: #86582a;
+  --syn-num: #a14c2d;
+  --syn-com: #677079;
+  --syn-doc: #64717f;
+  --syn-sym: #5c6875;
+}
+
+[data-code='paper'][data-mode='dark'] {
+  --syn-kw: #eceef0;
+  --syn-cf: #d4d9dd;
+  --syn-tyb: #adc4ca;
+  --syn-tye: #86b6cb;
+  --syn-tyu: #b0b6d1;
+  --syn-fn: #dee2e6;
+  --syn-mem: #d2a0a6;
+  --syn-str: #d6a26e;
+  --syn-num: #e1997f;
+  --syn-com: #8d97a2;
+  --syn-doc: #8b98a4;
+  --syn-sym: #99a1ab;
+}
+
+/* ---------- 暖褐 warm:暖色系,与浅色暖色板同调 ---------- */
+[data-code='warm'][data-mode='light'] {
+  --syn-kw: #7b421b;
+  --syn-cf: #993a2b;
+  --syn-tyb: #606720;
+  --syn-tye: #41667e;
+  --syn-tyu: #745d2f;
+  --syn-fn: #974426;
+  --syn-mem: #a63a49;
+  --syn-str: #476838;
+  --syn-num: #7e5b13;
+  --syn-com: #776c62;
+  --syn-doc: #786c5e;
+  --syn-sym: #786657;
+}
+
+[data-code='warm'][data-mode='dark'] {
+  --syn-kw: #eebc72;
+  --syn-cf: #e9ad9b;
+  --syn-tyb: #adbc4a;
+  --syn-tye: #92b6cc;
+  --syn-tyu: #c9b06c;
+  --syn-fn: #e8a685;
+  --syn-mem: #e39ca3;
+  --syn-str: #93ba7f;
+  --syn-num: #e49e14;
+  --syn-com: #a1968c;
+  --syn-doc: #a29688;
+  --syn-sym: #a99b8e;
 }
 
 /* ================================================================

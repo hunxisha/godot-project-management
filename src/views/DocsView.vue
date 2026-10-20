@@ -8,6 +8,7 @@ import Icon from '../components/Icon.vue'
 import DocClassPanel from '../components/docs/DocClassPanel.vue'
 import DocTreePanel from '../components/docs/DocTreePanel.vue'
 import DocDiffDialog from '../components/docs/DocDiffDialog.vue'
+import CodeThemeSwitcher from '../components/CodeThemeSwitcher.vue'
 import { useDocs } from '../composables/useDocs'
 import { notify, pickFile } from '../services/bridge'
 import type { DocClassSummary, DocsTask, GodotProject } from '../types/godot'
@@ -379,6 +380,8 @@ const PHASE_TEXT: Record<string, string> = {
       </template>
 
       <span class="grow"></span>
+      <!-- 代码配色:文档签名与代码块共用的语法配色,切换即时生效并落库 -->
+      <CodeThemeSwitcher />
       <!-- 版本差异对比:常驻 view-head(删除/库管理之间),两处模式都能直达 -->
       <button
         v-if="versions.length"
