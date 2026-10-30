@@ -83,11 +83,45 @@ async function main() {
   ok(B.updateCard(fixture(), 'A', { tags: [] }).columns[0].cards[0].tags === undefined, '空标签数组清空')
   ok(B.updateCard(fixture(), 'nope', { title: 'x' }) !== undefined, '卡片不存在不崩溃')
   ok(B.updateCard(fixture(), 'A', { priority: 'normal' }).columns[0].cards[0].priority === 'normal', '优先级可改')
+  ok(B.updateCard(fixture(), 'A', { done: true }).columns[0].cards[0].done === true, 'done 可标记')
+  const doneBoard = { schema: 1, columns: [{ id: 'c1', title: '待办', cards: [card('A', '任务A', { done: true })] }], updatedAt: 1 }
+  ok(B.updateCard(doneBoard, 'A', { done: false }).columns[0].cards[0].done === undefined, '取消完成不残留 false')
+  ok(B.updateCard(fixture(), 'A', { color: 'blue' }).columns[0].cards[0].color === 'blue', '色板内颜色可设')
+  ok(B.updateCard(fixture(), 'A', { color: 'rainbow' }).columns[0].cards[0].color === undefined, '非法色板 key 视为清色')
 
   section('removeCard')
   const b3 = B.removeCard(fixture(), 'A')
   ok(titles(b3, 'c1').join() === '任务B', '摘除指定卡片', titles(b3, 'c1'))
   ok(B.removeCard(fixture(), 'nope').columns[0].cards.length === 2, '不存在的卡片不改动')
+
+  section('duplicateCard:副本插在原卡之后')
+  const d1 = B.duplicateCard(fixture(), 'A')
+  ok(titles(d1, 'c1').join() === '任务A,任务A(副本),任务B', '副本紧随原卡', titles(d1, 'c1'))
+  const dup = d1.columns[0].cards[1]
+  ok(!!dup.id && dup.id !== 'A', '副本有新 id')
+  ok(dup.createdAt >= 1 && dup.updatedAt >= dup.createdAt, '副本时间戳刷新')
+  const rich = {
+    schema: 1,
+    columns: [{ id: 'c1', title: '待办', cards: [card('A', '富卡片', { notes: 'n', priority: 'high', due: '2030-01-02', tags: ['t'], done: true, color: 'red' })] }],
+    updatedAt: 1
+  }
+  const rc = B.duplicateCard(rich, 'A').columns[0].cards[1]
+  ok(rc.notes === 'n' && rc.priority === 'high' && rc.due === '2030-01-02' && rc.tags?.join() === 't' && rc.done === true && rc.color === 'red', '其余字段照搬')
+  ok(B.duplicateCard(fixture(), 'nope').columns[0].cards.length === 2, '不存在的卡片不改动')
+
+  section('restoreCard:撤销删除的插回')
+  const orig = fixture()
+  const snap = orig.columns[0].cards[0]
+  const gone = B.removeCard(orig, 'A')
+  const back = B.restoreCard(gone, 'c1', 0, snap)
+  ok(titles(back, 'c1').join() === '任务A,任务B', '插回原下标', titles(back, 'c1'))
+  ok(back.columns[0].cards[0].id === 'A', 'id 不变')
+  ok(titles(B.restoreCard(gone, 'c1', 99, snap), 'c1').join() === '任务B,任务A', '越界下标钳到列尾')
+  ok(B.restoreCard(gone, 'nope', 0, snap) === gone, '列不存在不改动')
+
+  section('cardPosition')
+  ok(JSON.stringify(B.cardPosition(fixture(), 'C')) === '{"columnId":"c2","index":0}', '跨列定位', B.cardPosition(fixture(), 'C'))
+  ok(B.cardPosition(fixture(), 'nope') === null, '找不到 → null')
 
   section('moveCard:跨列与列内')
   const m1 = B.moveCard(fixture(), 'A', 'c2', 0)
@@ -134,24 +168,38 @@ async function main() {
   ok(JSON.stringify(t1) === '["audio","bug","ui"]', '标签去重排序', t1)
   ok(B.countCards(fixture()) === 3, '卡片总数')
 
-  section('dueState / todayStr')
+  section('dueState / todayStr / addDays')
   const today = B.todayStr()
   ok(/^\d{4}-\d{2}-\d{2}$/.test(today), 'todayStr 格式', today)
   ok(B.dueState(undefined) === null, '未设置 → null')
   ok(B.dueState('2030-12-31', '2030-06-01') === null, '未来日期 → null')
   ok(B.dueState('2030-06-01', '2030-06-01') === 'today', '今天 → today')
   ok(B.dueState('2030-05-31', '2030-06-01') === 'overdue', '过去日期 → overdue')
+  ok(B.dueState('2030-06-02', '2030-06-01') === 'soon', '明天 → soon')
+  ok(B.dueState('2030-06-04', '2030-06-01') === 'soon', '第 3 天 → soon(窗口含边)')
+  ok(B.dueState('2030-06-05', '2030-06-01') === null, '第 4 天 → null(窗口外)')
+  ok(B.addDays('2030-01-30', 3) === '2030-02-02', 'addDays 跨月进位')
+  ok(B.addDays('2030-12-31', 1) === '2031-01-01', 'addDays 跨年进位')
+  ok(B.addDays('2030-6-1', 1) === '2030-6-1', '格式不合法原样返回')
 
-  section('matchCard:关键词 + 标签')
-  const probe = card('A', '实现存档系统 API', { notes: '记得处理加密', tags: ['ui'] })
-  ok(B.matchCard(probe, '', []) === true, '无条件全过')
-  ok(B.matchCard(probe, '存档', []) === true, '标题命中')
-  ok(B.matchCard(probe, '加密', []) === true, '备注命中')
-  ok(B.matchCard(probe, 'api', []) === true, '大小写不敏感')
-  ok(B.matchCard(probe, 'ABC', []) === false, '未命中')
-  ok(B.matchCard(probe, '', ['ui']) === true, '标签命中')
-  ok(B.matchCard(probe, '', ['net']) === false, '标签未命中')
-  ok(B.matchCard(probe, '存档', ['net']) === false, '关键词过但标签不过')
+  section('matchCard:关键词(含标签文本)+ 标签 + 优先级 + 仅逾期')
+  const probe = card('A', '实现存档系统 API', { notes: '记得处理加密', tags: ['ui'], priority: 'high', due: '2000-01-01' })
+  ok(B.matchCard(probe, {}) === true, '无条件全过')
+  ok(B.matchCard(probe, { query: '存档' }) === true, '标题命中')
+  ok(B.matchCard(probe, { query: '加密' }) === true, '备注命中')
+  ok(B.matchCard(probe, { query: 'ui' }) === true, '标签文本命中')
+  ok(B.matchCard(probe, { query: 'api' }) === true, '大小写不敏感')
+  ok(B.matchCard(probe, { query: 'ABC' }) === false, '未命中')
+  ok(B.matchCard(probe, { tags: ['ui'] }) === true, '标签命中')
+  ok(B.matchCard(probe, { tags: ['net'] }) === false, '标签未命中')
+  ok(B.matchCard(probe, { query: '存档', tags: ['net'] }) === false, '关键词过但标签不过')
+  ok(B.matchCard(probe, { priority: 'high' }) === true, '优先级命中')
+  ok(B.matchCard(probe, { priority: 'low' }) === false, '优先级不过')
+  ok(B.matchCard(card('B', '未设优先级'), { priority: 'normal' }) === true, '未设置按 normal 匹配')
+  ok(B.matchCard(probe, { overdueOnly: true }) === true, '仅逾期:逾期未完成卡通过')
+  ok(B.matchCard(card('C', '未来卡', { due: '2099-12-31' }), { overdueOnly: true }) === false, '仅逾期:未逾期不通过')
+  ok(B.matchCard(card('D', '今日到期', { due: B.todayStr() }), { overdueOnly: true }) === false, '仅逾期:今日不算逾期')
+  ok(B.matchCard(card('E', '已完成', { due: '2000-01-01', done: true }), { overdueOnly: true }) === false, '仅逾期:已完成被排除')
 
   section('normalizeBoard:宽容读取')
   ok(B.normalizeBoard(null) === null, '空文档 → null')
@@ -172,6 +220,20 @@ async function main() {
   ok(messy.schema === 1 && messy.updatedAt === 0, '缺省字段给默认值')
   const emptyCols = B.normalizeBoard({ schema: 1, columns: [], updatedAt: 5 })
   ok(emptyCols !== null && emptyCols.columns.length === 0, '列被删光是合法状态(不是缺失)')
+  const withMeta = B.normalizeBoard({
+    columns: [
+      {
+        id: 'c1',
+        title: 'ok',
+        color: 'red',
+        cards: [card('A', 'x', { done: true, color: 'cyan' }), card('B', 'y', { done: false, color: 'rainbow' })]
+      }
+    ]
+  })
+  ok(withMeta.columns[0].color === 'red', '列颜色保留')
+  ok(withMeta.columns[0].cards[0].done === true && withMeta.columns[0].cards[0].color === 'cyan', '卡片 done/color 合法值保留')
+  ok(withMeta.columns[0].cards[1].done === undefined && withMeta.columns[0].cards[1].color === undefined, 'done=false / 非法色剔除')
+  ok(B.normalizeBoard(fixture()).columns[0].cards[0].done === undefined, '老数据(无新字段)视为未完成、无色')
 
   console.log(`\n结果: ${pass} 通过, ${failures.length} 失败`)
   if (failures.length) {

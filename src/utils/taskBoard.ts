@@ -4,7 +4,13 @@
 // 「算出新板 → 落库 → 采纳」的方式持久化,也让断言测试无需 Vue。
 // 移动函数的 toIndex 一律是「原数组坐标里插到第 toIndex 个之前」(列尾传 length),
 // 摘出元素造成的下标偏移由函数内部消化。
-import type { TaskBoard, TaskCard, TaskColumn, TaskPriority } from '../types/godot'
+import type { TaskBoard, TaskCard, TaskColumn, TaskColor, TaskPriority } from '../types/godot'
+
+/** 卡片/列颜色色板(key 稳定存库,颜色值在 CSS 变量 --task-c-<key> 里随主题走) */
+export const TASK_COLORS = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'gray'] as const
+
+/** 「即将到期」窗口(天):due 在今天之后、SOON_DAYS 天内算 soon */
+export const SOON_DAYS = 3
 
 /** 生成卡片/列 id(宿主 webview 与 Node 18+ 都有 crypto.randomUUID,兜底时间+随机) */
 export function newId(): string {
@@ -50,7 +56,13 @@ function findCard(board: TaskBoard, cardId: string): { column: TaskColumn, index
 
 /** 卡片所在的列 id;找不到返回 null(saveCard 判断是否换列用) */
 export function columnIdOfCard(board: TaskBoard, cardId: string): string | null {
-  return findCard(board, cardId)?.column.id ?? null
+  return cardPosition(board, cardId)?.columnId ?? null
+}
+
+/** 卡片位置:{ 列 id, 列内数组下标 };找不到返回 null(撤销删除要用原坐标) */
+export function cardPosition(board: TaskBoard, cardId: string): { columnId: string, index: number } | null {
+  const hit = findCard(board, cardId)
+  return hit ? { columnId: hit.column.id, index: hit.index } : null
 }
 
 function normalizeTags(tags: string[] | undefined): string[] | undefined {
@@ -85,12 +97,13 @@ export function addCard(
 
 /**
  * 更新卡片字段:patch 里出现的键才生效(置 undefined 即清空)。
- * 空标题不采纳(返回原看板)。
+ * 空标题不采纳(返回原看板);done 只存 true(未完成 = 字段缺省,与老数据兼容);
+ * color 只接受色板 key,非法值视为清色。
  */
 export function updateCard(
   prev: TaskBoard,
   cardId: string,
-  patch: Partial<Pick<TaskCard, 'title' | 'notes' | 'priority' | 'due' | 'tags'>>,
+  patch: Partial<Pick<TaskCard, 'title' | 'notes' | 'priority' | 'due' | 'tags' | 'done' | 'color'>>,
   now = Date.now()
 ): TaskBoard {
   const hit = findCard(prev, cardId)
@@ -104,6 +117,8 @@ export function updateCard(
   if ('priority' in patch) card.priority = patch.priority || undefined
   if ('due' in patch) card.due = patch.due?.trim() || undefined
   if ('tags' in patch) card.tags = normalizeTags(patch.tags)
+  if ('done' in patch) card.done = patch.done === true || undefined
+  if ('color' in patch) card.color = TASK_COLORS.includes(patch.color as TaskColor) ? patch.color : undefined
   card.updatedAt = now
   next.updatedAt = now
   return next
@@ -116,6 +131,35 @@ export function removeCard(prev: TaskBoard, cardId: string, now = Date.now()): T
   const next = cloneBoard(prev)
   const target = findCard(next, cardId)!
   target.column.cards.splice(target.index, 1)
+  next.updatedAt = now
+  return next
+}
+
+/** 复制卡片:副本插在原卡之后,标题加「(副本)」,其余字段照搬(新 id、新时间戳) */
+export function duplicateCard(prev: TaskBoard, cardId: string, now = Date.now()): TaskBoard {
+  const hit = findCard(prev, cardId)
+  if (!hit) return prev
+  const next = cloneBoard(prev)
+  const target = findCard(next, cardId)! // cloneBoard 保留了同结构,断言安全
+  const src = target.column.cards[target.index]
+  target.column.cards.splice(target.index + 1, 0, {
+    ...src,
+    id: newId(),
+    title: `${src.title}(副本)`,
+    createdAt: now,
+    updatedAt: now
+  })
+  next.updatedAt = now
+  return next
+}
+
+/** 把卡片插回指定列的 index 处(撤销删除用;越界钳到列尾,列不存在不改动) */
+export function restoreCard(prev: TaskBoard, columnId: string, index: number, card: TaskCard, now = Date.now()): TaskBoard {
+  const next = cloneBoard(prev)
+  const column = findColumn(next, columnId)
+  if (!column) return prev
+  const idx = Math.max(0, Math.min(index, column.cards.length))
+  column.cards.splice(idx, 0, JSON.parse(JSON.stringify(card)) as TaskCard)
   next.updatedAt = now
   return next
 }
@@ -215,19 +259,42 @@ export function todayStr(now = new Date()): string {
   return `${y}-${m}-${d}`
 }
 
-/** 截止日状态:已过期(昨天及更早)/ 就是今天 / 未设置或未到期 */
-export function dueState(due: string | undefined, today = todayStr()): 'overdue' | 'today' | null {
+/** YYYY-MM-DD 加 n 天(本地时区,月末自动进位);格式不合法原样返回 */
+export function addDays(date: string, n: number): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return date
+  const [y, m, d] = date.split('-').map(Number)
+  const dt = new Date(y, m - 1, d)
+  dt.setDate(dt.getDate() + n)
+  return todayStr(dt)
+}
+
+/** 截止日状态:已过期(昨天及更早)/ 就是今天 / SOON_DAYS 天内到期 / 未设置或更远 */
+export function dueState(due: string | undefined, today = todayStr()): 'overdue' | 'today' | 'soon' | null {
   if (!due) return null
   if (due < today) return 'overdue'
   if (due === today) return 'today'
+  if (due <= addDays(today, SOON_DAYS)) return 'soon'
   return null
 }
 
-/** 卡片过滤:关键词命中标题或备注(忽略大小写),且标签任一命中(未选标签则不限) */
-export function matchCard(card: TaskCard, query: string, tags: string[]): boolean {
-  const kw = query.trim().toLowerCase()
-  if (kw && !card.title.toLowerCase().includes(kw) && !(card.notes ?? '').toLowerCase().includes(kw)) return false
-  if (tags.length && !(card.tags ?? []).some((t) => tags.includes(t))) return false
+/** 卡片过滤条件。query 命中标题/备注/标签文本(忽略大小写);tags 任一命中(未选不限);
+ *  priority 缺省不限(normal 也匹配未设置);overdueOnly 只看未完成的逾期卡 */
+export interface TaskFilter {
+  query?: string
+  tags?: string[]
+  priority?: TaskPriority
+  overdueOnly?: boolean
+}
+
+export function matchCard(card: TaskCard, f: TaskFilter): boolean {
+  const kw = (f.query ?? '').trim().toLowerCase()
+  if (kw) {
+    const hay = [card.title, card.notes ?? '', (card.tags ?? []).join(' ')].join('\n').toLowerCase()
+    if (!hay.includes(kw)) return false
+  }
+  if (f.tags?.length && !(card.tags ?? []).some((t) => f.tags!.includes(t))) return false
+  if (f.priority && (card.priority ?? 'normal') !== f.priority) return false
+  if (f.overdueOnly && (card.done === true || dueState(card.due) !== 'overdue')) return false
   return true
 }
 
@@ -257,6 +324,8 @@ export function normalizeBoard(raw: unknown): TaskBoard | null {
           priority: c.priority === 'high' || c.priority === 'low' || c.priority === 'normal' ? c.priority : undefined,
           due: typeof c.due === 'string' && c.due ? c.due : undefined,
           tags: normalizeTags(Array.isArray(c.tags) ? c.tags.filter((t): t is string => typeof t === 'string') : undefined),
+          done: c.done === true || undefined,
+          color: TASK_COLORS.includes(c.color as TaskColor) ? (c.color as TaskColor) : undefined,
           createdAt: typeof c.createdAt === 'number' ? c.createdAt : 0,
           updatedAt: typeof c.updatedAt === 'number' ? c.updatedAt : 0
         })
@@ -265,6 +334,7 @@ export function normalizeBoard(raw: unknown): TaskBoard | null {
     columns.push({
       id: typeof col.id === 'string' && col.id ? col.id : newId(),
       title: typeof col.title === 'string' && col.title.trim() ? col.title : '未命名列',
+      color: TASK_COLORS.includes(col.color as TaskColor) ? (col.color as TaskColor) : undefined,
       cards
     })
   }

@@ -626,6 +626,9 @@ export interface ProjectInfo {
 /** 任务卡片优先级(缺省 normal,界面不显示徽章) */
 export type TaskPriority = 'high' | 'normal' | 'low'
 
+/** 卡片/列颜色:固定色板 key,具体颜色由 CSS 变量 --task-c-<key> 随主题给出 */
+export type TaskColor = 'red' | 'orange' | 'yellow' | 'green' | 'cyan' | 'blue' | 'purple' | 'gray'
+
 /** 任务看板卡片 */
 export interface TaskCard {
   id: string
@@ -637,6 +640,10 @@ export interface TaskCard {
   due?: string
   /** 自由标签 */
   tags?: string[]
+  /** 显式完成标记:与列位置两套语义并存;徽标/通知/聚合/过滤统计一律排除已完成卡 */
+  done?: boolean
+  /** 卡片颜色(色板 key,缺省无色;界面画左色条) */
+  color?: TaskColor
   createdAt: number
   updatedAt: number
 }
@@ -645,6 +652,8 @@ export interface TaskCard {
 export interface TaskColumn {
   id: string
   title: string
+  /** 列颜色(色板 key,缺省无色;界面画列头顶部色条) */
+  color?: TaskColor
   cards: TaskCard[]
 }
 

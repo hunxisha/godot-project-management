@@ -3,6 +3,8 @@
 // 从 ProjectsView.vue 抽出。这是项目页唯一的破坏性操作,而「是否删除磁盘文件」的判定
 // 由全局设置(ask/always/never)与弹窗勾选共同决定 —— 三种组合都值得断言,抽出来才能测。
 import { ref, type Ref } from 'vue'
+import { removeDoc } from '../services/bridge'
+import { DOC_ID } from '../types/godot'
 import type { ProjectRow } from './useProjectList'
 
 /** 与 GodotSettings.deleteProjectFiles 同形 */
@@ -51,6 +53,9 @@ export function useProjectDelete(opts: UseProjectDeleteOptions) {
     }
     showDelete.value = false
     opts.dropLocal(p._id)
+    // 项目记录已删,其项目级看板文档(boardKey = 项目文档 id)成为孤儿,顺手清掉;
+    // 失败只留一条垃圾文档,不阻断删除流程,也无需向用户报错
+    removeDoc(DOC_ID.taskBoard(p._id)).catch(() => {})
     opts.notify(deleteFiles ? `已删除项目及文件(回收站):${p.name}` : `已移除项目记录:${p.name}`)
   }
 

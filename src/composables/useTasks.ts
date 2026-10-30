@@ -12,16 +12,19 @@ import {
   addCard as opAddCard,
   addColumn as opAddColumn,
   boardTags,
+  cardPosition,
   clearColumn as opClearColumn,
   columnIdOfCard,
   countCards,
   createDefaultBoard,
+  duplicateCard as opDuplicateCard,
   moveCard as opMoveCard,
   moveColumn as opMoveColumn,
   normalizeBoard,
   removeCard as opRemoveCard,
   removeColumn as opRemoveColumn,
   renameColumn as opRenameColumn,
+  restoreCard as opRestoreCard,
   updateCard as opUpdateCard
 } from '../utils/taskBoard'
 
@@ -32,6 +35,8 @@ const board = ref<TaskBoard | null>(null)
 const projects = ref<(GodotProject & { _id: string })[]>([])
 /** 最近一次保存失败(界面提示条;成功写入后清空) */
 const saveError = ref('')
+/** 最近一次删除的卡片(撤销用):原列 id + 原下标 + 卡片快照;切板/删列/清列时作废 */
+const lastDelete = ref<{ columnId: string, index: number, card: TaskCard } | null>(null)
 let initialized = false
 
 /** 看板内全部标签(去重排序) */
@@ -100,10 +105,11 @@ async function init() {
   }
 }
 
-/** 切换看板(通用板或某项目);目标没有板则建默认板 */
+/** 切换看板(通用板或某项目);目标没有板则建默认板。撤销条是旧板的东西,一并作废 */
 async function selectBoard(key: string) {
   if (key === currentKey.value && board.value) return
   currentKey.value = key
+  lastDelete.value = null
   saveSettings({ taskBoardId: key }).catch(() => {})
   await loadBoard(key)
   await ensureBoard()
@@ -123,7 +129,7 @@ async function addCard(columnId: string, input: { title: string, notes?: string,
  * 编辑弹窗保存:更新字段 + 可选换列(换列 = 追加到目标列尾),一次落库。
  * patch 直接透传 opUpdateCard(出现的键才生效)。
  */
-async function saveCard(cardId: string, patch: Partial<Pick<TaskCard, 'title' | 'notes' | 'priority' | 'due' | 'tags'>>, toColumnId: string) {
+async function saveCard(cardId: string, patch: Partial<Pick<TaskCard, 'title' | 'notes' | 'priority' | 'due' | 'tags' | 'done' | 'color'>>, toColumnId: string) {
   const prev = board.value
   if (!prev) return
   const next = opUpdateCard(prev, cardId, patch)
@@ -137,14 +143,44 @@ async function saveCard(cardId: string, patch: Partial<Pick<TaskCard, 'title' | 
   }
 }
 
-async function updateCard(cardId: string, patch: Partial<Pick<TaskCard, 'title' | 'notes' | 'priority' | 'due' | 'tags'>>) {
+async function updateCard(cardId: string, patch: Partial<Pick<TaskCard, 'title' | 'notes' | 'priority' | 'due' | 'tags' | 'done' | 'color'>>) {
   if (!board.value) return
   await commit(opUpdateCard(board.value, cardId, patch))
 }
 
+/** 勾选/取消完成(卡片上的勾选框) */
+async function setCardDone(cardId: string, done: boolean) {
+  await updateCard(cardId, { done })
+}
+
 async function removeCard(cardId: string) {
+  const prev = board.value
+  if (!prev) return
+  const pos = cardPosition(prev, cardId)
+  if (!pos) return
+  const card = prev.columns.find((c) => c.id === pos.columnId)?.cards[pos.index]
+  if (!card) return
+  const snapshot = toPlain(card)
+  await commit(opRemoveCard(prev, cardId))
+  // 落库成功才进入可撤销状态(失败已回读,卡片还在板上)
+  if (!saveError.value) lastDelete.value = { columnId: pos.columnId, index: pos.index, card: snapshot }
+}
+
+/** 撤销最近一次删除:卡片插回原列原下标(原列已被删/清则无处还原,静默作废) */
+async function undoDelete() {
+  const snap = lastDelete.value
+  const prev = board.value
+  if (!snap || !prev) return
+  lastDelete.value = null
+  const next = opRestoreCard(prev, snap.columnId, snap.index, snap.card)
+  if (next === prev) return
+  await commit(next)
+}
+
+/** 复制卡片:副本插在原卡之后 */
+async function duplicateCard(cardId: string) {
   if (!board.value) return
-  await commit(opRemoveCard(board.value, cardId))
+  await commit(opDuplicateCard(board.value, cardId))
 }
 
 /** 拖拽落点:toIndex 是「插到第 toIndex 张卡之前」(列尾传 cards.length) */
@@ -165,11 +201,13 @@ async function renameColumn(columnId: string, title: string) {
 
 async function removeColumn(columnId: string) {
   if (!board.value) return
+  lastDelete.value = null // 撤销条指向的列没了,作废(卡片随之删除,不可恢复)
   await commit(opRemoveColumn(board.value, columnId))
 }
 
 async function clearColumn(columnId: string) {
   if (!board.value) return
+  lastDelete.value = null // 同上:整列清空不做撤销,撤销条一并作废
   await commit(opClearColumn(board.value, columnId))
 }
 
@@ -185,6 +223,7 @@ export function useTasks() {
     board,
     projects: projectOptions,
     saveError,
+    lastDelete,
     tags,
     cardCount,
     init,
@@ -193,7 +232,10 @@ export function useTasks() {
     addCard,
     saveCard,
     updateCard,
+    setCardDone,
     removeCard,
+    undoDelete,
+    duplicateCard,
     moveCard,
     addColumn,
     renameColumn,

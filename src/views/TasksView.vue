@@ -1,30 +1,35 @@
 <script setup lang="ts">
 // 任务看板页:通用看板 + 每个项目的独立看板,多列卡片,列可增删改名/排序。
 // 数据与变更都在 useTasks(模块级单例,切页不丢);本组件负责装配、
-// 过滤(关键词 + 标签)与拖拽交互。拖拽用原生 HTML5 DnD(全项目首例):
-// 卡片按指针与卡片中点比较算插入位置,落点画 brand 色横条;列头可拖动整列,
+// 过滤(关键词含标签文本 + 标签 + 优先级 + 仅逾期)与拖拽交互。拖拽用原生 HTML5 DnD
+// (全项目首例):卡片按指针与卡片中点比较算插入位置,落点画 brand 色横条;列头可拖动整列,
 // 落点画列左右侧竖条。两种拖拽共用 dragend 清理,互不干扰(各 handler 判 dragKind)。
+// 卡片删除有一步撤销(提示条,仅记最近一次);完成标记是独立于列位置的显式语义。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from '../components/Icon.vue'
 import EmptyState from '../components/EmptyState.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import TaskCardDialog from '../components/dialogs/TaskCardDialog.vue'
 import { useTasks } from '../composables/useTasks'
-import { dueState, matchCard } from '../utils/taskBoard'
-import type { TaskCard, TaskColumn } from '../types/godot'
+import { dueState, matchCard, type TaskFilter } from '../utils/taskBoard'
+import type { TaskCard, TaskColumn, TaskPriority } from '../types/godot'
 
 const {
   board,
   currentKey,
   projects,
   saveError,
+  lastDelete,
   tags,
   cardCount,
   init,
   selectBoard,
   addCard,
   updateCard,
+  setCardDone,
   removeCard,
+  undoDelete,
+  duplicateCard,
   moveCard,
   addColumn,
   renameColumn,
@@ -39,15 +44,37 @@ onMounted(init)
 
 const query = ref('')
 const activeTags = ref<string[]>([])
+const filterPriority = ref<'' | TaskPriority>('')
+const overdueOnly = ref(false)
+
+/** matchCard 条件对象:关键词命中标题/备注/标签文本,标签任一命中,优先级,仅逾期 */
+const cardFilter = computed<TaskFilter>(() => ({
+  query: query.value,
+  tags: activeTags.value,
+  priority: filterPriority.value || undefined,
+  overdueOnly: overdueOnly.value
+}))
 
 function visibleCards(col: TaskColumn): TaskCard[] {
-  return col.cards.filter((c) => matchCard(c, query.value, activeTags.value))
+  return col.cards.filter((c) => matchCard(c, cardFilter.value))
 }
 
 function toggleTag(t: string) {
   activeTags.value = activeTags.value.includes(t)
     ? activeTags.value.filter((x) => x !== t)
     : [...activeTags.value, t]
+}
+
+/** 是否有任何过滤条件生效(决定「清除过滤」的显隐) */
+const hasFilter = computed(
+  () => !!query.value.trim() || activeTags.value.length > 0 || !!filterPriority.value || overdueOnly.value
+)
+
+function clearFilters() {
+  query.value = ''
+  activeTags.value = []
+  filterPriority.value = ''
+  overdueOnly.value = false
 }
 
 // ---------- 看板切换 ----------
@@ -59,7 +86,7 @@ const boardKey = computed({
   }
 })
 
-// 切板后拖拽/菜单/过滤都是旧板的东西,全部清掉
+// 切板后拖拽/菜单/过滤/撤销条都是旧板的东西,全部清掉
 watch(currentKey, () => {
   dragCard.value = null
   dragColId.value = null
@@ -69,9 +96,11 @@ watch(currentKey, () => {
   quickCol.value = null
   query.value = ''
   activeTags.value = []
+  filterPriority.value = ''
+  overdueOnly.value = false
 })
 // 过滤变了,落点指示的 visible 下标已失义
-watch([query, activeTags], () => {
+watch([query, activeTags, filterPriority, overdueOnly], () => {
   drop.value = null
 })
 
@@ -157,7 +186,7 @@ function onColHeadDrop() {
   if (dragColId.value && dropColIdx.value !== null) moveColumn(dragColId.value, dropColIdx.value)
 }
 
-// ---------- 卡片:打开编辑 / 删除 ----------
+// ---------- 卡片:打开编辑 / 完成 / 复制 / 删除 ----------
 
 const dialogOpen = ref(false)
 const editing = ref<TaskCard | null>(null)
@@ -169,12 +198,21 @@ function openCard(card: TaskCard) {
   dialogOpen.value = true
 }
 
+/** 勾选/取消完成(勾选框在卡片上,别触发打开弹窗) */
+function toggleDone(card: TaskCard) {
+  setCardDone(card.id, !card.done)
+}
+
+function duplicate(card: TaskCard) {
+  duplicateCard(card.id)
+}
+
 const confirmState = ref<{ title: string, message: string, details?: string[], run: () => void } | null>(null)
 
 function askDeleteCard(card: TaskCard) {
   confirmState.value = {
     title: '删除卡片',
-    message: `将删除卡片「${card.title}」,此操作不可撤销。`,
+    message: `将删除卡片「${card.title}」,删除后可在提示条里撤销。`,
     run: () => removeCard(card.id)
   }
 }
@@ -184,6 +222,15 @@ function runConfirm() {
   confirmState.value = null
   c?.run()
 }
+
+// ---------- 撤销条:最近一次删除,7 秒后自动作废 ----------
+
+let undoTimer: ReturnType<typeof setTimeout> | null = null
+watch(lastDelete, (v) => {
+  if (undoTimer) clearTimeout(undoTimer)
+  undoTimer = null
+  if (v) undoTimer = setTimeout(() => { lastDelete.value = null }, 7000)
+})
 
 // ---------- 列:菜单 / 新建重命名 / 清空删除 ----------
 
@@ -271,7 +318,7 @@ function cancelQuick() {
 
 function dueCls(card: TaskCard) {
   const s = dueState(card.due)
-  return s === 'overdue' ? 'over' : s === 'today' ? 'today' : ''
+  return s === 'overdue' ? 'over' : s === 'today' ? 'today' : s === 'soon' ? 'soon' : ''
 }
 
 function shortDue(due: string) {
@@ -296,6 +343,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocClick)
   window.removeEventListener('keydown', onKey)
+  if (undoTimer) clearTimeout(undoTimer)
 })
 </script>
 
@@ -312,29 +360,50 @@ onBeforeUnmount(() => {
       </select>
       <label class="search-box">
         <Icon name="search" :size="13" />
-        <input v-model="query" class="input" placeholder="搜索标题 / 备注…" />
+        <input v-model="query" class="input" placeholder="搜索标题 / 备注 / 标签…" />
       </label>
     </div>
 
-    <!-- 标签过滤:只列当前看板里出现过的标签 -->
-    <div v-if="tags.length" class="tag-filter">
-      <Icon name="tag" :size="12" class="tf-ico" />
-      <button
-        v-for="t in tags"
-        :key="t"
-        class="chip tf-chip"
-        :class="{ on: activeTags.includes(t) }"
-        @click="toggleTag(t)"
-      >
-        {{ t }}
+    <!-- 过滤行:优先级 + 仅逾期 + 标签 chips(只列当前看板里出现过的标签) -->
+    <div class="tag-filter">
+      <select v-model="filterPriority" class="select tf-select" title="按优先级过滤">
+        <option value="">全部优先级</option>
+        <option value="high">仅高优先级</option>
+        <option value="normal">仅普通</option>
+        <option value="low">仅低优先级</option>
+      </select>
+      <button class="chip tf-chip" :class="{ on: overdueOnly }" title="只看逾期且未完成的卡片" @click="overdueOnly = !overdueOnly">
+        仅逾期
       </button>
-      <button v-if="activeTags.length" class="tf-clear" @click="activeTags = []">
+      <template v-if="tags.length">
+        <span class="tf-sep"></span>
+        <Icon name="tag" :size="12" class="tf-ico" />
+        <button
+          v-for="t in tags"
+          :key="t"
+          class="chip tf-chip"
+          :class="{ on: activeTags.includes(t) }"
+          @click="toggleTag(t)"
+        >
+          {{ t }}
+        </button>
+      </template>
+      <button v-if="hasFilter" class="tf-clear" @click="clearFilters">
         <Icon name="x" :size="11" /> 清除过滤
       </button>
     </div>
 
     <div v-if="saveError" class="save-error">
       <Icon name="alert" :size="13" /> {{ saveError }}
+    </div>
+
+    <!-- 撤销条:最近一次删除的卡片,7 秒后自动消失 -->
+    <div v-if="lastDelete" class="undo-bar">
+      <Icon name="trash" :size="13" />
+      <span class="undo-text">已删除「{{ lastDelete?.card.title }}」</span>
+      <button class="undo-btn" title="把卡片放回原位" @click="undoDelete">
+        <Icon name="refresh" :size="12" /> 撤销
+      </button>
     </div>
 
     <!-- 载入中(board 为 null 时) -->
@@ -384,7 +453,7 @@ onBeforeUnmount(() => {
             <div v-if="showLine(col.id, vi)" class="drop-line"></div>
             <article
               class="tcard card"
-              :class="{ dragging: dragCard === card.id }"
+              :class="{ dragging: dragCard === card.id, done: card.done }"
               draggable="true"
               @dragstart="onCardDragStart(col, card, $event)"
               @dragover="onCardDragOver(col, vi, $event)"
@@ -393,13 +462,24 @@ onBeforeUnmount(() => {
               @click="openCard(card)"
             >
               <div class="tcard-top">
+                <button
+                  class="tcard-check"
+                  :class="{ on: card.done }"
+                  :title="card.done ? '标记未完成' : '标记完成'"
+                  @click.stop="toggleDone(card)"
+                >
+                  <Icon name="check" :size="11" />
+                </button>
                 <span v-if="card.priority === 'high'" class="tag danger">高</span>
                 <span v-else-if="card.priority === 'low'" class="tag">低</span>
                 <span v-if="card.due" class="tcard-due" :class="dueCls(card)" :title="card.due">
                   <Icon name="clock" :size="11" /> {{ shortDue(card.due) }}
                 </span>
                 <span class="grow"></span>
-                <button class="tcard-del" title="删除卡片" @click.stop="askDeleteCard(card)">
+                <button class="tcard-act" title="复制卡片" @click.stop="duplicate(card)">
+                  <Icon name="copy" :size="12" />
+                </button>
+                <button class="tcard-act danger" title="删除卡片" @click.stop="askDeleteCard(card)">
                   <Icon name="trash" :size="12" />
                 </button>
               </div>
@@ -551,6 +631,20 @@ onBeforeUnmount(() => {
   box-shadow: none;
 }
 
+.tf-select {
+  width: auto;
+  padding: 2px 24px 2px 8px;
+  font-size: 12px;
+  box-shadow: none;
+}
+
+.tf-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  margin: 0 2px;
+}
+
 .tf-clear {
   display: inline-flex;
   align-items: center;
@@ -580,6 +674,48 @@ onBeforeUnmount(() => {
   background: var(--danger-weak);
   color: var(--danger);
   font-size: 12.5px;
+}
+
+/* ---------- 删除撤销条 ---------- */
+
+.undo-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.undo-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.undo-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  padding: 3px 8px;
+  color: var(--brand);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.undo-btn:hover {
+  background: var(--brand-weak);
 }
 
 /* ---------- 看板区 ---------- */
@@ -748,11 +884,48 @@ onBeforeUnmount(() => {
   opacity: 0.45;
 }
 
+/* 已完成卡:整卡淡化 + 标题删除线(拖拽等操作照常) */
+.tcard.done {
+  opacity: 0.62;
+}
+
+.tcard.done .tcard-title {
+  text-decoration: line-through;
+  color: var(--text-3);
+}
+
 .tcard-top {
   display: flex;
   align-items: center;
   gap: 6px;
   min-height: 18px;
+}
+
+/* 完成勾选框:空心方块,选中填充 --ok */
+.tcard-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 5px;
+  background: transparent;
+  color: transparent;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+
+.tcard-check:hover {
+  border-color: var(--ok);
+}
+
+.tcard-check.on {
+  background: var(--ok);
+  border-color: var(--ok);
+  color: #fff;
 }
 
 .tcard-due {
@@ -773,7 +946,14 @@ onBeforeUnmount(() => {
   color: var(--warn);
 }
 
-.tcard-del {
+/* 3 天内到期:与今日同色系但降调,提示而不报警 */
+.tcard-due.soon {
+  color: var(--warn);
+  opacity: 0.65;
+}
+
+/* 卡片悬停操作钮(复制 / 删除),与删除钮共用显隐 */
+.tcard-act {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -788,11 +968,16 @@ onBeforeUnmount(() => {
   transition: opacity 0.12s, color 0.12s, background 0.12s;
 }
 
-.tcard:hover .tcard-del {
+.tcard:hover .tcard-act {
   opacity: 1;
 }
 
-.tcard-del:hover {
+.tcard-act:hover {
+  color: var(--brand);
+  background: var(--brand-weak);
+}
+
+.tcard-act.danger:hover {
   color: var(--danger);
   background: var(--danger-weak);
 }
@@ -888,7 +1073,10 @@ onBeforeUnmount(() => {
 
 @media (prefers-reduced-motion: reduce) {
   .tcard,
-  .quick-add {
+  .tcard-check,
+  .tcard-act,
+  .quick-add,
+  .undo-btn {
     transition: none;
   }
 }
