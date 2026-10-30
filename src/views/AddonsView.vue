@@ -8,7 +8,8 @@ import { useAddonSelection } from '../composables/useAddonSelection'
 import { useAddonActions } from '../composables/useAddonActions'
 import { useUpdateScan } from '../composables/useUpdateScan'
 import type { ProjectRow } from '../composables/useProjectList'
-import type { AddonInfo, GodotProject } from '../types/godot'
+import type { AddonInfo, GodotProject, GodotVersion } from '../types/godot'
+import { projectGodotVersion } from '../utils/godotVersion'
 
 const props = defineProps<{ enterProjectId?: string | null }>()
 const emit = defineEmits<{
@@ -17,6 +18,7 @@ const emit = defineEmits<{
 }>()
 
 const projects = ref<(GodotProject & { _id: string })[]>([])
+const versions = ref<(GodotVersion & { _id: string })[]>([])
 const targetId = ref('')
 const addons = ref<AddonInfo[]>([])
 
@@ -66,6 +68,8 @@ const {
 })
 
 const target = computed(() => projects.value.find((p) => p._id === targetId.value))
+/** 安装目标项目绑定的 Godot 版本(major.minor;未绑定或绑定版本未装时为空) */
+const targetGodot = computed(() => projectGodotVersion(target.value, versions.value))
 // 分区展示:插件(有启停概念)与素材(无)各成一段;素材没有启用概念,统计只算插件
 const pluginRows = computed(() => addons.value.filter((a) => a.kind !== 'asset'))
 const assetRows = computed(() => addons.value.filter((a) => a.kind === 'asset'))
@@ -103,6 +107,7 @@ function assetPathsTitle(a: AddonInfo): string {
 
 onMounted(() => {
   projects.value = window.ztools.db.allDocs('godot/project/') as any[]
+  versions.value = window.ztools.db.allDocs('godot/version/') as any[]
   projects.value.sort((a, b) => (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0))
   // 项目页「管理插件」联动:进入本页时定位到该项目
   if (props.enterProjectId) {
@@ -190,6 +195,7 @@ function openAddonDir(a: AddonInfo) {
             <option v-for="p in projects" :key="p._id" :value="p._id">{{ p.name }}</option>
           </select>
         </label>
+        <span v-if="targetGodot" class="tag brand" title="该项目绑定的 Godot 版本">Godot {{ targetGodot }}</span>
       </div>
 
       <!-- 内容面板:头部为列表级操作,主体为按 插件/素材 分区的行列表 -->
