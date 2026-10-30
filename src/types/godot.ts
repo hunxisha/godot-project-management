@@ -629,6 +629,13 @@ export type TaskPriority = 'high' | 'normal' | 'low'
 /** 卡片/列颜色:固定色板 key,具体颜色由 CSS 变量 --task-c-<key> 随主题给出 */
 export type TaskColor = 'red' | 'orange' | 'yellow' | 'green' | 'cyan' | 'blue' | 'purple' | 'gray'
 
+/** 卡片内的子任务/检查项(进度统计与勾选都以它为准) */
+export interface TaskChecklistItem {
+  id: string
+  text: string
+  done?: boolean
+}
+
 /** 任务看板卡片 */
 export interface TaskCard {
   id: string
@@ -644,6 +651,12 @@ export interface TaskCard {
   done?: boolean
   /** 卡片颜色(色板 key,缺省无色;界面画左色条) */
   color?: TaskColor
+  /** 子任务清单(可勾选;卡片上显示 done/total 进度) */
+  checklist?: TaskChecklistItem[]
+  /** 归档时间(仅在 board.archived 中出现;有值即已归档) */
+  archivedAt?: number
+  /** 归档前所在列 id(恢复时优先回到原列;列已删则回退首列) */
+  archivedFrom?: string
   createdAt: number
   updatedAt: number
 }
@@ -661,6 +674,8 @@ export interface TaskColumn {
 export interface TaskBoard {
   schema: 1
   columns: TaskColumn[]
+  /** 归档箱:从列移出的卡片,可恢复到原列或彻底删除(不参与统计/通知) */
+  archived?: TaskCard[]
   updatedAt: number
 }
 

@@ -227,6 +227,187 @@ async function main() {
   ok(B.matchCard(card('D', '今日到期', { due: B.todayStr() }), { overdueOnly: true }) === false, '仅逾期:今日不算逾期')
   ok(B.matchCard(card('E', '已完成', { due: '2000-01-01', done: true }), { overdueOnly: true }) === false, '仅逾期:已完成被排除')
 
+  section('检查项:归一化 / 进度 / 勾选')
+  const clBoard = B.addCard(fixture(), 'c1', {
+    title: '带清单',
+    checklist: [
+      { id: 'k1', text: '  第一步  ' },
+      { id: '', text: '第二步', done: true },
+      { text: '   ' },
+      { text: '第三步' }
+    ]
+  })
+  const cl = clBoard.columns[0].cards[2]
+  ok(cl.checklist?.length === 3, '丢空文本并保留三项', cl.checklist)
+  ok(cl.checklist[0].text === '第一步' && !!cl.checklist[1].id && !!cl.checklist[2].id, '文本裁剪、缺 id 补生成')
+  ok(cl.checklist[1].done === true && cl.checklist[2].done === undefined, 'done 只存 true')
+  ok(JSON.stringify(B.checklistProgress(cl)) === '{"done":1,"total":3,"pct":33}', '进度按百分比取整', B.checklistProgress(cl))
+  ok(JSON.stringify(B.checklistProgress(card('X', '无清单'))) === '{"done":0,"total":0,"pct":0}', '无清单进度归零')
+  const clDone = B.setChecklistItemDone(clBoard, cl.id, 'k1', true)
+  ok(clDone.columns[0].cards[2].checklist[0].done === true, '勾选检查项')
+  ok(B.setChecklistItemDone(clDone, cl.id, 'k1', false).columns[0].cards[2].checklist[0].done === undefined, '取消勾选不残留 false')
+  ok(B.setChecklistItemDone(clBoard, cl.id, 'nope', true) === clBoard, '检查项不存在不改动')
+  ok(B.setChecklistItemDone(clBoard, 'nope', 'k1', true) === clBoard, '卡片不存在不改动')
+  ok(B.updateCard(clBoard, cl.id, { checklist: [] }).columns[0].cards[2].checklist === undefined, '空清单清空')
+
+  section('parseQuickAdd:标签 / 优先级 / 截止日语法')
+  const q1 = B.parseQuickAdd('修复登录 #bug#前端 !高 @明天', '2030-06-01')
+  ok(q1.title === '修复登录', '语法 token 从标题剔除', q1.title)
+  ok(q1.tags.join() === 'bug,前端', '一次加多个标签', q1.tags)
+  ok(q1.priority === 'high' && q1.due === '2030-06-02', '!高 + @明天 解析', q1)
+  ok(B.parseQuickAdd('同步存档 @+3', '2030-06-01').due === '2030-06-04', '@+N 偏移')
+  ok(B.parseQuickAdd('更新文档 @2026-11-05', '2030-06-01').due === '2026-11-05', '@YYYY-MM-DD 原样')
+  ok(B.parseQuickAdd('巡检 @今天', '2030-06-01').due === '2030-06-01', '@今天')
+  ok(B.parseQuickAdd('随手记 @foo', '2030-06-01').title === '随手记 @foo', '认不出的 @token 留在标题')
+  ok(B.parseQuickAdd('看板 #a #a', '2030-06-01').tags.join() === 'a', '标签去重')
+  ok(B.parseQuickAdd('只有标签 #solo', '2030-06-01').title === '只有标签', '标签 token 剔除后保留其余文字')
+  ok(B.parseQuickAdd('#solo', '2030-06-01').title === '#solo', '全部 token 被吃掉时回退原文')
+  const qEmpty = B.parseQuickAdd('   ', '2030-06-01')
+  ok(qEmpty.title === '' && qEmpty.tags.length === 0 && !qEmpty.priority && !qEmpty.due, '空输入安全')
+
+  section('boardStats:完成率与到期压力')
+  const statsBoard = {
+    schema: 1,
+    columns: [
+      {
+        id: 'c1',
+        title: '待办',
+        cards: [
+          card('A', '逾期', { due: '2030-05-30' }),
+          card('B', '今天', { due: '2030-06-01' }),
+          card('C', '三天内', { due: '2030-06-03' }),
+          card('D', '远期', { due: '2030-07-01' }),
+          card('E', '无截止日'),
+          card('F', '已完成', { done: true })
+        ]
+      }
+    ],
+    archived: [card('G', '归档卡', { archivedAt: 9, archivedFrom: 'c1' })],
+    updatedAt: 1
+  }
+  const st = B.boardStats(statsBoard, '2030-06-01')
+  ok(st.total === 6 && st.done === 1 && st.active === 5, '总数/完成/活跃', st)
+  ok(st.overdue === 1 && st.today === 1 && st.soon === 1, '逾期/今天/未来三天(只数未完成)', st)
+  ok(st.archived === 1 && st.pct === 17, '归档数与完成率', st)
+  ok(B.boardStats({ schema: 1, columns: [], updatedAt: 1 }).pct === 0, '空板完成率 0')
+
+  section('sortCards:列表视图排序(不改入参)')
+  const scards = [
+    card('A', '乙', { priority: 'low', due: '2030-06-03', updatedAt: 10 }),
+    card('B', '甲', { priority: 'high', updatedAt: 5 }),
+    card('C', '丙', { due: '2030-06-01', updatedAt: 20 })
+  ]
+  ok(B.sortCards(scards, 'manual').map((c) => c.id).join() === 'A,B,C', 'manual 原样')
+  ok(scards.map((c) => c.id).join() === 'A,B,C', '不改入参')
+  ok(B.sortCards(scards, 'due').map((c) => c.id).join() === 'C,A,B', '截止日升序,无截止日排最后')
+  ok(B.sortCards(scards, 'due', 'desc').map((c) => c.id).join() === 'A,C,B', '截止日降序,无截止日仍最后')
+  ok(B.sortCards(scards, 'priority').map((c) => c.id).join() === 'B,C,A', '优先级 high→normal→low')
+  ok(B.sortCards(scards, 'updated', 'desc').map((c) => c.id).join() === 'C,A,B', '更新时间降序')
+  const asciiCards = [card('X', 'b'), card('Y', 'a'), card('Z', 'c')]
+  ok(B.sortCards(asciiCards, 'title').map((c) => c.id).join() === 'Y,X,Z', '标题升序')
+
+  section('focusGroups:当前板按该做什么分桶')
+  const focusBoard = {
+    schema: 1,
+    columns: [
+      {
+        id: 'c1',
+        title: '待办',
+        cards: [
+          card('A', '逾期', { due: '2030-05-30', priority: 'high' }),
+          card('B', '今天', { due: '2030-06-01', priority: 'low' }),
+          card('C', '三天内', { due: '2030-06-03' }),
+          card('D', '远期', { due: '2030-07-01' }),
+          card('E', '未排期'),
+          card('F', '已完成逾期', { due: '2030-05-30', done: true })
+        ]
+      }
+    ],
+    updatedAt: 1
+  }
+  const groups = B.focusGroups(focusBoard, '2030-06-01')
+  ok(groups.map((g) => g.key).join() === 'overdue,today,soon,unscheduled', '按 逾期→今天→未来三天→未排期 分节', groups.map((g) => g.key))
+  ok(groups[0].entries.length === 1 && groups[0].entries[0].card.id === 'A', '逾期分桶')
+  ok(groups[0].entries[0].columnTitle === '待办' && groups[0].entries[0].columnId === 'c1', '条目带来源列')
+  ok(groups[1].entries[0].card.id === 'B' && groups[2].entries[0].card.id === 'C' && groups[3].entries[0].card.id === 'E', '今天/未来/未排期各一张')
+  ok(!groups.some((g) => g.entries.some((e) => e.card.id === 'D')), '远期截止日不进聚焦')
+  ok(!groups.some((g) => g.entries.some((e) => e.card.id === 'F')), '已完成不进聚焦')
+  ok(B.focusGroups({ schema: 1, columns: [], updatedAt: 1 }).length === 0, '空板无分节')
+
+  section('归档箱:归档 / 恢复 / 彻底删除 / 清空')
+  const ar = B.archiveCards(fixture(), ['A', 'C'], 555)
+  ok(titles(ar, 'c1').join() === '任务B' && titles(ar, 'c2').length === 0, '卡片移出原列', [titles(ar, 'c1'), titles(ar, 'c2')])
+  ok(ar.archived?.length === 2, '进入归档箱')
+  ok(ar.archived[0].archivedAt === 555 && ar.archived[0].archivedFrom === 'c1', '记录归档时间与来源列')
+  ok(ar.archived[1].archivedFrom === 'c2', '跨列归档各记来源')
+  const noopAr = fixture()
+  ok(B.archiveCards(noopAr, []) === noopAr, '空 id 列表不改动')
+  const backA = B.restoreArchivedCard(ar, 'A')
+  ok(titles(backA, 'c1').join() === '任务B,任务A', '优先回原列(列尾)', titles(backA, 'c1'))
+  ok(backA.archived?.length === 1 && backA.columns[0].cards[1].archivedAt === undefined && backA.columns[0].cards[1].archivedFrom === undefined, '恢复后清归档字段')
+  const backC = B.restoreArchivedCard(ar, 'C', 'c1')
+  ok(titles(backC, 'c1').join() === '任务B,任务C' && backC.archived?.length === 1, '可指定恢复到其他列')
+  ok(B.restoreArchivedCard(ar, 'nope') === ar, '归档里不存在不改动')
+  const noOrigin = B.restoreArchivedCard(B.removeColumn(ar, 'c1'), 'A')
+  ok(titles(noOrigin, 'c2').join() === '任务A', '原列已删则回退首列', titles(noOrigin, 'c2'))
+  const rmArch = B.removeArchivedCard(ar, 'A')
+  ok(rmArch.archived?.length === 1 && rmArch.archived[0].id === 'C', '彻底删除一张归档卡')
+  ok(B.removeArchivedCard(ar, 'nope') === ar, '归档里不存在不改动')
+  ok(B.clearArchived(ar).archived?.length === 0, '清空归档箱')
+  const noArch = { schema: 1, columns: [], updatedAt: 1 }
+  ok(B.clearArchived(noArch) === noArch, '本来为空返回原板')
+  const archiveDone = B.archiveDoneCards({
+    schema: 1,
+    columns: [{ id: 'c1', title: '待办', cards: [card('A', '完成', { done: true }), card('B', '未完成')] }],
+    updatedAt: 1
+  }, 777)
+  ok(titles(archiveDone, 'c1').join() === '未完成' && archiveDone.archived?.length === 1 && archiveDone.archived[0].archivedAt === 777, '一键归档已完成')
+
+  section('批量操作:移动 / 删除 / 完成')
+  const moved = B.moveCards(fixture(), ['A', 'C'], 'c2', 700)
+  ok(titles(moved, 'c1').join() === '任务B' && titles(moved, 'c2').join() === '任务A,任务C', '按原顺序追加到目标列尾', [titles(moved, 'c1'), titles(moved, 'c2')])
+  ok(moved.updatedAt === 700, '批量移动刷新板时间戳')
+  const noopBatch = fixture()
+  ok(B.moveCards(noopBatch, ['nope'], 'c2') === noopBatch, '无命中不改动')
+  ok(B.moveCards(noopBatch, ['A'], 'nope') === noopBatch, '目标列不存在不改动')
+  const removedMany = B.removeCards(fixture(), ['A', 'C'])
+  ok(titles(removedMany, 'c1').join() === '任务B' && titles(removedMany, 'c2').length === 0, '批量删除')
+  ok(B.removeCards(noopBatch, ['nope']) === noopBatch, '无命中不改动')
+  const doneMany = B.setCardsDone(fixture(), ['A', 'C'], true, 800)
+  ok(doneMany.columns[0].cards[0].done === true && doneMany.columns[1].cards[0].done === true, '批量完成跨列生效')
+  ok(doneMany.columns[0].cards[1].done === undefined, '未选中的卡不标完成')
+  ok(B.setCardsDone(noopBatch, [], true) === noopBatch, '空 id 列表不改动')
+  ok(B.setCardsDone(doneMany, ['A'], false).columns[0].cards[0].done === undefined, '批量取消完成不残留 false')
+
+  section('matchCard:截止日范围与隐藏已完成')
+  const dueTodayCard = card('T', '今日卡', { due: B.todayStr() })
+  const overdueCard = card('O', '逾期卡', { due: '2000-01-01' })
+  const soonCard = card('S', '临近卡', { due: B.addDays(B.todayStr(), 2) })
+  const laterCard = card('L', '远期卡', { due: '2099-12-31' })
+  const noDueCard = card('N', '无期卡')
+  ok(B.matchCard(dueTodayCard, { dueScope: 'today' }) && B.matchCard(soonCard, { dueScope: 'soon' }), 'today / soon 命中')
+  ok(B.matchCard(overdueCard, { dueScope: 'overdue' }) && !B.matchCard(dueTodayCard, { dueScope: 'overdue' }), '逾期口径')
+  ok(B.matchCard(noDueCard, { dueScope: 'none' }) && !B.matchCard(dueTodayCard, { dueScope: 'none' }), 'none 只收无截止日')
+  ok(B.matchCard(laterCard, { dueScope: 'later' }) && !B.matchCard(soonCard, { dueScope: 'later' }), 'later 在三天窗口之外')
+  ok(!B.matchCard(card('D', '已完成', { done: true, due: B.todayStr() }), { dueScope: 'today' }), '截止日筛选排除已完成')
+  ok(!B.matchCard(card('D2', '已完成', { done: true }), { hideDone: true }) && B.matchCard(card('D3', '未完成'), { hideDone: true }), 'hideDone 隐藏已完成')
+  ok(B.matchCard(card('Q', '清单卡', { checklist: [{ id: 'i', text: '嵌套关键词' }] }), { query: '嵌套' }), '搜索覆盖检查项文本')
+
+  section('normalizeBoard:归档箱与检查项')
+  const nb = B.normalizeBoard({
+    columns: [
+      {
+        id: 'c1',
+        title: 'ok',
+        cards: [{ id: 'A', title: '带清单', checklist: [{ text: '子任务' }, { text: '  ' }, null] }]
+      }
+    ],
+    archived: [{ id: 'Z', title: '归档卡', archivedAt: 9, archivedFrom: 'c1' }, { title: '坏卡' }]
+  })
+  ok(nb.archived?.length === 1 && nb.archived[0].id === 'Z' && nb.archived[0].archivedAt === 9, '归档箱保留合法卡并剔除坏卡')
+  ok(nb.columns[0].cards[0].checklist?.length === 1 && !!nb.columns[0].cards[0].checklist[0].id, '检查项归一化')
+  ok(B.normalizeBoard({ columns: [{ id: 'c1', title: 'ok', cards: [{ id: 'A', title: 'x' }] }] }).archived === undefined, '老数据没有归档字段')
+
   section('normalizeBoard:宽容读取')
   ok(B.normalizeBoard(null) === null, '空文档 → null')
   ok(B.normalizeBoard(undefined) === null, 'undefined → null')

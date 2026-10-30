@@ -290,6 +290,64 @@ async function main() {
   ok(t.board.value.columns[0].cards[0].done === true, '当前板路径生效')
   ok(docs.get('godot/taskboard/global').columns[0].cards[0].done === true, '当前板路径已落库')
 
+  section('检查项 / 批量操作:生效并落库')
+  resetDb()
+  ;({ useTasks } = await freshModule())
+  t = useTasks()
+  await t.init()
+  const listCol = t.board.value.columns[0].id
+  await t.addCard(listCol, { title: '清单卡', checklist: [{ text: '子项一' }, { text: '子项二' }] })
+  const clCard = t.board.value.columns[0].cards[0]
+  ok(clCard.checklist?.length === 2, '检查项随卡片创建')
+  await t.setChecklistItemDone(clCard.id, clCard.checklist[0].id, true)
+  ok(t.board.value.columns[0].cards[0].checklist[0].done === true, '勾选检查项生效')
+  ok(docs.get('godot/taskboard/global').columns[0].cards[0].checklist[0].done === true, '勾选检查项已落库')
+  await t.addCard(listCol, { title: '甲' })
+  await t.addCard(listCol, { title: '乙' })
+  const [idA, idB] = t.board.value.columns[0].cards.slice(1).map((c) => c.id)
+  await t.setCardsDone([idA, idB], true)
+  ok(t.board.value.columns[0].cards.slice(1).every((c) => c.done === true), '批量完成生效')
+  ok(docs.get('godot/taskboard/global').columns[0].cards.slice(1).every((c) => c.done === true), '批量完成已落库')
+  await t.moveCards([idA], t.board.value.columns[1].id)
+  ok(
+    !t.board.value.columns[0].cards.some((c) => c.id === idA) &&
+      t.board.value.columns[1].cards.some((c) => c.id === idA),
+    '批量移动生效'
+  )
+  ok(docs.get('godot/taskboard/global').columns[1].cards.some((c) => c.id === idA), '批量移动已落库')
+  await t.removeCards([idB])
+  ok(!t.board.value.columns[0].cards.some((c) => c.id === idB), '批量删除生效')
+  ok(!docs.get('godot/taskboard/global').columns[0].cards.some((c) => c.id === idB), '批量删除已落库')
+
+  section('归档箱:归档 / 恢复 / 删除 / 清空')
+  resetDb()
+  ;({ useTasks } = await freshModule())
+  t = useTasks()
+  await t.init()
+  const archiveCol = t.board.value.columns[0].id
+  await t.addCard(archiveCol, { title: '归档候选' })
+  const archivedId = t.board.value.columns[0].cards[0].id
+  await t.archiveCard(archivedId)
+  ok(t.cardCount.value === 0 && t.archivedCards.value.length === 1, '归档移出看板')
+  ok(t.archivedCards.value[0].archivedFrom === archiveCol, '记录来源列')
+  ok(docs.get('godot/taskboard/global').archived?.some((c) => c.id === archivedId), '归档已落库')
+  const okRestore = await t.restoreArchivedCard(archivedId)
+  ok(okRestore && t.cardCount.value === 1 && t.board.value.columns[0].cards[0].id === archivedId, '恢复到原列')
+  ok(t.archivedCards.value.length === 0 && docs.get('godot/taskboard/global').archived?.length === 0, '恢复已落库')
+  await t.setCardDone(archivedId, true)
+  const archivedDone = await t.archiveDoneCards()
+  ok(archivedDone === 1 && t.archivedCards.value.length === 1, '一键归档已完成返回数量')
+  ok(docs.get('godot/taskboard/global').archived?.[0].done === true, '已完成卡归档时保留完成标记')
+  await t.removeArchivedCard(archivedId)
+  ok(t.archivedCards.value.length === 0 && docs.get('godot/taskboard/global').archived?.length === 0, '彻底删除归档卡')
+  await t.addCard(archiveCol, { title: '归档一' })
+  await t.addCard(archiveCol, { title: '归档二' })
+  const clearIds = t.board.value.columns[0].cards.map((c) => c.id)
+  await t.archiveCards(clearIds)
+  ok(t.archivedCards.value.length === 2 && t.cardCount.value === 0, '批量归档')
+  await t.clearArchivedCards()
+  ok(t.archivedCards.value.length === 0 && docs.get('godot/taskboard/global').archived?.length === 0, '清空归档箱已落库')
+
   console.log(`\n结果: ${pass} 通过, ${failures.length} 失败`)
   if (failures.length) {
     console.error('失败项:\n - ' + failures.join('\n - '))

@@ -11,23 +11,33 @@ import { DOC_ID, type GodotProject, type TaskBoard, type TaskCard, type TaskColo
 import {
   addCard as opAddCard,
   addColumn as opAddColumn,
+  archiveCards as opArchiveCards,
+  archiveDoneCards as opArchiveDoneCards,
   boardTags,
   cardPosition,
+  clearArchived as opClearArchived,
   clearColumn as opClearColumn,
   columnIdOfCard,
   countCards,
   createDefaultBoard,
   duplicateCard as opDuplicateCard,
   moveCard as opMoveCard,
+  moveCards as opMoveCards,
   moveColumn as opMoveColumn,
   normalizeBoard,
+  removeArchivedCard as opRemoveArchivedCard,
   removeCard as opRemoveCard,
+  removeCards as opRemoveCards,
   removeColumn as opRemoveColumn,
   renameColumn as opRenameColumn,
+  restoreArchivedCard as opRestoreArchivedCard,
   restoreCard as opRestoreCard,
+  setCardsDone as opSetCardsDone,
+  setChecklistItemDone as opSetChecklistItemDone,
   updateCard as opUpdateCard,
   updateColumn as opUpdateColumn
 } from '../utils/taskBoard'
+import type { TaskChecklistItem } from '../types/godot'
 
 /** 当前看板('global' 或项目文档 id) */
 const currentKey = ref('global')
@@ -44,6 +54,11 @@ let initialized = false
 const tags = computed(() => (board.value ? boardTags(board.value) : []))
 /** 卡片总数(页头徽标) */
 const cardCount = computed(() => (board.value ? countCards(board.value) : 0))
+/** 归档箱卡片(不参与统计;按归档时间倒序由界面排) */
+const archivedCards = computed(() => board.value?.archived ?? [])
+
+/** 卡片可编辑字段(弹窗保存与快捷变更共用,避免两处各写一份联合类型) */
+type TaskCardPatch = Partial<Pick<TaskCard, 'title' | 'notes' | 'priority' | 'due' | 'tags' | 'done' | 'color' | 'checklist'>>
 
 /** 选板器项目排序:收藏 → 最近打开 → 名称(与 useProjectList 同口径) */
 const projectOptions = computed(() =>
@@ -121,7 +136,10 @@ async function refreshProjects() {
   await loadProjects()
 }
 
-async function addCard(columnId: string, input: { title: string, notes?: string, priority?: TaskPriority, due?: string, tags?: string[] }) {
+async function addCard(
+  columnId: string,
+  input: { title: string, notes?: string, priority?: TaskPriority, due?: string, tags?: string[], checklist?: TaskChecklistItem[] }
+) {
   if (!board.value) return
   await commit(opAddCard(board.value, columnId, input))
 }
@@ -130,7 +148,7 @@ async function addCard(columnId: string, input: { title: string, notes?: string,
  * 编辑弹窗保存:更新字段 + 可选换列(换列 = 追加到目标列尾),一次落库。
  * patch 直接透传 opUpdateCard(出现的键才生效)。
  */
-async function saveCard(cardId: string, patch: Partial<Pick<TaskCard, 'title' | 'notes' | 'priority' | 'due' | 'tags' | 'done' | 'color'>>, toColumnId: string) {
+async function saveCard(cardId: string, patch: TaskCardPatch, toColumnId: string) {
   const prev = board.value
   if (!prev) return
   const next = opUpdateCard(prev, cardId, patch)
@@ -144,7 +162,7 @@ async function saveCard(cardId: string, patch: Partial<Pick<TaskCard, 'title' | 
   }
 }
 
-async function updateCard(cardId: string, patch: Partial<Pick<TaskCard, 'title' | 'notes' | 'priority' | 'due' | 'tags' | 'done' | 'color'>>) {
+async function updateCard(cardId: string, patch: TaskCardPatch) {
   if (!board.value) return
   await commit(opUpdateCard(board.value, cardId, patch))
 }
@@ -152,6 +170,18 @@ async function updateCard(cardId: string, patch: Partial<Pick<TaskCard, 'title' 
 /** 勾选/取消完成(卡片上的勾选框) */
 async function setCardDone(cardId: string, done: boolean) {
   await updateCard(cardId, { done })
+}
+
+/** 勾选/取消一个子任务(卡片详情里的清单) */
+async function setChecklistItemDone(cardId: string, itemId: string, done: boolean) {
+  if (!board.value) return
+  await commit(opSetChecklistItemDone(board.value, cardId, itemId, done))
+}
+
+/** 批量完成/取消完成(多选工具条) */
+async function setCardsDone(cardIds: string[], done: boolean) {
+  if (!board.value || !cardIds.length) return
+  await commit(opSetCardsDone(board.value, cardIds, done))
 }
 
 /**
@@ -207,6 +237,65 @@ async function moveCard(cardId: string, toColumnId: string, toIndex: number) {
   await commit(opMoveCard(board.value, cardId, toColumnId, toIndex))
 }
 
+/** 批量移动(多选工具条):统一追加到目标列尾 */
+async function moveCards(cardIds: string[], toColumnId: string) {
+  if (!board.value || !cardIds.length) return
+  await commit(opMoveCards(board.value, cardIds, toColumnId))
+}
+
+/** 批量删除(不可撤销;调用方先确认) */
+async function removeCards(cardIds: string[]) {
+  if (!board.value || !cardIds.length) return
+  await commit(opRemoveCards(board.value, cardIds))
+}
+
+// ---------- 归档箱 ----------
+
+/** 归档一张卡(可从归档箱恢复,不弹确认) */
+async function archiveCard(cardId: string) {
+  if (!board.value) return
+  await commit(opArchiveCards(board.value, [cardId]))
+}
+
+/** 批量归档(多选工具条) */
+async function archiveCards(cardIds: string[]) {
+  if (!board.value || !cardIds.length) return
+  await commit(opArchiveCards(board.value, cardIds))
+}
+
+/** 一键归档全部已完成卡片;返回归档数量供界面提示 */
+async function archiveDoneCards(): Promise<number> {
+  if (!board.value) return 0
+  const ids: string[] = []
+  for (const column of board.value.columns) {
+    for (const card of column.cards) if (card.done === true) ids.push(card.id)
+  }
+  if (!ids.length) return 0
+  await commit(opArchiveDoneCards(board.value))
+  return saveError.value ? 0 : ids.length
+}
+
+/** 从归档箱恢复(优先回原列);无列可放/写入失败返回 false */
+async function restoreArchivedCard(cardId: string, columnId?: string): Promise<boolean> {
+  if (!board.value) return false
+  const next = opRestoreArchivedCard(board.value, cardId, columnId)
+  if (next === board.value) return false
+  await commit(next)
+  return !saveError.value
+}
+
+/** 从归档箱彻底删除一张卡(不可恢复) */
+async function removeArchivedCard(cardId: string) {
+  if (!board.value) return
+  await commit(opRemoveArchivedCard(board.value, cardId))
+}
+
+/** 清空归档箱(不可恢复;调用方先确认) */
+async function clearArchivedCards() {
+  if (!board.value || !board.value.archived?.length) return
+  await commit(opClearArchived(board.value))
+}
+
 async function addColumn(title: string) {
   if (!board.value) return
   await commit(opAddColumn(board.value, title))
@@ -250,6 +339,7 @@ export function useTasks() {
     lastDelete,
     tags,
     cardCount,
+    archivedCards,
     init,
     selectBoard,
     refreshProjects,
@@ -257,11 +347,21 @@ export function useTasks() {
     saveCard,
     updateCard,
     setCardDone,
+    setChecklistItemDone,
+    setCardsDone,
     setCardDoneOnBoard,
     removeCard,
     undoDelete,
     duplicateCard,
     moveCard,
+    moveCards,
+    removeCards,
+    archiveCard,
+    archiveCards,
+    archiveDoneCards,
+    restoreArchivedCard,
+    removeArchivedCard,
+    clearArchivedCards,
     addColumn,
     renameColumn,
     setColumnColor,
