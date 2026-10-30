@@ -210,7 +210,7 @@ function activateTemplatePack(params, deps) {
   let outSlot = ''
   let outRec = null
   // 回滚要还原的是**换出前**那份记账：文件搬回生效位了、记录却写着「在槽里」，
-  // 下一次切换就会报「存档目录已不在」而面板显示成未生效（Rust 侧 tpl/pack.rs 同一条，两端一起改）
+  // 下一次切换就会报「存档目录已不在」而面板显示成未生效
   let outPrev = null
   // ---- 换出:生效位 → 活跃存档槽(无 dir='' 记录则新建收编槽)
   if (d.existsSync(dest)) {

@@ -488,12 +488,8 @@ export interface Services {
   docsDiffLibraries(versionA: string, versionB: string): DocLibraryDiff
   /** 单类在两库之间的成员级差异 */
   docsDiffClass(versionA: string, versionB: string, className: string): { ok: boolean, error?: string, diff?: DocClassDiff }
-  /** 收藏/取消收藏(全局,按类名跨版本) */
-  /**
-   * 收藏/取消收藏。写失败的形状两端不同:JS 宿主可能抛,ztools/Rust 侧是把
-   * `{error:true,name:'conflict'}` **正常 resolve** 回来(见 src-tauri/src/store.rs:31-33),
-   * 所以调用方必须读返回值,不能只等 catch。
-   */
+  /** 收藏/取消收藏(全局,按类名跨版本)。写失败有时是正常 resolve 回来的 `{ok:false,error}` 而非
+   * reject,所以调用方必须读返回值,不能只等 catch。 */
   docsToggleFavorite(className: string, fav: boolean): { ok: boolean, error?: string }
   /** 收藏列表 */
   docsListFavorites(): string[]
@@ -535,9 +531,8 @@ export interface Services {
 }
 
 /**
- * 渲染层看到的 services 视图:所有数据方法统一为 Promise 返回(Tauri 2 的 IPC 只有异步,
- * 阶段 A 见 docs/tauri-migration-plan.md §7)。ZTools 同步门面返回普通值也满足本视图
- * —— `await` 对普通值与 Promise 等价,两端共用同一份渲染层。
+ * 渲染层看到的 services 视图:所有数据方法统一为 Promise 返回。ZTools 同步门面返回普通值也满足本视图
+ * —— `await` 对普通值与 Promise 等价,共用同一份渲染层。
  * 订阅(watch*)是「注册回调→返回取消函数」的事件通道,无需异步;currentPlatform
  * 是注入的平台常量。二者保持同步签名。
  * 注意:门面验证仍以 `Services` 为准(本类型只是视图变换),不影响 preload 的 @type 校验。

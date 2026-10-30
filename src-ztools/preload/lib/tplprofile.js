@@ -240,7 +240,7 @@ function buildProfile(selection, options, opts) {
   }
 
   // 两个通道各自稳定序列化:profile 键字典序,命令行按 flag 名字典序生成 token
-  // (token 串本身也因此在字典序上,Rust 双端逐字节比的就是这两份)。
+  // (相同配置必须产出逐字节一致的两份串,勾选顺序不得影响结果)。
   const commandExtras = Object.keys(cmd).sort().map((flag) => sconsToken(flag, cmd[flag]))
   return { json: { disabled_build_options: sortKeys(dbo) }, written: written.sort(), skipped, commandExtras }
 }
@@ -278,7 +278,7 @@ function enumValue(flag, sourceDefault, on) {
 }
 
 /**
- * 键按字典序重排。Rust 双端要拿 profileText 逐字节对照,插入顺序随勾选顺序变就一定对不上。
+ * 键按字典序重排。profileText 要形态稳定(相同配置逐字节一致),插入顺序随勾选顺序变就一定对不上。
  * @param {Record<string, any>} obj @returns {Record<string, any>}
  */
 function sortKeys(obj) {

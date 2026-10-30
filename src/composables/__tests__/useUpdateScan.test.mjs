@@ -33,7 +33,7 @@ const ok = (cond, label, extra) => {
 }
 const section = (t) => console.log(`\n=== ${t} ===`)
 
-const ERR = '桌面版暂不支持检查插件更新,请使用 ZTools 插件版。'
+const ERR = '宿主不支持检查插件更新'
 const P1 = { id: 'godot/project/p1', name: '甲项目' }
 const P2 = { id: 'godot/project/p2', name: '乙项目' }
 const AD = (dir, over = {}) => ({ dirName: dir, name: dir, fromMarket: true, assetId: `a/${dir}`, versionString: '1.0.0', ...over })

@@ -10,7 +10,7 @@ export type DeleteFilesPolicy = 'ask' | 'always' | 'never'
 
 export interface UseProjectDeleteOptions {
   projects: Ref<ProjectRow[]>
-  /** 全局设置:删除项目时如何处理文件(设置异步化后允许传 getter,阶段 A) */
+  /** 全局设置:删除项目时如何处理文件(设置异步化后允许传 getter) */
   policy?: DeleteFilesPolicy | (() => DeleteFilesPolicy)
   notify: (msg: string) => void
   /** 删除成功后从本地列表摘掉该项 */

@@ -188,7 +188,7 @@ export function useAddonActions(opts: UseAddonActionsOptions) {
     checking.value = true
     const jobs = opts.addons.value.filter((a) => a.fromMarket && a.assetId)
     const next: Record<string, { hasUpdate: boolean, latest?: string }> = {}
-    /** 宿主**没查**却回了值的次数与首个原因(桌面版垫片就是这条空壳) */
+    /** 宿主**没查**却回了值的次数与首个原因 */
     let failed = 0
     let firstErr = ''
     try {

@@ -104,7 +104,7 @@ ok(dboOf(mixedR).module_vorbis_enabled === false, '明确未勾选项里"探到�
 ok(!hasIn(mixedR, 'module_ogg_enabled') && mixedR.skipped.some((s) => s.flag === 'module_ogg_enabled'),
    '同一项里"没探到"的那个仍只报 skipped,不写(与上条分得开)', JSON.stringify(mixedR.skipped.filter((s) => /ogg/.test(s.flag))))
 
-section('稳定序列化(给 parity 逐字节比)')
+section('稳定序列化(相同配置必须逐字节一致)')
 // #38 之后 profile 只剩模块键,所以这一节夹具换成**两个模块开关**:
 // 表里 fmtWebp 排在 fmtJpg 之前(module_webp_enabled 先插入),字典序却是 jpg 在前 —— 不 sortKeys 就红。
 const WEBP_JPG = Object.assign({}, OPTS, { module_jpg_enabled: { exists: true, default: true } })
@@ -115,7 +115,7 @@ ok(a === bText, '勾选顺序不同 → 文本相同', `${a}\n---\n${bText}`)
 ok(a.indexOf('"module_jpg_enabled"') < a.indexOf('"module_webp_enabled"'), '键按字典序输出(表插入序是 webp 在前)', a)
 ok(eqJson(Object.keys(T.buildProfile(sel({ fmtWebp: false, fmtJpg: false }), WEBP_JPG).json.disabled_build_options),
          ['module_jpg_enabled', 'module_webp_enabled']),
-   'disabled_build_options 的键数组本身就是字典序(Rust 侧按下标比也要对得上)')
+   'disabled_build_options 的键数组本身就是字典序')
 // written 的键名与顺序:written 现在记**两个通道**的全部产出,夹具用表序与字典序相反的那一对
 // (表里 sys3d 的 disable_3d 排在编译选项组的 debug_symbols 之前)。
 const rPair = reg('取消 3D + 勾调试符号', T.buildProfile(sel({ sys3d: false, optDebugSymbols: true }), OPTS))
@@ -124,18 +124,18 @@ ok(eqJson(rPair.written, ['debug_symbols', 'disable_3d']),
 ok(eqJson(rPair.written, Object.keys(dboOf(rPair)).concat(cmdOf(rPair)).sort()),
    'written = 两个通道实际产出的并集(键名对不上、或漏记某个通道就红)',
    `${JSON.stringify(rPair.written)} vs ${JSON.stringify(Object.keys(dboOf(rPair)).concat(cmdOf(rPair)).sort())}`)
-// 命令行通道的稳定排序:#38 之后它是主要出口,parity 同样逐字节比它。
+// 命令行通道的稳定排序:#38 之后它是主要出口,同样要求逐字节一致。
 // 夹具的表插入序是 disable_3d(引擎子系统)在前、debug_symbols(编译选项)在后,字典序相反 ——
 // 删掉 Object.keys(cmd).sort() 就得到 ["disable_3d=yes","debug_symbols=yes"],当场红。
 ok(eqJson(rPair.commandExtras, ['debug_symbols=yes', 'disable_3d=yes']),
    'commandExtras 固定字典序(删掉它的排序当场红)', JSON.stringify(rPair.commandExtras))
 ok(eqJson(T.buildProfile(sel({ optDebugSymbols: true, sys3d: false }), OPTS).commandExtras, rPair.commandExtras),
-   'commandExtras 与勾选顺序无关(它是 T7 拼进行尾的数组,parity 要逐字节比)')
+   'commandExtras 与勾选顺序无关(它是 T7 拼进行尾的数组,要求逐字节一致)')
 ok(eqJson(T.buildProfile(sel({ accesskit: false, sys3d: false }), OPTS, { mode: 'default-off' }).commandExtras,
          T.buildProfile(sel({ sys3d: false, accesskit: false }), OPTS, { mode: 'default-off' }).commandExtras),
    '反向模式下 commandExtras 也与勾选顺序无关', '')
 ok(rPair.skipped.every((s) => rPair.written.indexOf(s.flag) === -1), 'skipped 与 written 无交集')
-// 钉住 profileText 的形态本身:Rust 双端比的是字节,缩进或结构一变就对不上。
+// 钉住 profileText 的形态本身:消费方比的是字节,缩进或结构一变就对不上。
 ok(a.split('\n')[1] === '  "disabled_build_options": {', '顶层只有 disabled_build_options + 缩进固定 2 空格', JSON.stringify(a.split('\n').slice(0, 3)))
 ok(JSON.stringify(JSON.parse(T.profileText(b))) === JSON.stringify(b), 'profileText 可原样解析回同一对象')
 // 值域不变量(两个通道都要跑):scons 那侧 `env[c] = dbo[c]` 之后要么当布尔用要么按枚举串比,

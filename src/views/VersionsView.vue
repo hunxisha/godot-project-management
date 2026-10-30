@@ -8,7 +8,7 @@ import TemplateBuildWizard from '../components/versions/TemplateBuildWizard.vue'
 import { DEFAULT_SETTINGS, type DownloadTask, type GodotRelease, type GodotSettings, type GodotVersion, type ReleaseAsset, type Variant } from '../types/godot'
 import type { TemplatePack } from '../types/services'
 
-// 设置异步读取(阶段 A):先给默认值,onMounted 后用持久化值覆盖
+// 设置异步读取:先给默认值,onMounted 后用持久化值覆盖
 const settings = reactive<GodotSettings>({ ...DEFAULT_SETTINGS })
 getSettings().then((s) => Object.assign(settings, s)).catch(() => {})
 const platform = window.services.currentPlatform()

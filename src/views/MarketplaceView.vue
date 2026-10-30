@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { notify } from '../services/bridge'
-import { IS_DESKTOP } from '../services/desktop'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import VersionPickerDialog from '../components/dialogs/VersionPickerDialog.vue'
@@ -141,13 +140,6 @@ const { isFav, toggleFav, favDiag } = useMarketFavorites({
   reloadFavorites: () => reloadFavorites(),
   notify
 })
-
-/**
- * 桌面版(Tauri)没有本地收藏:动作在垫片里如实抛错(tauri-shim.js 的 toggleFavorite)。
- * 这里不等用户点下去才看到红条 —— 星标直接禁用,收藏模式的空态也改成「不支持」而不是
- * 「点 ★ 试试」那种做不到的建议。项目收藏(`p.favorite`)是另一回事,不受这条影响。
- */
-const isDesktop = IS_DESKTOP
 
 // ---------- 文案翻译 ----------
 // 译文表在模块级单例里(useTranslation),本页被 KeepAlive 常驻,切页回来不重翻。
@@ -444,10 +436,8 @@ watch(
           <EmptyState
             v-else-if="mode === 'favorites' && !favorites.length"
             icon="star"
-            :title="isDesktop ? '桌面版暂不支持收藏' : '还没有收藏'"
-            :desc="isDesktop
-              ? '桌面版还没移植本地收藏(★),这一栏在桌面版会是空的;浏览与安装不受影响,需要收藏请用 ZTools 插件版。'
-              : '在推荐、最近更新或搜索结果中点击 ★ 收藏插件,方便下次快速安装。'"
+            title="还没有收藏"
+            desc="在推荐、最近更新或搜索结果中点击 ★ 收藏插件,方便下次快速安装。"
           />
           <EmptyState
             v-else-if="tagFilter && !displayAssets.length"
@@ -476,8 +466,7 @@ watch(
               <button
                 class="fav-btn"
                 :class="{ active: isFav(a.assetId) }"
-                :disabled="isDesktop"
-                :title="isDesktop ? '桌面版暂不支持收藏' : isFav(a.assetId) ? '取消收藏' : '收藏'"
+                :title="isFav(a.assetId) ? '取消收藏' : '收藏'"
                 @click.stop="toggleFav(a)"
               ><Icon name="star" :size="14" :stroke-width="isFav(a.assetId) ? 2.4 : 1.7" /></button>
               <div class="asset-head">
@@ -844,19 +833,13 @@ watch(
   transition: color 0.15s, background 0.15s;
 }
 
-.fav-btn:hover:not(:disabled) {
+.fav-btn:hover {
   background: var(--surface-2);
   color: var(--gold);
 }
 
 .fav-btn.active {
   color: var(--gold);
-}
-
-/* 桌面版禁用态:压淡且不抢卡片光标 —— 不是「加载中」也不是「坏了」,是该宿主没有此功能 */
-.fav-btn:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 
 .asset-head {

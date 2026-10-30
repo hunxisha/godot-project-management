@@ -1,7 +1,8 @@
 // launcher 回归测试:启动参数拆分 + 启动失败不掀掉宿主。
 //
-// 后半部分是线上缺陷的护栏:桌面版「点启动项目,软件就关了」。两条成因都在这里钉住 ——
-// ① 唯一窗口被 hideMainWindow 关掉(ZTools 宿主上真会关窗;Tauri 垫片是空实现);
+// 后半部分是线上缺陷的护栏(起因:桌面版「点启动项目,软件就关了」,桌面版 2026-10-11 已下线)。
+// 两条成因都在这里钉住 ——
+// ① 唯一窗口被 hideMainWindow 关掉(ZTools 宿主上真会关窗);
 // ② 引擎不可执行时 spawn 报错,而 'error' 是异步事件,没人接就是未捕获异常 → 宿主退出。
 // launcher 必须自己接住并让用户看见,而不是静默或陪葬。
 //
@@ -134,7 +135,7 @@ notified.length = 0
 let crashed = null
 process.once('uncaughtException', (e) => { crashed = e })
 spawned[0].emit('error', new Error('spawn ENOEXEC'))
-ok(crashed === null, "spawn 的 'error' 不产生未捕获异常(桌面版会在此关闭)")
+ok(crashed === null, "spawn 的 'error' 不产生未捕获异常(旧桌面版会在此关闭)")
 ok(notified.length === 1 && /启动 Godot 失败/.test(notified[0]), '失败原因经宿主通知浮出', notified.join(' | '))
 
 console.log(`\nPASS ${pass}  FAIL ${failures.length}`)

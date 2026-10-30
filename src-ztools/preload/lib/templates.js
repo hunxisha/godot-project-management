@@ -46,7 +46,7 @@ function versionDirFromTag(tag) {
 }
 
 /**
- * 自定义模板目录名的白名单(与 Rust 端 `is_valid_version_dir_name` 逐字镜像):
+ * 自定义模板目录名的白名单:
  * 字母数字开头,只含字母数字 / 点 / 下划线 / 连字符,1–64 字符。
  * versionDir 会被 `path.join(base, versionDir)` —— 放行 `/`、`\`、`..` 就等于允许把
  * 模板装到任意位置;版本串(`4.3.stable` / `4.4.dev6`)本来也不需要别的字符。

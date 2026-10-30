@@ -10,7 +10,7 @@ const emit = defineEmits<{ (e: 'navigate', tab: string): void, (e: 'create'): vo
 
 const projects = ref<(GodotProject & { _id: string })[]>([])
 const versions = ref<(GodotVersion & { _id: string })[]>([])
-// 设置异步读取(阶段 A):先给默认值保证首屏可用,onMounted 后补齐
+// 设置异步读取:先给默认值保证首屏可用,onMounted 后补齐
 const settings = ref<GodotSettings>({ ...DEFAULT_SETTINGS })
 
 const defaultVersion = computed(() => versions.value.find((v) => v._id === settings.value.defaultVersionId))

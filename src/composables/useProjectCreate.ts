@@ -13,10 +13,10 @@ export type RendererOption = 'forward_plus' | 'mobile' | 'gl_compatibility'
 export interface UseProjectCreateOptions {
   projects: Ref<ProjectRow[]>
   versions: Ref<(GodotVersion & { _id: string })[]>
-  /** 设置里的默认引擎版本 id(可缺省;设置异步化后允许传 getter,阶段 A) */
+  /** 设置里的默认引擎版本 id(可缺省;设置异步化后允许传 getter) */
   defaultVersionId?: string | (() => string | undefined)
   notify: (msg: string) => void
-  /** 创建成功后重读列表(阶段 A 起通常为 async,提交处会 await) */
+  /** 创建成功后重读列表(通常为 async,提交处会 await) */
   reload: () => void | Promise<void>
   /** 需要立即打开时调用(传入新建出的项目行) */
   openProject: (row: ProjectRow) => void

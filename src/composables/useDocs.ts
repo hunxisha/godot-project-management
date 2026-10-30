@@ -122,8 +122,8 @@ async function afterTaskSettled() {
 /**
  * 收藏/取消收藏。
  *
- * **返回值必须读**:桌面版的写失败是一个**正常 resolve** 的 `{error:true,name:'conflict'}`
- * (src-tauri/src/store.rs:31-33),不走 rejection,所以 `catch` 接不到它。原先这里把结果整个丢掉,
+ * **返回值必须读**:宿主侧的写失败有时不走 rejection,而是把 `{ok:false,error}` **正常 resolve** 回来,
+ * 所以 `catch` 接不到它。原先这里把结果整个丢掉,
  * 于是「一条都没写进去」和「写好了」在界面上是同一个样子(点星标毫无反馈),正是市场收藏那次踩过的形状。
  * 列表无论如何都重读一次:星标以库为准,不做乐观更新。
  */

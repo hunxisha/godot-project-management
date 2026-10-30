@@ -63,7 +63,7 @@ export function useMarketInstall(opts: UseMarketInstallOptions) {
     }
   }
 
-  // slug 记忆缓存:设置读取异步化后(阶段 A),确认层预填仍需同步接口,
+  // slug 记忆缓存:设置读取异步化后,确认层预填仍需同步接口,
   // 故在组合式函数初始化时拉一次设置进本地缓存,读写都走缓存再落库
   const stripPrefs = ref<Record<string, boolean>>({})
   getSettings().then((s) => { stripPrefs.value = s.assetStripTopDir || {} }).catch(() => { /* ignore */ })

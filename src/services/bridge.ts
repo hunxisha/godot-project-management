@@ -6,7 +6,7 @@ import { DEFAULT_SETTINGS, type GodotSettings } from '../types/godot'
 
 type AnyDoc = { _id: string, _rev?: string, [key: string]: any }
 
-/** 读取单个文档,返回 _id + 数据字段(异步:Tauri 的 db 是 IPC,阶段 A 起两端统一) */
+/** 读取单个文档,返回 _id + 数据字段(异步接口) */
 export async function getDoc<T>(id: string): Promise<(T & { _id: string }) | null> {
   return (window.ztools.db.get(id) as AnyDoc | null) as any
 }

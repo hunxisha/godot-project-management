@@ -34,7 +34,7 @@ export function useProjectList() {
 
   const favCount = computed(() => projects.value.filter((p) => p.favorite).length)
 
-  /** 从本地库重新读取项目与已装引擎(异步,阶段 A) */
+  /** 从本地库重新读取项目与已装引擎(异步) */
   async function reload() {
     projects.value = ((await window.ztools.db.allDocs('godot/project/')) || []) as any[]
     versions.value = ((await window.ztools.db.allDocs('godot/version/')) || []) as any[]

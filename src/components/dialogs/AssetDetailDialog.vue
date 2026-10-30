@@ -5,7 +5,6 @@
 import { computed, ref, watch } from 'vue'
 import Icon from '../Icon.vue'
 import { formatRelative, normVersion } from '../../utils/format'
-import { IS_DESKTOP } from '../../services/desktop'
 import { openExternal } from '../../services/bridge'
 import { useTranslation } from '../../composables/useTranslation'
 import type { AssetDetail } from '../../types/godot'
@@ -106,9 +105,7 @@ async function load() {
     if (!detail.value) {
       // 宿主没给详情时要说人话。以前桌面版的垫片回的是 {ok:false},这一行读 media[0] 直接抛
       // TypeError,弹层上显示的就是「加载失败:Cannot read properties of undefined」。
-      error.value = IS_DESKTOP
-        ? '桌面版暂不支持读取商店详情,列表卡片上的信息仍可用于判断是否安装。'
-        : '商店没有返回该资产的详情,可稍后重试或从列表卡片直接安装。'
+      error.value = '商店没有返回该资产的详情,可稍后重试或从列表卡片直接安装。'
       return
     }
     active.value = detail.value.media[0] || ''

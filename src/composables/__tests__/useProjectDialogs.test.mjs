@@ -144,7 +144,7 @@ async function main() {
     c.cName.value = '  '
     ok(c.cPreview.value === 'E:\\Work', '项目名只有空白时退回父目录')
 
-    // chooseParent:选中目录则更新,取消则保持原值(异步化后需 await,阶段 A)
+    // chooseParent:选中目录则更新,取消则保持原值(异步化后需 await)
     pickedDir = ['D:\\Games']
     await c.chooseParent()
     ok(c.cParent.value === 'D:\\Games', '选中目录后写入父目录', c.cParent.value)

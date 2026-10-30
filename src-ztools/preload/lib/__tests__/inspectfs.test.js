@@ -307,7 +307,7 @@ async function main() {
   ok(!fs.existsSync(path.join(TREE, 'nosub')), '被拒绝的写入不留任何痕迹')
   ok(fs.readdirSync(TREE).filter((n) => n.startsWith('.gpm-tmp-')).length === 0, '不留 .gpm-tmp-* 残骸')
 
-  // text 非字符串:锁住 '内容不是文本' 这条串(Rust 侧 Task 7 逐字镜像),并确认拒绝后原文未被碰。
+  // text 非字符串:锁住 '内容不是文本' 这条串,并确认拒绝后原文未被碰。
   const wBad = F.writeProjectText('godot/project/p1', 'cfg.txt', 42)
   ok(wBad.error === '内容不是文本', '非字符串内容 → 内容不是文本', JSON.stringify(wBad))
   ok(fs.readFileSync(path.join(TREE, 'cfg.txt'), 'utf8') === 'X', '被拒绝的写入不改磁盘内容')
@@ -701,7 +701,7 @@ async function main() {
   ok(injected === 1, '探针确实只命中 doomed 那一项(断言不是空跑)', String(injected))
   ok(t7.ok === false && t7.moved === 1, 'moved 只数真正成功的 1 项(不是 items.length)', JSON.stringify({ ok: t7.ok, moved: t7.moved }))
   ok(t7.failed.some((f) => f.rel === 'doomed.txt' && f.error === '移入回收站失败'),
-    '回收站失败 → failed 里是「移入回收站失败」(钉住这条串,Rust 侧逐字镜像)', JSON.stringify(t7.failed))
+    '回收站失败 → failed 里是「移入回收站失败」(钉住这条串)', JSON.stringify(t7.failed))
   ok(!fs.existsSync(ok2Abs), '失败项之后的项照常被删除(不中断其余)', fs.readdirSync(trashRoot2).join(','))
   ok(fs.existsSync(doomedAbs) && fs.readFileSync(doomedAbs, 'utf8') === 'D',
     '回收站失败后不得退化成硬删:原文件还在原地', fs.readdirSync(trashRoot2).join(','))
@@ -717,7 +717,7 @@ async function main() {
     '非字符串/空 rel 逐项标非法路径,不抛也不误删', JSON.stringify(t9.failed))
   // 父目录也不存在的 rel:resolveInside 会退到最近的已存在祖先(项目根本身总在),
   // 所以 '目标目录不存在' 那条在删除侧**够不着**,一律由后面的 stat 报 '文件不存在'。
-  // 这里钉住的是「所有缺失形态都收敛到同一句『文件不存在』」——Rust 侧 Task 7 只需镜像这一句。
+  // 这里钉住的是「所有缺失形态都收敛到同一句『文件不存在』」。
   const t10 = F.movePathsToTrash('godot/project/t1', ['nodir/x.txt'])
   ok(t10.ok === false && t10.moved === 0 &&
     t10.failed.some((f) => f.rel === 'nodir/x.txt' && f.error === '文件不存在'),
@@ -857,7 +857,7 @@ async function main() {
     ok(sha('a.bin') !== sha('b.bin'), '不同内容 → 不同摘要')
     ok(sha('empty.bin') === 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
       '空文件 = SHA-256 标准向量(hex 小写 64 位)', sha('empty.bin'))
-    ok(/^[0-9a-f]{64}$/.test(sha('a.bin')), 'digest 是小写 hex(与 Rust 的 format!("{:x}") 同形)', sha('a.bin'))
+    ok(/^[0-9a-f]{64}$/.test(sha('a.bin')), 'digest 是小写 hex(SHA-256 惯例形态)', sha('a.bin'))
     ok(H.failed.length === 0, '没有失败项', JSON.stringify(H.failed))
 
     // 失败不中断:缺失 / 越界 / 目录混在成功项之间

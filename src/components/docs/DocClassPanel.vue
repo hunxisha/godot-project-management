@@ -183,7 +183,7 @@ function copySignature(text: string, kind: string, symbol: string) {
 
 /**
  * 收藏/取消:失败要出声。
- * 桌面版的写失败是一个正常 resolve 的 `{ok:false,error}`(store.rs 把 conflict 当值返回,不 reject),
+ * 写失败有时是被正常 resolve 回来的 `{ok:false,error}` 而不是 reject,
  * 所以这里判返回值,不能指望 catch。不给这条提示,用户看到的就是「点了没反应」。
  */
 async function onToggleFav(name: string) {

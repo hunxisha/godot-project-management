@@ -5,7 +5,7 @@ import type { GodotProject, OpenAction } from '../types/godot'
 /**
  * 用指定动作(默认读设置)打开项目,成功后隐藏主窗口并回写打开统计。
  * p 为响应式列表中的对象,成功时原地更新。
- * 异步化(阶段 A):设置读取与 launchProject 均走 Promise,调用方无需感知。
+ * 异步化:设置读取与 launchProject 均走 Promise,调用方无需感知。
  */
 export function openProjectAction(p: GodotProject & { _id: string }, action?: OpenAction) {
   void (async () => {

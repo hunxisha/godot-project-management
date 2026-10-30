@@ -8,7 +8,7 @@ import TranslatePanel from '../components/settings/TranslatePanel.vue'
 import { fmtSize } from '../utils/format'
 import { DEFAULT_SETTINGS, type DocsCacheInfo, type GodotSettings, type NetworkCheckResult, type OpenAction } from '../types/godot'
 
-// 设置异步读取(阶段 A):先给默认值,onMounted 后用持久化值覆盖
+// 设置异步读取:先给默认值,onMounted 后用持久化值覆盖
 const state = reactive<GodotSettings>({ ...DEFAULT_SETTINGS })
 getSettings().then((s) => Object.assign(state, s)).catch(() => {})
 const apiKeyInput = ref('')
@@ -95,7 +95,7 @@ async function cleanDocsCache(versionIds?: string[]) {
     notify(`已清理 ${r.removed ?? 0} 个文档库(收藏与浏览历史保留)`)
     await refreshDocsCache()
   } else {
-    // 没有这一句,桌面版点「清理缓存」就是按钮转一下什么都不发生(垫片正是回 ok:false 的那一侧)
+    // 没有这一句,宿主回 ok:false 时点「清理缓存」就是按钮转一下什么都不发生
     notify(r.error || '清理失败')
   }
 }
@@ -164,7 +164,7 @@ async function saveApiKey() {
       apiKeyInput.value = ''
       notify(`已连接 Asset Store:${r.name || '已认证用户'}`)
     } else {
-      // 少了这一句就是「按钮转一下,什么都不发生」:桌面版根本没有校验通道,宿主回的是
+      // 少了这一句就是「按钮转一下,什么都不发生」:宿主校验不过时回的是
       // {authenticated:false,error},而这里过去只有成功分支。密钥错也走同一句话。
       notify(r.error || '验证失败,请检查 API Key')
     }

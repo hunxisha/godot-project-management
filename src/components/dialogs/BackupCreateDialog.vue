@@ -134,7 +134,7 @@ watch(
       end()
       return
     }
-    // 每次打开都重新读取设置,避免用到组件挂载时的过期快照(设置读取为异步,阶段 A)
+    // 每次打开都重新读取设置,避免用到组件挂载时的过期快照(设置读取为异步)
     const settings = await getSettings()
     targetId.value = props.projectId || props.projects[0]?._id || ''
     label.value = ''

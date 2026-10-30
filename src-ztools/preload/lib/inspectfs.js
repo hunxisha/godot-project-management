@@ -5,7 +5,7 @@
 //
 // 设计红线:
 //   · 渲染层只拿 rel(相对项目根、正斜杠),绝对路径由这里拼 —— 误删面最小,
-//     也让 JS / Rust 两端只需比对 rel/size 序列就能验证 parity。
+//     也让调用方只需比对 rel/size 序列就能核对清单。
 //   · 读 / 写 / 删的 rel 过两道闸:resolveRel 挡字面越界(`..`、绝对路径、盘符),
 //     resolveInside 再挡「项目内的符号链接指向项目外」(realpath 后必须仍在根内)。
 //     第一道只看 rel 的字面形态,第二道才看真实落点 —— 读取漏第二道只是泄漏内容,
@@ -64,7 +64,7 @@ function resolveRel(root, rel) {
  * 为什么需要第二道闸:resolveRel 只做字面判断(`..` / 绝对 / 盘符),而 fs.statSync、
  * fs.readFileSync 会跟随符号链接 —— 项目内一条指向 ~/.ssh/id_rsa 的链接就能读出去。
  * 资产站 zip 解压正是项目内出现符号链接的主路径。错误串**刻意复用** '非法路径':
- * 不新增文案、不透露被挡掉的到底是哪一类(Rust 侧 Task 6-7 也只需镜像同一批串)。
+ * 不新增文案、不透露被挡掉的到底是哪一类。
  * @param {string|null} root
  * @param {unknown} rel
  * @returns {{abs?: string, error?: string}}
@@ -164,7 +164,7 @@ function relDirPrefix(rel) {
  * 读取时这只是泄漏内容,写入时它改的是别人的文件。
  * 错误串一律取闸返回的原话('项目不存在' / '非法路径' / '路径无法解析' / '目标目录不存在'),
  * 备份与写入各自的失败也只报 '备份失败' / '写入失败':工具页要把原因显示给用户,
- * 而 Node 的 EPERM 英文串既不稳定也无处对照(Rust 侧 Task 7 逐字镜像同一批串)。
+ * 而 Node 的 EPERM 英文串既不稳定也难读,统一收敛到固定中文串。
  * @param {string} projectId
  * @param {string} rel
  * @param {string} text
@@ -301,7 +301,7 @@ function scanProjectTree(projectId, opts) {
  *     残留盲区:父目录无检索权限时 existsSync 也返回 false,那一项会被计成成功 —— 与只信回报相比仍严格更好。
  *   · 对外**只有 rel 一个键**(fsutil 回的是绝对路径,不外泄)。failed 的 rel 刻意分两种形态:
  *     闸拒绝的项回报**调用方原样**的串(那一项根本没碰到盘,归一化后对不回用户点名的哪一条),
- *     trash / 复核阶段的失败回报归一后的 rel。Rust 侧 Task 7 同样镜像这两态。
+ *     trash / 复核阶段的失败回报归一后的 rel。两种形态由测试分别钉住。
  *
  * 闸用 resolveInside,与 writeProjectText 同一道:删除是读/写/删三翼里最重的一翼 ——
  * resolveRel 只看 rel 的字面形态,项目内一条指向项目外的链接(资产站 zip 解压带进来的形态)
@@ -309,7 +309,7 @@ function scanProjectTree(projectId, opts) {
  * 错误串一律取闸的原话('非法路径' / '路径无法解析';闸的 '目标目录不存在' 在删除侧够不着,
  * 因为项目根总是那个已存在的祖先,缺失形态统一由 stat 收敛到 '文件不存在'),
  * '项目不存在' 只来自 projectRoot,'移入回收站失败' 来自复核:
- * Node 的 EPERM 英文串既不稳定也无处对照(Rust 侧 Task 7 逐字镜像同一批串)。
+ * Node 的 EPERM 英文串既不稳定也难读,统一收敛到固定中文串。
  * @param {string} projectId
  * @param {string[]} rels
  * @returns {import('../../../src/types/godot').TrashResult}
@@ -360,8 +360,8 @@ function movePathsToTrash(projectId, rels) {
  * (realpath 包含校验)是这里唯一能挡住它的东西。
  *
  * 错误串**逐字复用**读原语那批('项目不存在' / '非法路径' / '路径无法解析' /
- * '目标目录不存在' / '文件不存在' / '读取失败'),不新增文案:Rust 侧镜像同一批串,
- * parity 测试逐字段比对。单个失败不中断其余(failed 如实回报),ok 仅在零失败时为 true;
+ * '目标目录不存在' / '文件不存在' / '读取失败'),不新增文案,由测试逐字段钉住。
+ * 单个失败不中断其余(failed 如实回报),ok 仅在零失败时为 true;
  * 空清单不是错误(→ ok:true, hashes:[])。rels 非数组按空清单处理,与 movePathsToTrash
  * 的判别同形 —— 字符串可迭代,`for (const raw of rels)` 会把 'a.txt' 拆成字符逐个哈希。
  *

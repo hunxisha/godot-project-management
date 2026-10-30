@@ -122,7 +122,6 @@ window.ztools = {
   hideMainWindow: () => {},
   onPluginEnter: () => {},
   isDarkColors: () => false,
-  isDesktop: () => true,
   isWindows: () => true,
   isMacOS: () => false,
   isLinux: () => false,

@@ -2,7 +2,7 @@
 //
 // 为什么只能扫源码:.vue 要 vite + @vitejs/plugin-vue + DOM 才载得进来,本仓库的 Node harness 没有这套
 // (先例:TemplateBuildWizard.vue 文件头那句「判据不进 .vue(跑不进 Node harness)」、
-//  tauriShimHonesty.test.mjs 的静态扫描、buildtools.test.js 第 8 节那套「未移植方法不得假成功」)。
+//  buildtools.test.js 第 8 节那套「未移植方法不得假成功」)。
 // 台账 deferred ⑥ 已判:不为两条断言引 vitest/jsdom(违反"不引入新依赖")。
 //
 // 写法纪律(轮 1 按 Ruling #63/#64 重写过,轮 2 按 #67/#68/#70/#72 补洞,别再退回旧形态):
@@ -23,7 +23,7 @@
 //     全绿。这条语义正是要交给 T10 去接的位置,所以轮 2 钉两条:名单谓词只出现在四个展示位、
 //     上报的 payload 只写被点的那一行且不写 false 字面量。
 //   · 扫描型断言最怕的失效模式是"删掉代码 + 在注释里补一句同样的字样"把它喂绿。这里按
-//     services.test.js:352 / tauriShimHonesty.test.mjs:37 的先导**先把注释剥掉再扫**,那条假绿就不成立了
+//     services.test.js 第 9/10 节的先导**先把注释剥掉再扫**,那条假绿就不成立了
 //     (注释不进扫描面);代价是同一文件里"注释替代码作保证"也不作数 —— 代码不在就是不在。
 //     Ruling #70:轮 1 只剥**整行**注释,结果"解释这条裁定的行尾注释"把这条裁定的守卫打红
 //     (复审员实测 M-尾部注释 红 3 条),与目标正好相反 —— 现在整行 / 行尾 `//` / 同行 `/* */` /
@@ -74,7 +74,7 @@ const failures = []
 const ok = (c, l, e) => { if (c) { pass++; console.log(`  PASS  ${l}`) } else { failures.push(l); console.log(`  FAIL  ${l}${e !== undefined ? '  → ' + e : ''}`) } }
 
 // ---------- 取 SFC 的两段 ----------
-// 注释一律剥掉再扫(切法与 services.test.js:352、tauriShimHonesty.test.mjs:37 同一条):
+// 注释一律剥掉再扫(切法与 services.test.js 第 9/10 节同一条):
 // 这一层的目的是"删掉代码 + 在注释里补一句同样的字样"不能把它喂绿 —— 注释不进扫描面,
 // 那条假绿就不成立了;同时合法改写也不会因为注释里提到某个标识符而假红。
 // Ruling #70:轮 1 只剥**整行**注释,行尾注释仍进扫描面 —— 复审员实测 M-尾部注释 给 :50 加一句

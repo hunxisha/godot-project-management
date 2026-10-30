@@ -23,7 +23,7 @@
 //   · 第 9 节是两条**源码扫描**:Ruling #60(整份转发这个形状)与 Ruling #58(契约层不重算
 //     `tested`)。它们在行为上观察不到,不扫形状就等于没测。
 //   · 第 10 节是 Ruling #62 的 `suppressed` 通道:名单算得对(行为)、不重复探测也不从渲染层收连带图
-//     (形状),并跨文件对账契约声明与桌面垫片的占位是否同形。
+//     (形状),并跨文件对账契约声明。
 //   · 第 11 节是 T10 补的 `applyTemplatePreset`:预设与 mode 都出自输出层(Ruling #74),
 //     契约层只合成不重算;mode 漏交 = §5.4b 反向白名单在真实流程里永不可达。
 // 这些调用是 async,因此全文改成 `async function main()` + `main().catch(() => process.exit(1))`
@@ -369,7 +369,7 @@ async function main() {
   // 轮 1 曾在两节里各写一份提取、各钉死一个名字;现在只留这一处,两节引用同一批反转引用。
   // 剥法说明:这两节防的是"第二处推导",而解释为什么不再有它的那段注释里必然提到那个写法 ——
   // 不剥注释的话第一条反向扫描会被自己的注释命中(假阳性),剥掉后代码里真把旧表达式改回去照样红。
-  // 切法与 tauriShimHonesty.test.mjs:37 同一条。只扫**代码行**。
+  // 只扫**代码行**。
   const srcJsRaw = fs.readFileSync(SERVICES, 'utf8')
   const code = srcJsRaw.split(/\r?\n/).filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l)).join('\n')
   const vtc = /validateTemplateConfig:\s*async\s*\(([A-Za-z_$][\w$]*)\)\s*=>\s*\{([\s\S]*?)\n {2}\},/.exec(code)
@@ -383,8 +383,7 @@ async function main() {
     //   · Ruling #60 —— `mode` 进 buildTemplatePack 零断言:`buildtools.js` 的入队闸先拦 `features`,
     //     再拦工具链,mode 的差异在这一层根本不外漏;只能把「整份 params 转发」这个形状钉住。
     //     它防的是「有人把转发改成显式字段列表而漏掉 mode」→ 变成**校验用 default-off、编译用 default-on**,
-    //     正是 services.ts:142 注释自己警告的那一形态(M5 改正:此前写 :130,是行号漂移)。先例:T9 简报 :28
-    //     与垫片诚实性扫描都用源码正则。
+    //     正是 services.ts:142 注释自己警告的那一形态(M5 改正:此前写 :130,是行号漂移)。
     //   · Ruling #58 —— `untestedSource` 不许在契约层重算 `testedVersions.includes(sourceVersion)`
     //     (`tplprobe.js:270` 是同一个表达式的第二处推导;`tested` 的语义一改就静默用旧口径)。
     //     这条同样是等价重构,行为断言抓不到,所以钉形状。
@@ -411,7 +410,7 @@ async function main() {
     //     多加一次 probeSource 在返回值上完全看不出来,只能数调用次数。
     //   · **连带图只能来自宿主自己那次探测** —— Ruling #53 已经把 ctx 通道整个删掉(宿主逐字段组装);
     //     若从 params 收 cascades,渲染层塞一张空图就能让面板把所有行都显示成可点。
-    //   · **契约与三宿主同形** —— 桌面垫片的占位缺这个键,渲染层取属性就是 undefined。
+    //   · **契约与实现同形** —— 契约声明缺这个键,渲染层取属性就是 undefined。
     // Ruling #71(与 #64/#60 同一条口径):轮 1 在这里把**形参名 `params` 与局部变量名 `probe` 写死**进
     // 三处正则,复审员实测 S5 —— 仅把该方法内 `params` 整体改名 `input`(语义完全不变)就假红 3 条。
     // 收紧办法同 T8 那条给过的零成本形状:第一次出现时**捕获**标识符,后面的判据反向引用同一个名字。
@@ -441,7 +440,7 @@ async function main() {
     // 本节剩下的是插件线自己的判据。
   }
 
-  section('11. applyTemplatePreset:预设与 mode 都出自输出层(Ruling #74;契约+注册+垫片三处齐补)')
+  section('11. applyTemplatePreset:预设与 mode 都出自输出层(Ruling #74;契约+注册齐补)')
   {
     // 两件事在这一层才观察得到:
     //   · **mode 随 features 一起交出去** —— 渲染层两个调用点(校验/编译)靠它透传同一份;契约层漏交

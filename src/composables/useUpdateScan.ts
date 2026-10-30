@@ -27,7 +27,7 @@ export function useUpdateScan() {
   /** 是否完成过一次扫描(区分「还没扫」与「没有可更新」) */
   const scanned = ref(false)
   /**
-   * 首个「根本没查成」的原因(桌面版没有 check_addon_update 命令,宿主会回 error)。
+   * 首个「根本没查成」的原因(宿主缺 check_addon_update 能力时会回 error)。
    * 空列表有两种含义:真的都是最新 / 一条都没查。少了这个字段,巡检面板就会把后者说成
    * 「所有项目的已装内容都是最新版本」—— 那是一句结论,不是这里得到的东西。
    */

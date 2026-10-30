@@ -248,7 +248,7 @@ async function main() {
   // ---------- 6b ----------
   section('6b. 本地导入(.tpz / 目录):不下载、versionDir 统一取法、覆盖走回收站')
   {
-    // 白名单:与 Rust is_valid_version_dir_name 镜像
+    // 白名单:只放行版本串形态
     ok(templates.isValidVersionDirName('4.3.stable') === true, '白名单放行版本串形态')
     ok(templates.isValidVersionDirName('../evil') === false && templates.isValidVersionDirName('a/b') === false &&
       templates.isValidVersionDirName('a\b') === false && templates.isValidVersionDirName('') === false,

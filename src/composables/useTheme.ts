@@ -118,8 +118,8 @@ function apply() {
 export function useTheme() {
   if (!initialized) {
     initialized = true
-    // 设置读取是异步的(阶段 A,见 docs/tauri-migration-plan.md):先用默认外观立即可用,
-    // 读到持久化值后再二次 apply(普通值/Promise 均等价,两端宿主共用此实现)
+    // 设置读取是异步的:先用默认外观立即可用,
+    // 读到持久化值后再二次 apply(普通值/Promise 均等价)
     getSettings()
       .then((s) => {
         if (s.theme && THEMES.some((t) => t.id === s.theme)) theme.value = s.theme
