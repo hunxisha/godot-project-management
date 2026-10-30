@@ -3,10 +3,11 @@
  *  · 分组导航(工作区 / 资源),Godot 编辑器 dock 式左侧竖栏
  *  · 顶部品牌 + 命令面板入口(Ctrl+K),底部主题/设置
  *  · 可收起为纯图标模式(状态持久化到 localStorage),窄窗口自动图标化 */
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import Icon from './Icon.vue'
 import ThemeSwitcher from './ThemeSwitcher.vue'
 import { listDocs } from '../services/bridge'
+import { useTaskAlerts } from '../composables/useTaskAlerts'
 import type { GodotProject } from '../types/godot'
 
 type NavItem = { key: string; label: string; icon: string; match?: string[] }
@@ -57,8 +58,19 @@ async function refreshCount() {
   }
 }
 
-onMounted(refreshCount)
-watch(() => props.modelValue, refreshCount)
+/** 徽标:看板逾期 + 今日到期的未完成卡片数(跨全部看板;统计与刷新在 useTaskAlerts) */
+const { stats: dueStats, refresh: refreshDue } = useTaskAlerts()
+const dueTotal = computed(() => dueStats.value.overdue + dueStats.value.today)
+const dueTitle = computed(() => `逾期 ${dueStats.value.overdue} · 今日到期 ${dueStats.value.today}(未完成)`)
+
+onMounted(() => {
+  refreshCount()
+  refreshDue()
+})
+watch(() => props.modelValue, () => {
+  refreshCount()
+  refreshDue()
+})
 
 function isActive(t: NavItem) {
   return t.match ? t.match.includes(props.modelValue) : props.modelValue === t.key
@@ -123,6 +135,11 @@ function pick(t: NavItem) {
           <Icon :name="t.icon" :size="15" />
           <span class="ni-label">{{ t.label }}</span>
           <span v-if="t.key === 'projects' && projectCount" class="ni-badge">{{ projectCount }}</span>
+          <span
+            v-else-if="t.key === 'tasks' && dueTotal"
+            class="ni-badge due"
+            :title="dueTitle"
+          >{{ dueTotal }}</span>
         </button>
       </template>
     </nav>
@@ -326,6 +343,12 @@ function pick(t: NavItem) {
 
 .nav-item.active .ni-badge {
   background: var(--brand);
+  color: #fff;
+}
+
+/* 看板到期徽标:danger 调,提示「有未完成的逾期/今日卡」 */
+.ni-badge.due {
+  background: var(--danger);
   color: #fff;
 }
 

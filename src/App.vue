@@ -12,6 +12,8 @@ import DocsView from './views/DocsView.vue'
 import BackupsView from './views/BackupsView.vue'
 import TasksView from './views/TasksView.vue'
 import SettingsView from './views/SettingsView.vue'
+import { notify } from './services/bridge'
+import { useTaskAlerts } from './composables/useTaskAlerts'
 
 const tab = ref('dashboard')
 /** 插件页(市场+已安装合并为一个导航项)当前子页:切走再切回「插件」时回到上次位置 */
@@ -44,6 +46,9 @@ const paletteOpen = ref(false)
 /** 项目页 → 文档页:按项目绑定的引擎版本选库(docVersionId 为待切换的版本 id) */
 const docVersionRequest = ref<string | null>(null)
 
+/** 打开插件时扫一遍全部看板:有逾期/今日到期的未完成卡就弹一次汇总通知(无后台轮询,每次打开至多一条) */
+const { stats: dueStats, refresh: refreshTaskAlerts } = useTaskAlerts()
+
 onMounted(() => {
   // 主题(色板 × 明暗)已在 main.ts 挂载前应用,见 composables/useTheme.ts
   window.ztools.setExpendHeight(600)
@@ -67,6 +72,11 @@ onMounted(() => {
   }
   window.addEventListener('keydown', onKeydown)
   keydownCleanup = () => window.removeEventListener('keydown', onKeydown)
+
+  void refreshTaskAlerts().then(() => {
+    const { overdue, today } = dueStats.value
+    if (overdue + today > 0) notify(`看板待办提醒:逾期 ${overdue} 张、今日到期 ${today} 张`)
+  })
 })
 
 let keydownCleanup: (() => void) | null = null

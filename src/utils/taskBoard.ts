@@ -278,6 +278,21 @@ export function countCards(board: TaskBoard): number {
   return board.columns.reduce((sum, c) => sum + c.cards.length, 0)
 }
 
+/** 看板内「逾期 + 今日到期」的未完成卡片数(侧栏/页头徽标与打开通知的统计口径,已完成卡一律排除) */
+export function countDue(board: TaskBoard, today = todayStr()): { overdue: number, today: number } {
+  let overdue = 0
+  let todayCount = 0
+  for (const column of board.columns) {
+    for (const card of column.cards) {
+      if (card.done === true) continue
+      const s = dueState(card.due, today)
+      if (s === 'overdue') overdue++
+      else if (s === 'today') todayCount++
+    }
+  }
+  return { overdue, today: todayCount }
+}
+
 /** 本地时区的今天,YYYY-MM-DD(dueState 的比较基准,测试可注入) */
 export function todayStr(now = new Date()): string {
   const y = now.getFullYear()

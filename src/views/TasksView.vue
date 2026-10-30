@@ -11,7 +11,7 @@ import EmptyState from '../components/EmptyState.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import TaskCardDialog from '../components/dialogs/TaskCardDialog.vue'
 import { useTasks } from '../composables/useTasks'
-import { dueState, matchCard, TASK_COLORS, TASK_COLOR_LABELS, type TaskFilter } from '../utils/taskBoard'
+import { countDue, dueState, matchCard, TASK_COLORS, TASK_COLOR_LABELS, type TaskFilter } from '../utils/taskBoard'
 import type { TaskCard, TaskColor, TaskColumn, TaskPriority } from '../types/godot'
 
 const {
@@ -77,6 +77,17 @@ function clearFilters() {
   filterPriority.value = ''
   overdueOnly.value = false
 }
+
+// ---------- 页头到期徽标(当前板,排除已完成卡) ----------
+
+const dueBadge = computed(() => (board.value ? countDue(board.value) : { overdue: 0, today: 0 }))
+const dueTotal = computed(() => dueBadge.value.overdue + dueBadge.value.today)
+const dueText = computed(() => {
+  const { overdue, today } = dueBadge.value
+  if (overdue && today) return `逾期 ${overdue} · 今日 ${today}`
+  if (overdue) return `逾期 ${overdue}`
+  return `今日 ${today}`
+})
 
 // ---------- 看板切换 ----------
 
@@ -356,7 +367,14 @@ onBeforeUnmount(() => {
 <template>
   <div class="tasks view">
     <div class="view-head">
-      <h2><Icon name="kanban" :size="17" /> 任务看板 <span class="count-pill">{{ cardCount }}</span></h2>
+      <h2>
+        <Icon name="kanban" :size="17" /> 任务看板 <span class="count-pill">{{ cardCount }}</span>
+        <span
+          v-if="dueTotal"
+          class="count-pill due-pill"
+          :title="`当前看板:逾期 ${dueBadge.overdue} · 今日到期 ${dueBadge.today}(未完成)`"
+        >{{ dueText }}</span>
+      </h2>
       <span class="grow"></span>
       <select v-model="boardKey" class="select board-select" title="选择看板(通用或某个项目)">
         <option value="global">通用看板</option>
@@ -605,6 +623,12 @@ onBeforeUnmount(() => {
 
 <style scoped>
 /* ---------- 页头控件 ---------- */
+
+/* 页头到期徽标:danger 调(与侧栏看板徽标同语义) */
+.due-pill {
+  background: var(--danger-weak);
+  color: var(--danger);
+}
 
 .board-select {
   width: 168px;

@@ -173,6 +173,27 @@ async function main() {
   ok(JSON.stringify(t1) === '["audio","bug","ui"]', '标签去重排序', t1)
   ok(B.countCards(fixture()) === 3, '卡片总数')
 
+  section('countDue:逾期+今日统计(排除已完成)')
+  const dueBoard = {
+    schema: 1,
+    columns: [
+      {
+        id: 'c1',
+        title: '待办',
+        cards: [
+          card('A', '逾期未完成', { due: '2000-01-01' }),
+          card('B', '逾期已完成', { due: '2000-01-01', done: true }),
+          card('C', '今日到期', { due: B.todayStr() }),
+          card('D', '三天内', { due: B.addDays(B.todayStr(), 2) }),
+          card('E', '无截止日')
+        ]
+      }
+    ],
+    updatedAt: 1
+  }
+  ok(JSON.stringify(B.countDue(dueBoard)) === '{"overdue":1,"today":1}', '只数未完成的逾期/今日卡', B.countDue(dueBoard))
+  ok(JSON.stringify(B.countDue({ schema: 1, columns: [], updatedAt: 1 })) === '{"overdue":0,"today":0}', '空板为 0')
+
   section('dueState / todayStr / addDays')
   const today = B.todayStr()
   ok(/^\d{4}-\d{2}-\d{2}$/.test(today), 'todayStr 格式', today)
