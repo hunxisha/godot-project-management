@@ -64,6 +64,8 @@ await build({
         godotdocs: path.join(root, 'src', 'utils', 'godotDocs.ts'),
         doctree: path.join(root, 'src', 'utils', 'docTree.ts'),
         docsig: path.join(root, 'src', 'utils', 'docSig.ts'),
+        taskboard: path.join(root, 'src', 'utils', 'taskBoard.ts'),
+        usetasks: path.join(root, 'src', 'composables', 'useTasks.ts'),
         // 测试专用:暴露 vue(与各入口共享同一个 chunk),供测试创建 ref
         vueshim: path.join(root, 'src', 'composables', '__tests__', 'vue-shim.mjs')
       },
@@ -75,6 +77,6 @@ await build({
   }
 })
 
-for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'format', 'godotversion', 'markettags', 'langdetect', 'bridge', 'usetranslation', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'docsig', 'vueshim']) {
+for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'format', 'godotversion', 'markettags', 'langdetect', 'bridge', 'usetranslation', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'docsig', 'taskboard', 'usetasks', 'vueshim']) {
   console.log(`bundle built: ${path.join(root, OUT_DIR, `${name}.mjs`)}`)
 }

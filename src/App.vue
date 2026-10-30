@@ -10,6 +10,7 @@ import MarketplaceView from './views/MarketplaceView.vue'
 import AddonsView from './views/AddonsView.vue'
 import DocsView from './views/DocsView.vue'
 import BackupsView from './views/BackupsView.vue'
+import TasksView from './views/TasksView.vue'
 import SettingsView from './views/SettingsView.vue'
 
 const tab = ref('dashboard')
@@ -50,6 +51,7 @@ onMounted(() => {
     if (code === 'projects') tab.value = 'projects'
     else if (code === 'versions') tab.value = 'versions'
     else if (code === 'plugins') tab.value = 'marketplace'
+    else if (code === 'tasks') tab.value = 'tasks'
     else if (code === 'addProject') {
       tab.value = 'projects'
       enterPayload.value = payload as string[]
@@ -163,6 +165,7 @@ function gotoCreateBackup(id: string) {
             @navigate="tab = $event"
             @backup-project="gotoCreateBackup"
           />
+          <TasksView v-else-if="tab === 'tasks'" />
           <SettingsView v-else />
         </KeepAlive>
       </main>

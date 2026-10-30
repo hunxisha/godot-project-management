@@ -338,6 +338,8 @@ export interface GodotSettings {
   backupRoot?: string
   /** 文档页上次浏览的文档库版本 id(引擎文档浏览功能) */
   docsVersionId?: string
+  /** 任务看板页上次浏览的看板 key('global' 或项目文档 id) */
+  taskBoardId?: string
   /** 默认备份方式:zip 打包 | copy 完整快照 */
   backupMode?: 'zip' | 'copy'
   /** 默认是否包含 .godot 编辑器缓存 */
@@ -619,6 +621,40 @@ export interface ProjectInfo {
   icon?: string
 }
 
+// ---------- 任务看板(一张看板一个文档,`godot/taskboard/<boardKey>`) ----------
+
+/** 任务卡片优先级(缺省 normal,界面不显示徽章) */
+export type TaskPriority = 'high' | 'normal' | 'low'
+
+/** 任务看板卡片 */
+export interface TaskCard {
+  id: string
+  title: string
+  /** 多行备注 */
+  notes?: string
+  priority?: TaskPriority
+  /** 截止日期,YYYY-MM-DD(本地时区,与 dueState 的比较基准一致) */
+  due?: string
+  /** 自由标签 */
+  tags?: string[]
+  createdAt: number
+  updatedAt: number
+}
+
+/** 任务看板列。卡片内嵌:拖拽 = 数组重排,单文档单写入方,无需拆卡文档 */
+export interface TaskColumn {
+  id: string
+  title: string
+  cards: TaskCard[]
+}
+
+/** 任务看板文档体。读端一律过 normalizeBoard(缺字段给默认值,与 backup.js 的 schema 口径一致) */
+export interface TaskBoard {
+  schema: 1
+  columns: TaskColumn[]
+  updatedAt: number
+}
+
 /** db 文档 id 约定 */
 export const DOC_ID = {
   settings: 'godot/settings',
@@ -627,14 +663,17 @@ export const DOC_ID = {
     `godot/version/${tag}-${variant}-${platform}`,
   project: (id: string) => `godot/project/${id}`,
   backup: (id: string) => `godot/backup/${id}`,
-  addon: (projectId: string, assetId: number) => `godot/asset/${projectId}/${assetId}`
+  addon: (projectId: string, assetId: number) => `godot/asset/${projectId}/${assetId}`,
+  /** boardKey = 'global'(通用看板)或完整项目文档 id(嵌套 id 先例:godot/asset/…) */
+  taskBoard: (boardKey: string) => `godot/taskboard/${boardKey}`
 } as const
 
 export const DOC_PREFIX = {
   project: 'godot/project/',
   version: 'godot/version/',
   backup: 'godot/backup/',
-  asset: 'godot/asset/'
+  asset: 'godot/asset/',
+  taskBoard: 'godot/taskboard/'
 } as const
 
 // ---------- 项目文件原语的返回类型（实现在 src-ztools/preload/lib/inspectfs.js） ----------

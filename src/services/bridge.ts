@@ -41,7 +41,7 @@ export async function listDocs<T>(prefix: string): Promise<(T & { _id: string })
  * 读回来的永远是普通对象,比较与序列化都不再受代理影响。
  * @param value 任意可 JSON 化的值
  */
-function toPlain<T>(value: T): T {
+export function toPlain<T>(value: T): T {
   if (value === null || typeof value !== 'object') return value
   if (Array.isArray(value)) return value.map((v) => toPlain(v)) as unknown as T
   const out: Record<string, unknown> = {}

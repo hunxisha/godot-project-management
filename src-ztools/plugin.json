@@ -51,6 +51,16 @@
       ]
     },
     {
+      "code": "tasks",
+      "explain": "任务看板,管理通用与项目待办",
+      "icon": "logo.png",
+      "cmds": [
+        "gtodo",
+        "任务看板",
+        "godot待办"
+      ]
+    },
+    {
       "code": "addProject",
       "explain": "拖入项目文件夹或 project.godot 文件快速添加项目",
       "icon": "logo.png",

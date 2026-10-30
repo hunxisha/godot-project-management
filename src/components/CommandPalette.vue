@@ -80,6 +80,7 @@ const commands = computed<Command[]>(() => [
   },
   { id: 'nav-dashboard', label: '前往 概览', icon: 'grid', group: '导航', run: () => nav('dashboard') },
   { id: 'nav-projects', label: '前往 项目', icon: 'folder', group: '导航', run: () => nav('projects') },
+  { id: 'nav-tasks', label: '前往 看板', icon: 'kanban', group: '导航', run: () => nav('tasks') },
   { id: 'nav-plugins', label: '前往 插件', icon: 'puzzle', group: '导航', run: () => nav('plugins') },
   { id: 'nav-versions', label: '前往 引擎', icon: 'package', group: '导航', run: () => nav('versions') },
   { id: 'nav-docs', label: '前往 文档', icon: 'book', group: '导航', run: () => nav('docs') },

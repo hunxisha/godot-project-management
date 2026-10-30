@@ -73,6 +73,8 @@ const ICONS: Record<string, string> = {
   activity: 'M3.5 12h4l2.5-6 4 12 2.5-6h4',
   // 横排三点:行内「更多操作」菜单
   more: 'M5.5 12h.01M12 12h.01M18.5 12h.01',
+  // 三竖栏:任务看板页(导航/页头)
+  kanban: 'M5 4.5h3.6v11.4H5zM10.2 4.5h3.6v7.6h-3.6zM15.4 4.5H19v13.4h-3.6z',
 }
 
 const props = defineProps<{ name: string; size?: number; strokeWidth?: number }>()

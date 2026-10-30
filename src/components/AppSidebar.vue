@@ -17,6 +17,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       { key: 'dashboard', label: '概览', icon: 'grid' },
       { key: 'projects', label: '项目', icon: 'folder' },
+      { key: 'tasks', label: '看板', icon: 'kanban' },
       { key: 'plugins', label: '插件', icon: 'puzzle', match: ['marketplace', 'addons'] }
     ]
   },
