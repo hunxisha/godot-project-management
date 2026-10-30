@@ -209,7 +209,18 @@ const PROVIDED: Record<string, any> = {
   },
   testTranslateProvider: () => ok({ ok: true, ms: 42, sample: '你好,世界' }),
   translateCacheInfo: () => ok({ count: 3, sizeBytes: 4096, entries: 12 }),
-  translateCacheClear: () => ok({ ok: true, removed: 3 })
+  translateCacheClear: () => ok({ ok: true, removed: 3 }),
+  // ---------- 文档库缓存(设置页用) ----------
+  // 形状必须对齐 DocsCacheInfo:Proxy 兜底会回空数组,truthy 却没有 libraries 字段,
+  // 模板里一读 .libraries.length 渲染 effect 就抛错,整个设置页从此不再响应任何状态。
+  docsCacheInfo: () => ok({
+    sizeBytes: 18_772_224,
+    libraries: [
+      { versionId: 'godot/version/4.7.2', tag: '4.7.2-stable', classes: 742, sizeBytes: 11_204_608 },
+      { versionId: 'godot/version/4.4.1', tag: '4.4.1-stable', classes: 689, sizeBytes: 7_567_616 }
+    ]
+  }),
+  docsCleanCache: (versionIds?: string[]) => ok({ ok: true, removed: versionIds?.length || 2 })
 }
 
 window.services = new Proxy(PROVIDED, {
