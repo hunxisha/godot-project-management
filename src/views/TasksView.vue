@@ -11,6 +11,7 @@ import EmptyState from '../components/EmptyState.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import TaskCardDialog from '../components/dialogs/TaskCardDialog.vue'
 import { useTasks } from '../composables/useTasks'
+import { useTaskAlerts, type OverviewEntry } from '../composables/useTaskAlerts'
 import { countDue, dueState, matchCard, TASK_COLORS, TASK_COLOR_LABELS, type TaskFilter } from '../utils/taskBoard'
 import type { TaskCard, TaskColor, TaskColumn, TaskPriority } from '../types/godot'
 
@@ -27,6 +28,7 @@ const {
   addCard,
   updateCard,
   setCardDone,
+  setCardDoneOnBoard,
   removeCard,
   undoDelete,
   duplicateCard,
@@ -88,6 +90,49 @@ const dueText = computed(() => {
   if (overdue) return `逾期 ${overdue}`
   return `今日 ${today}`
 })
+
+// ---------- 总览模式(跨看板,按紧急度分组) ----------
+
+const viewMode = ref<'board' | 'overview'>('board')
+const { overviewEntries, ready: overviewReady, refresh: refreshAlerts } = useTaskAlerts()
+const overviewLoading = computed(() => viewMode.value === 'overview' && !overviewReady.value)
+const overviewCount = computed(() => overviewEntries.value.length)
+
+const overviewSections = computed(() =>
+  [
+    { key: 'overdue', label: '已逾期', icon: 'alert' },
+    { key: 'today', label: '今日到期', icon: 'clock' },
+    { key: 'soon', label: '3 天内到期', icon: 'clock' }
+  ]
+    .map((s) => ({ ...s, cards: overviewEntries.value.filter((e) => e.section === s.key) }))
+    .filter((s) => s.cards.length)
+)
+
+function enterOverview() {
+  viewMode.value = 'overview'
+  refreshAlerts()
+}
+
+/** 总览就地完成:写库(可能是旁路的非当前板)后刷新跨板清单 */
+function completeEntry(e: OverviewEntry) {
+  void setCardDoneOnBoard(e.boardKey, e.card.id, true).then(() => refreshAlerts())
+}
+
+/** 跳回来源板并短暂高亮目标卡(过滤条件可能挡住它,先清掉) */
+const highlightId = ref<string | null>(null)
+
+async function gotoCard(e: OverviewEntry) {
+  clearFilters()
+  viewMode.value = 'board'
+  await selectBoard(e.boardKey)
+  highlightId.value = e.card.id
+  await nextTick()
+  const smooth = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+  document.querySelector(`[data-card-id="${e.card.id}"]`)?.scrollIntoView({ block: 'center', behavior: smooth })
+  setTimeout(() => {
+    if (highlightId.value === e.card.id) highlightId.value = null
+  }, 2400)
+}
 
 // ---------- 看板切换 ----------
 
@@ -368,28 +413,33 @@ onBeforeUnmount(() => {
   <div class="tasks view">
     <div class="view-head">
       <h2>
-        <Icon name="kanban" :size="17" /> 任务看板 <span class="count-pill">{{ cardCount }}</span>
+        <Icon name="kanban" :size="17" /> 任务看板
+        <span class="count-pill">{{ viewMode === 'overview' ? overviewCount : cardCount }}</span>
         <span
-          v-if="dueTotal"
+          v-if="viewMode === 'board' && dueTotal"
           class="count-pill due-pill"
           :title="`当前看板:逾期 ${dueBadge.overdue} · 今日到期 ${dueBadge.today}(未完成)`"
         >{{ dueText }}</span>
       </h2>
       <span class="grow"></span>
-      <select v-model="boardKey" class="select board-select" title="选择看板(通用或某个项目)">
+      <div class="seg view-mode" role="group" aria-label="视图切换">
+        <button type="button" :class="{ on: viewMode === 'board' }" @click="viewMode = 'board'">单板</button>
+        <button type="button" :class="{ on: viewMode === 'overview' }" @click="enterOverview">总览</button>
+      </div>
+      <select v-if="viewMode === 'board'" v-model="boardKey" class="select board-select" title="选择看板(通用或某个项目)">
         <option value="global">通用看板</option>
         <optgroup v-if="projects.length" label="项目">
           <option v-for="p in projects" :key="p._id" :value="p._id">{{ p.name }}</option>
         </optgroup>
       </select>
-      <label class="search-box">
+      <label v-if="viewMode === 'board'" class="search-box">
         <Icon name="search" :size="13" />
         <input v-model="query" class="input" placeholder="搜索标题 / 备注 / 标签…" />
       </label>
     </div>
 
-    <!-- 过滤行:优先级 + 仅逾期 + 标签 chips(只列当前看板里出现过的标签) -->
-    <div class="tag-filter">
+    <!-- 过滤行(仅单板模式):优先级 + 仅逾期 + 标签 chips(只列当前看板里出现过的标签) -->
+    <div v-if="viewMode === 'board'" class="tag-filter">
       <select v-model="filterPriority" class="select tf-select" title="按优先级过滤">
         <option value="">全部优先级</option>
         <option value="high">仅高优先级</option>
@@ -421,8 +471,8 @@ onBeforeUnmount(() => {
       <Icon name="alert" :size="13" /> {{ saveError }}
     </div>
 
-    <!-- 撤销条:最近一次删除的卡片,7 秒后自动消失 -->
-    <div v-if="lastDelete" class="undo-bar">
+    <!-- 撤销条(仅单板模式):最近一次删除的卡片,7 秒后自动消失 -->
+    <div v-if="viewMode === 'board' && lastDelete" class="undo-bar">
       <Icon name="trash" :size="13" />
       <span class="undo-text">已删除「{{ lastDelete?.card.title }}」</span>
       <button class="undo-btn" title="把卡片放回原位" @click="undoDelete">
@@ -430,15 +480,16 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <!-- 载入中(board 为 null 时) -->
-    <EmptyState v-if="!board" icon="kanban" title="正在载入看板…" />
+    <template v-if="viewMode === 'board'">
+      <!-- 载入中(board 为 null 时) -->
+      <EmptyState v-if="!board" icon="kanban" title="正在载入看板…" />
 
-    <!-- 一列都没有:引导建列(列删光也是合法状态,不擅自重建默认板) -->
-    <EmptyState v-else-if="board.columns.length === 0" icon="kanban" title="还没有列" desc="先把流程拆成几列,例如 待办 / 进行中 / 已完成。">
-      <button class="btn primary" @click="openCreateColumn"><Icon name="plus" :size="14" /> 新建列</button>
-    </EmptyState>
+      <!-- 一列都没有:引导建列(列删光也是合法状态,不擅自重建默认板) -->
+      <EmptyState v-else-if="board.columns.length === 0" icon="kanban" title="还没有列" desc="先把流程拆成几列,例如 待办 / 进行中 / 已完成。">
+        <button class="btn primary" @click="openCreateColumn"><Icon name="plus" :size="14" /> 新建列</button>
+      </EmptyState>
 
-    <div v-else class="board" :class="{ 'col-dragging': !!dragColId }">
+      <div v-else class="board" :class="{ 'col-dragging': !!dragColId }">
       <section
         v-for="(col, ci) in board.columns"
         :key="col.id"
@@ -499,8 +550,9 @@ onBeforeUnmount(() => {
             <div v-if="showLine(col.id, vi)" class="drop-line"></div>
             <article
               class="tcard card"
-              :class="{ dragging: dragCard === card.id, done: card.done, 'has-color': !!card.color }"
+              :class="{ dragging: dragCard === card.id, done: card.done, 'has-color': !!card.color, highlight: highlightId === card.id }"
               :style="colorStyle(card.color)"
+              :data-card-id="card.id"
               draggable="true"
               @dragstart="onCardDragStart(col, card, $event)"
               @dragover="onCardDragOver(col, vi, $event)"
@@ -567,6 +619,50 @@ onBeforeUnmount(() => {
         <button class="btn small ghost" @click="openCreateColumn"><Icon name="plus" :size="13" /> 新建列</button>
       </section>
     </div>
+    </template>
+
+    <!-- 总览:跨看板按紧急度分组,就地完成或点击跳回原板 -->
+    <div v-else class="overview">
+      <EmptyState v-if="overviewLoading" icon="kanban" title="正在汇总各看板…" />
+      <EmptyState
+        v-else-if="!overviewSections.length"
+        icon="check"
+        title="没有待处理"
+        desc="全部看板都没有逾期、今日或 3 天内到期的未完成卡片。"
+      />
+      <template v-else>
+        <section v-for="sec in overviewSections" :key="sec.key" class="ov-group">
+          <header class="ov-head" :class="sec.key">
+            <Icon :name="sec.icon" :size="13" />
+            <h3>{{ sec.label }}</h3>
+            <span class="count-pill">{{ sec.cards.length }}</span>
+          </header>
+          <article
+            v-for="e in sec.cards"
+            :key="`${e.boardKey}/${e.card.id}`"
+            class="ov-card card"
+            :class="{ 'has-color': !!e.card.color }"
+            :style="colorStyle(e.card.color)"
+            @click="gotoCard(e)"
+          >
+            <button class="tcard-check" title="标记完成" @click.stop="completeEntry(e)">
+              <Icon name="check" :size="11" />
+            </button>
+            <span v-if="e.card.priority === 'high'" class="tag danger">高</span>
+            <span v-else-if="e.card.priority === 'low'" class="tag">低</span>
+            <span class="ov-title" :title="e.card.title">{{ e.card.title }}</span>
+            <span v-if="e.card.tags?.length" class="ov-tags">
+              <span v-for="t in e.card.tags" :key="t" class="tcard-tag">{{ t }}</span>
+            </span>
+            <span class="grow"></span>
+            <span class="ov-board" :title="e.boardName"><Icon name="folder" :size="11" /> {{ e.boardName }}</span>
+            <span v-if="e.card.due" class="tcard-due" :class="sec.key === 'overdue' ? 'over' : sec.key" :title="e.card.due">
+              <Icon name="clock" :size="11" /> {{ shortDue(e.card.due) }}
+            </span>
+          </article>
+        </section>
+      </template>
+    </div>
 
     <TaskCardDialog
       :open="dialogOpen"
@@ -623,6 +719,11 @@ onBeforeUnmount(() => {
 
 <style scoped>
 /* ---------- 页头控件 ---------- */
+
+/* 视图切换(单板/总览) */
+.view-mode {
+  flex-shrink: 0;
+}
 
 /* 页头到期徽标:danger 调(与侧栏看板徽标同语义) */
 .due-pill {
@@ -1114,6 +1215,104 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
+/* 跳转高亮:总览点击后目标卡短暂描边 */
+.tcard.highlight {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-weak);
+}
+
+/* ---------- 总览模式(跨看板) ---------- */
+
+.overview {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 880px;
+  padding: 2px 2px 10px;
+}
+
+.ov-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ov-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+}
+
+.ov-head h3 {
+  margin: 0;
+  font: inherit;
+}
+
+.ov-head.overdue {
+  color: var(--danger);
+}
+
+.ov-head.today {
+  color: var(--warn);
+}
+
+.ov-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.ov-card:hover {
+  border-color: var(--brand);
+  box-shadow: var(--shadow-lift);
+}
+
+.ov-card.has-color {
+  border-left: 3px solid var(--task-color);
+}
+
+.ov-card .tcard-check {
+  width: 15px;
+  height: 15px;
+}
+
+.ov-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text);
+}
+
+.ov-tags {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.ov-board {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
 /* ---------- 列尾快加 ---------- */
 
 .tcol-foot {
@@ -1152,6 +1351,7 @@ onBeforeUnmount(() => {
   .tcard,
   .tcard-check,
   .tcard-act,
+  .ov-card,
   .quick-add,
   .undo-btn {
     transition: none;

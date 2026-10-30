@@ -271,6 +271,25 @@ async function main() {
   ok(t.board.value.columns[0].color === undefined, '不传即清色')
   ok(docs.get('godot/taskboard/global').columns[0].color === undefined, '清色已落库')
 
+  section('setCardDoneOnBoard:旁路写非当前板文档,当前板走内存路径')
+  resetDb()
+  ;({ useTasks } = await freshModule())
+  t = useTasks()
+  await t.init()
+  await t.selectBoard(P1)
+  await t.addCard(t.board.value.columns[0].id, { title: '项目一的卡' })
+  const remoteCardId = t.board.value.columns[0].cards[0].id
+  await t.selectBoard('global')
+  const okRemote = await t.setCardDoneOnBoard(P1, remoteCardId, true)
+  ok(okRemote === true, '旁路写库返回 true')
+  ok(docs.get(`godot/taskboard/${P1}`).columns[0].cards[0].done === true, '非当前板卡片已标完成(直写文档)')
+  ok(t.cardCount.value === 0, '当前板内存不受旁路影响')
+  await t.addCard(t.board.value.columns[0].id, { title: '当前板的卡' })
+  const localCardId = t.board.value.columns[0].cards[0].id
+  await t.setCardDoneOnBoard('global', localCardId, true)
+  ok(t.board.value.columns[0].cards[0].done === true, '当前板路径生效')
+  ok(docs.get('godot/taskboard/global').columns[0].cards[0].done === true, '当前板路径已落库')
+
   console.log(`\n结果: ${pass} 通过, ${failures.length} 失败`)
   if (failures.length) {
     console.error('失败项:\n - ' + failures.join('\n - '))

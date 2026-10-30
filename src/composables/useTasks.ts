@@ -154,6 +154,23 @@ async function setCardDone(cardId: string, done: boolean) {
   await updateCard(cardId, { done })
 }
 
+/**
+ * 总览就地完成:卡片可能属于非当前板。
+ * 当前板走内存路径(保持与界面一致);其他板直接读改写其文档,不碰当前内存板。
+ * 返回是否已落库(供调用方决定是否刷新跨板统计)。
+ */
+async function setCardDoneOnBoard(boardKey: string, cardId: string, done: boolean): Promise<boolean> {
+  if (boardKey === currentKey.value) {
+    await setCardDone(cardId, done)
+    return true
+  }
+  const target = normalizeBoard(await getDoc<TaskBoard>(DOC_ID.taskBoard(boardKey)))
+  if (!target) return false
+  const next = opUpdateCard(target, cardId, { done })
+  if (next === target) return false
+  return putDoc(DOC_ID.taskBoard(boardKey), toPlain(next))
+}
+
 async function removeCard(cardId: string) {
   const prev = board.value
   if (!prev) return
@@ -240,6 +257,7 @@ export function useTasks() {
     saveCard,
     updateCard,
     setCardDone,
+    setCardDoneOnBoard,
     removeCard,
     undoDelete,
     duplicateCard,

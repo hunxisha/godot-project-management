@@ -86,6 +86,15 @@ async function main() {
   await alerts.refresh()
   ok(alerts.stats.value.overdue === 2 && alerts.stats.value.today === 1, '跨板汇总(逾期 2 + 今日 1)', alerts.stats.value)
 
+  section('总览条目:分节、来源板名与排序')
+  const ov = alerts.overviewEntries.value
+  ok(ov.length === 3, '只收逾期/今日卡(排除已完成与远期)', ov.length)
+  ok(ov[0].card.id === 'D' && ov[1].card.id === 'A' && ov[2].card.id === 'C', '节序 overdue→today,节内按截止日升序', ov.map((e) => e.card.id))
+  ok(ov[2].section === 'today' && ov[0].section === 'overdue', '分节标记正确')
+  ok(ov.find((e) => e.card.id === 'D')?.boardName === '项目一', '项目板显示项目名')
+  ok(ov.find((e) => e.card.id === 'A')?.boardName === '通用看板', '通用板名称')
+  ok(alerts.ready.value === true, '首次成功扫描后 ready')
+
   section('refresh:坏文档跳过、空库归零')
   docs.set('godot/taskboard/broken', { _id: 'godot/taskboard/broken', columns: 'bad' })
   await alerts.refresh()
@@ -93,6 +102,7 @@ async function main() {
   docs.clear()
   await alerts.refresh()
   ok(alerts.stats.value.overdue === 0 && alerts.stats.value.today === 0, '清库后归零', alerts.stats.value)
+  ok(alerts.overviewEntries.value.length === 0, '清库后总览清空', alerts.overviewEntries.value.length)
 
   section('refresh:宿主异常保持上次统计')
   docs.set('godot/taskboard/global', { _id: 'godot/taskboard/global', schema: 1, columns: [{ id: 'c', title: '待办', cards: [card('F', '逾期', { due: '2000-01-01' })] }], updatedAt: 1 })
