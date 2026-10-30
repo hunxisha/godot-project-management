@@ -258,6 +258,19 @@ async function main() {
   await t.setCardDone(origId, false)
   ok(t.board.value.columns[0].cards[0].done === undefined, '取消完成不残留 false')
 
+  section('setColumnColor:生效并落库,可清色')
+  resetDb()
+  ;({ useTasks } = await freshModule())
+  t = useTasks()
+  await t.init()
+  const colId = t.board.value.columns[0].id
+  await t.setColumnColor(colId, 'purple')
+  ok(t.board.value.columns[0].color === 'purple', '列颜色生效')
+  ok(docs.get('godot/taskboard/global').columns[0].color === 'purple', '列颜色已落库')
+  await t.setColumnColor(colId, undefined)
+  ok(t.board.value.columns[0].color === undefined, '不传即清色')
+  ok(docs.get('godot/taskboard/global').columns[0].color === undefined, '清色已落库')
+
   console.log(`\n结果: ${pass} 通过, ${failures.length} 失败`)
   if (failures.length) {
     console.error('失败项:\n - ' + failures.join('\n - '))

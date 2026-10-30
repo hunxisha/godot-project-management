@@ -7,7 +7,7 @@
 // 失败回读」,界面永远与库对齐;上次浏览的板记在 settings.taskBoardId。
 import { computed, ref } from 'vue'
 import { getDoc, getSettings, listDocs, putDoc, saveSettings, toPlain } from '../services/bridge'
-import { DOC_ID, type GodotProject, type TaskBoard, type TaskCard, type TaskPriority } from '../types/godot'
+import { DOC_ID, type GodotProject, type TaskBoard, type TaskCard, type TaskColor, type TaskPriority } from '../types/godot'
 import {
   addCard as opAddCard,
   addColumn as opAddColumn,
@@ -25,7 +25,8 @@ import {
   removeColumn as opRemoveColumn,
   renameColumn as opRenameColumn,
   restoreCard as opRestoreCard,
-  updateCard as opUpdateCard
+  updateCard as opUpdateCard,
+  updateColumn as opUpdateColumn
 } from '../utils/taskBoard'
 
 /** 当前看板('global' 或项目文档 id) */
@@ -199,6 +200,12 @@ async function renameColumn(columnId: string, title: string) {
   await commit(opRenameColumn(board.value, columnId, title))
 }
 
+/** 列颜色(色板 key;不传即清色)。列菜单的 swatch 行用 */
+async function setColumnColor(columnId: string, color?: TaskColor) {
+  if (!board.value) return
+  await commit(opUpdateColumn(board.value, columnId, { color }))
+}
+
 async function removeColumn(columnId: string) {
   if (!board.value) return
   lastDelete.value = null // 撤销条指向的列没了,作废(卡片随之删除,不可恢复)
@@ -239,6 +246,7 @@ export function useTasks() {
     moveCard,
     addColumn,
     renameColumn,
+    setColumnColor,
     removeColumn,
     clearColumn,
     moveColumn

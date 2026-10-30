@@ -11,8 +11,8 @@ import EmptyState from '../components/EmptyState.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import TaskCardDialog from '../components/dialogs/TaskCardDialog.vue'
 import { useTasks } from '../composables/useTasks'
-import { dueState, matchCard, type TaskFilter } from '../utils/taskBoard'
-import type { TaskCard, TaskColumn, TaskPriority } from '../types/godot'
+import { dueState, matchCard, TASK_COLORS, TASK_COLOR_LABELS, type TaskFilter } from '../utils/taskBoard'
+import type { TaskCard, TaskColor, TaskColumn, TaskPriority } from '../types/godot'
 
 const {
   board,
@@ -33,6 +33,7 @@ const {
   moveCard,
   addColumn,
   renameColumn,
+  setColumnColor,
   removeColumn,
   clearColumn,
   moveColumn
@@ -316,6 +317,11 @@ function cancelQuick() {
 
 // ---------- 展示辅助 ----------
 
+/** 卡片/列颜色 → CSS 变量(--task-color 指向主题化的 --task-c-<key>;无色不绑) */
+function colorStyle(color: string | undefined): Record<string, string> | undefined {
+  return color ? { '--task-color': `var(--task-c-${color})` } : undefined
+}
+
 function dueCls(card: TaskCard) {
   const s = dueState(card.due)
   return s === 'overdue' ? 'over' : s === 'today' ? 'today' : s === 'soon' ? 'soon' : ''
@@ -419,7 +425,12 @@ onBeforeUnmount(() => {
         v-for="(col, ci) in board.columns"
         :key="col.id"
         class="tcol panel"
-        :class="{ 'drop-left': !!dragColId && dropColIdx === ci, 'drop-right': !!dragColId && dropColIdx === ci + 1 }"
+        :class="{
+          'drop-left': !!dragColId && dropColIdx === ci,
+          'drop-right': !!dragColId && dropColIdx === ci + 1,
+          'has-color': !!col.color
+        }"
+        :style="colorStyle(col.color)"
       >
         <header
           class="tcol-head"
@@ -439,6 +450,23 @@ onBeforeUnmount(() => {
               <Icon name="more" :size="14" />
             </button>
             <div v-if="menuCol === col.id" class="col-menu">
+              <div class="cm-swatches">
+                <button
+                  class="task-swatch none"
+                  :class="{ on: !col.color }"
+                  title="无颜色"
+                  @click.stop="setColumnColor(col.id, undefined)"
+                ></button>
+                <button
+                  v-for="k in TASK_COLORS"
+                  :key="k"
+                  class="task-swatch"
+                  :class="[`sw-${k}`, { on: col.color === k }]"
+                  :title="`列颜色:${TASK_COLOR_LABELS[k]}`"
+                  @click.stop="setColumnColor(col.id, k)"
+                ></button>
+              </div>
+              <div class="cm-sep"></div>
               <button class="cm-item" @click="openRenameColumn(col)"><Icon name="pen" :size="13" /> 重命名</button>
               <button class="cm-item" :disabled="!col.cards.length" @click="askClearColumn(col)">
                 <Icon name="x" :size="13" /> 清空该列
@@ -453,7 +481,8 @@ onBeforeUnmount(() => {
             <div v-if="showLine(col.id, vi)" class="drop-line"></div>
             <article
               class="tcard card"
-              :class="{ dragging: dragCard === card.id, done: card.done }"
+              :class="{ dragging: dragCard === card.id, done: card.done, 'has-color': !!card.color }"
+              :style="colorStyle(card.color)"
               draggable="true"
               @dragstart="onCardDragStart(col, card, $event)"
               @dragover="onCardDragOver(col, vi, $event)"
@@ -739,6 +768,11 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
+/* 列颜色:面板顶部 3px 内嵌色条(inset shadow 叠加 panel 原阴影,不占布局) */
+.tcol.has-color {
+  box-shadow: inset 0 3px 0 var(--task-color), var(--shadow-sm);
+}
+
 /* 列拖拽落点:左右两侧的 brand 竖条 */
 .tcol.drop-left::before,
 .tcol.drop-right::after {
@@ -846,6 +880,20 @@ onBeforeUnmount(() => {
   color: var(--danger);
 }
 
+/* 列菜单顶部的颜色 swatch 行 */
+.cm-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px 6px;
+}
+
+.cm-sep {
+  height: 1px;
+  margin: 2px 5px 4px;
+  background: var(--border);
+}
+
 /* ---------- 列体与卡片 ---------- */
 
 .tcol-body {
@@ -873,6 +921,11 @@ onBeforeUnmount(() => {
   cursor: pointer;
   flex-shrink: 0;
   transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+/* 卡片颜色:左侧 3px 色条 */
+.tcard.has-color {
+  border-left: 3px solid var(--task-color);
 }
 
 .tcard:hover {

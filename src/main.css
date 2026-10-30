@@ -39,6 +39,17 @@
   --gold: #e8a94a;
   --gold-weak: rgba(232, 169, 74, 0.16);
 
+  /* ---------- 浅色:任务看板色板(卡片左色条/列顶条;key 由存库 color 字段引用,
+     与品牌色板解耦,只随明暗调亮度;swatch 样式见 .task-swatch) ---------- */
+  --task-c-red: #d0474d;
+  --task-c-orange: #d9730d;
+  --task-c-yellow: #bd8f1c;
+  --task-c-green: #43a259;
+  --task-c-cyan: #1a9bab;
+  --task-c-blue: #478cbf;
+  --task-c-purple: #8a63d2;
+  --task-c-gray: #8a939f;
+
   /* ---------- 浅色:头像渐变(项目识别,不随色板变化) ---------- */
   --grad-a: linear-gradient(135deg, #57a1d4, #35719f);
   --grad-b: linear-gradient(135deg, #9b8ae6, #6a55c9);
@@ -120,6 +131,16 @@
   --warn-weak: rgba(227, 179, 65, 0.13);
   --gold: #eebd62;
   --gold-weak: rgba(238, 189, 98, 0.15);
+
+  /* ---------- 深色:任务看板色板(提亮一档,深底上保持可见) ---------- */
+  --task-c-red: #f07178;
+  --task-c-orange: #f0a35c;
+  --task-c-yellow: #e3b341;
+  --task-c-green: #57ab5a;
+  --task-c-cyan: #56c8d8;
+  --task-c-blue: #6cb0e3;
+  --task-c-purple: #a48ff0;
+  --task-c-gray: #7d8590;
 
   /* ---------- 深色:代码语法着色(直取 Godot 编辑器默认值,
      仅注释/成员提亮到 4.5:1) ---------- */
@@ -831,6 +852,53 @@ input[type='checkbox'].switch:checked::after {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
+}
+
+/* ================================================================
+   任务看板色板 swatch(卡片编辑弹窗与列菜单共用)
+   ----------------------------------------------------------------
+   圆点只负责「选中态描边」与「无颜色」斜杠,实际颜色一律引用
+   --task-c-<key>(见 :root 语义色区),明暗自动适配,两处 UI 不重复写。
+   ================================================================ */
+.task-swatch {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+  transition: transform 0.1s, border-color 0.1s;
+}
+
+.task-swatch:hover {
+  transform: scale(1.12);
+}
+
+.task-swatch.on {
+  border-color: var(--brand);
+}
+
+.task-swatch.sw-red { background: var(--task-c-red); }
+.task-swatch.sw-orange { background: var(--task-c-orange); }
+.task-swatch.sw-yellow { background: var(--task-c-yellow); }
+.task-swatch.sw-green { background: var(--task-c-green); }
+.task-swatch.sw-cyan { background: var(--task-c-cyan); }
+.task-swatch.sw-blue { background: var(--task-c-blue); }
+.task-swatch.sw-purple { background: var(--task-c-purple); }
+.task-swatch.sw-gray { background: var(--task-c-gray); }
+
+/* 无颜色:中性底 + 斜杠 */
+.task-swatch.none {
+  background: var(--surface-3);
+  background-image: linear-gradient(135deg, transparent 45%, var(--text-3) 45%, var(--text-3) 55%, transparent 55%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-swatch {
+    transition: none;
+  }
 }
 
 /* 面板:编辑器 dock 语言。头部是小写字距标题条,主体承载内容 */

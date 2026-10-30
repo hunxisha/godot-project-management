@@ -9,6 +9,18 @@ import type { TaskBoard, TaskCard, TaskColumn, TaskColor, TaskPriority } from '.
 /** 卡片/列颜色色板(key 稳定存库,颜色值在 CSS 变量 --task-c-<key> 里随主题走) */
 export const TASK_COLORS = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'gray'] as const
 
+/** 色板 key 的中文标签(swatch 的 title 提示用) */
+export const TASK_COLOR_LABELS: Record<TaskColor, string> = {
+  red: '红',
+  orange: '橙',
+  yellow: '黄',
+  green: '绿',
+  cyan: '青',
+  blue: '蓝',
+  purple: '紫',
+  gray: '灰'
+}
+
 /** 「即将到期」窗口(天):due 在今天之后、SOON_DAYS 天内算 soon */
 export const SOON_DAYS = 3
 
@@ -198,6 +210,21 @@ export function renameColumn(prev: TaskBoard, columnId: string, title: string, n
   const column = findColumn(next, columnId)
   if (!column) return prev
   column.title = name
+  next.updatedAt = now
+  return next
+}
+
+/** 更新列字段(patch 出现的键才生效;color 只接受色板 key,非法值视为清色) */
+export function updateColumn(
+  prev: TaskBoard,
+  columnId: string,
+  patch: Partial<Pick<TaskColumn, 'color'>>,
+  now = Date.now()
+): TaskBoard {
+  const next = cloneBoard(prev)
+  const column = findColumn(next, columnId)
+  if (!column) return prev
+  if ('color' in patch) column.color = TASK_COLORS.includes(patch.color as TaskColor) ? patch.color : undefined
   next.updatedAt = now
   return next
 }

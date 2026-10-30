@@ -1,11 +1,12 @@
 <script setup lang="ts">
-// 任务卡片编辑弹窗:标题/优先级/截止日/标签/备注/所属列。
+// 任务卡片编辑弹窗:标题/优先级/截止日/颜色/标签/备注/所属列。
 // 保存经 useTasks.saveCard 一次落库(字段更新 + 可选换列 = 追加到目标列尾);
 // 删除不在这里做(卡片悬停删除钮 + 看板页 ConfirmDialog),避免弹窗叠弹窗。
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from '../Icon.vue'
 import { useTasks } from '../../composables/useTasks'
-import type { TaskCard, TaskColumn, TaskPriority } from '../../types/godot'
+import { TASK_COLORS, TASK_COLOR_LABELS } from '../../utils/taskBoard'
+import type { TaskCard, TaskColumn, TaskColor, TaskPriority } from '../../types/godot'
 
 const props = defineProps<{
   open: boolean
@@ -28,6 +29,8 @@ const due = ref('')
 const columnId = ref('')
 const tagList = ref<string[]>([])
 const tagDraft = ref('')
+/** 卡片颜色('' = 无颜色);存库走色板 key,值随 --task-c-<key> 变 */
+const color = ref<TaskColor | ''>('')
 const busy = ref(false)
 const titleInput = ref<HTMLInputElement | null>(null)
 
@@ -43,6 +46,7 @@ watch(
     columnId.value = props.columnId
     tagList.value = [...(c?.tags ?? [])]
     tagDraft.value = ''
+    color.value = c?.color ?? ''
     busy.value = false
     nextTick(() => titleInput.value?.focus())
   }
@@ -71,7 +75,8 @@ async function onSave() {
       notes: notes.value.trim() || undefined,
       priority: priority.value,
       due: due.value.trim() || undefined,
-      tags: tagList.value
+      tags: tagList.value,
+      color: color.value || undefined
     },
     columnId.value
   )
@@ -124,6 +129,30 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
         <div class="field">
           <label class="f-label" for="task-card-due">截止日期</label>
           <input id="task-card-due" v-model="due" type="date" class="input" :disabled="busy" />
+        </div>
+
+        <div class="field">
+          <label class="f-label">颜色</label>
+          <div class="swatch-row" role="group" aria-label="卡片颜色">
+            <button
+              type="button"
+              class="task-swatch none"
+              :class="{ on: !color }"
+              title="无颜色"
+              :disabled="busy"
+              @click="color = ''"
+            ></button>
+            <button
+              v-for="k in TASK_COLORS"
+              :key="k"
+              type="button"
+              class="task-swatch"
+              :class="[`sw-${k}`, { on: color === k }]"
+              :title="`卡片颜色:${TASK_COLOR_LABELS[k]}`"
+              :disabled="busy"
+              @click="color = k"
+            ></button>
+          </div>
         </div>
 
         <div class="field">
@@ -184,6 +213,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 </template>
 
 <style scoped>
+.swatch-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .tag-editor {
   display: flex;
   flex-wrap: wrap;
