@@ -478,9 +478,43 @@ function menuDelete(card: TaskCard) {
 // ---------- 列:菜单 / 新建重命名 / 清空删除 ----------
 
 const menuCol = ref<string | null>(null)
+const menuColPos = ref({ x: 0, y: 0 })
 
-function toggleMenu(colId: string) {
-  menuCol.value = menuCol.value === colId ? null : colId
+// 列菜单可以是任意一列(浮层 Teleport 到 body,避免被列面板的 overflow 裁切)
+const menuColumn = computed(
+  () => (board.value?.columns ?? []).find((c) => c.id === menuCol.value) ?? null
+)
+
+function toggleMenu(colId: string, e: MouseEvent) {
+  if (menuCol.value === colId) {
+    menuCol.value = null
+    return
+  }
+  const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  const width = 168
+  const height = 224
+  const x = Math.max(8, Math.min(r.right - width, window.innerWidth - width - 8))
+  const y = Math.max(8, Math.min(r.bottom + 6, window.innerHeight - height - 8))
+  menuColPos.value = { x, y }
+  menuCol.value = colId
+}
+
+/** 菜单里的操作都从当前 menuColumn 取列,模板里就不用处理可空类型 */
+function menuSetColor(color?: TaskColor) {
+  const col = menuColumn.value
+  if (col) setColumnColor(col.id, color)
+}
+
+function menuRename() {
+  if (menuColumn.value) openRenameColumn(menuColumn.value)
+}
+
+function menuClear() {
+  if (menuColumn.value) askClearColumn(menuColumn.value)
+}
+
+function menuRemove() {
+  if (menuColumn.value) askRemoveColumn(menuColumn.value)
 }
 
 const colModal = ref<{ mode: 'create' | 'rename', id: string, title: string } | null>(null)
@@ -860,10 +894,16 @@ function columnOfCard(cardId: string) {
 
 function onDocClick(e: MouseEvent) {
   const el = e.target as HTMLElement | null
-  if (menuCol.value && !el?.closest('.col-menu-wrap')) menuCol.value = null
+  if (menuCol.value && !el?.closest('.col-menu') && !el?.closest('.tcol-more')) menuCol.value = null
   if (cardMenu.value && !el?.closest('.task-card-menu') && !el?.closest('.tcard-more')) cardMenu.value = null
   if (filterOpen.value && !el?.closest('.filter-wrap')) filterOpen.value = false
   if (helpOpen.value && !el?.closest('.help-wrap')) helpOpen.value = false
+}
+
+/** 面板滚动/窗口尺寸变化时关闭固定定位的浮层,避免菜单与触发点脱节 */
+function closeFloatingMenus() {
+  menuCol.value = null
+  cardMenu.value = null
 }
 
 function isTypingTarget(el: EventTarget | null): boolean {
@@ -914,11 +954,15 @@ function onKey(e: KeyboardEvent) {
 onMounted(() => {
   document.addEventListener('click', onDocClick)
   window.addEventListener('keydown', onKey)
+  window.addEventListener('resize', closeFloatingMenus)
+  window.addEventListener('scroll', closeFloatingMenus, true)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocClick)
   window.removeEventListener('keydown', onKey)
+  window.removeEventListener('resize', closeFloatingMenus)
+  window.removeEventListener('scroll', closeFloatingMenus, true)
   if (undoTimer) clearTimeout(undoTimer)
   if (flashTimer) clearTimeout(flashTimer)
 })
@@ -1233,7 +1277,7 @@ onBeforeUnmount(() => {
         </button>
       </EmptyState>
 
-      <div v-else class="board" :class="{ 'col-dragging': !!dragColId }">
+      <div v-else class="board" :class="{ 'col-dragging': !!dragColId }" @scroll.passive="closeFloatingMenus">
         <section
           v-for="(col, ci) in board.columns"
           :key="col.id"
@@ -1256,9 +1300,10 @@ onBeforeUnmount(() => {
             @dragend="onDragEnd"
           >
             <span class="tcol-title" :title="col.title">{{ col.title }}</span>
-            <span class="count-pill">{{ visibleCards(col).length }}</span>
-            <span v-if="groupDone(col)" class="tcol-done">{{ groupDone(col) }} 完成</span>
-            <span class="grow"></span>
+            <span
+              class="count-pill"
+              :title="`${visibleCards(col).length} 张可见${groupDone(col) ? `,${groupDone(col)} 张已完成` : ''}`"
+            >{{ visibleCards(col).length }}</span>
             <button
               type="button"
               class="btn small ghost icon-btn tcol-add"
@@ -1267,46 +1312,14 @@ onBeforeUnmount(() => {
             >
               <Icon name="plus" :size="13" />
             </button>
-            <div class="col-menu-wrap">
-              <button
-                type="button"
-                class="btn small ghost icon-btn tcol-more"
-                title="列操作"
-                @click.stop="toggleMenu(col.id)"
-              >
-                <Icon name="more" :size="14" />
-              </button>
-              <div v-if="menuCol === col.id" class="col-menu">
-                <div class="cm-swatches">
-                  <button
-                    type="button"
-                    class="task-swatch none"
-                    :class="{ on: !col.color }"
-                    title="无颜色"
-                    @click.stop="setColumnColor(col.id, undefined)"
-                  ></button>
-                  <button
-                    v-for="k in TASK_COLORS"
-                    :key="k"
-                    type="button"
-                    class="task-swatch"
-                    :class="[`sw-${k}`, { on: col.color === k }]"
-                    :title="`列颜色:${TASK_COLOR_LABELS[k]}`"
-                    @click.stop="setColumnColor(col.id, k)"
-                  ></button>
-                </div>
-                <div class="cm-sep"></div>
-                <button type="button" class="cm-item" @click="openRenameColumn(col)">
-                  <Icon name="pen" :size="13" /> 重命名
-                </button>
-                <button type="button" class="cm-item" :disabled="!col.cards.length" @click="askClearColumn(col)">
-                  <Icon name="x" :size="13" /> 清空该列
-                </button>
-                <button type="button" class="cm-item danger" @click="askRemoveColumn(col)">
-                  <Icon name="trash" :size="13" /> 删除列
-                </button>
-              </div>
-            </div>
+            <button
+              type="button"
+              class="btn small ghost icon-btn tcol-more"
+              title="列操作:重命名 / 颜色 / 清空 / 删除列"
+              @click.stop="toggleMenu(col.id, $event)"
+            >
+              <Icon name="more" :size="14" />
+            </button>
           </header>
 
           <div class="tcol-body" @dragover="onBodyDragOver(col, $event)" @drop.prevent="onDrop(col)">
@@ -1706,6 +1719,49 @@ onBeforeUnmount(() => {
         <button type="button" class="btn small ghost" :disabled="!selectedCount || batchBusy" @click="batchArchive">归档</button>
         <button type="button" class="btn small danger-text" :disabled="!selectedCount || batchBusy" @click="askBatchDelete">删除</button>
         <button type="button" class="btn small primary" @click="toggleSelectMode">完成选择</button>
+      </div>
+    </Teleport>
+
+    <!-- ---------- 列操作菜单:挂到 body,空列/窄列也不会被面板裁切 ---------- -->
+    <Teleport to="body">
+      <div
+        v-if="menuColumn"
+        class="col-menu"
+        :style="{ left: `${menuColPos.x}px`, top: `${menuColPos.y}px` }"
+        @click.stop
+      >
+        <div class="cm-head">
+          <span class="cm-title" :title="menuColumn.title">{{ menuColumn.title }}</span>
+          <span class="cm-meta">{{ menuColumn.cards.length }} 张</span>
+        </div>
+        <div class="cm-swatches">
+          <button
+            type="button"
+            class="task-swatch none"
+            :class="{ on: !menuColumn.color }"
+            title="无颜色"
+            @click="menuSetColor(undefined)"
+          ></button>
+          <button
+            v-for="k in TASK_COLORS"
+            :key="k"
+            type="button"
+            class="task-swatch"
+            :class="[`sw-${k}`, { on: menuColumn.color === k }]"
+            :title="`列颜色:${TASK_COLOR_LABELS[k]}`"
+            @click="menuSetColor(k)"
+          ></button>
+        </div>
+        <div class="cm-sep"></div>
+        <button type="button" class="cm-item" @click="menuRename">
+          <Icon name="pen" :size="13" /> 重命名
+        </button>
+        <button type="button" class="cm-item" :disabled="!menuColumn.cards.length" @click="menuClear">
+          <Icon name="x" :size="13" /> 清空该列
+        </button>
+        <button type="button" class="cm-item danger" @click="menuRemove">
+          <Icon name="trash" :size="13" /> 删除列
+        </button>
       </div>
     </Teleport>
 
@@ -2394,11 +2450,20 @@ onBeforeUnmount(() => {
 
 /* ---------- 看板视图 ---------- */
 
+/* 任务页吃满内容区高度:看板列随窗口高度伸展,底部不留大片空白 */
+.tasks.view {
+  height: 100%;
+  box-sizing: border-box;
+}
+
 .board {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-x: auto;
+  overflow-y: hidden;
   padding: 2px 2px 10px;
 }
 
@@ -2407,9 +2472,11 @@ onBeforeUnmount(() => {
 }
 
 .tcol {
-  width: 276px;
-  flex-shrink: 0;
-  max-height: calc(100vh - 330px);
+  /* 列宽按可用宽度等分:4 列并排能完整放进内容区;列太多时再横向滚动 */
+  flex: 1 1 0;
+  width: auto;
+  min-width: 140px;
+  max-width: 480px;
   min-height: 128px;
   position: relative;
 }
@@ -2441,10 +2508,14 @@ onBeforeUnmount(() => {
 }
 
 .tcol.addcol {
-  width: auto;
-  min-width: 110px;
+  flex: 0 0 100px;
+  width: 100px;
+  min-width: 100px;
+  max-width: 100px;
+  height: auto;
   max-height: none;
   min-height: 0;
+  align-self: flex-start;
   padding: 8px;
   border: 1px dashed var(--border);
   background: transparent;
@@ -2473,8 +2544,8 @@ onBeforeUnmount(() => {
 }
 
 .tcol-title {
-  flex-shrink: 0;
-  max-width: 130px;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2487,14 +2558,6 @@ onBeforeUnmount(() => {
 
 .tcol-head .count-pill {
   flex-shrink: 0;
-}
-
-.tcol-done {
-  flex-shrink: 0;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--ok);
-  white-space: nowrap;
 }
 
 .tcol-add,
@@ -2519,21 +2582,42 @@ onBeforeUnmount(() => {
   color: var(--brand);
 }
 
-.col-menu-wrap {
-  position: relative;
-}
-
 .col-menu {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
-  z-index: 40;
-  min-width: 144px;
+  /* 固定定位的浮层(Teleport 到 body):不受列面板 overflow:hidden 裁切 */
+  position: fixed;
+  z-index: 120;
+  width: 168px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   padding: 5px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-lift);
+  box-shadow: var(--shadow-overlay);
+}
+
+.cm-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 3px;
+}
+
+.cm-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.cm-meta {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  color: var(--text-3);
 }
 
 .cm-item {
@@ -3522,8 +3606,9 @@ onBeforeUnmount(() => {
   }
 
   .tcol {
-    width: 252px;
-    max-height: calc(100vh - 300px);
+    flex: 0 0 244px;
+    min-width: 244px;
+    max-width: 244px;
   }
 
   .list-wrap,
@@ -3557,6 +3642,12 @@ onBeforeUnmount(() => {
 
   .board-select {
     width: 142px;
+  }
+
+  .tcol {
+    flex: 0 0 216px;
+    min-width: 216px;
+    max-width: 216px;
   }
 
   .view-tabs button {
