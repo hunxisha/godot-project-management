@@ -1299,6 +1299,11 @@ onBeforeUnmount(() => {
             @drop.prevent="onColHeadDrop"
             @dragend="onDragEnd"
           >
+            <span
+              v-if="col.color"
+              class="tcol-dot"
+              :title="`列颜色:${TASK_COLOR_LABELS[col.color]}`"
+            ></span>
             <span class="tcol-title" :title="col.title">{{ col.title }}</span>
             <span
               class="count-pill"
@@ -1730,7 +1735,8 @@ onBeforeUnmount(() => {
         :style="{ left: `${menuColPos.x}px`, top: `${menuColPos.y}px` }"
         @click.stop
       >
-        <div class="cm-head">
+        <div class="cm-head" :style="colorStyle(menuColumn.color)">
+          <span v-if="menuColumn.color" class="cm-dot"></span>
           <span class="cm-title" :title="menuColumn.title">{{ menuColumn.title }}</span>
           <span class="cm-meta">{{ menuColumn.cards.length }} 张</span>
         </div>
@@ -2481,9 +2487,25 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
-/* 列颜色:面板顶部 3px 内嵌色条(inset shadow 叠加 panel 原阴影,不占布局) */
+/* 列颜色:顶部色条 + 列头淡色底 + 同色描边,三层叠加保证一眼能看出颜色已生效 */
 .tcol.has-color {
+  border-color: color-mix(in srgb, var(--task-color) 30%, var(--border));
   box-shadow: inset 0 3px 0 var(--task-color), var(--shadow-sm);
+}
+
+.tcol.has-color .tcol-head {
+  background: color-mix(in srgb, var(--task-color) 12%, var(--panel-head));
+  border-bottom-color: color-mix(in srgb, var(--task-color) 28%, var(--border));
+}
+
+/* 列头与列菜单里的颜色圆点(颜色由外层 --task-color 提供) */
+.tcol-dot,
+.cm-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--task-color);
 }
 
 /* 列拖拽落点:左右两侧的 brand 竖条 */
