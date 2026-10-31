@@ -173,47 +173,48 @@ const viewCount = computed(() => {
 })
 
 // ---------- 快速捕获 ----------
+// 顶部捕获条与列尾快加是两套独立状态,变量前缀刻意分开(capture* / colQuick*),
+// 避免在同一个 <script setup> 作用域里出现同名声明(曾因此触发 SFC 编译报错)。
+const captureTitle = ref('')
+const captureInput = ref<HTMLInputElement | null>(null)
+const captureColumnId = ref('')
 
-const quickTitle = ref('')
-const quickInput = ref<HTMLInputElement | null>(null)
-const quickColumnId = ref('')
-
-const quickParsed = computed(() => parseQuickAdd(quickTitle.value, today))
-const quickTarget = computed(
-  () => board.value?.columns.find((c) => c.id === quickColumnId.value) ?? board.value?.columns[0] ?? null
+const captureParsed = computed(() => parseQuickAdd(captureTitle.value, today))
+const captureTarget = computed(
+  () => board.value?.columns.find((c) => c.id === captureColumnId.value) ?? board.value?.columns[0] ?? null
 )
-const quickValid = computed(() => !!quickParsed.value.title.trim() && !!quickTarget.value)
+const captureValid = computed(() => !!captureParsed.value.title.trim() && !!captureTarget.value)
 
 /** 列变化(切板/删列/建列)时把目标列钳到存在的列上 */
 watch(
   () => board.value?.columns.map((c) => c.id).join('|'),
   () => {
-    if (!board.value?.columns.some((c) => c.id === quickColumnId.value)) {
-      quickColumnId.value = board.value?.columns[0]?.id ?? ''
+    if (!board.value?.columns.some((c) => c.id === captureColumnId.value)) {
+      captureColumnId.value = board.value?.columns[0]?.id ?? ''
     }
   },
   { immediate: true }
 )
 
-async function submitQuick() {
-  const target = quickTarget.value
-  if (!quickValid.value || !target) return
-  const parsed = quickParsed.value
+async function submitCapture() {
+  const target = captureTarget.value
+  if (!captureValid.value || !target) return
+  const parsed = captureParsed.value
   await addCard(target.id, {
     title: parsed.title,
     tags: parsed.tags,
     priority: parsed.priority,
     due: parsed.due
   })
-  quickTitle.value = ''
+  captureTitle.value = ''
   flash(`已添加到「${target.title}」`)
   await nextTick()
-  quickInput.value?.focus()
+  captureInput.value?.focus()
 }
 
-function focusQuick() {
-  quickInput.value?.focus()
-  quickInput.value?.select()
+function focusCapture() {
+  captureInput.value?.focus()
+  captureInput.value?.select()
 }
 
 function priorityClass(p?: TaskPriority) {
@@ -900,7 +901,7 @@ function onKey(e: KeyboardEvent) {
   const key = e.key.toLowerCase()
   if (key === 'n') {
     e.preventDefault()
-    focusQuick()
+    focusCapture()
   } else if (key === '/') {
     e.preventDefault()
     searchInput.value?.focus()
@@ -977,34 +978,34 @@ onBeforeUnmount(() => {
     <div class="capture card">
       <Icon name="zap" :size="16" class="capture-ico" />
       <input
-        ref="quickInput"
-        v-model="quickTitle"
+        ref="captureInput"
+        v-model="captureTitle"
         class="input capture-input"
         placeholder="记下一件事,回车添加…#标签 @明天 !高"
         aria-label="快速添加任务"
-        @keydown.enter.prevent="submitQuick"
+        @keydown.enter.prevent="submitCapture"
       />
-      <div v-if="quickParsed.tags.length || quickParsed.priority || quickParsed.due" class="capture-chips">
+      <div v-if="captureParsed.tags.length || captureParsed.priority || captureParsed.due" class="capture-chips">
         <span
-          v-if="quickParsed.priority"
+          v-if="captureParsed.priority"
           class="tag"
-          :class="quickParsed.priority === 'high' ? 'danger' : quickParsed.priority === 'low' ? '' : 'brand'"
-        >{{ TASK_PRIORITY_LABELS[quickParsed.priority] }}优先级</span>
-        <span v-if="quickParsed.due" class="capture-chip">
-          <Icon name="clock" :size="11" /> {{ dueHint(quickParsed.due, today) }}
+          :class="captureParsed.priority === 'high' ? 'danger' : captureParsed.priority === 'low' ? '' : 'brand'"
+        >{{ TASK_PRIORITY_LABELS[captureParsed.priority] }}优先级</span>
+        <span v-if="captureParsed.due" class="capture-chip">
+          <Icon name="clock" :size="11" /> {{ dueHint(captureParsed.due, today) }}
         </span>
-        <span v-for="t in quickParsed.tags" :key="t" class="capture-chip">
+        <span v-for="t in captureParsed.tags" :key="t" class="capture-chip">
           <Icon name="tag" :size="10" /> {{ t }}
         </span>
       </div>
-      <select v-model="quickColumnId" class="select capture-target" title="添加到哪一列" :disabled="!board?.columns.length">
+      <select v-model="captureColumnId" class="select capture-target" title="添加到哪一列" :disabled="!board?.columns.length">
         <option v-for="c in board?.columns ?? []" :key="c.id" :value="c.id">{{ c.title }}</option>
       </select>
-      <button type="button" class="btn primary small capture-submit" :disabled="!quickValid" @click="submitQuick">
+      <button type="button" class="btn primary small capture-submit" :disabled="!captureValid" @click="submitCapture">
         <Icon name="plus" :size="13" /> 添加
       </button>
     </div>
-    <div v-if="!quickTitle" class="capture-tip">
+    <div v-if="!captureTitle" class="capture-tip">
       <span class="kbd">#标签</span>
       <span class="kbd">@今天</span>
       <span class="kbd">@+3</span>
