@@ -15,7 +15,7 @@ import ConfirmDialog from '../components/ConfirmDialog.vue'
 import TaskCardDialog from '../components/dialogs/TaskCardDialog.vue'
 import { useTasks } from '../composables/useTasks'
 import { useTaskAlerts, type OverviewEntry } from '../composables/useTaskAlerts'
-import { formatTime } from '../utils/format'
+import { formatRelative, formatTime } from '../utils/format'
 import {
   addDays,
   boardStats,
@@ -886,6 +886,12 @@ function progressOf(card: TaskCard) {
   return checklistProgress(card)
 }
 
+/** 备注摘要:取第一行非空文字,过长截断(卡片上只做预览,完整内容在详情弹窗/悬停提示) */
+function notesPreview(notes?: string): string {
+  const line = (notes || '').split(/\r?\n/).map((l) => l.trim()).find((l) => l.length > 0) ?? ''
+  return line.length > 48 ? `${line.slice(0, 48)}…` : line
+}
+
 function columnOfCard(cardId: string) {
   return board.value?.columns.find((c) => c.cards.some((k) => k.id === cardId) ?? false)?.title ?? ''
 }
@@ -1358,8 +1364,12 @@ onBeforeUnmount(() => {
                   >
                     <Icon name="check" :size="11" />
                   </button>
-                  <span v-if="card.priority === 'high'" class="tag danger" title="高优先级">高</span>
-                  <span v-else-if="card.priority === 'low'" class="tag" title="低优先级">低</span>
+                  <span
+                    v-if="card.priority"
+                    class="tag tcard-prio"
+                    :class="card.priority === 'high' ? 'danger' : card.priority === 'low' ? 'faint' : ''"
+                    :title="`优先级:${TASK_PRIORITY_LABELS[card.priority]}`"
+                  >{{ TASK_PRIORITY_LABELS[card.priority] }}</span>
                   <span v-if="card.due" class="tcard-due" :class="dueCls(card)" :title="card.due">
                     <Icon name="clock" :size="11" /> {{ cardDueText(card) }}
                   </span>
@@ -1387,13 +1397,27 @@ onBeforeUnmount(() => {
                   </span>
                 </div>
 
-                <div v-if="card.tags?.length || card.notes" class="tcard-bottom">
+                <div v-if="card.notes && notesPreview(card.notes)" class="tcard-notes-line" :title="card.notes">
+                  <Icon name="list" :size="11" />
+                  <span class="tcard-notes-text">{{ notesPreview(card.notes) }}</span>
+                </div>
+
+                <div v-if="card.tags?.length || card.updatedAt" class="tcard-bottom">
                   <span v-if="card.tags?.length" class="tcard-tags">
-                    <span v-for="t in card.tags" :key="t" class="tcard-tag">{{ t }}</span>
+                    <span v-for="t in card.tags.slice(0, 2)" :key="t" class="tcard-tag">{{ t }}</span>
+                    <span
+                      v-if="card.tags.length > 2"
+                      class="tcard-tag extra"
+                      :title="card.tags.join('、')"
+                    >+{{ card.tags.length - 2 }}</span>
                   </span>
                   <span class="grow"></span>
-                  <span v-if="card.notes" class="tcard-notes" :title="card.notes">
-                    <Icon name="list" :size="11" /> 备注
+                  <span
+                    v-if="card.updatedAt"
+                    class="tcard-time"
+                    :title="`最后更新 ${formatTime(card.updatedAt)}`"
+                  >
+                    <Icon name="clock" :size="10" /> {{ formatRelative(card.updatedAt) }}
                   </span>
                 </div>
               </article>
@@ -2487,15 +2511,16 @@ onBeforeUnmount(() => {
   position: relative;
 }
 
-/* 列颜色:顶部色条 + 列头淡色底 + 同色描边,三层叠加保证一眼能看出颜色已生效 */
+/* 列颜色:整列淡色底 + 列头深一档 + 同色描边 + 顶部色条,让整列一眼能看出颜色 */
 .tcol.has-color {
-  border-color: color-mix(in srgb, var(--task-color) 30%, var(--border));
+  background: color-mix(in srgb, var(--task-color) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--task-color) 32%, var(--border));
   box-shadow: inset 0 3px 0 var(--task-color), var(--shadow-sm);
 }
 
 .tcol.has-color .tcol-head {
-  background: color-mix(in srgb, var(--task-color) 12%, var(--panel-head));
-  border-bottom-color: color-mix(in srgb, var(--task-color) 28%, var(--border));
+  background: color-mix(in srgb, var(--task-color) 16%, var(--panel-head));
+  border-bottom-color: color-mix(in srgb, var(--task-color) 30%, var(--border));
 }
 
 /* 列头与列菜单里的颜色圆点(颜色由外层 --task-color 提供) */
@@ -2720,8 +2745,14 @@ onBeforeUnmount(() => {
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
+/* 卡片颜色:整张卡片淡色底 + 左色条(与列颜色同一套视觉语言) */
 .tcard.has-color {
+  background: color-mix(in srgb, var(--task-color) 10%, var(--surface));
   border-left: 3px solid var(--task-color);
+}
+
+.tcard.has-color:hover {
+  border-left-color: var(--task-color);
 }
 
 .tcard:hover {
@@ -2787,12 +2818,26 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
   font-size: 11px;
   font-weight: 600;
   font-family: var(--mono);
   white-space: nowrap;
   color: var(--text-3);
+}
+
+/* 优先级徽标:高/中/低三档都显示,只按档位换色与降透明 */
+.tcard-prio {
+  flex-shrink: 0;
+  padding: 0 6px;
+  font-size: 10.5px;
+  line-height: 16px;
+}
+
+.tcard-prio.faint {
+  opacity: 0.6;
 }
 
 .tcard-due.over {
@@ -2921,12 +2966,41 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.tcard-notes {
+.tcard-notes-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-3);
+}
+
+/* 图标不参与省略,备注文字单行截断(完整内容在悬停提示与详情弹窗) */
+.tcard-notes-line > :first-child {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.tcard-notes-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tcard-time {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   flex-shrink: 0;
-  font-size: 10.5px;
+  font-size: 10px;
+  white-space: nowrap;
+  color: var(--text-3);
+}
+
+.tcard-tag.extra {
+  background: var(--surface-2);
   color: var(--text-3);
 }
 
@@ -3072,6 +3146,7 @@ onBeforeUnmount(() => {
 }
 
 .lrow.has-color {
+  background: color-mix(in srgb, var(--task-color) 8%, var(--surface));
   border-left: 3px solid var(--task-color);
 }
 

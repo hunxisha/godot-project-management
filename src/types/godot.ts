@@ -649,7 +649,7 @@ export interface TaskCard {
   tags?: string[]
   /** 显式完成标记:与列位置两套语义并存;徽标/通知/聚合/过滤统计一律排除已完成卡 */
   done?: boolean
-  /** 卡片颜色(色板 key,缺省无色;界面画左色条) */
+  /** 卡片颜色(色板 key,缺省无色;界面画整卡淡色底 + 左色条) */
   color?: TaskColor
   /** 子任务清单(可勾选;卡片上显示 done/total 进度) */
   checklist?: TaskChecklistItem[]
@@ -665,7 +665,7 @@ export interface TaskCard {
 export interface TaskColumn {
   id: string
   title: string
-  /** 列颜色(色板 key,缺省无色;界面画列头顶部色条) */
+  /** 列颜色(色板 key,缺省无色;界面画整列淡色底 + 顶部色条) */
   color?: TaskColor
   cards: TaskCard[]
 }
