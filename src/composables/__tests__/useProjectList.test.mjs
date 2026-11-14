@@ -76,12 +76,12 @@ section('1. reload:从本地库读项目与引擎')
 }
 
 // ---------- 2. 关键词过滤 ----------
-section('2. 关键词过滤:名称或路径,忽略大小写')
+section('2. 关键词过滤:名称/路径/标签,忽略大小写')
 {
   seed([
     P('a', 'Alpha', { path: 'E:\\Godot\\Alpha' }),
     P('b', 'Beta', { path: 'D:\\Projects\\beta-2d' }),
-    P('c', 'Gamma', { path: 'E:\\Other\\Gamma' })
+    P('c', 'Gamma', { path: 'E:\\Other\\Gamma', tags: ['RPG', 'demo'] })
   ])
   const l = useProjectList()
   await l.reload()
@@ -95,6 +95,12 @@ section('2. 关键词过滤:名称或路径,忽略大小写')
 
   l.filter.value = '  gamma  '
   ok(l.visible.value.length === 1, '首尾空白不影响匹配')
+
+  l.filter.value = 'rpg'
+  ok(l.visible.value.length === 1 && l.visible.value[0].name === 'Gamma', '按标签匹配(官方启动器同款:点标签即过滤)', l.visible.value.map((p) => p.name).join(','))
+
+  l.filter.value = 'DEMO'
+  ok(l.visible.value.length === 1 && l.visible.value[0].name === 'Gamma', '标签匹配忽略大小写', l.visible.value.map((p) => p.name).join(','))
 
   l.filter.value = 'zzz'
   ok(l.visible.value.length === 0, '无命中时为空')

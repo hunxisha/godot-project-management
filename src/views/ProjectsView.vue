@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getSettings, isWindows, notify, pickDirectory, putDoc } from '../services/bridge'
 import EmptyState from '../components/EmptyState.vue'
 import Icon from '../components/Icon.vue'
 import BackupCreateDialog from '../components/dialogs/BackupCreateDialog.vue'
 import ExportDialog from '../components/dialogs/ExportDialog.vue'
+import ProjectTagsDialog from '../components/dialogs/ProjectTagsDialog.vue'
 import { openProjectAction } from '../composables/useProjectActions'
 import { useProjectList, type ProjectRow } from '../composables/useProjectList'
 import { useProjectCreate } from '../composables/useProjectCreate'
 import { useProjectDelete } from '../composables/useProjectDelete'
+import { godotTagLabel, tagChipVars } from '../utils/godotTags'
 import { gradOf } from '../utils/avatar'
 import { versionMismatch } from '../utils/godotVersion'
 import { formatRelative, fmtSize } from '../utils/format'
@@ -305,6 +307,56 @@ async function cleanCache() {
   }
 }
 
+// ---------- 重命名 / 管理标签 ----------
+// 两者都写回 project.godot(官方启动器的真源):官方显示名 = config/name,
+// 官方标签 = [application] config/tags,工坊这边只改文件再同步本地文档。
+
+const showRename = ref(false)
+const renameTarget = ref<Row | null>(null)
+const renameDraft = ref('')
+const renaming = ref(false)
+const renameInput = ref<HTMLInputElement | null>(null)
+
+function openRename(p: Row) {
+  renameTarget.value = p
+  renameDraft.value = p.name
+  showRename.value = true
+  nextTick(() => renameInput.value?.focus())
+}
+
+async function submitRename() {
+  const p = renameTarget.value
+  if (!p || renaming.value) return
+  const name = renameDraft.value.replace(/[\\"]/g, '').trim()
+  if (!name) return
+  if (name === p.name) {
+    showRename.value = false
+    return
+  }
+  renaming.value = true
+  try {
+    const r = await window.services.renameProject(p._id, name)
+    if (r.ok) {
+      notify('已重命名(官方启动器同步显示新名称)')
+      showRename.value = false
+      await reload()
+    } else {
+      notify(r.error || '重命名失败')
+    }
+  } finally {
+    renaming.value = false
+  }
+}
+
+/** 标签管理对话框 */
+const showTags = ref(false)
+const tagsTarget = ref<Row | null>(null)
+
+function openTags(p: Row) {
+  tagsTarget.value = p
+  showTags.value = true
+}
+
 // ---------- 行内「更多」菜单 ----------
 // 行内常驻只留「打开 + 打开方式 + 收藏」,其余低频操作(导出/插件/备份/文档/参数/缓存/删除)
 // 收进「⋯」下拉,避免一行 11 个控件把卡片挤满。
@@ -356,11 +408,19 @@ function onKeyDown(e: KeyboardEvent) {
       showCache.value = false
       return
     }
+    if (showRename.value) {
+      showRename.value = false
+      return
+    }
+    if (showTags.value) {
+      showTags.value = false
+      return
+    }
     selected.value = -1
     return
   }
   // 备份对话框自行处理 Escape;这里只阻止列表键盘导航
-  if (showCreate.value || showDelete.value || showBackupCreate.value || showExport.value || showArgs.value || showCache.value) return
+  if (showCreate.value || showDelete.value || showBackupCreate.value || showExport.value || showArgs.value || showCache.value || showRename.value || showTags.value) return
   // 「更多」菜单展开时,方向键/回车不再挪动列表选中
   if (openMenuId.value) return
   if (!['ArrowDown', 'ArrowUp', 'Enter'].includes(e.key)) return
@@ -432,6 +492,20 @@ function onKeyDown(e: KeyboardEvent) {
               <span v-if="mismatch(p)" class="tag warn" title="绑定版本与项目引擎要求不一致"><Icon name="alert" :size="10" /> 版本不匹配</span>
             </div>
             <div class="row-path mono" :title="p.path">{{ p.path }}</div>
+            <!-- 标签:与 Godot 官方启动器同一存储(config/tags),色相同官方公式 -->
+            <div v-if="p.tags?.length" class="row-tags">
+              <span
+                v-for="t in p.tags"
+                :key="t"
+                class="tag-chip clickable"
+                :style="tagChipVars(t)"
+                :title="`标签:${t} · 点击按它过滤(与官方启动器一致)`"
+                @click="filter = t"
+              >{{ godotTagLabel(t) }}</span>
+              <button class="tag-edit" title="管理标签" @click="openTags(p)">
+                <Icon name="pen" :size="10" />
+              </button>
+            </div>
             <div class="row-meta">
               <select
                 class="select ver-select"
@@ -480,6 +554,13 @@ function onKeyDown(e: KeyboardEvent) {
                 <Icon name="more" :size="16" :stroke-width="3" />
               </button>
               <div v-if="openMenuId === p._id" class="row-menu">
+                <button class="menu-item" @click="menuAction(p._id, () => openRename(p))">
+                  <Icon name="pen" :size="13" /> 重命名
+                </button>
+                <button class="menu-item" @click="menuAction(p._id, () => openTags(p))">
+                  <Icon name="tag" :size="13" /> 管理标签
+                </button>
+                <div class="menu-sep"></div>
                 <button class="menu-item" @click="menuAction(p._id, () => openExport(p))">
                   <Icon name="upload" :size="13" /> 一键导出
                 </button>
@@ -717,6 +798,54 @@ function onKeyDown(e: KeyboardEvent) {
         </div>
       </div>
     </Teleport>
+
+    <!-- 重命名对话框(写回 project.godot 的 config/name,官方启动器同步显示) -->
+    <Teleport to="body">
+      <div v-if="showRename" class="modal-mask" @click.self="showRename = false">
+        <form class="card modal" @submit.prevent="submitRename">
+          <div class="modal-head">
+            <div class="modal-title"><Icon name="pen" :size="15" /> 重命名项目</div>
+            <span class="grow"></span>
+            <button type="button" class="btn small ghost icon-x" title="关闭" @click="showRename = false">
+              <Icon name="x" :size="14" />
+            </button>
+          </div>
+
+          <div class="del-path mono" :title="renameTarget?.path">{{ renameTarget?.path }}</div>
+
+          <div class="field">
+            <label class="f-label" for="rn-name">项目名称</label>
+            <input
+              id="rn-name"
+              ref="renameInput"
+              v-model="renameDraft"
+              class="input"
+              maxlength="60"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <div class="f-hint">写入 <code>project.godot</code> 的 <code>config/name</code>,官方启动器同步显示;项目目录名保持不变。</div>
+          </div>
+
+          <div class="modal-foot">
+            <span class="grow"></span>
+            <button type="button" class="btn ghost" @click="showRename = false">取消</button>
+            <button type="submit" class="btn primary" :disabled="!renameDraft.trim() || renaming">
+              <Icon name="check" :size="13" /> {{ renaming ? '保存中…' : '保存' }}
+            </button>
+          </div>
+        </form>
+      </div>
+    </Teleport>
+
+    <!-- 管理标签对话框(与 Godot 4.3+ 官方启动器同一存储) -->
+    <ProjectTagsDialog
+      :open="showTags"
+      :project="tagsTarget"
+      :projects="projects"
+      @close="showTags = false"
+      @saved="reload"
+    />
   </div>
 </template>
 
@@ -823,6 +952,49 @@ function onKeyDown(e: KeyboardEvent) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 标签行:chip 点击 = 按标签过滤(官方启动器行为),小铅笔 = 打开管理标签 */
+.row-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 4px;
+}
+
+.tag-chip.clickable {
+  cursor: pointer;
+}
+
+.tag-chip.clickable:hover {
+  filter: brightness(1.1);
+}
+
+.tag-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+
+.row-item:hover .tag-edit {
+  opacity: 0.75;
+}
+
+.tag-edit:hover {
+  opacity: 1;
+  color: var(--brand);
+  background: var(--surface-2);
 }
 
 .row-meta {

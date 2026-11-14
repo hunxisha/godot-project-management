@@ -20,6 +20,7 @@ const IGNORE_DIRS = new Set(['.git', '.godot', 'node_modules', '.import', 'build
  * @property {string} [engineVersion]
  * @property {string} [icon]
  * @property {boolean} hasPlugins
+ * @property {string[]} tags [application] config/tags(Godot 4.3+ 官方启动器标签);无该键时为 []
  */
 
 /**
@@ -37,6 +38,7 @@ function parseProjectGodot(rootDir) {
   let configVersion = 0
   let engineVersion
   let hasPlugins = false
+  let tags = /** @type {string[]} */ ([])
 
   for (const line of text.split(/\r?\n/)) {
     const sec = /^\s*\[(.+)\]\s*$/.exec(line)
@@ -58,12 +60,34 @@ function parseProjectGodot(rootDir) {
     } else if (key === 'config/features') {
       const m = /"([^"]+)"/.exec(value)
       if (m) engineVersion = m[1]
+    } else if (key === 'config/tags' && section === 'application') {
+      tags = parsePackedStrings(value)
     } else if (key === 'enabled' && section === 'editor_plugins') {
       if (/"[^"]*"/.test(value)) hasPlugins = true
     }
   }
 
-  return { name: name || path.basename(rootDir), configVersion, engineVersion, icon, hasPlugins }
+  return { name: name || path.basename(rootDir), configVersion, engineVersion, icon, hasPlugins, tags }
+}
+
+/**
+ * 解析 PackedStringArray("a", "b") 形值的引号项(官方 config/tags 的存储形态)。
+ * 不是该形态的值(手写异常)宽松返回 []。官方启动器对同一实现:
+ * project_list.cpp 的 `cf->get_value("application", "config/tags", PackedStringArray())`。
+ * @param {string} v
+ * @returns {string[]}
+ */
+function parsePackedStrings(v) {
+  const m = /^PackedStringArray\((.*)\)\s*$/.exec(v.trim())
+  if (!m) return []
+  /** @type {string[]} */
+  const items = []
+  const re = /"((?:\\.|[^"\\])*)"/g
+  let mm
+  while ((mm = re.exec(m[1]))) {
+    items.push(mm[1].replace(/\\(["\\])/g, '$1'))
+  }
+  return items
 }
 
 /**
@@ -151,6 +175,8 @@ function addProject(inputPath, versionIdOverride) {
       icon: info.icon,
       configVersion: info.configVersion,
       engineVersion: info.engineVersion,
+      // 标签以 project.godot 为真源(官方启动器可改):重新添加即同步官方侧的增删
+      ...(info.tags.length ? { tags: info.tags } : {}),
       versionId,
       favorite: existed ? !!existed.favorite : false,
       lastOpenedAt: existed ? existed.lastOpenedAt : undefined,
@@ -316,6 +342,159 @@ function createProject(opts) {
     return git ? { ...added, git } : added
   } catch (e) {
     return { ok: false, error: (e && e.message) || '创建失败' }
+  }
+}
+
+// ---------- project.godot 写回(重命名 / 标签,均与官方启动器互通) ----------
+
+/**
+ * project.godot 行级原位写回:只动 patch 给出的键,其余内容(注释/节序/键序)逐行保留。
+ * 目标是「像 Godot 自己改过一样」—— 官方启动器与编辑器随后读它不能有任何感知差异。
+ *
+ * 规则:
+ *   · [application] 节内已存在该键 → 原位替换;不存在 → 追加到节内容末尾(节尾空行之前);
+ *   · 没有 [application] 节 → 文件末尾追加该节;
+ *   · tags 传空数组 → 删除 config/tags 行(官方同样不落空数组)。
+ * @param {string} rootDir
+ * @param {{name?: string, tags?: string[]}} patch name:新 config/name;tags:新 config/tags
+ * @returns {{ok: boolean, error?: string}}
+ */
+function updateProjectGodot(rootDir, patch) {
+  const file = path.join(rootDir, 'project.godot')
+  let text
+  try {
+    text = fs.readFileSync(file, 'utf8')
+  } catch (e) {
+    return { ok: false, error: '读取 project.godot 失败' }
+  }
+
+  /** 键 → 新行;null 表示删除该行 */
+  /** @type {Map<string, string | null>} */
+  const patches = new Map()
+  if (patch.name !== undefined) {
+    const name = String(patch.name).replace(/[\\"]/g, '').replace(/\r?\n/g, ' ').trim()
+    patches.set('config/name', name ? `config/name="${name}"` : null)
+  }
+  if (patch.tags !== undefined) {
+    // 清洗:去引号/反斜杠/换行(INI 值内不安全)、去空、去重保序;全空视为删除该行
+    const seen = new Set()
+    const clean = []
+    for (const t of Array.isArray(patch.tags) ? patch.tags : []) {
+      const s = String(t).replace(/[\\"]/g, '').replace(/\s+/g, ' ').trim()
+      if (s && !seen.has(s)) {
+        seen.add(s)
+        clean.push(s)
+      }
+    }
+    patches.set('config/tags', clean.length
+      ? `config/tags=PackedStringArray(${clean.map((s) => `"${s}"`).join(', ')})`
+      : null)
+  }
+  if (!patches.size) return { ok: true }
+
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const lines = text.split(/\r?\n/)
+
+  /**
+   * [application] 节边界:[节头下标, 下一节头下标(或文件尾)]。找不到返回 [-1, -1]。
+   * @param {string[]} ls
+   * @returns {[number, number]}
+   */
+  const findAppSection = (ls) => {
+    const start = ls.findIndex((l) => /^\s*\[application\]\s*$/.test(l))
+    if (start < 0) return [-1, -1]
+    let end = ls.length
+    for (let i = start + 1; i < ls.length; i++) {
+      if (/^\s*\[/.test(ls[i])) {
+        end = i
+        break
+      }
+    }
+    return [start, end]
+  }
+
+  for (const [key, line] of patches) {
+    const [start, end] = findAppSection(lines)
+    const keyRe = new RegExp(`^\\s*${key.replace('.', '\\.')}\\s*=`)
+    if (start < 0) {
+      if (line !== null) {
+        if (lines[lines.length - 1] !== '') lines.push('')
+        lines.push('[application]', line)
+      }
+      continue
+    }
+    const at = lines.findIndex((l, i) => i > start && i < end && keyRe.test(l))
+    if (at >= 0) {
+      if (line === null) lines.splice(at, 1)
+      else lines[at] = line
+    } else if (line !== null) {
+      // 追加到节内容末尾:节尾若留有一个空行(官方格式),插在它前面
+      let insert = end
+      if (insert > start + 1 && lines[insert - 1] === '') insert--
+      lines.splice(insert, 0, line)
+    }
+  }
+
+  try {
+    fs.writeFileSync(file, lines.join(eol), 'utf8')
+  } catch (e) {
+    return { ok: false, error: '写入 project.godot 失败' }
+  }
+  return { ok: true }
+}
+
+/**
+ * 重命名项目:改写 project.godot 的 config/name(官方启动器随之显示新名),成功后同步本地文档。
+ * 只改项目名、不动目录 —— 目录路径是项目文档 id、备份、插件来源记录的锚点。
+ * @param {string} projectId
+ * @param {string} newName
+ * @returns {{ok: boolean, error?: string, project?: ProjectDoc}}
+ */
+function renameProject(projectId, newName) {
+  try {
+    const project = getDoc(projectId)
+    if (!project) return { ok: false, error: '项目不存在' }
+    const name = String(newName || '').replace(/[\\"]/g, '').replace(/\r?\n/g, ' ').trim()
+    if (!name) return { ok: false, error: '项目名称不能为空' }
+    if (!fs.existsSync(path.join(project.path, 'project.godot'))) {
+      return { ok: false, error: '未找到 project.godot(项目目录可能已被移动或删除)' }
+    }
+    const r = updateProjectGodot(project.path, { name })
+    if (!r.ok) return r
+    const { _id, _rev, ...data } = project
+    const updated = { ...data, name }
+    putDoc(projectId, updated)
+    return { ok: true, project: updated }
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || '重命名失败' }
+  }
+}
+
+/**
+ * 设置项目标签:写 project.godot 的 [application] config/tags —— 与 Godot 4.3+ 官方
+ * 启动器同一存储,双向互通;并镜像进本地文档供卡片展示。空数组表示清除全部标签。
+ * @param {string} projectId
+ * @param {string[]} tags
+ * @returns {{ok: boolean, error?: string, tags?: string[]}}
+ */
+function setProjectTags(projectId, tags) {
+  try {
+    const project = getDoc(projectId)
+    if (!project) return { ok: false, error: '项目不存在' }
+    if (!fs.existsSync(path.join(project.path, 'project.godot'))) {
+      return { ok: false, error: '未找到 project.godot(项目目录可能已被移动或删除)' }
+    }
+    const r = updateProjectGodot(project.path, { tags: Array.isArray(tags) ? tags : [] })
+    if (!r.ok) return r
+    // 写回后的文件再解析一遍:清洗/去重结果以它为准,单一路径不留两套口径
+    const clean = parseProjectGodot(project.path).tags
+    const { _id, _rev, ...data } = project
+    if (clean.length) data.tags = clean
+    else delete data.tags
+    putDoc(projectId, data)
+    return { ok: true, tags: clean }
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || '保存标签失败' }
   }
 }
 
@@ -500,9 +679,12 @@ function cleanProjectCache(projectId) {
 
 module.exports = {
   parseProjectGodot,
+  updateProjectGodot,
   addProject,
   scanProjects,
   removeProject,
+  renameProject,
+  setProjectTags,
   copyAddonsToProject,
   projectDocId,
   matchVersion,

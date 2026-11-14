@@ -16,14 +16,14 @@ export function useProjectList() {
   const favOnly = ref(false)
 
   /**
-   * 可见列表:先按关键词过滤(名称或路径,忽略大小写),再排序 ——
+   * 可见列表:先按关键词过滤(名称/路径/标签,忽略大小写),再排序 ——
    * 收藏优先 → 最近打开优先 → 名称。
    */
   const visible = computed<ProjectRow[]>(() => {
     const kw = filter.value.trim().toLowerCase()
     const list = projects.value.filter((p) => {
       if (favOnly.value && !p.favorite) return false
-      return !kw || p.name.toLowerCase().includes(kw) || p.path.toLowerCase().includes(kw)
+      return !kw || p.name.toLowerCase().includes(kw) || p.path.toLowerCase().includes(kw) || (p.tags || []).some((t) => t.toLowerCase().includes(kw))
     })
     return [...list].sort((a, b) => {
       if (!!a.favorite !== !!b.favorite) return a.favorite ? -1 : 1

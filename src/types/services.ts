@@ -276,6 +276,10 @@ export interface Services {
   }
   /** 删除项目记录(deleteFiles=true 同时删除项目文件夹,Windows 移入回收站) */
   removeProject(id: string, deleteFiles?: boolean): { ok: boolean, error?: string, filesDeleted?: boolean }
+  /** 重命名项目:改写 project.godot 的 config/name(官方启动器同步显示)并更新本地记录;不动目录 */
+  renameProject(projectId: string, name: string): { ok: boolean, error?: string, project?: GodotProject }
+  /** 设置项目标签(与 Godot 4.3+ 官方启动器互通,存储 [application] config/tags;空数组=清除全部) */
+  setProjectTags(projectId: string, tags: string[]): { ok: boolean, error?: string, tags?: string[] }
   /** 复制插件目录到另一个项目(不自动启用);同时把市场来源记录一并过户 */
   copyAddonsToProject(opts: {
     sourceProjectId: string

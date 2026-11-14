@@ -975,6 +975,41 @@ input[type='checkbox'].switch:checked::after {
   color: var(--ok);
 }
 
+/* Godot 官方启动器同款项目标签 chip:左侧实色条 + 淡色底 + 同系文字。
+   色相由内联 --tag-h 给出(godotTags.ts 按官方哈希公式精确复刻),明暗自适应在此调整。 */
+.tag-chip {
+  --tag-c: hsl(var(--tag-h) 62% 34%);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 7px 0 5px;
+  border-radius: 4px;
+  border-left: 3px solid hsl(var(--tag-h) 62% 42%);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 19px;
+  background: hsl(var(--tag-h) 62% 40% / 0.13);
+  color: var(--tag-c);
+  white-space: nowrap;
+  transition: background 0.12s;
+}
+
+:root[data-mode='dark'] .tag-chip {
+  --tag-c: hsl(var(--tag-h) 46% 66%);
+  border-left-color: hsl(var(--tag-h) 46% 54%);
+  background: hsl(var(--tag-h) 46% 60% / 0.16);
+}
+
+/* chip 文字超长省略(官方也对单标签设了最大宽度);文字 span 自身可收缩才有省略号 */
+.tag-chip {
+  max-width: 168px;
+}
+
+.tag-chip .chip-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* 视图标题行:标题 + 说明 + 动作 */
 .view-head {
   display: flex;

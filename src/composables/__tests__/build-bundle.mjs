@@ -12,6 +12,7 @@
 //   .gpm-test/out/format.mjs          ← src/utils/format.ts                 (src/__tests__/format.test.mjs)
 //   .gpm-test/out/godotversion.mjs    ← src/utils/godotVersion.ts           (src/__tests__/marketUtils.test.mjs)
 //   .gpm-test/out/markettags.mjs      ← src/utils/marketTags.ts             (src/__tests__/marketUtils.test.mjs)
+//   .gpm-test/out/godottags.mjs       ← src/utils/godotTags.ts              (src/__tests__/godotTags.test.mjs)
 //   .gpm-test/out/usedocs.mjs         ← src/composables/useDocs.ts          (src/composables/__tests__/useDocs.test.mjs)
 //
 // 一次打包供全部渲染层测试共用(npm run test:renderer),避免每个测试各起一次 vite。
@@ -56,6 +57,7 @@ await build({
         format: path.join(root, 'src', 'utils', 'format.ts'),
         godotversion: path.join(root, 'src', 'utils', 'godotVersion.ts'),
         markettags: path.join(root, 'src', 'utils', 'marketTags.ts'),
+        godottags: path.join(root, 'src', 'utils', 'godotTags.ts'),
         langdetect: path.join(root, 'src', 'utils', 'langDetect.ts'),
         bridge: path.join(root, 'src', 'services', 'bridge.ts'),
         usetranslation: path.join(root, 'src', 'composables', 'useTranslation.ts'),
@@ -78,6 +80,6 @@ await build({
   }
 })
 
-for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'format', 'godotversion', 'markettags', 'langdetect', 'bridge', 'usetranslation', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'docsig', 'taskboard', 'usetasks', 'usetaskalerts', 'vueshim']) {
+for (const name of ['usebackups', 'usetaskdialog', 'usemarketsearch', 'useassethydration', 'usemarketbrowse', 'usemarketinstall', 'usemarketfavorites', 'useprojectlist', 'useprojectcreate', 'useprojectdelete', 'useinstallprogress', 'useaddonselection', 'useaddonactions', 'usebackuppageactions', 'useupdatescan', 'usedocs', 'format', 'godotversion', 'markettags', 'godottags', 'langdetect', 'bridge', 'usetranslation', 'avatar', 'bbcode', 'godotdocs', 'doctree', 'docsig', 'taskboard', 'usetasks', 'usetaskalerts', 'vueshim']) {
   console.log(`bundle built: ${path.join(root, OUT_DIR, `${name}.mjs`)}`)
 }

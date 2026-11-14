@@ -169,6 +169,10 @@ const servicesImpl = {
   scanProjects: (rootDir) => projects.scanProjects(rootDir),
   /** 删除项目记录(deleteFiles=true 同时删除项目文件夹,Windows 移入回收站) */
   removeProject: (id, deleteFiles) => projects.removeProject(id, deleteFiles),
+  /** 重命名项目(改写 project.godot 的 config/name,官方启动器同步显示;不动目录) */
+  renameProject: (projectId, name) => projects.renameProject(projectId, name),
+  /** 设置项目标签(与 Godot 4.3+ 官方启动器互通,存储 project.godot 的 config/tags) */
+  setProjectTags: (projectId, tags) => projects.setProjectTags(projectId, tags),
   /** 复制插件目录到另一个项目 */
   copyAddonsToProject: (opts) => projects.copyAddonsToProject(opts),
   /** 复制已装纯素材到另一个项目(按安装清单逐文件复制,目标已有同名文件跳过) */

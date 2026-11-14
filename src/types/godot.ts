@@ -50,6 +50,8 @@ export interface GodotProject {
   configVersion: number
   /** config/features[0],如 "4.3" */
   engineVersion?: string
+  /** project.godot [application] config/tags(与 Godot 4.3+ 官方启动器互通);无标签时缺省 */
+  tags?: string[]
   /** 绑定的引擎版本 id */
   versionId?: string
   favorite: boolean
@@ -619,6 +621,8 @@ export interface ProjectInfo {
   configVersion: number
   engineVersion?: string
   icon?: string
+  /** [application] config/tags(Godot 4.3+ 官方启动器标签);无该键时为空数组 */
+  tags: string[]
 }
 
 // ---------- 任务看板(一张看板一个文档,`godot/taskboard/<boardKey>`) ----------
