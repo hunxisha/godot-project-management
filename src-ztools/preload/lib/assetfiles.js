@@ -292,7 +292,9 @@ function listAddons(projectId) {
         storeUrl: market
           ? (market.meta && market.meta.storeUrl) ||
             (market.assetId ? `${STORE_BASE}/asset/${market.assetId}/` : undefined)
-          : undefined
+          : undefined,
+        // 市场图标(安装时随 meta 记下;旧记录缺失时界面回退默认图标)
+        iconUrl: market && market.meta ? market.meta.iconUrl || undefined : undefined
       })
     }
   }
@@ -315,7 +317,8 @@ function listAddons(projectId) {
       assetPaths: asArray(doc.installedPaths),
       storeUrl:
         (doc.meta && doc.meta.storeUrl) ||
-        (doc.assetId ? `${STORE_BASE}/asset/${doc.assetId}/` : undefined)
+        (doc.assetId ? `${STORE_BASE}/asset/${doc.assetId}/` : undefined),
+      iconUrl: doc.meta ? doc.meta.iconUrl || undefined : undefined
     })
   }
   out.sort((a, b) => a.name.localeCompare(b.name))

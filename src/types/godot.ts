@@ -613,6 +613,8 @@ export interface AddonInfo {
   assetPaths?: string[]
   /** 商店页面地址(来自市场安装记录;无来源信息时为空) */
   storeUrl?: string
+  /** 市场资产图标地址(安装时随 meta 记下;旧记录可能缺失,界面回退默认图标) */
+  iconUrl?: string
 }
 
 /** project.godot 解析结果 */

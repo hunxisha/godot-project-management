@@ -68,6 +68,12 @@ const {
 })
 
 const target = computed(() => projects.value.find((p) => p._id === targetId.value))
+/** 市场图标加载失败的条目(回退默认图标;与市场页 brokenIcons 同款做法) */
+const brokenIcons = ref(new Set<string>())
+
+function onIconError(a: AddonInfo) {
+  brokenIcons.value = new Set(brokenIcons.value).add(a.assetId || a.dirName)
+}
 /** 安装目标项目绑定的 Godot 版本(major.minor;未绑定或绑定版本未装时为空) */
 const targetGodot = computed(() => projectGodotVersion(target.value, versions.value))
 // 分区展示:插件(有启停概念)与素材(无)各成一段;素材没有启用概念,统计只算插件
@@ -271,7 +277,16 @@ function openAddonDir(a: AddonInfo) {
                   @change="toggleCheck(a.dirName)"
                 />
                 <div class="ad-ico" :class="{ off: a.kind !== 'asset' && !a.enabled }">
-                  <Icon :name="a.kind === 'asset' ? 'box' : 'puzzle'" :size="17" />
+                  <!-- 市场安装的条目显示资产图标(安装时随 meta 记下);加载失败回退默认图标 -->
+                  <img
+                    v-if="a.iconUrl && !brokenIcons.has(a.assetId || a.dirName)"
+                    class="ad-img"
+                    :src="a.iconUrl"
+                    :alt="a.name"
+                    loading="lazy"
+                    @error="onIconError(a)"
+                  />
+                  <Icon v-else :name="a.kind === 'asset' ? 'box' : 'puzzle'" :size="17" />
                 </div>
                 <div class="row-main">
                   <div class="row-name">
@@ -587,6 +602,19 @@ function openAddonDir(a: AddonInfo) {
 .ad-ico.off {
   background: var(--surface-3);
   color: var(--text-3);
+}
+
+/* 市场图标:contain 与市场页同款取景,禁用态灰化保留启停语义 */
+.ad-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: inherit;
+}
+
+.ad-ico.off .ad-img {
+  filter: grayscale(1);
+  opacity: 0.55;
 }
 
 .row-main {

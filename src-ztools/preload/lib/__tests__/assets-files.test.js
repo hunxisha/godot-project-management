@@ -182,7 +182,7 @@ async function main() {
     'sprites/grass.png': 'grass-png',
     'README.md': 'readme'
   })
-  const r1 = await assets.installAsset({ projectId: pidA, assetId: 'kenney/nature-pack', assetMeta: { title: 'Nature Pack' } })
+  const r1 = await assets.installAsset({ projectId: pidA, assetId: 'kenney/nature-pack', assetMeta: { title: 'Nature Pack', iconUrl: 'https://example.com/nature-pack.png' } })
   ok(r1.ok === true, '安装成功', r1.error)
   ok(r1.addon && r1.addon.kind === 'asset', `返回 kind=asset(${r1.addon && r1.addon.kind})`)
   ok(r1.addon && r1.addon.enabled === false, '素材不涉及启用')
@@ -207,6 +207,7 @@ async function main() {
   ok(!!ast && ast.assetId === 'kenney/nature-pack' && ast.fromMarket === true, 'assetId 与来源标记正确')
   ok(!!ast && Array.isArray(ast.assetPaths) && ast.assetPaths.length === 4, '条目携带安装清单')
   ok(!!ast && ast.storeUrl === 'https://store.godotengine.org/asset/kenney/nature-pack/', '商店链接按 assetId 拼装')
+  ok(!!ast && ast.iconUrl === 'https://example.com/nature-pack.png', '条目带出安装记录里的市场图标', ast && ast.iconUrl)
   ok(!!ast && ast.hasCfg === false && ast.enabled === false, '素材无 plugin.cfg、无启用状态')
 
   // ---------- 3 ----------
@@ -228,7 +229,7 @@ async function main() {
     'addons/dialogue_manager/plugin.cfg': '[plugin]\n\nname="Dialogue Manager"\nversion="1.2.3"\nauthor="T"\nscript="dm.gd"\n',
     'addons/dialogue_manager/dm.gd': '# demo\n'
   })
-  const r4 = await assets.installAsset({ projectId: pidA, assetId: 'nathanhoad/dialogue-manager' })
+  const r4 = await assets.installAsset({ projectId: pidA, assetId: 'nathanhoad/dialogue-manager', assetMeta: { title: 'Dialogue Manager', iconUrl: 'https://example.com/dialogue-manager.png' } })
   ok(r4.ok === true, '安装成功', r4.error)
   ok(r4.addon && r4.addon.kind === 'addon' && r4.addon.enabled === true, 'kind=addon 且默认启用')
   ok(fs.existsSync(path.join(rootA, 'addons', 'dialogue_manager', 'plugin.cfg')), '插件目录在 addons/ 下')
@@ -260,6 +261,8 @@ async function main() {
   ok(fs.readFileSync(path.join(rootA, 'models', 'mushroom.glb'), 'utf8') === 'mushroom-glb', '新文件就位')
   const doc6 = docs.get(`godot/asset/${pidA}/kenney/nature-pack`)
   ok(!!doc6 && doc6.versionString === '2.2.0' && doc6.installedPaths.length === 2, '记录的版本与清单已更新')
+  // 更新链路不带 assetMeta,旧 meta(含市场图标)必须继承下来
+  ok(!!doc6 && doc6.meta && doc6.meta.iconUrl === 'https://example.com/nature-pack.png', '更新不丢市场图标(meta 继承)', doc6 && JSON.stringify(doc6.meta))
 
   // ---------- 7 ----------
   section('7. 卸载素材:按清单删文件并清理空目录')
@@ -271,6 +274,8 @@ async function main() {
   ok(fs.existsSync(path.join(rootA, 'addons', 'dialogue_manager', 'plugin.cfg')), '插件不受影响')
   const listA7 = assets.listAddons(pidA)
   ok(listA7.some((a) => a.kind === 'addon' && a.dirName === 'dialogue_manager'), 'listAddons 仍列出插件')
+  const dm7 = listA7.find((a) => a.kind === 'addon' && a.dirName === 'dialogue_manager')
+  ok(!!dm7 && dm7.iconUrl === 'https://example.com/dialogue-manager.png', '插件条目同样带出市场图标', dm7 && dm7.iconUrl)
   ok(!listA7.some((a) => a.kind === 'asset'), '素材条目已从列表消失')
 
   // ---------- 8 ----------

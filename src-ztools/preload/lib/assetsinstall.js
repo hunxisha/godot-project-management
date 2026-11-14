@@ -56,7 +56,19 @@ async function installAsset({ projectId, assetId, assetMeta, version, stageId, s
     await extractZip(zipPath, extractDir)
 
     // 内容嗅探:zip 里有没有 plugin.cfg 是插件与素材的唯一可靠判据(见文件头注释)
-    const ctx = { project, projectId, assetId, assetMeta, detail, extractDir }
+    // meta 继承与合并:更新链路(updateAsset)压根不带 assetMeta,切换版本只带 {title, storeUrl} ——
+    // 直接覆盖会把安装时随 meta 记下的市场图标(iconUrl)抹掉,已装页的图标更新一次就消失。
+    // 缺省沿用旧记录的 meta,调用方给了的字段按键覆盖;首装无旧记录时行为不变。
+    const prevRecord = getDoc(`godot/asset/${projectId}/${assetId}`)
+    const mergedMeta = { ...((prevRecord && prevRecord.meta) || {}), ...(assetMeta || {}) }
+    const ctx = {
+      project,
+      projectId,
+      assetId,
+      assetMeta: Object.keys(mergedMeta).length ? mergedMeta : undefined,
+      detail,
+      extractDir
+    }
     if (findPluginCfgs(extractDir).length) return installAsAddon(ctx)
     return installAsAssetFiles({ ...ctx, stripTopDir })
   } catch (e) {
