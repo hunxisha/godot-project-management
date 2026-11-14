@@ -2,6 +2,7 @@
 const { spawn } = require('node:child_process')
 const fs = require('node:fs')
 const { getDoc, putDoc } = require('./store')
+const usage = require('./usage')
 
 /**
  * 拆分启动参数:双引号内的空白属于同一个参数;引号本身不保留。
@@ -91,6 +92,10 @@ function launchProject({ projectId, action }) {
       openCount: (project.openCount || 0) + 1
     }
     putDoc(projectId, updated)
+    // 使用时长追踪:记一条启动会话(pid 供采样链精确结算 end)。失败只吞掉,不影响启动本身。
+    try {
+      usage.recordLaunch(version, updated, action, child.pid)
+    } catch (e) { /* 会话记录失败不影响启动 */ }
     return { ok: true, project: { ...updated, _id: projectId } }
   } catch (e) {
     return { ok: false, error: (e && e.message) || '启动失败' }

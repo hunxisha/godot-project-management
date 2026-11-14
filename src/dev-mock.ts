@@ -113,6 +113,44 @@ const docs = new Map<string, any>([
   ['godot/version/4.7.2', { _id: 'godot/version/4.7.2', name: 'Godot 4.7.2', tag: '4.7.2-stable', exePath: 'E:/mock/godot.exe' }]
 ])
 
+// ---------- 引擎使用热力图夹具:半年内的工作日分布,覆盖全部色阶;今天也给一笔 ----------
+const dayKey = (ts: number) => {
+  const d = new Date(ts)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+const USAGE_STEPS = [0, 0, 12, 25, 48, 95, 140, 210]
+for (let i = 0; i < 26 * 7; i++) {
+  const ts = startOfToday + 12 * HOUR - i * DAY
+  const wd = new Date(ts).getDay()
+  const minutes =
+    i === 0 ? 65
+    : wd === 0 || wd === 6 ? (i % 3 === 0 ? 80 : 0)
+    : USAGE_STEPS[(i * 5) % USAGE_STEPS.length]
+  const byHour = new Array<number>(24).fill(0)
+  byHour[wd % 2 ? 20 : 10] = minutes
+  const key = dayKey(ts)
+  docs.set(`godot/usage/day/${key}`, { _id: `godot/usage/day/${key}`, day: key, minutes, byHour, updatedAt: ts })
+}
+/** 会话夹具:[几天前, 项目 id, 项目名];start 取当天 20 点附近,让 tooltip 有东西可讲 */
+const USAGE_SESSIONS: [number, string, string][] = [
+  [0, 'godot/project/p1', 'Demo 体检项目'],
+  [0, 'godot/project/p2', '平台跳跃 Demo'],
+  [1, 'godot/project/p1', 'Demo 体检项目'],
+  [2, 'godot/project/p3', '塔防原型'],
+  [5, 'godot/project/p2', '平台跳跃 Demo'],
+  [9, 'godot/project/p1', 'Demo 体检项目']
+]
+for (const [back, projectId, projectName] of USAGE_SESSIONS) {
+  const start = Date.now() - back * DAY - 2 * HOUR
+  const id = `godot/usage/session/s${back}-${projectName.length}`
+  docs.set(id, {
+    _id: id, start, end: start + 90 * 60000, pid: 4000 + back,
+    exeBase: 'godot_v4.7.2-stable_win64.exe', exePath: 'E:/mock/godot.exe',
+    projectId, projectName, action: 'editor', day: dayKey(start), lastSeenAt: start + 90 * 60000
+  })
+}
+
 const ok = <T,>(v: T) => Promise.resolve(v)
 
 window.ztools = {
@@ -220,7 +258,9 @@ const PROVIDED: Record<string, any> = {
       { versionId: 'godot/version/4.4.1', tag: '4.4.1-stable', classes: 689, sizeBytes: 7_567_616 }
     ]
   }),
-  docsCleanCache: (versionIds?: string[]) => ok({ ok: true, removed: versionIds?.length || 2 })
+  docsCleanCache: (versionIds?: string[]) => ok({ ok: true, removed: versionIds?.length || 2 }),
+  // ---------- 引擎使用追踪(浏览器里不采样,只吞掉开窗调用避免 Proxy 兜底告警) ----------
+  usageStart: () => ok({ ok: true })
 }
 
 window.services = new Proxy(PROVIDED, {

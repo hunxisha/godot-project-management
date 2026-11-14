@@ -4,7 +4,17 @@ import { getSettings, listDocs, pickDirectory, saveSettings, showInFolder } from
 import { openProjectAction } from '../composables/useProjectActions'
 import { gradOf } from '../utils/avatar'
 import Icon from '../components/Icon.vue'
-import { DEFAULT_SETTINGS, type GodotProject, type GodotSettings, type GodotVersion } from '../types/godot'
+import UsageHeatmap from '../components/UsageHeatmap.vue'
+import {
+  DEFAULT_SETTINGS,
+  DOC_PREFIX,
+  type GodotProject,
+  type GodotSettings,
+  type GodotVersion,
+  type UsageDay,
+  type UsageSession
+} from '../types/godot'
+import { dayKeyOf, fmtMinutes, streakOf, totalMinutes, weekMinutes } from '../utils/usage'
 
 const emit = defineEmits<{ (e: 'navigate', tab: string): void, (e: 'create'): void }>()
 
@@ -12,6 +22,17 @@ const projects = ref<(GodotProject & { _id: string })[]>([])
 const versions = ref<(GodotVersion & { _id: string })[]>([])
 // 设置异步读取:先给默认值保证首屏可用,onMounted 后补齐
 const settings = ref<GodotSettings>({ ...DEFAULT_SETTINGS })
+
+// ---- 引擎使用(进程采样,采集语义见 preload/lib/usage.js) ----
+const usageDays = ref<Record<string, number>>({})
+const usageSessions = ref<UsageSession[]>([])
+const usageToday = computed(() => usageDays.value[dayKeyOf(Date.now())] || 0)
+const usageWeek = computed(() => weekMinutes(usageDays.value))
+const usageStreak = computed(() => streakOf(usageDays.value))
+const usageTotal = computed(() => totalMinutes(usageDays.value))
+const hasUsage = computed(
+  () => usageSessions.value.length > 0 || Object.values(usageDays.value).some((m) => m > 0)
+)
 
 const defaultVersion = computed(() => versions.value.find((v) => v._id === settings.value.defaultVersionId))
 
@@ -40,6 +61,17 @@ onMounted(async () => {
   projects.value = await listDocs<GodotProject>('godot/project/')
   versions.value = await listDocs<GodotVersion>('godot/version/')
   settings.value = await getSettings()
+  // 引擎使用:日汇总 + 启动会话(tooltip 归因用)。读失败/无数据不阻塞概览,面板走空态。
+  try {
+    const [dayDocs, sessionDocs] = await Promise.all([
+      listDocs<UsageDay>(DOC_PREFIX.usageDay),
+      listDocs<UsageSession>(DOC_PREFIX.usageSession)
+    ])
+    const map: Record<string, number> = {}
+    for (const d of dayDocs) if (d && d.day) map[d.day] = d.minutes || 0
+    usageDays.value = map
+    usageSessions.value = sessionDocs.filter((s) => s && typeof s.start === 'number' && s.day)
+  } catch (e) { /* usage 文档缺失不阻塞概览 */ }
 })
 
 async function chooseRoot() {
@@ -188,6 +220,23 @@ async function chooseRoot() {
           </div>
           <span class="rr-open"><Icon name="play" :size="12" /> 打开</span>
         </div>
+      </div>
+    </section>
+
+    <!-- 引擎使用热力图(进程采样;工坊窗口存活期间累计,口径详见 preload/lib/usage.js) -->
+    <section class="panel block usage">
+      <div class="panel-head">
+        <span class="panel-title"><Icon name="activity" :size="13" /> 引擎使用</span>
+        <span class="grow"></span>
+        <span class="u-chip">今日 <b>{{ fmtMinutes(usageToday) }}</b></span>
+        <span class="u-chip">本周 <b>{{ fmtMinutes(usageWeek) }}</b></span>
+        <span class="u-chip">连续 <b>{{ usageStreak }} 天</b></span>
+        <span class="u-chip">累计 <b>{{ fmtMinutes(usageTotal) }}</b></span>
+      </div>
+      <UsageHeatmap v-if="hasUsage" class="usage-hm" :days="usageDays" :sessions="usageSessions" />
+      <div v-else class="usage-empty">
+        <Icon name="activity" :size="14" />
+        还没有使用记录 —— 从工坊启动编辑器或运行项目后,只要工坊窗口开着就会自动累计时长
       </div>
     </section>
 
@@ -602,6 +651,47 @@ async function chooseRoot() {
 
 .fav-empty .icon {
   color: var(--gold, #e8a33d);
+  flex-shrink: 0;
+}
+
+/* ---- 引擎使用热力图 ---- */
+.usage-hm {
+  margin: 12px 14px 10px;
+}
+
+.u-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 11.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.u-chip b {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.usage-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 12px 12px;
+  padding: 14px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+.usage-empty .icon {
+  color: var(--brand);
   flex-shrink: 0;
 }
 

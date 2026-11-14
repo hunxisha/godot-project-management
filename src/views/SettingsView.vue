@@ -326,6 +326,16 @@ onBeforeUnmount(() => {
                   <input v-model="state.autoEnablePlugin" type="checkbox" class="switch" @change="patchNow" />
                 </div>
               </label>
+
+              <label class="set-item row">
+                <div class="set-head">
+                  <span class="set-title">记录引擎使用时长</span>
+                  <span class="set-desc">概览页热力图的数据源;纯本地数据(工坊窗口开着时每分钟探测一次 Godot 进程),不上传任何服务</span>
+                </div>
+                <div class="set-ctl">
+                  <input v-model="state.usageTrackingEnabled" type="checkbox" class="switch" @change="patchNow" />
+                </div>
+              </label>
             </div>
           </div>
         </section>

@@ -376,6 +376,10 @@ export interface GodotSettings {
   translateActiveId?: string
   /** 追加的不译词(内置词表之外;AI 走提示词白名单,DeepL 走 <x> 标签保护) */
   translateGlossary?: string[]
+
+  // ---------- 引擎使用追踪 ----------
+  /** 记录引擎使用时长(本地数据,概览热力图用);缺字段视为开启,仅显式 false 关闭 */
+  usageTrackingEnabled?: boolean
 }
 
 /** 翻译服务商(设置页里的一行) */
@@ -480,7 +484,9 @@ export const DEFAULT_SETTINGS: GodotSettings = {
   // 翻译默认关闭:没配服务商就联网翻译是不可接受的默认行为,也让「是否启用」这个开关有实际含义
   translateEnabled: false,
   translateTarget: 'zh-CN',
-  translateCardAuto: true
+  translateCardAuto: true,
+  // 使用记录默认开启:纯本地数据不上网、不传第三方,且热力图从零积累,默认关会让功能永远空着
+  usageTrackingEnabled: true
 }
 
 /** 引擎下载资产(官方 CDN 直链) */
@@ -685,6 +691,35 @@ export interface TaskBoard {
   updatedAt: number
 }
 
+/** 引擎使用日汇总(进程采样:工坊窗口存活期间每 60s 探测一次 Godot 进程并累计) */
+export interface UsageDay {
+  /** 本地时区 'YYYY-MM-DD',同时是文档 id 尾段 */
+  day: string
+  /** 当日使用分钟数(两位小数;采样间隔/60000 累计) */
+  minutes: number
+  /** 各小时(0-23)计入的分钟数,时段视图备用 */
+  byHour: number[]
+  updatedAt: number
+}
+
+/** 一次从工坊启动编辑器/运行项目的会话(归因用;分钟数只来自采样,不在此重复计费) */
+export interface UsageSession {
+  start: number
+  /** null = 仍在跑(采样链维护中);结算规则见 preload/lib/usage.js */
+  end: number | null
+  /** 启动时的子进程 pid,采样链凭它精确匹配会话;拿不到时为 null */
+  pid: number | null
+  /** 引擎映像名(小写 basename) */
+  exeBase: string
+  exePath: string
+  projectId: string
+  /** 项目名快照(项目删除后 tooltip 仍可显示) */
+  projectName: string
+  action: 'editor' | 'run'
+  day: string
+  lastSeenAt: number
+}
+
 /** db 文档 id 约定 */
 export const DOC_ID = {
   settings: 'godot/settings',
@@ -703,7 +738,9 @@ export const DOC_PREFIX = {
   version: 'godot/version/',
   backup: 'godot/backup/',
   asset: 'godot/asset/',
-  taskBoard: 'godot/taskboard/'
+  taskBoard: 'godot/taskboard/',
+  usageDay: 'godot/usage/day/',
+  usageSession: 'godot/usage/session/'
 } as const
 
 // ---------- 项目文件原语的返回类型（实现在 src-ztools/preload/lib/inspectfs.js） ----------

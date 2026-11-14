@@ -1,9 +1,10 @@
 // 插件数据导出/导入:换机迁移用。
 //
-// 导出 = 设置 + 项目清单 + 市场收藏 + 文档收藏/浏览历史 打包成一个 JSON 文件。
+// 导出 = 设置 + 项目清单 + 市场收藏 + 文档收藏/浏览历史 + 引擎使用记录 打包成一个 JSON 文件。
 // 文档库正文(可再生成的大体积缓存)不迁移,只有跨版本生效的收藏与历史跟着走。
 // 导入 = 项目仅登记本机路径存在的条目(引擎/备份路径都是本机概念,不迁移);
 //        收藏按 assetId 合并(不覆盖本机已有);文档收藏并集、浏览历史按时间合并去重;
+//        使用记录按天/按会话 id 补缺(本机已有的不覆盖);
 //        设置只补本机缺失的键(versionsRoot/backupRoot/proxy 这类机器本地路径不应被导入值覆盖)。
 const fs = require('node:fs')
 const { getDoc, putDoc, listDocs } = require('./store')
@@ -19,7 +20,7 @@ const DATA_KIND = 'ztools-godot-data'
 /**
  * 导出插件数据到 JSON 文件。
  * @param {string} destPath
- * @returns {{ok: boolean, error?: string, projects?: number, favorites?: number, docFavorites?: number, docHistory?: number}}
+ * @returns {{ok: boolean, error?: string, projects?: number, favorites?: number, docFavorites?: number, docHistory?: number, usageDays?: number, usageSessions?: number}}
  */
 function exportPluginData(destPath) {
   try {
@@ -30,18 +31,24 @@ function exportPluginData(destPath) {
     const favorites = (getDoc(FAVORITES_ID) || {}).items || []
     const docFavorites = (getDoc(DOC_FAVORITES_ID) || {}).items || []
     const docHistory = (getDoc(DOC_HISTORY_ID) || {}).items || []
+    // 使用记录:保留 _id(会话 id 含启动时刻,重导入靠它去重),只剥 _rev
+    const usageDays = listDocs('godot/usage/day/').map(({ _rev, ...rest }) => rest)
+    const usageSessions = listDocs('godot/usage/session/').map(({ _rev, ...rest }) => rest)
     const data = {
       kind: DATA_KIND,
-      version: 2,
+      // v3:+usageDays/usageSessions(导入端对缺字段的老文件自然跳过)
+      version: 3,
       exportedAt: Date.now(),
       settings: settingsFields,
       projects,
       favorites,
       docFavorites,
-      docHistory
+      docHistory,
+      usageDays,
+      usageSessions
     }
     fs.writeFileSync(destPath, JSON.stringify(data, null, 2), 'utf8')
-    return { ok: true, projects: projects.length, favorites: favorites.length, docFavorites: docFavorites.length, docHistory: docHistory.length }
+    return { ok: true, projects: projects.length, favorites: favorites.length, docFavorites: docFavorites.length, docHistory: docHistory.length, usageDays: usageDays.length, usageSessions: usageSessions.length }
   } catch (e) {
     return { ok: false, error: (e && e.message) || '导出失败' }
   }
@@ -50,7 +57,7 @@ function exportPluginData(destPath) {
 /**
  * 从 JSON 文件导入插件数据。
  * @param {string} srcPath
- * @returns {{ok: boolean, error?: string, projectsAdded?: number, projectsOffline?: number, projectsSkipped?: number, favoritesAdded?: number, docFavoritesAdded?: number, docHistoryAdded?: number, settingsAdopted?: number}}
+ * @returns {{ok: boolean, error?: string, projectsAdded?: number, projectsOffline?: number, projectsSkipped?: number, favoritesAdded?: number, docFavoritesAdded?: number, docHistoryAdded?: number, settingsAdopted?: number, usageDaysAdded?: number, usageSessionsAdded?: number}}
  */
 function importPluginData(srcPath) {
   try {
@@ -129,7 +136,24 @@ function importPluginData(srcPath) {
     if (Object.keys(patch).length) putDoc('godot/settings', { ...localSettings, ...patch })
     const settingsAdopted = Object.keys(patch).length
 
-    return { ok: true, projectsAdded, projectsOffline, projectsSkipped, favoritesAdded, docFavoritesAdded, docHistoryAdded, settingsAdopted }
+    // 使用记录:按天/按会话 id 补缺,本机已有的不覆盖(本机采样在持续写)
+    let usageDaysAdded = 0
+    for (const d of data.usageDays || []) {
+      if (!d || typeof d.day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(d.day)) continue
+      const id = 'godot/usage/day/' + d.day
+      if (getDoc(id)) continue
+      putDoc(id, d)
+      usageDaysAdded++
+    }
+    let usageSessionsAdded = 0
+    for (const s of data.usageSessions || []) {
+      if (!s || typeof s._id !== 'string' || !s._id.startsWith('godot/usage/session/')) continue
+      if (getDoc(s._id)) continue
+      putDoc(s._id, s)
+      usageSessionsAdded++
+    }
+
+    return { ok: true, projectsAdded, projectsOffline, projectsSkipped, favoritesAdded, docFavoritesAdded, docHistoryAdded, settingsAdopted, usageDaysAdded, usageSessionsAdded }
   } catch (e) {
     return { ok: false, error: (e && e.message) || '导入失败' }
   }

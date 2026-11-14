@@ -55,6 +55,7 @@ await build({
         useupdatescan: path.join(root, 'src', 'composables', 'useUpdateScan.ts'),
         usedocs: path.join(root, 'src', 'composables', 'useDocs.ts'),
         format: path.join(root, 'src', 'utils', 'format.ts'),
+        usage: path.join(root, 'src', 'utils', 'usage.ts'),
         godotversion: path.join(root, 'src', 'utils', 'godotVersion.ts'),
         markettags: path.join(root, 'src', 'utils', 'marketTags.ts'),
         godottags: path.join(root, 'src', 'utils', 'godotTags.ts'),

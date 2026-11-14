@@ -216,9 +216,9 @@ export interface Services {
   listExportHistory(projectId?: string): ExportHistoryEntry[]
   /** 删除一条导出历史记录(只删记录,不动产物文件) */
   removeExportHistoryEntry(id: string): { ok: boolean, error?: string }
-  /** 导出插件数据(设置+项目清单+市场收藏)到 JSON 文件 */
-  exportPluginData(destPath: string): { ok: boolean, error?: string, projects?: number, favorites?: number }
-  /** 从 JSON 文件导入插件数据(项目仅登记本机存在的路径;收藏合并;设置只补缺失键) */
+  /** 导出插件数据(设置+项目清单+市场收藏+使用记录)到 JSON 文件 */
+  exportPluginData(destPath: string): { ok: boolean, error?: string, projects?: number, favorites?: number, usageDays?: number, usageSessions?: number }
+  /** 从 JSON 文件导入插件数据(项目仅登记本机存在的路径;收藏合并;使用记录补缺;设置只补缺失键) */
   importPluginData(srcPath: string): {
     ok: boolean
     error?: string
@@ -229,6 +229,8 @@ export interface Services {
     docFavoritesAdded?: number
     docHistoryAdded?: number
     settingsAdopted?: number
+    usageDaysAdded?: number
+    usageSessionsAdded?: number
   }
   /** 网络诊断:依次探测商店 API/GitHub/官方 CDN 的可达性与延迟 */
   runNetworkDiagnostics(): Promise<{ ok: boolean, results: NetworkCheckResult[] }>
@@ -368,6 +370,8 @@ export interface Services {
     error?: string
     project?: GodotProject & { _id: string }
   }
+  /** 引擎使用追踪:窗口打开时对账未结会话并幂等启动采样链(详见 preload/lib/usage.js;数据渲染层直接读 godot/usage/* 文档) */
+  usageStart(): { ok: boolean, error?: string }
   /** 搜索市场资产(assetType:0=插件/素材,1=完整项目) */
   searchAssets(
     filter: string,

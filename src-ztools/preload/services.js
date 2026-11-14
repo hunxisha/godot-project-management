@@ -11,6 +11,7 @@ const install = require('./lib/install')
 const projects = require('./lib/projects')
 const backup = require('./lib/backup')
 const { launchProject } = require('./lib/launcher')
+const usage = require('./lib/usage')
 const assets = require('./lib/assets')
 const templates = require('./lib/templates')
 const exporter = require('./lib/exporter')
@@ -245,6 +246,8 @@ const servicesImpl = {
   dismissBackupTask: (taskId) => backup.dismissBackupTask(taskId),
   /** 启动项目(editor=打开编辑器带 -e,run=直接运行) */
   launchProject: (opts) => launchProject(opts),
+  /** 引擎使用追踪:窗口打开时对账未结会话并幂等启动采样链(详见 lib/usage.js) */
+  usageStart: () => usage.usageStart(),
   /** 搜索 Asset Store(assetType:0=插件/素材,1=完整项目) */
   searchAssets: (filter, godotVersion, page, assetType) => assets.searchAssets(filter, godotVersion, page, assetType),
   /** 官方精选(推荐)Addon */

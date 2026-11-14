@@ -52,6 +52,10 @@ const { stats: dueStats, refresh: refreshTaskAlerts } = useTaskAlerts()
 onMounted(() => {
   // 主题(色板 × 明暗)已在 main.ts 挂载前应用,见 composables/useTheme.ts
   window.ztools.setExpendHeight(600)
+  // 引擎使用追踪:开窗对账未结会话 + 幂等启动采样链(失败静默,概览面板走空态)
+  try {
+    window.services.usageStart()
+  } catch (e) { /* 浏览器 dev 或旧宿主无此能力 */ }
   window.ztools.onPluginEnter(({ code, payload }) => {
     if (code === 'projects') tab.value = 'projects'
     else if (code === 'versions') tab.value = 'versions'

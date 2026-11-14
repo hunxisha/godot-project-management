@@ -73,9 +73,10 @@ dev 版本走「tag → 小版本分支 → master」回退链，全部失败则
   [docs/theme-system.md](docs/theme-system.md)。
 - **数据存储**：全部状态存在 ZTools 的 db 中（无独立数据库文件），按文档 ID 前缀区分：
   `godot/settings`、`godot/version/*`、`godot/project/*`、`godot/asset/*`、`godot/backup/*`、
-  `godot/templates/*`、`godot/export/*`、`godot/docs/*`（文档库元数据/收藏/历史）、`godot/cache/*`。
+  `godot/templates/*`、`godot/export/*`、`godot/docs/*`（文档库元数据/收藏/历史）、`godot/cache/*`、
+  `godot/usage/*`（引擎使用时长：日汇总 `day/` 与启动会话 `session/`，概览热力图用）。
   换机迁移用「设置 → 数据导出/导入」：项目只登记本机存在的路径，收藏按 assetId 合并，
-  文档收藏与浏览历史并集合并，设置只补缺失键。
+  文档收藏与浏览历史并集合并，使用记录按天/会话补缺，设置只补缺失键。
 
 ## 目录结构
 
